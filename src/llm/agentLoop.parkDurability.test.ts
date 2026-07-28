@@ -413,6 +413,60 @@ describe("a resume adopts its source envelope", () => {
   });
 });
 
+// ── the answer reaches the model on BOTH resume branches ─────────────────────
+
+describe("a carried-over answer", () => {
+  const QUESTION_ASKED = "Which auth module is canonical?";
+  const ANSWER = "src/auth/session.ts is canonical";
+
+  /** The conversation as the envelope stores it, ending on the unanswered ask. */
+  const suspendedMessages = (): unknown[] => ([
+    { role: "system", content: "sys" },
+    { role: "user", content: "pick an auth module" },
+    {
+      role: "assistant",
+      content: null,
+      tool_calls: [{ id: "t2", type: "function", function: { name: "ask_user", arguments: JSON.stringify({ question: QUESTION_ASKED }) } }],
+    },
+  ]);
+
+  async function runWithAnswer(resumeMessages: unknown[] | undefined): Promise<string> {
+    mocks.createChatCompletion.mockReset();
+    mocks.createChatCompletion.mockResolvedValueOnce(doneResponse());
+    await runAgentLoop({
+      task: "pick an auth module",
+      repoPath,
+      runId: "run-answering",
+      sessionId: SESSION_ID,
+      envelopeKey: "envelope-resumed",
+      interactiveChannel: "tui",
+      resumeContextBlock: "RESUMED RUN — continuing an interrupted run.",
+      resumeMessages,
+      resumeAnswer: ANSWER,
+      resumePendingQuestion: { toolCallId: "t2", question: QUESTION_ASKED, iter: 1 },
+    });
+    return flatten(mocks.createChatCompletion.mock.calls[0]![0].messages as unknown[]);
+  }
+
+  it("fills the dangling ask_user reply when the conversation was restored", async () => {
+    const sent = await runWithAnswer(suspendedMessages());
+    expect(sent).toContain(ANSWER);
+    // The whole point: NOT the "user was unavailable" text, which is what the
+    // resume path produced before any UI put the question back to them.
+    expect(sent).not.toContain(UNANSWERED_ON_RESUME_REPLY);
+  });
+
+  it("still reaches the model when the conversation was too large to save", async () => {
+    // messagesOmitted ⇒ resumeMessages is undefined ⇒ isWarmResume is false ⇒
+    // reconcileDanglingToolCalls never runs. Without the cold-branch route the
+    // user answers a question and the answer is discarded before the first API
+    // call, which is a worse version of the bug this path exists to fix.
+    const sent = await runWithAnswer(undefined);
+    expect(sent).toContain(ANSWER);
+    expect(sent).toContain(QUESTION_ASKED);
+  });
+});
+
 describe("reconcileDanglingToolCalls", () => {
   const asked = () => ([
     { role: "user", content: "task" },

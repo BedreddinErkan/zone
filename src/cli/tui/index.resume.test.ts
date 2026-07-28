@@ -30,7 +30,7 @@ vi.mock("../dispatch.js", () => ({
 
 // ── imports (after mock registration) ─────────────────────────────────────────
 
-import { _runPromptImpl, type _RunPromptDeps } from "./index.js";
+import { _runPromptImpl, _resumeStartupAction, type _RunPromptDeps } from "./index.js";
 import { createEventBus } from "../eventBus.js";
 import type { StoreState } from "./store.js";
 import type { CliConfig } from "../config.js";
@@ -98,6 +98,45 @@ function makeEnvelopeResume(): NonNullable<_RunPromptDeps["pendingEnvelopeResume
 }
 
 // ── suite ─────────────────────────────────────────────────────────────────────
+
+describe("resuming an envelope that stopped mid-question", () => {
+  const PENDING = { toolCallId: "t2", question: "Which auth module is canonical?", iter: 3 };
+
+  it("waits for the user instead of auto-running the task", () => {
+    // Auto-running restarts the run before the user can type, and
+    // reconcileDanglingToolCalls then answers on their behalf with "no answer is
+    // available" — at the exact moment they resumed in order to answer it.
+    const action = _resumeStartupAction(
+      { ...RESUME_PAYLOAD, pendingQuestion: PENDING, envelopeKey: "run-that-asked" },
+      "pick an auth module",
+    );
+    expect(action.kind).toBe("await_answer");
+    if (action.kind !== "await_answer") return;
+    expect(action.carried.question).toBe(PENDING.question);
+    expect(action.carried.toolCallId).toBe("t2");
+    // The run that ASKED — the one that will answer does not exist yet.
+    expect(action.carried.runId).toBe("run-that-asked");
+    expect(action.carried.iter).toBe(3);
+    expect(action.carried.conversationLost).toBe(false);
+  });
+
+  it("flags a lost conversation so the panel can say so before the user types", () => {
+    const action = _resumeStartupAction(
+      { ...RESUME_PAYLOAD, pendingQuestion: PENDING, messagesOmitted: true },
+      "pick an auth module",
+    );
+    expect(action.kind).toBe("await_answer");
+    if (action.kind !== "await_answer") return;
+    expect(action.carried.conversationLost).toBe(true);
+  });
+
+  it("auto-runs as before when no question is outstanding", () => {
+    expect(_resumeStartupAction(RESUME_PAYLOAD, "pick an auth module"))
+      .toEqual({ kind: "auto_run", prompt: "pick an auth module" });
+    expect(_resumeStartupAction(undefined, "a task"))
+      .toEqual({ kind: "auto_run", prompt: "a task" });
+  });
+});
 
 describe("durable resume — _runPromptImpl threading (Fix A + Fix B)", () => {
   let tmpDir: string;

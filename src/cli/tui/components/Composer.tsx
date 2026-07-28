@@ -19,8 +19,15 @@ const MAX_HISTORY = 50;
 
 interface ComposerProps {
   onSubmit: (text: string, ac: AbortController, images?: ImageAttachment[]) => void;
-  /** Trigger a durable-resume run for the given session ID (or latest if omitted). */
-  onEnvelopeResume?: (sessionId?: string) => void;
+  /** Trigger a durable-resume run for the given envelope key (or latest if omitted). */
+  onEnvelopeResume?: (envelopeKey?: string) => void;
+  /**
+   * Answer a question carried over from a previous process. Distinct from
+   * onSubmit: this starts the RESUMED run with the answer threaded in, rather
+   * than a new task, and distinct from the live path, which resolves a registry
+   * entry that no longer exists here.
+   */
+  onCarriedAnswer?: (answer: string, ac: AbortController) => void;
   onExit: () => void;
   onInitStart?: (ac: AbortController) => void;
   onUndoRequest?: () => void;
@@ -146,7 +153,7 @@ function SlashCommandPalette({ commands, selectedIdx }: PaletteProps): React.Rea
   );
 }
 
-export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, onRemoteControlCommand, getCommitData, getFeedbackData, onEnvelopeResume }: ComposerProps): React.ReactElement {
+export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, onRemoteControlCommand, getCommitData, getFeedbackData, onEnvelopeResume, onCarriedAnswer }: ComposerProps): React.ReactElement {
   const { state, dispatch } = useStore();
   const { stdout } = useStdout();
   const disabled = state.runState === "running";
@@ -549,11 +556,21 @@ export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, onRemot
     if (state.pendingQuestion !== null && key.return) {
       const answer = bufferRef.current.trim();
       if (!answer) return; // Enter on an empty buffer is not an answer
-      resolveUserQuestion({
-        questionId: state.pendingQuestion.questionId,
-        runId: state.pendingQuestion.runId,
-        answer,
-      });
+      const pending = state.pendingQuestion;
+      if (pending.kind === "live") {
+        // A parked loop is awaiting this; hand it back through the registry.
+        resolveUserQuestion({
+          questionId: pending.questionId,
+          runId: pending.runId,
+          answer,
+        });
+      } else {
+        // Carried over from a previous process: there is no parked loop and no
+        // registry entry, so answering STARTS the resumed run with the answer
+        // threaded into it. Routing this through resolveUserQuestion would get
+        // "unknown_question_id" and drop the answer without a word.
+        onCarriedAnswer?.(answer, new AbortController());
+      }
       // Deliberately NOT submitBuffer: that fires USER_PROMPT (which resets todos)
       // and hands App a new AbortController, orphaning the run we are answering.
       dispatch({ type: "USER_QUESTION_RESOLVED", echo: answer });

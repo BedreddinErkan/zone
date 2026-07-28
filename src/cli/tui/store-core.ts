@@ -64,6 +64,36 @@ export function isRunInFlight(runState: RunState): boolean {
   return runState === "running" || runState === "awaiting_input";
 }
 
+/**
+ * A question awaiting the user, in one of two genuinely different situations.
+ *
+ * A union rather than one shape with a flag, because the difference is not
+ * cosmetic: a "live" question indexes an in-memory registry entry that a parked
+ * agent loop is awaiting, and a "carried" one does not — that registry did not
+ * survive the process. Giving a carried question an empty questionId would make
+ * Composer's Enter call resolveUserQuestion, get "unknown_question_id" back, and
+ * silently swallow an answer the user believes they gave. The union makes that
+ * state unrepresentable rather than merely tested against, and forces every
+ * consumer to say which case it is handling.
+ */
+export type PendingQuestion =
+  | { kind: "live"; questionId: string; runId: string; question: string }
+  | {
+      kind: "carried";
+      question: string;
+      /** The dangling ask_user call the answer has to reply to. */
+      toolCallId: string;
+      /** The run that ASKED — not the run that will answer, which does not exist yet. */
+      runId: string;
+      iter: number;
+      /**
+       * The envelope hit the 1MB cap and dropped the conversation. Said before
+       * the user types, because answering a question whose conversation is gone
+       * is a worse version of losing the question in the first place.
+       */
+      conversationLost: boolean;
+    };
+
 export type StoreState = {
   transcript: TranscriptEntry[];
   sessionId: string;
@@ -97,7 +127,7 @@ export type StoreState = {
    * field hard-blocks the Composer (Composer.tsx returns early while it is
    * non-null), and a question needs the Composer live to be answered.
    */
-  pendingQuestion: { questionId: string; runId: string; question: string } | null;
+  pendingQuestion: PendingQuestion | null;
   sessionTrustedPrefixes: string[];
   mode: TuiMode;
   planProposal: {
@@ -171,6 +201,8 @@ export function buildInitialState(initialValues?: {
   pendingHookTrust?: { config: UserHooksConfig; hash: string; projectPath: string } | null;
   armedMcpManager?: import("../../mcp/mcpClientManager.js").McpClientManager | null;
   pendingMcpTrust?: { config: import("../../api/diskMcp.js").McpConfig; hash: string; projectPath: string } | null;
+  /** --resume/--continue landing on an envelope that stopped mid-question. */
+  carriedQuestion?: Extract<PendingQuestion, { kind: "carried" }> | null;
 }): StoreState {
   return {
     transcript: initialValues?.resumedTranscript ?? [],
@@ -188,7 +220,10 @@ export function buildInitialState(initialValues?: {
       tokenBudgetRatio: 0,
       cumulativeTokens: 0,
     },
-    runState: "idle",
+    // A carried question means the session opens already waiting on the user, so
+    // the status line says "waiting for you" rather than "idle" next to a
+    // question nobody appears to be waiting for.
+    runState: initialValues?.carriedQuestion ? "awaiting_input" : "idle",
     runStartMs: undefined,
     runEndMs: undefined,
     parkedMs: 0,
@@ -196,7 +231,7 @@ export function buildInitialState(initialValues?: {
     toastQueue: [],
     modalStack: [],
     pendingApproval: null,
-    pendingQuestion: null,
+    pendingQuestion: initialValues?.carriedQuestion ?? null,
     sessionTrustedPrefixes: initialValues?.trustedPrefixes ?? [],
     mode: initialValues?.mode ?? "normal",
     planProposal: null,
@@ -256,6 +291,14 @@ export type StoreAction =
   | { type: "PENDING_APPROVAL_SET"; approvalId: string; runId: string; command: string; kind?: "command" | "edit" | "trust" }
   | { type: "PENDING_APPROVAL_RESOLVED" }
   | { type: "USER_QUESTION_ASKED"; questionId: string; runId: string; question: string }
+  | {
+      type: "USER_QUESTION_CARRIED";
+      question: string;
+      toolCallId: string;
+      runId: string;
+      iter: number;
+      conversationLost: boolean;
+    }
   | { type: "USER_QUESTION_RESOLVED"; echo?: string }
   | { type: "SESSION_TRUST_PREFIX"; prefix: string }
   | { type: "PERMISSIONS_OPEN"; list: DiskTrustEntry[] }
@@ -498,6 +541,7 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
       return {
         ...state,
         pendingQuestion: {
+          kind: "live",
           questionId: action.questionId,
           runId: action.runId,
           question: action.question,
@@ -508,6 +552,27 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         // question reads as "still working", i.e. "don't type".
         spinner: null,
         liveTail: { ...state.liveTail, currentToolCall: null },
+      };
+
+    case "USER_QUESTION_CARRIED":
+      // Resumed from an envelope: the question outlived the process that asked
+      // it. runState goes to awaiting_input so the pinned panel and the status
+      // line say the same thing they do mid-run — the user's next keystroke
+      // joins an old conversation, and they can see that before they type.
+      return {
+        ...state,
+        pendingQuestion: {
+          kind: "carried",
+          question: action.question,
+          toolCallId: action.toolCallId,
+          runId: action.runId,
+          iter: action.iter,
+          conversationLost: action.conversationLost,
+        },
+        runState: "awaiting_input",
+        // No parkStartedMs: the wait happened while zone was not running, so it
+        // is not this session's to bank against a run duration.
+        spinner: null,
       };
 
     case "USER_QUESTION_RESOLVED":

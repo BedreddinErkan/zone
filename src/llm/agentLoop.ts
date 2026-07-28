@@ -332,6 +332,8 @@ export interface AgentLoopInput {
    * so explicitly rather than being handed a fabricated answer.
    */
   resumeAnswer?: string | null;
+  /** The question a resumed run stopped on — pairs with resumeAnswer. */
+  resumePendingQuestion?: { toolCallId: string; question: string; iter: number };
   /**
    * Write this run's envelope under an existing key instead of minting one from
    * runId. Set when resuming, so a resume CONTINUES its source envelope rather
@@ -2762,7 +2764,26 @@ Example:
     : "";
   // Resume: compact context block injected into the first user message only (never system prompt —
   // cache breakpoint #2 invariant). Empty string when not resuming.
-  const resumeBlock = input.resumeContextBlock ? input.resumeContextBlock + "\n\n" : "";
+  // The answer to a carried-over question, for the COLD branch only.
+  //
+  // resumeAnswer is normally consumed by reconcileDanglingToolCalls, which runs
+  // only when resumeMessages is non-empty. When the envelope hit the 1MB cap,
+  // messages is undefined — so the user would see a question, answer it, and
+  // have the answer dropped before the first API call while the model cold
+  // starts. This is the second route by which the same answer reaches the model,
+  // and it exists so there is no combination of flags that silently discards one.
+  // Cold branch only: on the warm branch the answer is already the ask_user tool
+  // reply, and repeating it would read as the user having said it twice.
+  const carriedAnswerBlock =
+    !input.resumeMessages?.length &&
+    typeof input.resumeAnswer === "string" &&
+    input.resumeAnswer.length > 0
+      ? "You asked the user: " + (input.resumePendingQuestion?.question ?? "(question not recorded)") +
+        "\nThey answered: " + input.resumeAnswer + "\n\n"
+      : "";
+  const resumeBlock = input.resumeContextBlock
+    ? input.resumeContextBlock + "\n\n" + carriedAnswerBlock
+    : carriedAnswerBlock;
   // Double-injection suppression: when the session window is non-empty it already
   // carries the most recent turn with neutral framing. Suppress the PRIOR RUN CONTEXT
   // block in that case so the newest summary never appears twice.

@@ -34,14 +34,16 @@ function leftText(
   }
 }
 
-function rightHint(runState: RunState): string {
+function rightHint(runState: RunState, questionKind: "live" | "carried" | null): string {
   switch (runState) {
     case "running":
       return "esc abort";
     case "awaiting_input":
-      // Esc here skips the question, it does not abort the run — the hint has to
-      // say which, because the same key means the other thing one state away.
-      return "esc skip question";
+      // Esc here never aborts the run — but it means two different things one
+      // state apart, so the hint has to say which. Live: the run continues
+      // without an answer. Carried: the whole suspended conversation is set
+      // aside, which is the heavier of the two and must not read as "skip".
+      return questionKind === "carried" ? "esc set aside" : "esc skip question";
     default:
       return "/help for commands";
   }
@@ -90,7 +92,7 @@ export function StatusBar(): React.ReactElement {
       <Box justifyContent="space-between" paddingX={1}>
         <Text color={tokenColor}>{leftText(runState, costUsd, model, elapsedSec, cumulativeTokens, waitedSec)}{webSearch ? " · [W]" : ""}</Text>
         {pill ? <Text color={pillColor}>{pill}</Text> : null}
-        <Text dimColor>{rightHint(runState)}</Text>
+        <Text dimColor>{rightHint(runState, state.pendingQuestion?.kind ?? null)}</Text>
       </Box>
       <Box paddingX={1}>
         <Text dimColor>{badgeLine}</Text>

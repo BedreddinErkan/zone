@@ -62,7 +62,9 @@ describe("reducer — awaiting_input and pendingQuestion", () => {
       { type: "USER_QUESTION_ASKED", questionId: "q1", runId: RUN_ID, question: "Which?" }
     );
     expect(s.runState).toBe("awaiting_input");
-    expect(s.pendingQuestion).toEqual({ questionId: "q1", runId: RUN_ID, question: "Which?" });
+    expect(s.pendingQuestion).toEqual({
+      kind: "live", questionId: "q1", runId: RUN_ID, question: "Which?",
+    });
     expect(s.spinner).toBeNull();
   });
 
@@ -252,6 +254,66 @@ describe("answering", () => {
     await wait();
     stdin.write("\r");
     await expect(parked).resolves.toMatchObject({ answer: "vitest" });
+    unmount();
+  });
+});
+
+// ── carried over from a previous process ─────────────────────────────────────
+
+describe("a question carried across the turn boundary", () => {
+  const carried = {
+    kind: "carried" as const,
+    question: "Which auth module is canonical?",
+    toolCallId: "t2",
+    runId: "run-that-asked",
+    iter: 3,
+    conversationLost: false,
+  };
+
+  it("renders marked as carried over, and the session opens waiting on the user", () => {
+    const s = buildInitialState({ model: "m", capUsd: 10, carriedQuestion: carried });
+    expect(s.pendingQuestion).toEqual(carried);
+    // Not "idle": a question with an idle status line reads as nobody waiting.
+    expect(s.runState).toBe("awaiting_input");
+  });
+
+  it("an answer starts the resumed run instead of resolving a registry entry", async () => {
+    // The registry did not survive the process, so resolveUserQuestion would
+    // return unknown_question_id and swallow the answer. This is the assertion
+    // that the carried path takes the other branch.
+    const onSubmit = vi.fn();
+    const onCarriedAnswer = vi.fn();
+    const { stdin, lastFrame, unmount } = render(
+      <App bus={bus} onSubmit={onSubmit} onCarriedAnswer={onCarriedAnswer} initialCarriedQuestion={carried} />
+    );
+    await wait();
+
+    expect(lastFrame()).toContain("Which auth module is canonical?");
+    expect(lastFrame()).toContain("carried over from the previous turn");
+    expect(lastFrame()).toContain("esc set aside");
+
+    stdin.write("src/auth/session.ts");
+    await wait();
+    stdin.write("\r");
+    await wait();
+
+    expect(onCarriedAnswer).toHaveBeenCalledTimes(1);
+    expect(onCarriedAnswer.mock.calls[0]![0]).toBe("src/auth/session.ts");
+    // Not a new task: that would start a fresh run and abandon the conversation.
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(lastFrame()).not.toContain("Which auth module is canonical?");
+    unmount();
+  });
+
+  it("says the conversation was lost BEFORE the user answers", async () => {
+    // Both flags can be true at once. Finding out afterwards that the agent
+    // cannot see the conversation you just answered about is a worse version of
+    // losing the question in the first place.
+    const { lastFrame, unmount } = render(
+      <App bus={bus} initialCarriedQuestion={{ ...carried, conversationLost: true }} />
+    );
+    await wait();
+    expect(lastFrame()).toContain("too large to save");
     unmount();
   });
 });

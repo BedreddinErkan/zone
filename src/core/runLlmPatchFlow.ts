@@ -4593,6 +4593,10 @@ export async function runLlmPatchFlow(input: {
     /** Key of the envelope being resumed — adopted so the run continues that
      *  file instead of forking a second one under its own runId. */
     envelopeKey?: string;
+    /** The question the resumed run stopped on, for the TUI to re-render. */
+    pendingQuestion?: { toolCallId: string; question: string; iter: number };
+    /** What the user typed in reply to it. Absent when they did not answer. */
+    answer?: string | null;
   };
 }): Promise<LlmPatchFlowResult> {
   attachRunIdentity({ userId: input.userId, runId: input.runId });
@@ -5976,6 +5980,8 @@ const initializeTodosFromPlan = (): void => {
         resumeContextBlock: input.resume.contextBlock,
         resumeMessages: input.resume.messages,
         envelopeKey: input.resume.envelopeKey,
+        resumeAnswer: input.resume.answer,
+        resumePendingQuestion: input.resume.pendingQuestion,
       } : {}),
       // Phase X.0.1: forward audit findings so execute agent skips re-investigation.
       auditFindings: input.auditFindings,

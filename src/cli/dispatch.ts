@@ -811,6 +811,9 @@ export async function buildResumeFlowInput(
       // Continue the envelope we loaded rather than starting a second one under
       // this run's freshly-minted runId.
       envelopeKey,
+      // The question this run stopped on, so the TUI can put it back to the user
+      // instead of answering it on their behalf with "no answer is available".
+      pendingQuestion: env.pendingQuestion,
     },
   };
 }

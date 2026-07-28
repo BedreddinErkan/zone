@@ -51,7 +51,9 @@ interface AppProps {
   onSubmit?: (prompt: string, ac: AbortController, mode: TuiMode, images?: import("../../api/imageUpload.js").ImageAttachment[]) => void;
   onUndoRequest?: () => void;
   onRemoteControlCommand?: (argsText: string) => void;
-  onEnvelopeResume?: (sessionId?: string) => void;
+  onEnvelopeResume?: (envelopeKey?: string) => void;
+  /** Answer a question carried over from a previous process — starts the resumed run. */
+  onCarriedAnswer?: (answer: string, ac: AbortController) => void;
   initialTrustedPrefixes?: string[];
   resumedSession?: DiskSession;
   initialSessionId?: string;
@@ -67,6 +69,8 @@ interface AppProps {
   initialPendingHookTrust?: { config: import("../../api/diskHooks.js").UserHooksConfig; hash: string; projectPath: string } | null;
   initialArmedMcpManager?: import("../../mcp/mcpClientManager.js").McpClientManager | null;
   initialPendingMcpTrust?: { config: import("../../api/diskMcp.js").McpConfig; hash: string; projectPath: string } | null;
+  /** --resume landing on an envelope that stopped mid-question. */
+  initialCarriedQuestion?: Extract<import("./store-core.js").PendingQuestion, { kind: "carried" }> | null;
 }
 
 interface AppInnerProps {
@@ -76,7 +80,8 @@ interface AppInnerProps {
   onSubmit: ((prompt: string, ac: AbortController, mode: TuiMode, images?: import("../../api/imageUpload.js").ImageAttachment[]) => void) | undefined;
   onUndoRequest: (() => void) | undefined;
   onRemoteControlCommand: ((argsText: string) => void) | undefined;
-  onEnvelopeResume: ((sessionId?: string) => void) | undefined;
+  onEnvelopeResume: ((envelopeKey?: string) => void) | undefined;
+  onCarriedAnswer: ((answer: string, ac: AbortController) => void) | undefined;
   onStateChange: ((state: StoreState) => void) | undefined;
   onModelApply: ((model: string, provider: "anthropic" | "openai", effort?: EffortLevel, summaryFormat?: "compact" | "detailed", memoryEnabled?: boolean, commitOnSuccess?: boolean) => void) | undefined;
   getCommitData: (() => { filePaths: string[]; message: string; repoPath: string } | null) | undefined;
@@ -85,7 +90,7 @@ interface AppInnerProps {
   onSessionClear: ((oldSessionId: string) => void) | undefined;
 }
 
-function AppInner({ bus, initialPrompt, initialMode, onSubmit, onUndoRequest, onRemoteControlCommand, onEnvelopeResume, onStateChange, onModelApply, getCommitData, getFeedbackData, onDispatchCapture, onSessionClear }: AppInnerProps): React.ReactElement {
+function AppInner({ bus, initialPrompt, initialMode, onSubmit, onUndoRequest, onRemoteControlCommand, onEnvelopeResume, onCarriedAnswer, onStateChange, onModelApply, getCommitData, getFeedbackData, onDispatchCapture, onSessionClear }: AppInnerProps): React.ReactElement {
   const { exit } = useApp();
   const { state, dispatch } = useStore();
   const runAcRef = useRef<AbortController | null>(null);
@@ -167,7 +172,7 @@ function AppInner({ bus, initialPrompt, initialMode, onSubmit, onUndoRequest, on
     // Checked first: while parked the run state is awaiting_input rather than
     // running, so the abort branch below cannot fire, but the ordering makes the
     // precedence legible instead of incidental.
-    if (key.escape && state.pendingQuestion !== null && state.modalView === "none") {
+    if (key.escape && state.pendingQuestion?.kind === "live" && state.modalView === "none") {
       const { questionId, runId } = state.pendingQuestion;
       // The loop is parked awaiting a tool_result, so the decline must return one.
       declineUserQuestion({ questionId, runId });
@@ -286,11 +291,18 @@ function AppInner({ bus, initialPrompt, initialMode, onSubmit, onUndoRequest, on
         onUndoRequest={onUndoRequest}
         onRemoteControlCommand={onRemoteControlCommand}
         onEnvelopeResume={onEnvelopeResume}
+        onCarriedAnswer={onCarriedAnswer}
         getCommitData={getCommitData}
         getFeedbackData={getFeedbackData}
       />
       {state.pendingQuestion !== null && (
-        <QuestionPanel question={state.pendingQuestion.question} />
+        <QuestionPanel
+          question={state.pendingQuestion.question}
+          carriedOver={state.pendingQuestion.kind === "carried"}
+          conversationLost={
+            state.pendingQuestion.kind === "carried" && state.pendingQuestion.conversationLost
+          }
+        />
       )}
       {state.runState === "running" && state.todos.length > 0 && (
         <PlanPanel todos={state.todos} />
@@ -300,7 +312,7 @@ function AppInner({ bus, initialPrompt, initialMode, onSubmit, onUndoRequest, on
   );
 }
 
-export function App({ initialPrompt, initialMode, bus, initialModel, capUsd, initialDailyUsedUsd, onSubmit, onUndoRequest, onRemoteControlCommand, onEnvelopeResume, initialTrustedPrefixes, resumedSession, initialSessionId, onStateChange, initialModelSettings, onModelApply, getCommitData, getFeedbackData, onDispatchCapture, onSessionClear, initialUserCommands, initialArmedUserHooks, initialPendingHookTrust, initialArmedMcpManager, initialPendingMcpTrust }: AppProps): React.ReactElement {
+export function App({ initialPrompt, initialMode, bus, initialModel, capUsd, initialDailyUsedUsd, onSubmit, onUndoRequest, onRemoteControlCommand, onEnvelopeResume, onCarriedAnswer, initialTrustedPrefixes, resumedSession, initialSessionId, onStateChange, initialModelSettings, onModelApply, getCommitData, getFeedbackData, onDispatchCapture, onSessionClear, initialUserCommands, initialArmedUserHooks, initialPendingHookTrust, initialArmedMcpManager, initialPendingMcpTrust, initialCarriedQuestion }: AppProps): React.ReactElement {
   return (
     <StoreProvider initialValues={{
       model: initialModel ?? "",
@@ -317,8 +329,9 @@ export function App({ initialPrompt, initialMode, bus, initialModel, capUsd, ini
       pendingHookTrust: initialPendingHookTrust,
       armedMcpManager: initialArmedMcpManager,
       pendingMcpTrust: initialPendingMcpTrust,
+      carriedQuestion: initialCarriedQuestion,
     }}>
-      <AppInner bus={bus} initialPrompt={initialPrompt} initialMode={initialMode} onSubmit={onSubmit} onUndoRequest={onUndoRequest} onRemoteControlCommand={onRemoteControlCommand} onEnvelopeResume={onEnvelopeResume} onStateChange={onStateChange} onModelApply={onModelApply} getCommitData={getCommitData} getFeedbackData={getFeedbackData} onDispatchCapture={onDispatchCapture} onSessionClear={onSessionClear} />
+      <AppInner bus={bus} initialPrompt={initialPrompt} initialMode={initialMode} onSubmit={onSubmit} onUndoRequest={onUndoRequest} onRemoteControlCommand={onRemoteControlCommand} onEnvelopeResume={onEnvelopeResume} onCarriedAnswer={onCarriedAnswer} onStateChange={onStateChange} onModelApply={onModelApply} getCommitData={getCommitData} getFeedbackData={getFeedbackData} onDispatchCapture={onDispatchCapture} onSessionClear={onSessionClear} />
     </StoreProvider>
   );
 }

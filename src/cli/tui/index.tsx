@@ -29,7 +29,7 @@ import { loadDiskMcp, mcpConfigHash, type McpConfig } from "../../api/diskMcp.js
 import { isMcpTrusted } from "../../api/diskTrustedMcp.js";
 import { McpClientManager } from "../../mcp/mcpClientManager.js";
 import { log } from "../../utils/logger.js";
-import type { StoreState, StoreAction } from "./store.js";
+import type { StoreState, StoreAction, PendingQuestion } from "./store.js";
 import { isRunInFlight } from "./store-core.js";
 import { deriveCommitMessage, shouldAutoCommit } from "./commitMessage.js";
 import { executeCommit } from "./components/CommitModal.js";
@@ -266,6 +266,41 @@ export function _resolveSessionId(
   localSessionId: string
 ): string {
   return storeState?.sessionId ?? localSessionId;
+}
+
+/**
+ * What --resume / /resume should do with the envelope it just loaded.
+ *
+ * Pure, and extracted rather than inlined, because the whole correctness of the
+ * turn boundary is this one branch: auto-running an envelope that stopped
+ * mid-question restarts the run before the user can type, and
+ * reconcileDanglingToolCalls then answers on their behalf with "no answer is
+ * available" — at the exact moment they asked to resume in order to answer it.
+ */
+export function _resumeStartupAction(
+  resume: {
+    pendingQuestion?: { toolCallId: string; question: string; iter: number };
+    messagesOmitted?: boolean;
+    envelopeKey?: string;
+  } | undefined,
+  task: string,
+):
+  | { kind: "auto_run"; prompt: string }
+  | { kind: "await_answer"; carried: Extract<PendingQuestion, { kind: "carried" }> } {
+  const q = resume?.pendingQuestion;
+  if (!q) return { kind: "auto_run", prompt: task };
+  return {
+    kind: "await_answer",
+    carried: {
+      kind: "carried",
+      question: q.question,
+      toolCallId: q.toolCallId,
+      // The run that ASKED. The run that will answer does not exist yet.
+      runId: resume?.envelopeKey ?? "",
+      iter: q.iter,
+      conversationLost: resume?.messagesOmitted === true,
+    },
+  };
 }
 
 /**
@@ -608,12 +643,19 @@ export async function runTui(
   // load the envelope and auto-trigger the run once the TUI mounts.
   const envResumeId = process.env["ZONE_RESUME_ENVELOPE_ID"];
   let pendingEnvelopeResume: Awaited<ReturnType<typeof buildResumeFlowInput>> | null = null;
+  let initialCarriedQuestion: Extract<import("./store-core.js").PendingQuestion, { kind: "carried" }> | null = null;
   if (envResumeId) {
     delete process.env["ZONE_RESUME_ENVELOPE_ID"];
     try {
       pendingEnvelopeResume = await buildResumeFlowInput(envResumeId, opts, {});
-      // Override initialPrompt so App.tsx mounts + auto-triggers the run.
-      initialPrompt = pendingEnvelopeResume.task;
+      const action = _resumeStartupAction(pendingEnvelopeResume.resume, pendingEnvelopeResume.task);
+      if (action.kind === "await_answer") {
+        // Deliberately does NOT set initialPrompt — see _resumeStartupAction.
+        initialCarriedQuestion = action.carried;
+      } else {
+        // Override initialPrompt so App.tsx mounts + auto-triggers the run.
+        initialPrompt = action.prompt;
+      }
       if (pendingEnvelopeResume.resume?.messagesOmitted) {
         // The user is about to rely on continuity that isn't there. Say so.
         process.stderr.write(
@@ -859,12 +901,35 @@ export async function runTui(
             level: "warning" } });
         }
         runPromptDeps.pendingEnvelopeResume = resumeInput;
-        onSubmit(env.task, new AbortController(), "normal");
+        const action = _resumeStartupAction(resumeInput.resume, env.task);
+        if (action.kind === "await_answer") {
+          // Render the question and wait — same rule as --resume at startup.
+          storeCapture.dispatch?.({ type: "USER_QUESTION_CARRIED", ...action.carried });
+          return;
+        }
+        onSubmit(action.prompt, new AbortController(), "normal");
       } catch (err: unknown) {
         storeCapture.dispatch?.({ type: "TOAST_PUSH", entry: { id: randomUUID(),
           message: err instanceof Error ? err.message : String(err), level: "warning" } });
       }
     })();
+  };
+
+  /**
+   * The user answered a question carried over from a previous process.
+   *
+   * Not a new task and not a resolver call: there is no parked loop to unpark, so
+   * this starts the resumed run with the answer threaded onto the stashed flow
+   * input. From there resumeAnswer reaches the model by one of two routes —
+   * reconcileDanglingToolCalls fills the dangling ask_user reply when the
+   * conversation was restored, and the cold-branch kickoff carries it when the
+   * conversation was too large to save.
+   */
+  const onCarriedAnswer = (answer: string, ac: AbortController): void => {
+    const pending = runPromptDeps.pendingEnvelopeResume;
+    if (!pending?.resume) return;
+    pending.resume.answer = answer;
+    onSubmit(pending.task, ac, "normal");
   };
 
   // Best-effort GC: delete the prior sessionId's .jsonl when the user clears session memory.
@@ -904,6 +969,8 @@ export async function runTui(
         onSubmit={onSubmit}
         onUndoRequest={onUndoRequest}
         onEnvelopeResume={onEnvelopeResume}
+        onCarriedAnswer={onCarriedAnswer}
+        initialCarriedQuestion={initialCarriedQuestion}
         initialTrustedPrefixes={initialTrustedPrefixes}
         resumedSession={resumedSession ?? undefined}
         initialSessionId={localSessionId}

@@ -20,22 +20,10 @@ export function StoreProvider({
   initialValues,
 }: {
   children: React.ReactNode;
-  initialValues?: {
-    model: string;
-    capUsd: number;
-    dailyUsedUsd?: number;
-    trustedPrefixes?: string[];
-    resumedTranscript?: TranscriptEntry[];
-    resumedSessionId?: string;
-    resumedStartedAt?: string;
-    modelSettings?: DiskModelSettings | null;
-    userCommands?: UserCommand[];
-    mode?: TuiMode;
-    armedUserHooks?: UserHooksConfig | null;
-    pendingHookTrust?: { config: UserHooksConfig; hash: string; projectPath: string } | null;
-    armedMcpManager?: import("../../mcp/mcpClientManager.js").McpClientManager | null;
-    pendingMcpTrust?: { config: import("../../api/diskMcp.js").McpConfig; hash: string; projectPath: string } | null;
-  };
+  // Derived rather than restated: this was a hand-copied duplicate of
+  // buildInitialState's parameter, so every new seed field had to be added twice
+  // and silently failed to compile at the second site.
+  initialValues?: Parameters<typeof buildInitialState>[0];
 }): React.ReactElement {
   const [state, dispatch] = useReducer(reducer, undefined, () =>
     buildInitialState(initialValues)
