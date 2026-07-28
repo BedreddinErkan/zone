@@ -15,6 +15,7 @@ import {
   deriveCreatedPaths,
   buildResumeContextBlock,
   createCoalescingWriter,
+  currentEnvelopesDir,
   _setEnvelopeDirForTest,
   type RunEnvelope,
   type ReconcileResult,
@@ -503,6 +504,94 @@ describe("createCoalescingWriter", () => {
     writer.trigger();
     await new Promise(r => setTimeout(r, 20));
     // No unhandled rejection
+  });
+
+  it("drain waits for a write that was queued behind another", async () => {
+    // run() re-assigns inFlightPromise to a fresh run() when it finishes dirty,
+    // so awaiting it ONCE returns while the follow-up write is still outstanding.
+    // That is the whole difference between drain and a bare await, and it is what
+    // decides whether stampEnvelopeStatus is really the last write of a run.
+    const gates: Array<() => void> = [];
+    const finished: number[] = [];
+    const writer = createCoalescingWriter(() => {
+      const n = gates.length + 1;
+      return new Promise<void>((r) => {
+        gates.push(() => { finished.push(n); r(); });
+      });
+    });
+
+    writer.trigger();                              // write 1 starts
+    await new Promise(r => setTimeout(r, 10));
+    writer.trigger();                              // dirty ⇒ write 2 follows
+
+    let drainResolved = false;
+    const drained = writer.drain().then(() => { drainResolved = true; });
+
+    gates[0]!();                                   // write 1 completes, write 2 begins
+    await new Promise(r => setTimeout(r, 10));
+    expect(drainResolved).toBe(false);             // ← `while` → `if` fails here
+
+    gates[1]!();
+    await drained;
+    expect(drainResolved).toBe(true);
+    expect(finished).toEqual([1, 2]);
+  });
+});
+
+// ---- A queued write lands where it was queued for ---------------------------
+
+describe("write-time vs enqueue-time directory resolution", () => {
+  it("a queued write ignores a directory change made while it waited", async () => {
+    // How the park-durability tests leaked envelopes into the real ~/.zone:
+    // saveRunEnvelope resolved envelopesDir() when the queued write finally ran,
+    // so a checkpoint outliving afterEach's _setEnvelopeDirForTest(null) wrote to
+    // the user's home directory instead of the tmpdir it was queued for.
+    const boundDir = currentEnvelopesDir();
+    let release: (() => void) | undefined;
+    const writer = createCoalescingWriter(async () => {
+      await new Promise<void>((r) => { release = r; });
+      await saveRunEnvelope(makeEnvelope({ sessionId: "queued" }), { dir: boundDir });
+    });
+
+    writer.trigger();
+    await new Promise(r => setTimeout(r, 10));
+
+    const elsewhere = join(tmp, "elsewhere");
+    _setEnvelopeDirForTest(elsewhere);              // the directory moves mid-flight
+    release!();
+    await writer.drain();
+
+    expect(await readdir(boundDir)).toContain("queued.envelope.json");
+    // Nothing was created at the new location: the write went where it was queued for.
+    await expect(readdir(elsewhere)).rejects.toThrow();
+  });
+});
+
+// ---- A failed write is audible ----------------------------------------------
+
+describe("saveRunEnvelope failure", () => {
+  it("logs the path and the error, then rethrows", async () => {
+    // Every caller swallows this — createCoalescingWriter's catch, forceFlush's
+    // .catch — so without the log a full disk or a permission error loses the
+    // envelope in total silence, and a parked envelope is sometimes the only copy
+    // of staged work that never reached the working tree.
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const blocked = join(tmp, "blocked");
+      await writeFile(blocked, "a file where a directory needs to be", "utf-8");
+
+      await expect(
+        saveRunEnvelope(makeEnvelope(), { dir: join(blocked, "sessions") }),
+      ).rejects.toThrow();
+
+      const failures = logSpy.mock.calls.filter(c => c[0] === "[zone-envelope-write-failed]");
+      expect(failures).toHaveLength(1);
+      const payload = JSON.parse(String(failures[0]![1])) as { path: string; error: string };
+      expect(payload.path).toContain("blocked");
+      expect(payload.error).toMatch(/ENOTDIR|EEXIST|ENOENT|EACCES/);
+    } finally {
+      logSpy.mockRestore();
+    }
   });
 });
 

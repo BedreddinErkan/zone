@@ -47,6 +47,7 @@ import { parseTodoProgressMarkers, executionPlanToTodos, type RunTodo } from "..
 import { generateExecutionPlan } from "./executionPlan.js";
 import {
   saveRunEnvelope,
+  currentEnvelopesDir,
   deleteRunEnvelope,
   stampEnvelopeStatus,
   deriveCreatedPaths,
@@ -2429,9 +2430,14 @@ async function runAgentLoopScoped(input: AgentLoopInput, stats: LoopRunStats): P
     return { messages: undefined, messagesOmitted: true };
   }
 
+  // Bound once, strictly before any write can be enqueued. saveRunEnvelope would
+  // otherwise resolve the directory when the queued write finally runs, so a
+  // checkpoint outliving a directory change lands somewhere its run never meant —
+  // which is how the park-durability tests wrote into the real ~/.zone.
+  const envelopeDir = currentEnvelopesDir();
   const checkpointWriter = createCoalescingWriter(async () => {
     captureBaseHashes();
-    await saveRunEnvelope(buildEnvelopeSnapshot("running"));
+    await saveRunEnvelope(buildEnvelopeSnapshot("running"), { dir: envelopeDir });
   });
 
   function writeRunCheckpoint(): void {
@@ -4998,6 +5004,13 @@ Example:
   });
 
   } finally {
+    // Every writeRunCheckpoint is fire-and-forget, so a checkpoint can still be
+    // in flight here. Draining before returning makes the wrapper's
+    // stampEnvelopeStatus the last write to touch this envelope; otherwise a
+    // trailing checkpoint overwrites the stamp with status "running", and with a
+    // live PID isResumable reads that as "a run is in progress" and hides the
+    // envelope for the rest of the session.
+    await checkpointWriter.drain();
     // DF-17b: emergency flush for AbortError and any other uncaught exception.
     // stagingFinalized is set true before every explicit staging exit (all 9 paths:
     // 3 new Part-A gaps + 3 existing persistStagingOnError sites + 3 finalizeRun calls)

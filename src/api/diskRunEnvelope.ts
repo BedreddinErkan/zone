@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import * as fsSync from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { homedir } from "node:os";
+import { log } from "../utils/logger.js";
 import type { ExecutionPlan } from "../llm/executionPlan.js";
 import type { RunTodo } from "../core/todoLifecycle.js";
 // type-only import — erased at compile time; no runtime cycle with agentLoop.ts
@@ -113,8 +114,21 @@ function envelopesDir(): string {
   return _envelopeDirOverride ?? join(homedir(), ".zone", "sessions");
 }
 
-function envelopeFilePath(sessionId: string): string {
-  return join(envelopesDir(), `${sessionId}.envelope.json`);
+/**
+ * The envelope directory as it stands right now.
+ *
+ * Callers that enqueue writes for later — the checkpoint writer is the only one —
+ * must resolve this ONCE up front and pass it back as `saveRunEnvelope`'s `dir`.
+ * Resolving inside the write means a queued write lands wherever the directory
+ * happens to point when it finally runs, which is how the park-durability tests
+ * leaked envelopes into the real ~/.zone after restoring the override.
+ */
+export function currentEnvelopesDir(): string {
+  return envelopesDir();
+}
+
+function envelopeFilePath(sessionId: string, dir?: string): string {
+  return join(dir ?? envelopesDir(), `${sessionId}.envelope.json`);
 }
 
 // ---- PID liveness ----------------------------------------------------------
@@ -130,14 +144,36 @@ function isResumable(env: RunEnvelope): boolean {
 
 // ---- CRUD ------------------------------------------------------------------
 
-export async function saveRunEnvelope(env: RunEnvelope): Promise<void> {
-  const dir = envelopesDir();
-  await fs.mkdir(dir, { recursive: true });
-  const p = envelopeFilePath(env.sessionId);
+/**
+ * @param opts.dir Write here instead of resolving the directory now. Supplied by
+ *   callers that enqueue writes — see currentEnvelopesDir.
+ *
+ * Failures are logged and rethrown. The rethrow matters as much as the log: every
+ * caller that swallows this (createCoalescingWriter's catch, forceFlush's
+ * .catch) was previously the ONLY handler, so a full disk or a permission error
+ * lost the envelope in silence — and a parked envelope is sometimes the sole copy
+ * of staged work that never reached the working tree.
+ */
+export async function saveRunEnvelope(
+  env: RunEnvelope,
+  opts?: { dir?: string },
+): Promise<void> {
+  const dir = opts?.dir ?? envelopesDir();
+  const p = envelopeFilePath(env.sessionId, dir);
   const tmp = `${p}.tmp`;
   const stamped: RunEnvelope = { ...env, updatedAt: new Date().toISOString() };
-  await fs.writeFile(tmp, JSON.stringify(stamped, null, 2), "utf-8");
-  await fs.rename(tmp, p);
+  try {
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(tmp, JSON.stringify(stamped, null, 2), "utf-8");
+    await fs.rename(tmp, p);
+  } catch (err) {
+    log("[zone-envelope-write-failed]", JSON.stringify({
+      event: "envelope_write_failed",
+      path: p,
+      error: err instanceof Error ? err.message : String(err),
+    }));
+    throw err;
+  }
   try { await fs.chmod(p, 0o600); } catch { /* best effort */ }
 }
 
@@ -358,6 +394,15 @@ export interface CoalescingWriter {
   trigger(): void;
   /** Waits for any in-flight write, then forces one final write. */
   forceFlush(): Promise<void>;
+  /**
+   * Waits for queued work to finish WITHOUT forcing an extra write.
+   *
+   * Every `trigger()` is fire-and-forget, so without this a checkpoint can still
+   * be in flight when the run exits and land AFTER stampEnvelopeStatus — leaving
+   * the envelope stamped "running", which with a live PID isResumable reads as
+   * "a run is in progress" and hides for the rest of the session.
+   */
+  drain(): Promise<void>;
 }
 
 /**
@@ -399,5 +444,14 @@ export function createCoalescingWriter(saveFn: () => Promise<void>): CoalescingW
     dirty = false;
   }
 
-  return { trigger, forceFlush };
+  async function drain(): Promise<void> {
+    // Loop rather than a single await: run() re-assigns inFlightPromise to a
+    // fresh run() when it finishes dirty, so awaiting once returns while the
+    // follow-up write is still outstanding.
+    while (inFlightPromise) {
+      await inFlightPromise.catch(() => {});
+    }
+  }
+
+  return { trigger, forceFlush, drain };
 }
