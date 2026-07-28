@@ -412,6 +412,11 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         runStartMs: isRunInFlight(state.runState) ? state.runStartMs : Date.now(),
         runEndMs: isRunInFlight(state.runState) ? state.runEndMs : undefined,
         parkedMs: isRunInFlight(state.runState) ? state.parkedMs : 0,
+        // Cleared alongside parkedMs. A run that ended while parked leaves this
+        // set; without the reset the next run's first USER_QUESTION_RESOLVED
+        // banks Date.now() minus the PREVIOUS run's park start, deducting
+        // unrelated hours from a run that never waited.
+        parkStartedMs: isRunInFlight(state.runState) ? state.parkStartedMs : undefined,
       };
     case "SPINNER_UPDATE":
       return { ...state, spinner: { active: true, label: action.label } };
@@ -484,6 +489,11 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         ...state,
         spinner: null,
         runState: "done",
+        // Bank a park still in flight. A run that ENDS while parked — which is
+        // exactly what suspending on a question does — would otherwise report
+        // the whole wait as work.
+        parkedMs: state.parkedMs + (state.parkStartedMs != null ? Date.now() - state.parkStartedMs : 0),
+        parkStartedMs: undefined,
         // Freeze the duration at completion (excludes idle / reading time).
         runEndMs: Date.now(),
         pendingQuestion: null,
@@ -495,6 +505,11 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         ...state,
         spinner: null,
         runState: "aborted",
+        // Bank a park still in flight. A run that ENDS while parked — which is
+        // exactly what suspending on a question does — would otherwise report
+        // the whole wait as work.
+        parkedMs: state.parkedMs + (state.parkStartedMs != null ? Date.now() - state.parkStartedMs : 0),
+        parkStartedMs: undefined,
         runEndMs: Date.now(),
         pendingQuestion: null,
         liveTail: { ...state.liveTail, currentToolCall: null },
@@ -505,6 +520,11 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         ...state,
         spinner: null,
         runState: "failed",
+        // Bank a park still in flight. A run that ENDS while parked — which is
+        // exactly what suspending on a question does — would otherwise report
+        // the whole wait as work.
+        parkedMs: state.parkedMs + (state.parkStartedMs != null ? Date.now() - state.parkStartedMs : 0),
+        parkStartedMs: undefined,
         runEndMs: Date.now(),
         pendingQuestion: null,
         liveTail: { ...state.liveTail, currentToolCall: null },

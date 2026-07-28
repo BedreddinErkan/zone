@@ -1961,7 +1961,11 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       recordRunSummary({
         userId,
         runId: input.runId.trim(),
-        latencyMs: Date.now() - runStartTs,
+        // Time spent parked on a human is not latency. This figure persists to
+        // ~/.zone/usage/*.jsonl under model "__run_summary__" and is read by
+        // metricsAggregator, so a run parked for an hour would record an hour of
+        // inference — the one place the distortion outlives the session.
+        latencyMs: Math.max(0, Date.now() - runStartTs - loopStats.parkedMs),
         terminationReason,
       }).catch((e) => {
         log("[zone-run-summary-write-failed]", JSON.stringify({

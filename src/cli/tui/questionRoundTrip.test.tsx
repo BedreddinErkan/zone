@@ -161,6 +161,72 @@ describe("reducer — awaiting_input and pendingQuestion", () => {
     }
   });
 
+  it("a run that ends while parked banks the outstanding wait", () => {
+    // Suspending on a question ends the run WHILE parked — the terminal arms
+    // nulled the question but never banked the park, so the whole wait was
+    // reported as work by the one path this feature makes routine.
+    let clock = 0;
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => clock);
+    try {
+      clock = 1_000;
+      let s = reducer(buildInitialState({ model: "m", capUsd: 10 }), { type: "SPINNER_START", label: "W" });
+      clock = 3_000;
+      s = reducer(s, { type: "USER_QUESTION_ASKED", questionId: "q1", runId: RUN_ID, question: "?" });
+      clock = 63_000; // the user walked away, then the run ended still parked
+      s = reducer(s, { type: "RUN_DONE" });
+
+      expect(s.parkedMs).toBe(60_000);
+      expect(s.runEndMs! - s.runStartMs! - s.parkedMs).toBe(2_000);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it("a park abandoned by SESSION_RESUME cannot poison the next run", () => {
+    // SESSION_RESUME nulls pendingQuestion and goes idle but does NOT clear
+    // parkStartedMs — the one reachable path that abandons a park without
+    // banking it. Without SPINNER_START's reset the next run's first
+    // USER_QUESTION_RESOLVED banks Date.now() minus a park start from a session
+    // the user has already left, deducting unrelated hours from a run that never
+    // waited that long.
+    let clock = 0;
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => clock);
+    try {
+      clock = 1_000;
+      let s = reducer(buildInitialState({ model: "m", capUsd: 10 }), { type: "SPINNER_START", label: "W" });
+      clock = 2_000;
+      s = reducer(s, { type: "USER_QUESTION_ASKED", questionId: "q1", runId: RUN_ID, question: "?" });
+      expect(s.parkStartedMs).toBe(2_000);
+
+      // The user opens /sessions and switches away while the question is pending.
+      clock = 5_000;
+      s = reducer(s, {
+        type: "SESSION_RESUME",
+        session: {
+          version: 1, sessionId: "other", startedAt: "2026-07-28T00:00:00.000Z",
+          lastActivityAt: "2026-07-28T00:00:00.000Z", cwd: "/repo", model: "m",
+          transcript: [], totalCostUsd: 0, totalTokens: 0, totalElapsedMs: 0,
+        },
+      });
+      expect(s.parkStartedMs).toBe(2_000); // still stale — SESSION_RESUME leaves it
+
+      // Hours later, a new run in the resumed session.
+      clock = 3_600_000;
+      s = reducer(s, { type: "SPINNER_START", label: "W" });
+      expect(s.parkStartedMs).toBeUndefined();
+
+      clock = 3_601_000;
+      s = reducer(s, { type: "USER_QUESTION_ASKED", questionId: "q2", runId: RUN_ID, question: "?" });
+      clock = 3_604_000;
+      s = reducer(s, { type: "USER_QUESTION_RESOLVED" });
+
+      // Three seconds of waiting in THIS run, not the hour since the last one.
+      expect(s.parkedMs).toBe(3_000);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
   it("a new run starts its parked accumulator at zero", () => {
     // Otherwise the previous run's wait is deducted from the next run's work and
     // the duration reads as faster than it was.

@@ -30,7 +30,19 @@ const toolExecutorMock = vi.hoisted(() => ({
   resolveRunCommandCwd: vi.fn(),
 }));
 
-const mocks = vi.hoisted(() => ({ createChatCompletion: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  createChatCompletion: vi.fn(),
+  recordRunSummary: vi.fn(),
+}));
+
+// recordRunSummary has no directory override and writes to the real
+// ~/.zone/usage/. Mocked both to assert on the latency it persists and to stop
+// these tests appending records to the user's own usage log.
+vi.mock("../usage/usageTracker.js", () => ({
+  recordRunSummary: mocks.recordRunSummary,
+  recordRunRetry: vi.fn(() => Promise.resolve()),
+  getUsage: vi.fn(() => Promise.resolve({ totalCostUsd: 0 })),
+}));
 
 vi.mock("./factory.js", () => ({
   createLLMClient: vi.fn(() => ({
@@ -92,6 +104,8 @@ beforeEach(() => {
   _setEnvelopeDirForTest(envelopeDir);
   resetToolExecutorMock(toolExecutorMock);
   mocks.createChatCompletion.mockReset();
+  mocks.recordRunSummary.mockReset();
+  mocks.recordRunSummary.mockResolvedValue(undefined);
   toolExecutorMock.executeTool.mockResolvedValue({ success: true, output: "file contents" });
   logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 });
@@ -410,6 +424,50 @@ describe("a resume adopts its source envelope", () => {
     // Nothing survives: without adoption the delete targets FRESH_RUN_ID and the
     // envelope the user resumed is immortal.
     expect(envelopes()).toEqual([]);
+  });
+});
+
+// ── parked time is not latency ───────────────────────────────────────────────
+
+describe("the latency a run persists", () => {
+  it("excludes time spent parked on a human", async () => {
+    // This figure lands in ~/.zone/usage/*.jsonl under model "__run_summary__"
+    // and is read by metricsAggregator — the ONE place a long human pause would
+    // outlive the session as recorded inference time.
+    const recorded: number[] = [];
+    mocks.recordRunSummary.mockImplementation(
+      (p: { latencyMs: number }) => { recorded.push(p.latencyMs); return Promise.resolve(); }
+    );
+
+    let clock = 1_000;
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => clock);
+    try {
+      mocks.createChatCompletion
+        .mockResolvedValueOnce(toolCallResponse("t1", "read_file", { filePath: "src/a.ts", lineRange: null }))
+        .mockResolvedValueOnce(toolCallResponse("t2", "ask_user", { question: QUESTION }))
+        .mockResolvedValueOnce(doneResponse());
+
+      await runAgentLoop({
+        task: "pick an auth module",
+        repoPath,
+        runId: "run-latency",
+        sessionId: SESSION_ID,
+        interactiveChannel: "tui",
+        onStructuredEvent: (evt: unknown) => {
+          const e = evt as { type?: string; questionId?: string };
+          if (e?.type === "user_question_required") {
+            clock += 3_600_000;  // the user took an hour
+            resolveUserQuestion({ questionId: String(e.questionId), runId: "run-latency", answer: "ok" });
+          }
+        },
+      });
+
+      expect(recorded).toHaveLength(1);
+      // An hour parked must not read as an hour of inference.
+      expect(recorded[0]).toBeLessThan(60_000);
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 });
 
