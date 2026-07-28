@@ -13,6 +13,7 @@ export default defineConfig({
   test: {
     env: { ZONE_TRUST_ALL: "1", HOME: TEST_HOME, USERPROFILE: TEST_HOME },
     globalSetup: ["src/test/setup/globalHome.ts"],
+    setupFiles: ["src/test/setup/homeGuard.ts"],
     environment: "node",
     include: ["src/**/*.test.ts", "src/**/*.test.tsx", "scripts/**/*.test.ts"],
     exclude: ["src/llm/taskClassifier.archetype.test.ts"],

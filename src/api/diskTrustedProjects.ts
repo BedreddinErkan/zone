@@ -1,7 +1,10 @@
-import { readFileSync, writeFileSync, mkdirSync, renameSync, chmodSync, statSync } from "node:fs";
+// Namespace import, not named bindings: the test-suite home guard
+// (src/test/setup/homeGuard.ts) intercepts writes by assigning over the fs
+// module's properties, and a named function import snapshots the binding at
+// evaluation and never sees that assignment.
+import fs from "node:fs";
 import { join, dirname, sep, resolve } from "node:path";
 import { homedir } from "node:os";
-import { realpathSync } from "node:fs";
 import { classifyPath } from "../core/pathSafety.js";
 
 export interface TrustedProject {
@@ -29,7 +32,7 @@ function trustedProjectsFilePath(): string {
 /** Resolve to a canonical absolute path. Falls back to path.resolve for non-existent paths. */
 export function canonicalizePath(p: string): string {
   try {
-    return realpathSync(p);
+    return fs.realpathSync(p);
   } catch {
     return resolve(p);
   }
@@ -38,7 +41,7 @@ export function canonicalizePath(p: string): string {
 function loadTrustedProjects(): TrustedProjectsFile {
   const p = trustedProjectsFilePath();
   try {
-    const raw = readFileSync(p, "utf-8");
+    const raw = fs.readFileSync(p, "utf-8");
     const parsed = JSON.parse(raw) as TrustedProjectsFile;
     if (parsed.version !== 1 || !Array.isArray(parsed.projects)) {
       return { version: 1, projects: [] };
@@ -52,11 +55,11 @@ function loadTrustedProjects(): TrustedProjectsFile {
 
 function saveTrustedProjects(store: TrustedProjectsFile): void {
   const p = trustedProjectsFilePath();
-  mkdirSync(dirname(p), { recursive: true });
+  fs.mkdirSync(dirname(p), { recursive: true });
   const tmp = `${p}.tmp`;
-  writeFileSync(tmp, JSON.stringify(store, null, 2), "utf-8");
-  renameSync(tmp, p);
-  try { chmodSync(p, 0o600); } catch { /* Windows/non-POSIX — best effort */ }
+  fs.writeFileSync(tmp, JSON.stringify(store, null, 2), "utf-8");
+  fs.renameSync(tmp, p);
+  try { fs.chmodSync(p, 0o600); } catch { /* Windows/non-POSIX — best effort */ }
 }
 
 /**
@@ -94,7 +97,7 @@ export function resolveProjectRoot(startPath: string): string {
   let dir = canonical;
   for (;;) {
     try {
-      statSync(join(dir, ".git"));
+      fs.statSync(join(dir, ".git"));
       return dir;
     } catch { /* not found at this level */ }
     const parent = dirname(dir);
