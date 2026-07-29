@@ -178,6 +178,29 @@ export function emitTierArchetypeMismatch(data: TierArchetypeMismatchData): void
 }
 
 // ---------------------------------------------------------------------------
+// emitTierGrantUnusable — [zone-tier-grant-unusable]
+// Emitted once per run when tier grants a subagent quota for a tool the
+// resolved toolset does not contain. Tier and archetype are decided
+// independently; this makes the case where they disagree observable instead of
+// silent. `removedBy` matters: dropping Task on a small task is a deliberate
+// Zone decision (iteration-inflation.md Fix A), and a marker that cannot tell
+// that apart from an accidental mismatch is noise.
+// ---------------------------------------------------------------------------
+
+export interface TierGrantUnusableData {
+  runId: string | null | undefined;
+  tier: string;
+  archetype: string | null;
+  grantedSubagentCalls: number;
+  toolSubsetSize: number;
+  removedBy: "task_too_small" | "capability_filter";
+}
+
+export function emitTierGrantUnusable(data: TierGrantUnusableData): void {
+  log("[zone-tier-grant-unusable]", JSON.stringify(data));
+}
+
+// ---------------------------------------------------------------------------
 // emitCoachingRule — [zone-coaching-rule]
 // Emitted when the test-failure scope-check coaching rule fires.
 // ---------------------------------------------------------------------------

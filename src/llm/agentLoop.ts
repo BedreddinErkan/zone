@@ -26,6 +26,7 @@ import {
   emitCacheUsage,
   emitTierConstraints,
   emitTierArchetypeMismatch,
+  emitTierGrantUnusable,
   emitCoachingRule,
   emitCommandCacheSummary,
   emitToolResultSummary,
@@ -2196,6 +2197,25 @@ async function runAgentLoopScoped(input: AgentLoopInput, stats: LoopRunStats): P
       fallbackUsed: input.taskClassification?.fallbackUsed ?? false,
       toolSubsetSize: tierFilterFromClassifier ? toolsForLLM.length : undefined,
     });
+    // Tier grants a subagent quota; the archetype's pipeline decides the
+    // toolset. Nothing reconciles them, so a complex-tier read-only run is told
+    // it may dispatch 4 subagents while `Task` is not in its toolset at all.
+    // Harmless in itself — the quota is simply unreachable — but it is the third
+    // place these two axes disagree, after the mismatch detector gating on
+    // forceTier and isReadOnlyMode being unreachable. Record it rather than
+    // reconcile it here.
+    if (tierLimits.maxSubagentCalls > 0 && !effectiveAllowedSet.has("Task")) {
+      emitTierGrantUnusable({
+        runId: input.runId ?? null,
+        tier: input.taskClassification?.tier ?? "medium",
+        archetype: input.taskClassification?.archetype ?? null,
+        grantedSubagentCalls: tierLimits.maxSubagentCalls,
+        toolSubsetSize: toolsForLLM.length,
+        // taskIsSmall drops Task on purpose; anything else means the pipeline
+        // removed a tool the tier still budgeted for.
+        removedBy: taskIsSmall ? "task_too_small" : "capability_filter",
+      });
+    }
     if (tierArchetypeMismatch && input.taskClassification) {
       const simpleSet = new Set(["read_file", "write_file", "apply_patch", "run_command"]);
       const allToolNames = [
