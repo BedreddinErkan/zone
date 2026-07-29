@@ -20,6 +20,8 @@ const PROPOSAL: PlanReadyProposal = {
     { title: "Read relevant files", description: "Understand the codebase", filesLikely: ["src/foo.ts"] },
     { title: "Implement feature", description: "Write the code", filesLikely: ["src/bar.ts"] },
   ],
+  riskHints: ["Touches shared auth middleware"],
+  scopeSummary: "Add feature X behind a flag in the request-handling path.",
 };
 
 function makeEmit() {
@@ -211,6 +213,26 @@ describe("rejectPendingPlansForRun", () => {
 
   it("returns 0 for empty runId", () => {
     expect(rejectPendingPlansForRun("")).toBe(0);
+  });
+});
+
+// PlanReady projection: riskHints/scopeSummary threading (required fields, no presence check).
+describe("riskHints / scopeSummary in PlanReadyProposal", () => {
+  it("riskHints and scopeSummary on proposal are emitted as planRiskHints / planScopeSummary", async () => {
+    const { emit, events } = makeEmit();
+    const proposal: PlanReadyProposal = {
+      ...PROPOSAL,
+      planId: "plan-risk-001",
+      riskHints: ["Touches shared auth middleware", "No test coverage on the affected path"],
+      scopeSummary: "Add feature X behind a flag in the request-handling path.",
+    };
+    const p = requestPlanApproval({ proposal, emit: emit as any });
+    await Promise.resolve();
+    const evt = events[0] as Record<string, unknown>;
+    expect(evt["planRiskHints"]).toEqual(["Touches shared auth middleware", "No test coverage on the affected path"]);
+    expect(evt["planScopeSummary"]).toBe("Add feature X behind a flag in the request-handling path.");
+    resolvePlanApproval({ planId: "plan-risk-001", runId: PROPOSAL.runId, decision: "reject" });
+    await p;
   });
 });
 

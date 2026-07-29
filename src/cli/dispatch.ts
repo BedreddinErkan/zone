@@ -428,6 +428,8 @@ export async function runOneShotInner(
               scopeNotes: currentPlan.scopeNotes,
               noChangeReason: currentPlan.noChangeReason,
               cannotVerifyReason: currentPlan.cannotVerifyReason,
+              riskHints: currentPlan.riskHints,
+              scopeSummary: currentPlan.scopeSummary,
             },
             emit: (evt) => progressCallback({ stage: evt.type, progress: evt } as unknown as LlmPatchProgressUpdate),
             abortSignal: ac.signal,

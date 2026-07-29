@@ -15,6 +15,8 @@ export interface PlanReadyProposal {
   scopeNotes?: string;
   noChangeReason?: string;
   cannotVerifyReason?: string;
+  riskHints: string[];
+  scopeSummary: string;
 }
 
 /**
@@ -73,6 +75,8 @@ export function requestPlanApproval(input: {
     planScopeNotes?: string;
     planNoChangeReason?: string;
     planCannotVerifyReason?: string;
+    planRiskHints: string[];
+    planScopeSummary: string;
   }) => void;
   abortSignal?: AbortSignal;
   timeoutMs?: number;
@@ -130,6 +134,8 @@ export function requestPlanApproval(input: {
       planId,
       planObjective: proposal.objective,
       planStepsJson: JSON.stringify(proposal.steps),
+      planRiskHints: proposal.riskHints,
+      planScopeSummary: proposal.scopeSummary,
       ...(proposal.scopeNotes ? { planScopeNotes: proposal.scopeNotes } : {}),
       ...(proposal.noChangeReason ? { planNoChangeReason: proposal.noChangeReason } : {}),
       ...(proposal.cannotVerifyReason ? { planCannotVerifyReason: proposal.cannotVerifyReason } : {}),

@@ -128,6 +128,8 @@ export function toWireFrame(evt: ZoneStructuredProgressEvent): RemoteControlFram
         ...(evt.planScopeNotes !== undefined && { planScopeNotes: evt.planScopeNotes }),
         ...(evt.planNoChangeReason !== undefined && { planNoChangeReason: evt.planNoChangeReason }),
         ...(evt.planCannotVerifyReason !== undefined && { planCannotVerifyReason: evt.planCannotVerifyReason }),
+        ...(evt.planRiskHints !== undefined && { planRiskHints: evt.planRiskHints }),
+        ...(evt.planScopeSummary !== undefined && { planScopeSummary: evt.planScopeSummary }),
       };
 
     // Staged diff approval: approvalId + summary. stagedFilesJson dropped (raw file content).

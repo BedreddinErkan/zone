@@ -155,6 +155,8 @@ export type StoreState = {
     scopeNotes?: string;
     noChangeReason?: string;
     cannotVerifyReason?: string;
+    riskHints: string[];
+    scopeSummary: string;
   } | null;
   stagedDiffProposal: {
     approvalId: string;
@@ -371,6 +373,8 @@ export type StoreAction =
       scopeNotes?: string;
       noChangeReason?: string;
       cannotVerifyReason?: string;
+      riskHints: string[];
+      scopeSummary: string;
     }
   | { type: "PLAN_READY_RESOLVED" }
   | {
@@ -785,6 +789,8 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
           ...(action.scopeNotes ? { scopeNotes: action.scopeNotes } : {}),
           ...(action.noChangeReason ? { noChangeReason: action.noChangeReason } : {}),
           ...(action.cannotVerifyReason ? { cannotVerifyReason: action.cannotVerifyReason } : {}),
+          riskHints: action.riskHints,
+          scopeSummary: action.scopeSummary,
         },
       };
 
