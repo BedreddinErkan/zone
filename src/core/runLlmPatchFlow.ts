@@ -6362,7 +6362,7 @@ const initializeTodosFromPlan = (): void => {
         );
         const result = await maybeCleanupOldSnapshots();
         if (result.ran && result.removed > 0) {
-          debugLog(
+          log(
             "[zone-snapshot-cleanup]",
             JSON.stringify({ removed: result.removed })
           );
@@ -6386,7 +6386,7 @@ const initializeTodosFromPlan = (): void => {
         );
         const result = await maybeCleanupOldEnvelopes();
         if (result.ran && result.removed > 0) {
-          debugLog(
+          log(
             "[zone-envelope-cleanup]",
             JSON.stringify({ removed: result.removed })
           );
