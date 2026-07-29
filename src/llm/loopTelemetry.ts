@@ -227,6 +227,27 @@ export function emitWriteCapabilityAbsent(data: WriteCapabilityAbsentData): void
 }
 
 // ---------------------------------------------------------------------------
+// emitReadOnlyPipelineSuppressed — [zone-readonly-pipeline-suppressed]
+// Emitted once per run when the archetype dispatcher resolved a read-only
+// pipeline (investigation/question) but the run carries a user-approved plan
+// with real steps — the fix for the condition [zone-write-capability-absent]
+// names. The capability filter is suppressed so the run falls through to the
+// tier-derived (write-capable) filter instead; iterCap/coachingBudget are
+// left exactly as the pipeline set them. This is a silent-default override by
+// construction, so it is not allowed to itself be silent.
+// ---------------------------------------------------------------------------
+
+export interface ReadOnlyPipelineSuppressedData {
+  runId: string | null | undefined;
+  archetype: string | null;
+  stepCount: number;
+}
+
+export function emitReadOnlyPipelineSuppressed(data: ReadOnlyPipelineSuppressedData): void {
+  log("[zone-readonly-pipeline-suppressed]", JSON.stringify(data));
+}
+
+// ---------------------------------------------------------------------------
 // emitCoachingRule — [zone-coaching-rule]
 // Emitted when the test-failure scope-check coaching rule fires.
 // ---------------------------------------------------------------------------

@@ -115,6 +115,7 @@ import {
   type PipelineConfig,
 } from "../llm/archetypeDispatcher.js";
 import { type CapabilityFilter } from "../tools/capabilities.js";
+import { emitReadOnlyPipelineSuppressed } from "../llm/loopTelemetry.js";
 import { getRunCost } from "../usage/usageTracker.js";
 import {
   generateFinalRunReport,
@@ -5928,6 +5929,26 @@ const initializeTodosFromPlan = (): void => {
       ? buildPipelineConfig(taskClassification.archetype, _archetypeFlags)
       : null;
     _dispatcherCapabilityFilter = buildDispatcherCapabilityFilter(pipelineCfg);
+
+    // A user-approved plan with real steps means this run is not what the classifier
+    // just called it — investigation/question's read-only cage would block the very
+    // edits the plan was approved to make (diagnosed on run d31ead23). Guard on
+    // input.preGeneratedPlan specifically, not the local `executionPlan` a few lines
+    // above: that variable is ALSO set by this function's own generateExecutionPlan
+    // fallback when no plan was supplied, which was never reviewed or approved.
+    // steps.length > 0, not mere presence — a stepless approved plan (noChangeReason /
+    // cannotVerifyReason) is genuinely read-only and must stay that way. Only the
+    // capability filter is suppressed; pipelineCfg itself (iterCap, coachingBudget,
+    // skipPlan, ...) is untouched and still flows through below unchanged.
+    const hasApprovedSteps = !!input.preGeneratedPlan && input.preGeneratedPlan.steps.length > 0;
+    if (pipelineCfg?.readOnlyPipeline && hasApprovedSteps) {
+      emitReadOnlyPipelineSuppressed({
+        runId,
+        archetype: taskClassification?.archetype ?? null,
+        stepCount: input.preGeneratedPlan!.steps.length,
+      });
+      _dispatcherCapabilityFilter = undefined;
+    }
 
     const agentLoopBaseInput = {
       task: input.task,
