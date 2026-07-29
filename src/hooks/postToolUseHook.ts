@@ -8,7 +8,7 @@ export type HookResult =
   | {
       kind: "appendContext";
       content: string;
-      target: "responseInput" | "prunedMessages";
+      target: "responseInput" | "wireMessages";
       mode: "append-to-tool" | "push-user";
       /**
        * mode=push-user to responseInput shifts Anthropic cache breakpoint #2
@@ -43,7 +43,7 @@ export interface PreIterationContext {
   /** Read-only view — mutations are returned via HookResult, not in-place. */
   responseInput: readonly ChatCompletionMessageParam[];
   /** Read-only view of the R.2-pruned message set built this iter. */
-  prunedMessages: readonly ChatCompletionMessageParam[];
+  wireMessages: readonly ChatCompletionMessageParam[];
   iterationBudget: { maxIterationsForRun: number };
   cumulativeTokens: number;
   /** Cache-discounted token sum: cache_read × 0.1, others × 1.0. Use for budget-ratio checks. */
@@ -95,7 +95,7 @@ export interface PreIterationMutations {
   /** Content to append or push, collected in order from all hooks. */
   appendOps: Array<{
     content: string;
-    target: "responseInput" | "prunedMessages";
+    target: "responseInput" | "wireMessages";
     mode: "append-to-tool" | "push-user";
     allowResponseInputUserPush?: boolean;
   }>;
@@ -107,7 +107,7 @@ export interface PreIterationMutations {
 export interface PostToolUseMutations {
   appendOps: Array<{
     content: string;
-    target: "responseInput" | "prunedMessages";
+    target: "responseInput" | "wireMessages";
     mode: "append-to-tool" | "push-user";
     allowResponseInputUserPush?: boolean;
   }>;
@@ -209,12 +209,12 @@ export function runPostToolUseHooks(
 
 /**
  * Applies appendOps from a hook runner result to the live message arrays.
- * Mutates responseInput and/or prunedMessages in place.
+ * Mutates responseInput and/or wireMessages in place.
  */
 export function applyAppendOps(
   ops: Array<{
     content: string;
-    target: "responseInput" | "prunedMessages";
+    target: "responseInput" | "wireMessages";
     mode: "append-to-tool" | "push-user";
     allowResponseInputUserPush?: boolean;
   }>,
@@ -237,11 +237,11 @@ export function applyAppendOps(
       if (!appended && op.target === "responseInput") {
         const newMsg: ChatCompletionMessageParam = { role: "user", content: op.content };
         responseInput.push(newMsg);
-        // Also push to prunedMessages: it may have been built from responseInput before
+        // Also push to wireMessages: it may have been built from responseInput before
         // this hook ran (R.2 runs before the pre-iter runner), so the new message would
         // otherwise be invisible to the LLM in the current iteration.
         setPrunedMessages([...getPrunedMessages(), newMsg]);
-      } else if (!appended && op.target === "prunedMessages") {
+      } else if (!appended && op.target === "wireMessages") {
         setPrunedMessages([...getPrunedMessages(), { role: "user", content: op.content }]);
       }
     } else {

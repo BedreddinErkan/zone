@@ -7,7 +7,7 @@ import { log } from "../../utils/logger.js";
  * marker, as it goes on the wire.
  *
  * This is deliberately NOT the probe at `agentLoop.ts`'s ZONE_DEBUG_CACHE_PROBE
- * block. That one hashes `prunedMessages`, the internal pre-translation shape,
+ * block. That one hashes `wireMessages`, the internal pre-translation shape,
  * which is the wrong object for a cache question in two directions: it includes
  * Zone-internal fields the API never sees (so it reports a bust when one is
  * added), and it excludes the translation itself (so a change in how a message

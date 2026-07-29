@@ -3439,9 +3439,15 @@ Example:
       `[agent_loop] Iteration ${iter + 1}/${iterationBudget.maxIterationsForRun}`
     );
 
-    // R.2 + U.1: HistoryProcessor pipeline (R2ShimProcessor handles stale read pruning
-    // and cache-aware prefix preservation). Runs FIRST so prunedMessages is available
-    // to all pre-iter hooks (including file-read-manifest at priority 90).
+    // HistoryProcessor pipeline. Its output is what goes to the provider —
+    // responseInput stays canonical and is never mutated here. Runs FIRST so
+    // wireMessages is available to all pre-iter hooks (including
+    // file-read-manifest at priority 90).
+    //
+    // Every processor must leave the cached prefix APPEND-ONLY: it may add
+    // messages, it may not rewrite one the provider has already cached. R.2
+    // stale-read pruning broke that rule and cost 2.3x measured; it and the U.1
+    // shim that hid it are gone. Pinned by history/cachePrefixStability.test.ts.
     const _pipelineResult = _historyOrchestrator.assemble({
       responseInput,
       toolCallLog,
@@ -3452,19 +3458,19 @@ Example:
         else debugLog(marker, JSON.stringify(payload));
       },
     });
-    let prunedMessages = _pipelineResult.messages;
-    latestMessages = prunedMessages as unknown[];
+    let wireMessages = _pipelineResult.messages;
+    latestMessages = wireMessages as unknown[];
     writeRunCheckpoint(); // per-iter: capture conversation before each LLM call
 
     // Gap 1 pre-iteration runner — sites 1-3 all migrated to internal hooks.
-    // R.2 runs first (above) so prunedMessages has the pruned state when hooks fire.
+    // R.2 runs first (above) so wireMessages has the pruned state when hooks fire.
     {
       const _allPreHooks = [..._internalPreIterHooks, ...(input.hooks?.preIteration ?? [])];
       const preCtx: PreIterationContext = {
         iter,
         runId: input.runId ?? null,
         responseInput,
-        prunedMessages,
+        wireMessages,
         iterationBudget,
         cumulativeTokens: budget.cumulativeTokens,
         effectiveCumulativeTokens: budget.effectiveCumulativeTokens,
@@ -3488,7 +3494,7 @@ Example:
           patchValidatedByAgent: false, verificationReason: "no_verification_attempted",
           terminationReason: "hook_blocked", promotedFromArchetype, promotionTrigger, promotedAtIter };
       }
-      applyAppendOps(preMutations.appendOps, responseInput, () => prunedMessages, (msgs) => { prunedMessages = msgs; });
+      applyAppendOps(preMutations.appendOps, responseInput, () => wireMessages, (msgs) => { wireMessages = msgs; });
     }
 
     debugLog("[zone-agent-llm-pre]", {
@@ -3508,7 +3514,7 @@ Example:
     if (process.env["ZONE_DEBUG_CACHE_PROBE"] === "1") {
       const hashMsg = (s: string) => createHash("sha256").update(s).digest("hex").slice(0, 12);
       const estTokens = (s: string) => Math.ceil(s.length / 4);
-      const msgs = prunedMessages;
+      const msgs = wireMessages;
 
       let cumulativeChars = 0;
       let cumulativeTokens = 0;
@@ -3616,7 +3622,7 @@ Example:
       parentRunId: input.subagent?.parentRunId,
       subagentId: input.subagent?.id,
       iter,
-      messages: prunedMessages,
+      messages: wireMessages,
       tools: toolsForLLM,
       model: modelName,
     });
@@ -3648,7 +3654,7 @@ Example:
       response = await client.createChatCompletion(
         {
           model: modelName,
-          messages: prunedMessages,
+          messages: wireMessages,
           tools: toolsForLLM,
           tool_choice: "auto",
           max_tokens: getMaxOutputTokens(modelName),
@@ -4072,7 +4078,7 @@ Example:
 
           // Durability BEFORE the wait, not after: the park has no timeout, so
           // this is the longest window in the run during which the process can
-          // die. responseInput (not prunedMessages) is the snapshot — it holds
+          // die. responseInput (not wireMessages) is the snapshot — it holds
           // the assistant turn carrying this very question, and pruning is
           // recomputed from the full history on every iteration anyway, so
           // restoring the pruned copy would discard context permanently.
@@ -4395,7 +4401,7 @@ Example:
             const vetoContent = buildVetoContent(name, preHookResult.filePath, preHookResult, isPermanent);
             const vetoMsg: ChatCompletionMessageParam = { role: "tool", tool_call_id: callId, content: vetoContent };
             responseInput.push(vetoMsg);
-            prunedMessages = [...prunedMessages, vetoMsg];
+            wireMessages = [...wireMessages, vetoMsg];
             input.onStructuredEvent?.({
               type: "hook_completed",
               runId: input.runId ?? "",
@@ -4539,7 +4545,7 @@ Example:
               lastMsg.content = postMutations.mutatedOutput;
             }
           }
-          applyAppendOps(postMutations.appendOps, responseInput, () => prunedMessages, (msgs) => { prunedMessages = msgs; });
+          applyAppendOps(postMutations.appendOps, responseInput, () => wireMessages, (msgs) => { wireMessages = msgs; });
         }
 
         // User PostToolUse hooks — async, non-fatal (side-effects only)
@@ -4554,8 +4560,8 @@ Example:
               applyAppendOps(
                 [{ content: `\n[hook output]\n${stdout}`, target: "responseInput", mode: "append-to-tool" }],
                 responseInput,
-                () => prunedMessages,
-                (msgs) => { prunedMessages = msgs; },
+                () => wireMessages,
+                (msgs) => { wireMessages = msgs; },
               );
             },
           );
@@ -4796,7 +4802,7 @@ Example:
       ) {
         continuationCount++;
         const continuationMsgs = [
-          ...prunedMessages,
+          ...wireMessages,
           { role: "assistant" as const, content: finalAnswerText },
           {
             role: "user" as const,
