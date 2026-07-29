@@ -13,6 +13,11 @@ const WHITELIST_PREFIXES = [
   // Type/lint checks
   "tsc",
   "npx tsc",
+  // Same shape as "npm run test" above: a project-defined script body, trusted
+  // by convention on its name. Without it a read-only run can typecheck only by
+  // spelling it `tsc --noEmit`, while every repo's own docs say the alias.
+  "npm run typecheck",
+  "npm run lint",
   "eslint",
   "npx eslint",
   "prettier --check",

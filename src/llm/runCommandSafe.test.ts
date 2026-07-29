@@ -405,3 +405,30 @@ describe("checkCommandSafe", () => {
     });
   });
 });
+
+/**
+ * Read-only pipelines get `run_command_readonly` and not `run_command`, so this
+ * whitelist is the whole shell surface an investigation run has. It covered
+ * `npm test` but not `npm run typecheck`, which meant typechecking was possible
+ * only by spelling it `tsc --noEmit` while every repo's own docs say the alias.
+ */
+describe("script aliases for read-only checks", () => {
+  it.each(["npm run typecheck", "npm run lint"])("allows %s", (cmd) => {
+    expect(checkCommandSafe(cmd).safe).toBe(true);
+  });
+
+  it("still blocks npm run build — a build writes", () => {
+    // The trade accepted when read-only pipelines lost `run_command`: they
+    // cannot build. That is the feature, not a gap to close here.
+    expect(checkCommandSafe("npm run build").safe).toBe(false);
+  });
+
+  it("does not whitelist arbitrary scripts", () => {
+    expect(checkCommandSafe("npm run deploy").safe).toBe(false);
+    expect(checkCommandSafe("npm run release").safe).toBe(false);
+  });
+
+  it("prefix matching does not let a chained mutation through", () => {
+    expect(checkCommandSafe("npm run typecheck && rm -rf /").safe).toBe(false);
+  });
+});
