@@ -169,6 +169,19 @@ const DEFAULT_TIMEOUT_MS = 5000;
 export const CLASSIFIER_CONFIDENCE_THRESHOLD = 0.5;
 const MAX_OUTPUT_TOKENS = 300;
 
+/** The tier vocabulary. */
+const VALID_TIERS: readonly string[] = ["simple", "medium", "complex"];
+
+/**
+ * The archetype vocabulary. One copy, shared by the parser and
+ * `getFallbackArchetype` — the parser now needs it before it validates tier, and
+ * two lists that must agree are two lists that will eventually disagree.
+ */
+const VALID_ARCHETYPES: readonly string[] = [
+  "simple_add", "targeted_fix", "refactor", "debug",
+  "investigation", "question", "complex_multi_file",
+];
+
 const classificationCache = new Map<string, TaskClassification>();
 
 function truncateForLog(value: unknown, maxChars = 600): string {
@@ -263,6 +276,12 @@ interface ParsedClassifierResponse {
   reasoning?: string;
   archetype: TaskArchetype;
   archetypeConfidence: number;
+  /**
+   * What the model put in `tier` when it was not a tier. Present only on the
+   * degraded path; carried for telemetry, never for behaviour — `tier` and
+   * `confidence` already encode the degradation.
+   */
+  rejectedTier?: string;
 }
 
 function parseClassifierResponse(text: string): ParsedClassifierResponse {
@@ -285,30 +304,50 @@ function parseClassifierResponse(text: string): ParsedClassifierResponse {
   if (parsed === null || typeof parsed !== "object") {
     throw new Error("classifier response is not an object");
   }
-  if (!["simple", "medium", "complex"].includes(parsed.tier)) {
-    throw new Error(`invalid tier: ${String(parsed.tier)}`);
-  }
-  const tier = parsed.tier as TaskTier;
+  // Tier and archetype are two independent judgements that arrive in one
+  // response — the prompt calls them "orthogonal to tier". Parse them that way.
+  // Validating tier first and throwing discarded the archetype with it, which is
+  // how a run the classifier had correctly called `investigation` reached the
+  // agent loop as a `refactor` patch run.
+  const tierValid = VALID_TIERS.includes(parsed.tier);
+  const rejectedTier = tierValid ? undefined : String(parsed.tier);
+  const tier = (tierValid ? parsed.tier : "medium") as TaskTier;
+
   const estimatedFiles = Math.max(1, Math.floor(Number(parsed.estimatedFiles) || 1));
-  const VALID_ARCHETYPES: readonly string[] = [
-    "simple_add", "targeted_fix", "refactor", "debug",
-    "investigation", "question", "complex_multi_file",
-  ];
   const rawArchetype = parsed.archetype;
+  const archetypeFieldUsable =
+    typeof rawArchetype === "string" && VALID_ARCHETYPES.includes(rawArchetype);
   const archetypeConfidence = Math.min(1, Math.max(0, Number(parsed.archetypeConfidence) || 0));
-  const archetype: TaskArchetype =
-    typeof rawArchetype === "string" && VALID_ARCHETYPES.includes(rawArchetype)
-      ? (rawArchetype as TaskArchetype)
-      : "complex_multi_file";
+
+  // When the model put archetype vocabulary in the tier slot AND the archetype
+  // field is itself unusable, that misplaced value is the only archetype signal
+  // in the response. Take it rather than defaulting to complex_multi_file, which
+  // would answer "read-only" with a patch archetype. It is then subject to the
+  // same confidence gate as a correctly-placed archetype (below) — adoption
+  // recovers a signal, it does not manufacture confidence in one.
+  const adoptedArchetype =
+    !tierValid && !archetypeFieldUsable && VALID_ARCHETYPES.includes(String(parsed.tier))
+      ? (String(parsed.tier) as TaskArchetype)
+      : undefined;
+
+  const archetype: TaskArchetype = archetypeFieldUsable
+    ? (rawArchetype as TaskArchetype)
+    : (adoptedArchetype ?? "complex_multi_file");
+
   return {
     tier,
     estimatedFiles,
     estimatedIterations: Math.max(1, Math.floor(Number(parsed.estimatedIterations) || 10)),
-    confidence: Math.min(1, Math.max(0, Number(parsed.confidence) || 0)),
+    // A tier we could not read is a tier we cannot trust. Zeroing confidence
+    // routes it through the existing low-confidence gate instead of inventing a
+    // second degradation path, so every downstream consumer treats it exactly as
+    // it treated the thrown-away classification before.
+    confidence: tierValid ? Math.min(1, Math.max(0, Number(parsed.confidence) || 0)) : 0,
     reasoning:
       typeof parsed.reasoning === "string" ? parsed.reasoning.slice(0, 200) : undefined,
     archetype,
     archetypeConfidence,
+    rejectedTier,
   };
 }
 
@@ -320,13 +359,9 @@ function parseClassifierResponse(text: string): ParsedClassifierResponse {
 // (agentLoop.ts:426). Requires ZONE_ARCHETYPE_ENABLE_REFACTOR !== "0" (default) for the
 // refactor pipeline to resolve; if disabled, dispatcher returns null — same as today.
 // Set ZONE_FALLBACK_ARCHETYPE=complex_multi_file to restore legacy behavior exactly.
-const VALID_FALLBACK_ARCHETYPES: readonly string[] = [
-  "simple_add", "targeted_fix", "refactor", "debug",
-  "investigation", "question", "complex_multi_file",
-];
 function getFallbackArchetype(): TaskArchetype {
   const raw = process.env["ZONE_FALLBACK_ARCHETYPE"];
-  return (raw && VALID_FALLBACK_ARCHETYPES.includes(raw) ? raw : "refactor") as TaskArchetype;
+  return (raw && VALID_ARCHETYPES.includes(raw) ? raw : "refactor") as TaskArchetype;
 }
 
 function buildFallback(
@@ -481,6 +516,17 @@ export async function classifyTask(
 
     if (parsed.confidence < CLASSIFIER_CONFIDENCE_THRESHOLD) {
       const fallback = buildFallback(model, costUsd, startTime, "low confidence");
+      // `parsed.confidence` is the confidence in the TIER. It says nothing about
+      // the archetype, which the gate above has already vetted on its own
+      // confidence. Overwriting it here with ZONE_FALLBACK_ARCHETYPE (default
+      // `refactor`) is the same tier/archetype coupling as the parser's, and it
+      // fires with no parse error at all: a response reading
+      // {archetype:"investigation", archetypeConfidence:0.95, confidence:0.4}
+      // became a patch run.
+      if (parsed.archetypeConfidence >= CLASSIFIER_CONFIDENCE_THRESHOLD) {
+        fallback.archetype = parsed.archetype;
+        fallback.archetypeConfidence = parsed.archetypeConfidence;
+      }
       classificationCache.set(cacheKey, fallback);
       if (parsed.tier !== "medium") {
         log(
@@ -510,8 +556,17 @@ export async function classifyTask(
       return fallback;
     }
 
+    // Listed field by field rather than spread: `parsed` now also carries
+    // `rejectedTier`, which is diagnostic and has no place in the classification
+    // every downstream consumer reads.
     const classification: TaskClassification = {
-      ...parsed,
+      tier: parsed.tier,
+      estimatedFiles: parsed.estimatedFiles,
+      estimatedIterations: parsed.estimatedIterations,
+      confidence: parsed.confidence,
+      reasoning: parsed.reasoning,
+      archetype: parsed.archetype,
+      archetypeConfidence: parsed.archetypeConfidence,
       classifierCostUsd: costUsd,
       classifierLatencyMs: Date.now() - startTime,
       classifierModel: model,
