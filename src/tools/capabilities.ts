@@ -26,6 +26,29 @@ export const ALL_CAPABILITIES: ReadonlySet<Capability> = new Set<Capability>([
   "mcp.call",
 ]);
 
+/**
+ * What "read-only" means as capabilities, for pipelines that must not write.
+ *
+ * Derived rather than enumerated, and that is the point. `resolveToolList`
+ * grants a tool iff EVERY one of its capabilities is in `allow`, so a tool that
+ * declares `fs.write` — today's `apply_patch`, `multi_edit`, `write_file`,
+ * `run_command`, `run_command_background`, or anything added tomorrow — is
+ * denied without anyone remembering to add it to a list. A tool missing from
+ * `BUILTIN_TOOL_CAPS` resolves to zero capabilities and is denied too.
+ *
+ * This replaced a name denylist that had the opposite failure direction: it
+ * granted whatever it forgot, which is how `multi_edit` reached a read-only run.
+ *
+ * `shell.exec` is included so `run_command_readonly` is reachable — its
+ * whitelist covers tests, `tsc --noEmit`, lint and read-only git. Unqualified
+ * `run_command` declares `fs.write` and is therefore excluded, which is the
+ * distinction `run_command_readonly` exists to make.
+ */
+export const READ_ONLY_CAPABILITIES: ReadonlySet<Capability> = new Set<Capability>([
+  "fs.read",
+  "shell.exec",
+]);
+
 export interface CapabilityFilter {
   /**
    * A tool is granted iff every one of its capabilities is in `allow`.

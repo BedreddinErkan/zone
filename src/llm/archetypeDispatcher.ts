@@ -1,4 +1,5 @@
 import type { TaskArchetype } from "./taskClassifier.js";
+import { READ_ONLY_CAPABILITIES, type CapabilityFilter } from "../tools/capabilities.js";
 
 export interface PipelineConfig {
   skipPhase1: boolean;
@@ -13,6 +14,17 @@ export interface PipelineConfig {
   preserveReadBeforePatch: boolean;
   skipCrossFileHeuristic: boolean;
   readOnlyPipeline?: boolean;
+  /**
+   * Whether a read-only pipeline may search and navigate the tree.
+   *
+   * Only consulted when `readOnlyPipeline` is set. This names a decision that
+   * used to be implicit in three tool names on a denylist: QUESTION deliberately
+   * denies `list_files`/`search_in_files`/`find_references`, because at iterCap 3
+   * the shape is one command and one summary, not exploration. That was coherent
+   * for QUESTION and became wrong the moment `investigation` — multi-step
+   * exploration by definition — inherited the same pipeline.
+   */
+  allowExploration?: boolean;
 }
 
 export interface ArchetypeFlags {
@@ -51,6 +63,8 @@ export const QUESTION_PIPELINE: Readonly<PipelineConfig> = Object.freeze({
   preserveReadBeforePatch: false,
   skipCrossFileHeuristic: true,
   readOnlyPipeline: true,
+  // One command, one summary — see PipelineConfig.allowExploration.
+  allowExploration: false,
 });
 
 // CE.4.1.a: per-archetype iter caps — targeted_fix (10) and refactor (12)
@@ -95,6 +109,42 @@ export function readArchetypeFlagsFromEnv(
     targetedFixEnabled: env["ZONE_ARCHETYPE_ENABLE_TARGETED_FIX"] !== "0",
     refactorEnabled: env["ZONE_ARCHETYPE_ENABLE_REFACTOR"] !== "0",
   };
+}
+
+/**
+ * Which tools a pipeline exposes. Pure; the single implementation, called by
+ * `runLlmPatchFlow` and asserted on directly by its tests — a test that mirrors
+ * this logic instead of calling it would pass while production regressed.
+ *
+ * Read-only pipelines are expressed as a capability **allow**-set. The
+ * predecessor was a name denylist and it granted whatever it forgot, which is
+ * how `multi_edit`, `run_command` and `run_command_background` — three ways to
+ * write — reached runs whose whole point was not writing. `excludeToolNames`
+ * survives only to trim tools that are incoherent to offer; it is not what makes
+ * the pipeline safe.
+ */
+export function buildDispatcherCapabilityFilter(
+  cfg: PipelineConfig | null,
+): CapabilityFilter | undefined {
+  if (!cfg) return undefined;
+  const excludeToolNames = new Set<string>();
+  if (!cfg.allowSubagentDispatch) excludeToolNames.add("Task");
+  if (!cfg.allowScopeRevision) excludeToolNames.add("suggest_scope_change");
+
+  if (!cfg.readOnlyPipeline) {
+    return excludeToolNames.size > 0 ? { excludeToolNames } : undefined;
+  }
+
+  // Reachable by capability (shell.exec) but inert: `run_command_background`
+  // declares fs.write and is denied, so nothing can start a process for these to
+  // manage. A model offered `list_background` may well try it.
+  for (const t of ["kill_background", "list_background", "read_background_output"]) {
+    excludeToolNames.add(t);
+  }
+  if (!cfg.allowExploration) {
+    for (const t of ["list_files", "search_in_files", "find_references"]) excludeToolNames.add(t);
+  }
+  return { allow: READ_ONLY_CAPABILITIES, excludeToolNames };
 }
 
 export function buildPipelineConfig(

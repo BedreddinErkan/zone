@@ -111,8 +111,10 @@ import {
 import {
   buildPipelineConfig,
   readArchetypeFlagsFromEnv,
+  buildDispatcherCapabilityFilter,
   type PipelineConfig,
 } from "../llm/archetypeDispatcher.js";
+import { type CapabilityFilter } from "../tools/capabilities.js";
 import { getRunCost } from "../usage/usageTracker.js";
 import {
   generateFinalRunReport,
@@ -5290,7 +5292,7 @@ const initializeTodosFromPlan = (): void => {
   // L5.1b-1: dispatcher config — null until classifier runs inside _useAgentLoop.
   // Path 2 (legacy) always sees null → no behavioral change.
   let pipelineCfg: PipelineConfig | null = null;
-  let _dispatcherExcludeTools: ReadonlySet<string> | undefined = undefined;
+  let _dispatcherCapabilityFilter: CapabilityFilter | undefined = undefined;
 
   if (_useAgentLoop) {
     const runId = typeof input.runId === "string" ? input.runId.trim() : "";
@@ -5925,17 +5927,7 @@ const initializeTodosFromPlan = (): void => {
     pipelineCfg = taskClassification
       ? buildPipelineConfig(taskClassification.archetype, _archetypeFlags)
       : null;
-    _dispatcherExcludeTools = (() => {
-      if (!pipelineCfg) return undefined;
-      const s = new Set<string>();
-      if (!pipelineCfg.allowSubagentDispatch) s.add("Task");
-      if (!pipelineCfg.allowScopeRevision) s.add("suggest_scope_change");
-      if (pipelineCfg.readOnlyPipeline) {
-        for (const t of ["apply_patch", "write_file", "revert_patch", "TodoWrite"]) s.add(t);
-        for (const t of ["list_files", "search_in_files", "find_references"]) s.add(t);
-      }
-      return s.size > 0 ? s : undefined;
-    })();
+    _dispatcherCapabilityFilter = buildDispatcherCapabilityFilter(pipelineCfg);
 
     const agentLoopBaseInput = {
       task: input.task,
@@ -6012,8 +6004,8 @@ const initializeTodosFromPlan = (): void => {
         coachingBudgetOverride: pipelineCfg.coachingBudget,
         pipelineApplied: true,
         originalArchetype: taskClassification?.archetype,
-        ...(_dispatcherExcludeTools && {
-          capabilityFilter: { excludeToolNames: _dispatcherExcludeTools },
+        ...(_dispatcherCapabilityFilter && {
+          capabilityFilter: _dispatcherCapabilityFilter,
         }),
       }),
     };
