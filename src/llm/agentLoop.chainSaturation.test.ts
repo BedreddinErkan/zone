@@ -390,3 +390,97 @@ describe("CE.4.1.b: chain-saturation pre-iter hook", () => {
     expect(logs.length).toBe(0);
   });
 });
+
+/**
+ * A dogfood run on a read-only trace task took this nudge at iteration 6:
+ * "Apply a patch implementing your best current hypothesis." The guard below it
+ * already excluded `investigation` — it was fed `refactor`, because the
+ * classifier's tier field was unusable and the whole classification fell back.
+ *
+ * So the fix is not in the trigger. It is in what the guard is allowed to
+ * believe about the run.
+ */
+describe("chain-saturation trusts the archetype only when there is one", () => {
+  const SIX_FILES = ["src/a.ts", "src/b.ts", "src/c.ts", "src/d.ts", "src/e.ts", "src/f.ts"];
+
+  function classification(over: Record<string, unknown> = {}) {
+    return {
+      tier: "medium" as const,
+      estimatedFiles: 5,
+      estimatedIterations: 15,
+      confidence: 0.9,
+      classifierCostUsd: 0.003,
+      classifierLatencyMs: 1700,
+      classifierModel: "claude-haiku-4-5",
+      archetype: "refactor" as const,
+      archetypeConfidence: 0.85,
+      ...over,
+    };
+  }
+
+  function queueSixReads() {
+    for (const f of SIX_FILES) {
+      mocks.createChatCompletion.mockResolvedValueOnce(makeReadFileResponse(f));
+    }
+    mocks.createChatCompletion.mockResolvedValue(makeDoneResponse());
+  }
+
+  function warnings() {
+    return mocks.log.mock.calls.filter(
+      (c: unknown[]) => c[0] === "[zone-chain-saturation-warn]",
+    );
+  }
+
+  it("stands down on a fallback classification — the dogfood shape", async () => {
+    // Exactly what the failed run carried: tier forced to medium, confidence 0,
+    // and `refactor` from ZONE_FALLBACK_ARCHETYPE rather than from the model.
+    queueSixReads();
+
+    await runAgentLoop({
+      task: "trace how a tool result reaches the message history",
+      repoPath,
+      runId: "test-csat-fallback",
+      taskClassification: classification({ confidence: 0, archetypeConfidence: 0, fallbackUsed: true }),
+    });
+
+    expect(warnings().length).toBe(0);
+  });
+
+  it("reads the archetype from taskClassification when no dispatcher pipeline applied", async () => {
+    // `originalArchetype` is only populated when buildPipelineConfig returned a
+    // pipeline (runLlmPatchFlow.ts:6010). Leaving it undefined used to blind the
+    // guard completely; the classification is always threaded.
+    queueSixReads();
+
+    await runAgentLoop({
+      task: "walk me through the compaction gates",
+      repoPath,
+      runId: "test-csat-classification-archetype",
+      taskClassification: classification({ archetype: "investigation" }),
+      // originalArchetype deliberately omitted
+    });
+
+    expect(warnings().length).toBe(0);
+  });
+
+  it("still fires on a confident patch classification", async () => {
+    // The nudge keeps its job. Suppression is scoped to "we do not know what
+    // this run is", not to "this run has not patched yet" — the latter is the
+    // trigger condition, and gating on it would neuter the hook entirely.
+    queueSixReads();
+
+    await runAgentLoop({
+      task: "rename createThing to buildThing across the repo",
+      repoPath,
+      runId: "test-csat-still-fires",
+      taskClassification: classification(),
+    });
+
+    const logs = warnings();
+    expect(logs.length).toBe(1);
+    const payload = JSON.parse(logs[0][1] as string) as Record<string, unknown>;
+    expect(payload.iter).toBe(6);
+    // Telemetry reports the archetype the gate actually consulted.
+    expect(payload.archetype).toBe("refactor");
+  });
+});

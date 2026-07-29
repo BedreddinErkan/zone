@@ -3282,7 +3282,23 @@ Example:
   };
   // CE.4.1.b: chain-saturation pre-iter hook (priority 30)
   // Fires at iter>=6 with 0 successful apply_patch. NUDGE wording (not COMMAND).
-  // Scope: patch mode only — Q&A and investigation archetypes excluded via closure guard.
+  // Scope: patch runs only — Q&A and investigation archetypes excluded below.
+  //
+  // The archetype is read from `taskClassification`, which runLlmPatchFlow always
+  // threads (:5964), rather than from `input.originalArchetype`, which is only
+  // populated when a dispatcher pipeline applied (:6010) — leaving this guard
+  // blind whenever `buildPipelineConfig` returns null or the dispatcher is off.
+  //
+  // WARNING: `!isReadOnlyMode` below is DEAD on every path that reaches this
+  // code. runLlmPatchFlow types its mode `"patch" | "plan"` and maps plan→patch
+  // (runLlmPatchFlow.ts:5953), so isReadOnlyMode is false even for a correctly
+  // classified `investigation` run: readOnlyPipeline strips the write tools but
+  // never touches mode, and only investigationFlow.ts:121 ever sets investigate.
+  // It is kept so the condition still reads correctly if mode is ever aligned
+  // with readOnlyPipeline, but do not mistake it for live protection — the
+  // archetype checks are carrying this guard on their own.
+  const chainSaturationArchetype =
+    input.taskClassification?.archetype ?? input.originalArchetype;
   const chainSaturationWarnHook: PreIterationHook = {
     name: "chain-saturation-warn",
     priority: 30,
@@ -3290,8 +3306,14 @@ Example:
       !chainSaturationWarnInjected &&
       ctx.iter >= 6 &&
       !isReadOnlyMode &&
-      input.originalArchetype !== "question" &&
-      input.originalArchetype !== "investigation" &&
+      // A fallback classification carries no archetype signal — only
+      // ZONE_FALLBACK_ARCHETYPE's default, which is a patch archetype. That is
+      // how an action-forcing "apply a patch" reached a read-only run. Standing
+      // down here is the difference between knowing this is a patch run and
+      // having guessed that it is.
+      input.taskClassification?.fallbackUsed !== true &&
+      chainSaturationArchetype !== "question" &&
+      chainSaturationArchetype !== "investigation" &&
       toolCallLog.filter(e =>
         (e.tool === "apply_patch" || (saturationCountMultiEdit && e.tool === "multi_edit")) &&
         e.success === true
@@ -3309,7 +3331,8 @@ Example:
       ctx.emit("log", "[zone-chain-saturation-warn]", {
         iter: ctx.iter,
         runId: ctx.runId,
-        archetype: input.originalArchetype ?? null,
+        // The archetype the gate actually consulted, not the dispatcher-only one.
+        archetype: chainSaturationArchetype ?? null,
         content,
       });
       return { kind: "appendContext", content, target: "responseInput", mode: "append-to-tool" };
