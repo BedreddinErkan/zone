@@ -9,6 +9,15 @@ interface PlanReadyModalProps {
   dispatch: Dispatch<StoreAction>;
 }
 
+// Shared by both the slice and its length comparison so the two can't drift —
+// a bound duplicated across them is one guard with two failure modes: it can
+// hide content silently (comparison bumped, slice not), or claim truncation
+// that never happened (comparison stuck low, or mutated true, while the slice
+// is fine).
+const SCOPE_SUMMARY_MAX = 200;
+const RISK_HINT_MAX = 120;   // per-entry char cap
+const RISK_HINTS_LIMIT = 5;  // entry-count cap
+
 function renderFeedbackBuffer(buf: string, pos: number): string {
   return buf.slice(0, pos) + "▋" + buf.slice(pos);
 }
@@ -96,6 +105,9 @@ export function PlanReadyModal({ proposal, dispatch }: PlanReadyModalProps): Rea
       <Text dimColor>Objective:</Text>
       <Text>{proposal.objective.slice(0, 200)}</Text>
       <Text> </Text>
+      <Text dimColor>Summary:</Text>
+      <Text>{`${proposal.scopeSummary.slice(0, SCOPE_SUMMARY_MAX)}${proposal.scopeSummary.length > SCOPE_SUMMARY_MAX ? "…" : ""}`}</Text>
+      <Text> </Text>
       {(proposal.noChangeReason || proposal.cannotVerifyReason) && (
         <Box flexDirection="column" marginBottom={1}>
           <Text bold color="yellow">
@@ -126,6 +138,18 @@ export function PlanReadyModal({ proposal, dispatch }: PlanReadyModalProps): Rea
       ))}
       {proposal.steps.length > 6 && (
         <Text dimColor>{`  … +${proposal.steps.length - 6} more step(s)`}</Text>
+      )}
+      {proposal.riskHints.length > 0 && (
+        <>
+          <Text> </Text>
+          <Text dimColor>Risks:</Text>
+          {proposal.riskHints.slice(0, RISK_HINTS_LIMIT).map((hint, i) => (
+            <Text key={i}>{`  • ${hint.slice(0, RISK_HINT_MAX)}${hint.length > RISK_HINT_MAX ? "…" : ""}`}</Text>
+          ))}
+          {proposal.riskHints.length > RISK_HINTS_LIMIT && (
+            <Text dimColor>{`  … +${proposal.riskHints.length - RISK_HINTS_LIMIT} more risk(s)`}</Text>
+          )}
+        </>
       )}
       {!!proposal.scopeNotes && (
         <>

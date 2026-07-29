@@ -63,7 +63,27 @@ const PROPOSAL = {
     { title: "Add login route", description: "Create the route", filesLikely: ["src/routes/login.ts"] },
     { title: "Add tests", description: "Write tests", filesLikely: ["src/routes/login.test.ts"] },
   ],
+  riskHints: [] as string[],
+  scopeSummary: "Add a login feature end to end.",
 };
+
+/**
+ * Ink renders this Box with borderStyle="double" + paddingX={2} and no explicit
+ * width, so every line is right-padded to the widest line's width and framed
+ * with a border char on both sides — a raw line NEVER literally ends with the
+ * content's own last character. A long unbroken string also wraps across
+ * multiple lines with no gap in the actual content (verified empirically: the
+ * per-line border/padding strip below reconstructs the original contiguous
+ * string exactly). Both helpers strip only the border char + its immediately
+ * adjacent whitespace, never touching interior content.
+ */
+function stripBoxChars(line: string): string {
+  return line.replace(/^[║╔╚]\s*/, "").replace(/\s*[║╗╝]$/, "");
+}
+
+function flattenContent(frame: string): string {
+  return frame.split("\n").map(stripBoxChars).join("");
+}
 
 function makeDispatch() {
   return vi.fn();
@@ -308,6 +328,122 @@ describe("PlanReadyModal — scopeNotes", () => {
     // Ink wraps text across lines — count total x chars to verify cap
     const xCount = (frame.match(/x/g) ?? []).length;
     expect(xCount).toBe(200); // .slice(0, 200) applied — exactly 200 rendered
+  });
+});
+
+// PlanReady projection: scopeSummary rendering. Required field — always
+// present, unlike scopeNotes, so no absent/present branch to test, only the
+// truncation-marker guard.
+describe("PlanReadyModal — scopeSummary", () => {
+  it("renders 'Summary:' label and the scopeSummary text", () => {
+    const { lastFrame, unmount } = render(
+      <PlanReadyModal proposal={PROPOSAL} dispatch={makeDispatch()} />
+    );
+    activeUnmount = unmount;
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("Summary:");
+    expect(frame).toContain("Add a login feature end to end.");
+  });
+
+  it("truncates scopeSummary over 200 chars with a trailing … marker", () => {
+    const longSummary = "x".repeat(250);
+    const proposal = { ...PROPOSAL, scopeSummary: longSummary };
+    const { lastFrame, unmount } = render(
+      <PlanReadyModal proposal={proposal} dispatch={makeDispatch()} />
+    );
+    activeUnmount = unmount;
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("Summary:");
+    // Anchored to content+marker as one string, not the bare "…" glyph (which
+    // the counted-overflow dialect elsewhere also renders) — flattened across
+    // Ink's line-wrap so a mid-string wrap boundary can't break the match.
+    expect(flattenContent(frame)).toContain("x".repeat(200) + "…");
+  });
+
+  it("does not append … when scopeSummary is under the 200-char cap", () => {
+    const shortSummary = "A short, untruncated summary.";
+    const proposal = { ...PROPOSAL, scopeSummary: shortSummary };
+    const { lastFrame, unmount } = render(
+      <PlanReadyModal proposal={proposal} dispatch={makeDispatch()} />
+    );
+    activeUnmount = unmount;
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain(shortSummary); // positive first
+    // Scoped to this fixture's own line, not the whole frame — an unrelated
+    // overflow line elsewhere must not be able to satisfy this check.
+    const line = frame.split("\n").find((l) => l.includes(shortSummary));
+    expect(line).toBeDefined();
+    expect(stripBoxChars(line!)).not.toContain("…");
+  });
+});
+
+// PlanReady projection: riskHints rendering. List dialect (counted overflow)
+// for the entry count; string dialect (trailing …) for each entry's own
+// per-character cap — round-2's "lists get counted overflow, strings get a
+// trailing …" split applied within a single field.
+describe("PlanReadyModal — riskHints", () => {
+  it("does not render 'Risks:' when riskHints is empty", () => {
+    const { lastFrame, unmount } = render(
+      <PlanReadyModal proposal={PROPOSAL} dispatch={makeDispatch()} />
+    );
+    activeUnmount = unmount;
+    const frame = lastFrame() ?? "";
+    expect(frame).not.toContain("Risks:");
+  });
+
+  it("renders up to 5 risk hints and a counted overflow line for more", () => {
+    const proposal = {
+      ...PROPOSAL,
+      riskHints: ["Risk A", "Risk B", "Risk C", "Risk D", "Risk E", "Risk F", "Risk G"],
+    };
+    const { lastFrame, unmount } = render(
+      <PlanReadyModal proposal={proposal} dispatch={makeDispatch()} />
+    );
+    activeUnmount = unmount;
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("Risks:");
+    expect(frame).toContain("Risk A");
+    expect(frame).toContain("Risk E");
+    expect(frame).not.toContain("Risk F");
+    // Full counter text, not the bare glyph.
+    expect(frame).toContain("+2 more risk(s)");
+  });
+
+  it("does not render an overflow line when riskHints is under the 5-entry cap", () => {
+    const proposal = { ...PROPOSAL, riskHints: ["Risk A", "Risk B", "Risk C"] };
+    const { lastFrame, unmount } = render(
+      <PlanReadyModal proposal={proposal} dispatch={makeDispatch()} />
+    );
+    activeUnmount = unmount;
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("Risk A"); // positive first
+    expect(frame).not.toContain("more risk(s)");
+  });
+
+  it("truncates a riskHints entry over 120 chars with a trailing … marker", () => {
+    const longHint = "x".repeat(197); // matches the measured production max (990a051c envelope)
+    const proposal = { ...PROPOSAL, riskHints: [longHint] };
+    const { lastFrame, unmount } = render(
+      <PlanReadyModal proposal={proposal} dispatch={makeDispatch()} />
+    );
+    activeUnmount = unmount;
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("Risks:");
+    expect(flattenContent(frame)).toContain("x".repeat(120) + "…");
+  });
+
+  it("does not append … to a riskHints entry under the 120-char cap", () => {
+    const shortHint = "A short, untruncated risk.";
+    const proposal = { ...PROPOSAL, riskHints: [shortHint] };
+    const { lastFrame, unmount } = render(
+      <PlanReadyModal proposal={proposal} dispatch={makeDispatch()} />
+    );
+    activeUnmount = unmount;
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain(shortHint); // positive first
+    const line = frame.split("\n").find((l) => l.includes(shortHint));
+    expect(line).toBeDefined();
+    expect(stripBoxChars(line!)).not.toContain("…");
   });
 });
 
