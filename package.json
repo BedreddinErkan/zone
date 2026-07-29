@@ -1,25 +1,39 @@
 {
-  "name": "zone-api",
+  "name": "zone",
   "version": "0.0.1",
   "private": true,
-  "description": "Zone backend API and CLI",
-  "main": "./dist/server.js",
-  "exports": {
-    ".": "./dist/server.js",
-    "./flow": "./dist/core/runLlmPatchFlow.js",
-    "./agent": "./dist/llm/agentLoop.js",
-    "./openai": "./dist/llm/openaiClient.js",
-    "./approvals": "./dist/api/commandApprovals.js"
+  "type": "module",
+  "description": "Self-host AI coding agent. Tier-bounded execution, atomic safety, BYOK transparency.",
+  "bin": {
+    "zone": "./dist/cli/index.js"
   },
+ "exports": {
+  "./flow":       { "types": "./src/core/runLlmPatchFlow.ts",         "default": "./dist/core/runLlmPatchFlow.js" },
+  "./agent":      { "types": "./src/llm/agentLoop.ts",                "default": "./dist/llm/agentLoop.js" },
+  "./openai":     { "types": "./src/llm/openaiClient.ts",             "default": "./dist/llm/openaiClient.js" },
+  "./approvals":  { "types": "./src/api/commandApprovals.ts",         "default": "./dist/api/commandApprovals.js" },
+  "./store-core": { "types": "./src/cli/tui/store-core.ts",           "default": "./dist/cli/tui/store-core.js" },
+  "./events":     { "types": "./src/cli/tui/hooks/eventToActions.ts", "default": "./dist/cli/tui/hooks/eventToActions.js" },
+  "./lifecycle":  { "types": "./src/core/agentLifecycleEvents.ts",    "default": "./dist/core/agentLifecycleEvents.js" },
+  "./config":     { "types": "./src/cli/config.ts",                   "default": "./dist/cli/config.js" },
+  "./dispatch":   { "types": "./src/cli/dispatch.ts",                 "default": "./dist/cli/dispatch.js" },
+  "./init":       { "types": "./src/memory/initFlow.ts",              "default": "./dist/memory/initFlow.js" },
+  "./snapshots":  { "types": "./src/snapshots/snapshotStore.ts",      "default": "./dist/snapshots/snapshotStore.js" },
+  "./model-registry":     { "types": "./src/llm/modelRegistry.ts",                "default": "./dist/llm/modelRegistry.js" },
+  "./session-window":     { "types": "./src/llm/sessionWindow.ts",                "default": "./dist/llm/sessionWindow.js" },
+  "./conversation-store": { "types": "./src/core/conversationFilesystemStore.ts", "default": "./dist/core/conversationFilesystemStore.js" },
+  "./tier-settings":      { "types": "./src/visual/tierSettings.ts",              "default": "./dist/visual/tierSettings.js" },
+  "./feedback":           { "types": "./src/feedback/buildFeedbackReport.ts",      "default": "./dist/feedback/buildFeedbackReport.js" }
+},
   "scripts": {
-    "copy-ui": "node scripts/sync-zone-ui.cjs",
-    "build": "node node_modules/typescript/bin/tsc -p tsconfig.json && node scripts/sync-zone-ui.cjs",
+    "build": "node node_modules/typescript/bin/tsc -p tsconfig.json",
+    "postbuild": "chmod +x dist/cli/index.js",
     "typecheck": "tsc --noEmit",
     "check-types": "tsc --noEmit -p tsconfig.json",
-    "serve": "node dist/cli/index.js serve",
-    "start": "node dist/cli/index.js serve",
-    "test": "echo \"This branch uses typecheck for agent verification\" && npm run typecheck",
-    "test:run": "vitest run"
+    "test": "vitest run",
+    "test:l3": "vitest run src/llm/taskClassifier.archetype.test.ts",
+    "sweep": "npx tsx scripts/sweep.ts",
+    "sweep:dry": "npx tsx scripts/sweep.ts --dry-run"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.92.0",
@@ -27,6 +41,7 @@
     "@babel/parser": "^7.29.2",
     "@babel/traverse": "^7.29.0",
     "@babel/types": "^7.29.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@supabase/supabase-js": "^2.57.4",
     "body-parser": "^1.20.3",
     "commander": "^12.1.0",
@@ -35,7 +50,15 @@
     "express": "^4.21.2",
     "express-rate-limit": "^7.5.0",
     "fast-glob": "^3.3.3",
+    "ink": "^7.0.3",
+    "ink-big-text": "^2.0.0",
+    "ink-gradient": "^4.0.1",
+    "ink-select-input": "^6.2.0",
+    "ink-spinner": "^5.0.0",
+    "ink-text-input": "^6.0.0",
     "openai": "^5.23.2",
+    "picomatch": "^4.0.4",
+    "react": "^19.2.0",
     "zod": "^3.25.0"
   },
   "devDependencies": {
@@ -45,7 +68,14 @@
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.1",
     "@types/node": "^22.13.10",
+    "@types/picomatch": "^4.0.3",
+    "@types/react": "^19.2.0",
+    "@vitejs/plugin-react": "^4.7.0",
+    "dompurify": "^3.4.4",
+    "ink-testing-library": "^4.0.0",
+    "marked": "^18.0.3",
     "typescript": "^5.9.3",
+    "undici": "^8.3.0",
     "vitest": "^2.1.9"
   },
   "license": "AGPL-3.0-or-later"
