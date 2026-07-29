@@ -8,7 +8,10 @@ describe("diskKeys", () => {
   let tmp: string;
   beforeEach(async () => {
     tmp = await mkdtemp(join(tmpdir(), "zone-keys-"));
-    _setKeysFilePathForTest(join(tmp, "keys.json"));
+    // Both paths must be overridden: legacy defaults to process.cwd()/.zone/keys.json
+    // (diskKeys.ts's migration fallback), which in this tree is a real, live BYOK
+    // keys file — leaving it unset leaks real keys into these tests.
+    _setKeysFilePathForTest(join(tmp, "keys.json"), join(tmp, "legacy.json"));
   });
   afterEach(async () => {
     _setKeysFilePathForTest(null);
