@@ -78,12 +78,12 @@ export function requestPlanApproval(input: {
   timeoutMs?: number;
   /** When true, resolve immediately as "accept_all" without SSE emission or pending state. */
   autoApprove?: boolean;
-}): Promise<{ planId: string; decision: PlanDecision; feedback?: string }> {
+}): Promise<{ planId: string; decision: PlanDecision; feedback?: string; modalEmitted: boolean }> {
   const { proposal } = input;
   const planId = proposal.planId;
 
   if (input.autoApprove) {
-    return Promise.resolve({ planId, decision: "accept_all" });
+    return Promise.resolve({ planId, decision: "accept_all", modalEmitted: false });
   }
 
   const timeoutMs =
@@ -92,13 +92,18 @@ export function requestPlanApproval(input: {
       : 10 * 60 * 1000;
 
   return new Promise((resolve) => {
+    // Whether input.emit (the thing that renders PlanReadyModal) actually fired. Read by
+    // `finish` at call time, not capture time — a caller resolving before the flag flips
+    // (the already-aborted branch below) correctly reports false; every other resolver runs
+    // after it flips, since all of them are responses to a modal that was already shown.
+    let modalEmitted = false;
     const finish = (result: { decision: PlanDecision; feedback?: string }) => {
       const entry = pendingPlans.get(planId);
       if (entry) {
         try { clearTimeout(entry.timeout); } catch {}
         pendingPlans.delete(planId);
       }
-      resolve({ planId, decision: result.decision, feedback: result.feedback });
+      resolve({ planId, decision: result.decision, feedback: result.feedback, modalEmitted });
     };
 
     const timeout = setTimeout(() => finish({ decision: "timeout" }), timeoutMs);
@@ -129,6 +134,7 @@ export function requestPlanApproval(input: {
       ...(proposal.noChangeReason ? { planNoChangeReason: proposal.noChangeReason } : {}),
       ...(proposal.cannotVerifyReason ? { planCannotVerifyReason: proposal.cannotVerifyReason } : {}),
     });
+    modalEmitted = true;
   });
 }
 

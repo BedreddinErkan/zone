@@ -20,7 +20,7 @@ import { taskAssertsProblem, isPureAddition } from "../llm/taskShape.js";
 import { rejectPendingEditsForRun } from "../api/editApprovals.js";
 import { rejectPendingStagedForRun } from "../api/stagedApprovals.js";
 import { rejectPendingQuestionsForRun } from "../api/questionApprovals.js";
-import { debugLog } from "../utils/logger.js";
+import { debugLog, log } from "../utils/logger.js";
 import { isProjectTrusted, addTrustedProject, resolveProjectRoot, canonicalizePath } from "../api/diskTrustedProjects.js";
 import { requestTrustApproval, rejectPendingTrustForRun } from "../api/trustApprovals.js";
 import { classifyPath } from "../core/pathSafety.js";
@@ -436,11 +436,12 @@ export async function runOneShotInner(
           switch (result.decision) {
             case "reject":
             case "timeout":
-              debugLog("[zone-plan-decision]", { mode: "plan-first", decision: result.decision, refineCount: planFirstRefineCount });
+              log("[zone-plan-decision]", JSON.stringify({ runId, planId: result.planId, decision: result.decision, planAttempt: planFirstRefineCount + 1, reviewed: result.modalEmitted }));
               ac.abort();
               return { ok: false as const, reason: "plan_rejected_by_user" } as unknown as LlmPatchFlowResult;
             case "feedback":
             case "refine":
+              log("[zone-plan-decision]", JSON.stringify({ runId, planId: result.planId, decision: result.decision, planAttempt: planFirstRefineCount + 1, reviewed: result.modalEmitted }));
               progressCallback({ stage: "plan_generation_started", progress: { type: "plan_generation_started", ts: Date.now(), runId, title: "Replanning…" } } as unknown as LlmPatchProgressUpdate);
               try {
                 currentPlan = await withRequestContext(planGenCtx, () =>
@@ -511,21 +512,21 @@ export async function runOneShotInner(
                   reviewed: false,
                 });
               }
-              debugLog("[zone-plan-decision]", { mode: "plan-first", decision: "approve_with_feedback", refineCount: planFirstRefineCount });
+              log("[zone-plan-decision]", JSON.stringify({ runId, planId: result.planId, decision: result.decision, planAttempt: planFirstRefineCount + 1, reviewed: result.modalEmitted }));
               looping = false;
               break;
             case "accept_all":
               setTrustAllForRun(runId);
-              debugLog("[zone-plan-decision]", { mode: "plan-first", decision: "accept_all", refineCount: planFirstRefineCount });
+              log("[zone-plan-decision]", JSON.stringify({ runId, planId: result.planId, decision: result.decision, planAttempt: planFirstRefineCount + 1, reviewed: result.modalEmitted }));
               looping = false;
               break;
             case "manual":
               editApprovalMode = "manual";
-              debugLog("[zone-plan-decision]", { mode: "plan-first", decision: "manual", refineCount: planFirstRefineCount });
+              log("[zone-plan-decision]", JSON.stringify({ runId, planId: result.planId, decision: result.decision, planAttempt: planFirstRefineCount + 1, reviewed: result.modalEmitted }));
               looping = false;
               break;
             default:
-              debugLog("[zone-plan-decision]", { mode: "plan-first", decision: result.decision ?? "unknown", refineCount: planFirstRefineCount });
+              log("[zone-plan-decision]", JSON.stringify({ runId, planId: result.planId, decision: result.decision ?? "unknown", planAttempt: planFirstRefineCount + 1, reviewed: result.modalEmitted }));
               looping = false;
           }
         }

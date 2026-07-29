@@ -143,6 +143,9 @@ describe("autoApprove bypass", () => {
     expect(result.decision).toBe("accept_all");
     expect(result.planId).toBe(PROPOSAL.planId);
     expect(events).toHaveLength(0);
+    // The modal was never shown — reviewed-style callers must be able to tell this apart
+    // from a real user decision, from this return value alone.
+    expect(result.modalEmitted).toBe(false);
   });
 
   it("autoApprove=false falls through to normal SSE path", async () => {
@@ -153,6 +156,7 @@ describe("autoApprove bypass", () => {
     resolvePlanApproval({ planId: PROPOSAL.planId, runId: PROPOSAL.runId, decision: "accept_all" });
     const result = await p;
     expect(result.decision).toBe("accept_all");
+    expect(result.modalEmitted).toBe(true);
   });
 });
 
@@ -165,6 +169,8 @@ describe("abort signal", () => {
     ac.abort();
     const result = await p;
     expect(result.decision).toBe("reject");
+    // The modal WAS shown before the later abort fired.
+    expect(result.modalEmitted).toBe(true);
   });
 
   it("resolves immediately with 'reject' when signal already aborted", async () => {
@@ -174,6 +180,8 @@ describe("abort signal", () => {
     const result = await requestPlanApproval({ proposal: PROPOSAL, emit: emit as any, abortSignal: ac.signal });
     expect(result.decision).toBe("reject");
     expect(events).toHaveLength(0);
+    // Second divergence named in Establish #3: skips input.emit independent of autoApprove.
+    expect(result.modalEmitted).toBe(false);
   });
 });
 
