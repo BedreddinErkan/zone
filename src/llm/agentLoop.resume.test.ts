@@ -192,6 +192,7 @@ describe("Inc-1 checkpoint: per-iteration write fires before any staging", () =>
       expect(JSON.stringify(env.messages).length).toBeLessThanOrEqual(1_000_000);
     }
   });
+
 });
 
 // ── Seed-correctness: resumeMessages replaces system, carries history ─────────

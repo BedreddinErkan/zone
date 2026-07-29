@@ -99,6 +99,14 @@ export interface RunEnvelope {
    */
   messagesOmitted?: boolean;
   /**
+   * True when `messages` is present but its thinking passthrough was stripped to
+   * fit the size cap. Deliberately NOT folded into `messagesOmitted`: "resumed
+   * without reasoning" costs one turn of re-derivation, "resumed without a
+   * conversation" costs a cold start, and a single flag would make the two
+   * indistinguishable in exactly the telemetry that has to tell them apart.
+   */
+  thinkingOmitted?: boolean;
+  /**
    * Set when the run stopped with a question outstanding (status
    * "awaiting_user_input"). Carries the tool_call_id because the restored
    * conversation ends with an assistant tool_call that has no reply, and the

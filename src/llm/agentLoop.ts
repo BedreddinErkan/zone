@@ -80,6 +80,7 @@ import { MANIFEST_CONTENT_PREFIX } from "./anthropicAdapter/cacheControlHelpers.
 import {
   ZONE_PROVIDER_FIELD,
   countThinkingDroppedForModel,
+  stripProviderState,
   type ProviderThinkingBlock,
 } from "./anthropicAdapter/thinkingBlocks.js";
 import { CompactionExhaustedError, type CompactionResult } from "./compaction/types.js";
@@ -2449,15 +2450,51 @@ async function runAgentLoopScoped(input: AgentLoopInput, stats: LoopRunStats): P
    * its size and recorded on the envelope. Resume reads the flag and says so
    * rather than cold-starting a conversation the user thinks is continuing.
    */
-  function serializeMessagesForEnvelope(): Pick<RunEnvelope, "messages" | "messagesOmitted"> {
+  function serializeMessagesForEnvelope(): Pick<
+    RunEnvelope,
+    "messages" | "messagesOmitted" | "thinkingOmitted"
+  > {
     const snapshot = stripTrailingManifests(latestMessages);
     const bytes = JSON.stringify(snapshot).length;
     if (bytes <= MAX_STAGED_CONTENT_BYTES) return { messages: snapshot };
+
+    // Degrade before giving up. Thinking is the largest thing a message carries
+    // and the least essential to restore — at xhigh/max effort the floors are
+    // 32000/64000 thinking tokens, so a single turn can be ~126-251KB and the
+    // cap arrives within a handful of turns, on exactly the long and parked runs
+    // that most need resume. Losing thinking costs one turn of re-derivation;
+    // losing the conversation costs a cold start.
+    //
+    // Stripping restores the history to precisely the shape it had before
+    // thinking passthrough existed, so this can never make resume worse than it
+    // was. The strip is safe by construction: readProviderState returns null for
+    // a message without the field, so a stripped history simply replays no
+    // thinking.
+    const stripped = stripProviderState(snapshot);
+    const strippedBytes = JSON.stringify(stripped).length;
+    if (strippedBytes <= MAX_STAGED_CONTENT_BYTES) {
+      // Its own marker, not folded into messagesOmitted: "resumed without
+      // reasoning" and "resumed without a conversation" are different failures
+      // with different costs, and a single flag would make them indistinguishable
+      // in the telemetry that has to tell them apart later.
+      log("[zone-envelope-thinking-omitted]", JSON.stringify({
+        event: "envelope_thinking_omitted",
+        runId: input.runId ?? null,
+        sessionId: input.sessionId ?? null,
+        bytes,
+        strippedBytes,
+        capBytes: MAX_STAGED_CONTENT_BYTES,
+        messageCount: latestMessages.length,
+      }));
+      return { messages: stripped, thinkingOmitted: true };
+    }
+
     log("[zone-envelope-messages-omitted]", JSON.stringify({
       event: "envelope_messages_omitted",
       runId: input.runId ?? null,
       sessionId: input.sessionId ?? null,
       bytes,
+      strippedBytes,
       capBytes: MAX_STAGED_CONTENT_BYTES,
       messageCount: latestMessages.length,
     }));

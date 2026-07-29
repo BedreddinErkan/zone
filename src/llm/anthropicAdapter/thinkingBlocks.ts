@@ -184,6 +184,27 @@ export function selectThinkingReplayIndices(
 }
 
 /**
+ * A copy of `messages` with every thinking passthrough removed.
+ *
+ * For the envelope only. Thinking is the largest thing a message carries and
+ * the least essential to restore: losing it costs one turn of re-derivation,
+ * whereas losing the conversation costs a cold start. So an oversized history
+ * degrades in that order rather than being dropped whole.
+ *
+ * Shallow-copies only the messages that actually carry the field; everything
+ * else passes by reference, so the result is byte-identical to the history as
+ * it was before thinking passthrough existed.
+ */
+export function stripProviderState<T>(messages: readonly T[]): T[] {
+  return messages.map((msg) => {
+    if (!readProviderState(msg)) return msg;
+    const copy = { ...(msg as object) } as Record<string, unknown>;
+    delete copy[ZONE_PROVIDER_FIELD];
+    return copy as T;
+  });
+}
+
+/**
  * Assistant turns holding thinking that will NOT be replayed to `requestModel`
  * because it was signed by a different one. Telemetry only — the drop itself is
  * a side effect of `selectThinkingReplayIndices` returning fewer indices.
