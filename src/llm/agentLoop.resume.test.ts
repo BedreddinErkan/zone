@@ -34,10 +34,6 @@ const adapterMocks = vi.hoisted(() => ({
   createChatCompletion: vi.fn(),
 }));
 
-const prunerMocks = vi.hoisted(() => ({
-  pruneStaleReads: vi.fn(),
-  emitContextPruned: vi.fn(),
-}));
 
 const envelopeMocks = vi.hoisted(() => ({
   saveRunEnvelope: vi.fn<[], Promise<void>>().mockResolvedValue(undefined),
@@ -55,10 +51,6 @@ vi.mock("./factory.js", () => ({
 
 vi.mock("../tools/toolExecutor.js", () => toolExecutorMock);
 
-vi.mock("./contextPruner.js", () => ({
-  pruneStaleReads: prunerMocks.pruneStaleReads,
-  emitContextPruned: prunerMocks.emitContextPruned,
-}));
 
 // Partial mock: keep createCoalescingWriter + other pure helpers real;
 // replace disk-writing functions with spies.
@@ -117,19 +109,12 @@ beforeEach(() => {
   });
 
   adapterMocks.createChatCompletion.mockReset();
-  prunerMocks.pruneStaleReads.mockReset();
-  prunerMocks.emitContextPruned.mockReset();
   envelopeMocks.saveRunEnvelope.mockReset().mockResolvedValue(undefined);
   envelopeMocks.stampEnvelopeStatus.mockReset().mockResolvedValue(undefined);
   envelopeMocks.deleteRunEnvelope.mockReset().mockResolvedValue(undefined);
   envelopeMocks.loadRunEnvelope.mockReset().mockResolvedValue(null);
 
   // Default: pass-through pruner (preserves messages unchanged)
-  prunerMocks.pruneStaleReads.mockImplementation((msgs: unknown[]) => ({
-    pruned: msgs,
-    stats: { blocksReplaced: 0, charsSaved: 0, blocksKept: (msgs as unknown[]).length },
-  }));
-  prunerMocks.emitContextPruned.mockImplementation(() => {});
 });
 
 afterEach(() => {
@@ -170,11 +155,12 @@ describe("Inc-1 checkpoint: per-iteration write fires before any staging", () =>
   });
 
   it("B-cap: over-cap messages are omitted (messages === undefined in checkpoint)", async () => {
-    // Inflate prunedMessages to >MAX_STAGED_CONTENT_BYTES (1MB) via pruner mock.
-    // buildEnvelopeSnapshot must omit the messages field in this case.
-    prunerMocks.pruneStaleReads.mockImplementation((msgs: unknown[]) => ({
-      pruned: [...(msgs as unknown[]), { role: "user", content: "X".repeat(1_100_000) }],
-      stats: { blocksReplaced: 0, charsSaved: 0, blocksKept: (msgs as unknown[]).length + 1 },
+    // Push the history over MAX_STAGED_CONTENT_BYTES (1MB) the way a real run
+    // does — an oversized tool result — rather than by injecting a message
+    // through a processor mock. buildEnvelopeSnapshot must omit `messages`.
+    toolExecutorMock.executeTool.mockImplementation(async () => ({
+      success: true,
+      output: "X".repeat(1_100_000),
     }));
 
     adapterMocks.createChatCompletion
@@ -194,8 +180,16 @@ describe("Inc-1 checkpoint: per-iteration write fires before any staging", () =>
       .filter((env) => env.status === "running");
 
     expect(runningCalls.length).toBeGreaterThan(0);
+
+    // The earliest checkpoint fires before the oversized tool result exists, so
+    // it legitimately carries a small history. The invariant is the one that
+    // matters for resume: once the history is over cap it is omitted, and no
+    // checkpoint ever carries an over-cap array.
+    const omitted = runningCalls.filter((env) => env.messages === undefined);
+    expect(omitted.length).toBeGreaterThan(0);
     for (const env of runningCalls) {
-      expect(env.messages).toBeUndefined();
+      if (env.messages === undefined) continue;
+      expect(JSON.stringify(env.messages).length).toBeLessThanOrEqual(1_000_000);
     }
   });
 });

@@ -29,8 +29,6 @@ const toolExecutorMock = vi.hoisted(() => ({
 
 const mocks = vi.hoisted(() => ({
   createChatCompletion: vi.fn(),
-  pruneStaleReads: vi.fn(),
-  emitContextPruned: vi.fn(),
   log: vi.fn(),
 }));
 
@@ -43,10 +41,6 @@ vi.mock("./factory.js", () => ({
 
 vi.mock("../tools/toolExecutor.js", () => toolExecutorMock);
 
-vi.mock("./contextPruner.js", () => ({
-  pruneStaleReads: mocks.pruneStaleReads,
-  emitContextPruned: mocks.emitContextPruned,
-}));
 
 vi.mock("../utils/logger.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../utils/logger.js")>();
@@ -125,15 +119,7 @@ beforeEach(() => {
   repoPath = fs.mkdtempSync(path.join(os.tmpdir(), "zone-coaching-jsonl-"));
   resetToolExecutorMock(toolExecutorMock);
   mocks.createChatCompletion.mockReset();
-  mocks.pruneStaleReads.mockReset();
-  mocks.emitContextPruned.mockReset();
   mocks.log.mockReset();
-
-  mocks.pruneStaleReads.mockImplementation((msgs: unknown[]) => ({
-    pruned: msgs,
-    stats: { blocksReplaced: 0, charsSaved: 0, blocksKept: msgs.length },
-  }));
-  mocks.emitContextPruned.mockImplementation(() => {});
   toolExecutorMock.executeTool.mockImplementation(async (name: string) => {
     if (name === "apply_patch") return { success: true, output: "patched" };
     return { success: true, output: "" };

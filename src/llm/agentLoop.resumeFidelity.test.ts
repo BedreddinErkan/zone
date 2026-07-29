@@ -34,7 +34,6 @@ vi.mock("./factory.js", () => ({
 }));
 vi.mock("../tools/toolExecutor.js", () => toolExecutorMock);
 
-import { pruneStaleReads, isPrunedPlaceholder } from "./contextPruner.js";
 import { stripTrailingManifests, rehydrateFileAccess, runAgentLoop } from "./agentLoop.js";
 import { MANIFEST_CONTENT_PREFIX } from "./anthropicAdapter/cacheControlHelpers.js";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
@@ -61,52 +60,11 @@ const manifestMsg = (): ChatCompletionMessageParam => ({
 });
 
 // ── defect 4 ─────────────────────────────────────────────────────────────────
-
-describe("pruneStaleReads is idempotent", () => {
-  /** Enough groups that the first read is well outside the fresh window. */
-  function historyWithStaleRead(): ChatCompletionMessageParam[] {
-    const msgs: ChatCompletionMessageParam[] = [
-      { role: "system", content: "sys" },
-      { role: "user", content: "task" },
-      assistantRead("c1", "src/big.ts"),
-      toolResult("c1", "x".repeat(5000)),
-    ];
-    for (let i = 2; i <= 6; i++) {
-      msgs.push(assistantRead(`c${i}`, `src/other${i}.ts`));
-      msgs.push(toolResult(`c${i}`, "small"));
-    }
-    return msgs;
-  }
-
-  it("re-pruning a restored history does not summarize the summary", () => {
-    // The killer detail: the original content is already gone by the second
-    // pass, so a second elision would record the PLACEHOLDER's byte count as
-    // though it were the file's — wrong, and unrecoverable.
-    const first = pruneStaleReads(historyWithStaleRead(), 2);
-    expect(first.stats.blocksReplaced).toBeGreaterThan(0);
-
-    const placeholder = (first.pruned[3] as { content?: string }).content ?? "";
-    expect(isPrunedPlaceholder(placeholder)).toBe(true);
-    expect(placeholder).toContain("src/big.ts");
-    expect(placeholder).toContain("5000 bytes");
-
-    const second = pruneStaleReads(first.pruned, 2);
-    expect(second.stats.blocksReplaced).toBe(0);
-    expect((second.pruned[3] as { content?: string }).content).toBe(placeholder);
-
-    // Third pass, in case idempotence only held once.
-    const third = pruneStaleReads(second.pruned, 2);
-    expect((third.pruned[3] as { content?: string }).content).toBe(placeholder);
-  });
-
-  it("passes an already-pruned message through by reference", () => {
-    const first = pruneStaleReads(historyWithStaleRead(), 2);
-    const second = pruneStaleReads(first.pruned, 2);
-    // Identity, not equality: a rebuilt object would satisfy toEqual while
-    // having dropped every field this module does not know about.
-    expect(second.pruned[3]).toBe(first.pruned[3]);
-  });
-});
+// The "pruneStaleReads is idempotent" suite lived here. R.2 pruning and the U.1
+// shim were deleted: pruning edits an already-cached message, which invalidates
+// the Anthropic prefix from that point and costs 2.3x measured, and U.1 had been
+// silently discarding every elision since it landed. Nothing re-prunes a restored
+// history, so the idempotence defect it guarded is unreachable.
 
 // ── defect 5 ─────────────────────────────────────────────────────────────────
 

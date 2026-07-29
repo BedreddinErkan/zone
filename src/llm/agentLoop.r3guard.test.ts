@@ -88,9 +88,15 @@ describe("R.3 — Phase Q safety signal preservation", () => {
     expect(p).toMatch(/new file/i);
   });
 
-  it("ELIDED READS guidance (R.2) is intact", () => {
+  it("ELIDED READS guidance is gone with R.2", () => {
+    // The directive told the model that "[Earlier read: ...]" markers meant
+    // content had been elided. R.2 pruning was the only thing that produced
+    // them and has been deleted, so the guidance now describes a marker the
+    // model can never see. Inverted rather than removed: an accidental
+    // re-introduction should fail here.
     const p = basePrompt();
-    expect(p).toContain("ELIDED READS");
+    expect(p).not.toContain("ELIDED READS");
+    expect(p).not.toContain("Earlier read");
   });
 
   it("S.2.1 READ_FILE ECONOMY includes lineRange follow-up nudge after outline", () => {

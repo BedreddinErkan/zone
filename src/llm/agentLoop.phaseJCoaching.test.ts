@@ -34,8 +34,6 @@ const toolExecutorMock = vi.hoisted(() => ({
 
 const mocks = vi.hoisted(() => ({
   createChatCompletion: vi.fn(),
-  pruneStaleReads: vi.fn(),
-  emitContextPruned: vi.fn(),
 }));
 
 vi.mock("./factory.js", () => ({
@@ -47,10 +45,6 @@ vi.mock("./factory.js", () => ({
 
 vi.mock("../tools/toolExecutor.js", () => toolExecutorMock);
 
-vi.mock("./contextPruner.js", () => ({
-  pruneStaleReads: mocks.pruneStaleReads,
-  emitContextPruned: mocks.emitContextPruned,
-}));
 
 import { runAgentLoop } from "./agentLoop.js";
 
@@ -90,14 +84,6 @@ beforeEach(() => {
   repoPath = fs.mkdtempSync(path.join(os.tmpdir(), "zone-phase-j-coaching-"));
   resetToolExecutorMock(toolExecutorMock);
   mocks.createChatCompletion.mockReset();
-  mocks.pruneStaleReads.mockReset();
-  mocks.emitContextPruned.mockReset();
-
-  mocks.pruneStaleReads.mockImplementation((msgs: unknown[]) => ({
-    pruned: msgs,
-    stats: { blocksReplaced: 0, charsSaved: 0, blocksKept: (msgs as unknown[]).length },
-  }));
-  mocks.emitContextPruned.mockImplementation(() => {});
   toolExecutorMock.executeTool.mockImplementation(async (name: string) => {
     if (name === "run_command")
       return { success: false, exitCode: 1, output: "[exit_code=1] Tests failed: 2 failures\n  at src/foo.test.ts:42" };

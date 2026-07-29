@@ -7,7 +7,6 @@ import {
   type ProcessorContext,
   runProcessorPipeline,
 } from "./types.js";
-import { R2ShimProcessor } from "./R2ShimProcessor.js";
 import { ManifestInjectionProcessor } from "./ManifestInjectionProcessor.js";
 import { PollingWindowProcessor } from "./PollingWindowProcessor.js";
 import { BudgetReductionProcessor } from "./BudgetReductionProcessor.js";
@@ -18,8 +17,6 @@ import { BudgetReductionProcessor } from "./BudgetReductionProcessor.js";
 
 function buildProcessorFromConfig(config: ProcessorConfig): HistoryProcessor {
   switch (config.kind) {
-    case "r2_shim":
-      return new R2ShimProcessor(config);
     case "manifest_injection":
       return new ManifestInjectionProcessor(config);
     case "polling_window":
@@ -75,7 +72,6 @@ export function buildDefaultOrchestrator(
   extraConfigs?: ProcessorConfig[],
 ): ContextOrchestrator {
   const defaultConfigs: ProcessorConfig[] = [
-    { kind: "r2_shim", freshIterWindow: 2, useU1CacheAwareShim: true },
     { kind: "manifest_injection", maxEntries: 20 },
   ];
   if (process.env["ZONE_HISTORY_PIPELINE_POLLING"] === "1") {

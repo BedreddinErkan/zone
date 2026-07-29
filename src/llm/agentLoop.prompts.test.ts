@@ -51,7 +51,7 @@ describe('UI.6.1: patch prompt FINAL SUMMARY block', () => {
   it('CE.2.1.b: EXAMPLES section < 600 chars after reduction', () => {
     const prompt = assembleAgentSystemPrompt(PATCH_INPUT);
     const examplesStart = prompt.indexOf('EXAMPLES:');
-    const examplesEnd = prompt.indexOf('ELIDED READS:');
+    const examplesEnd = prompt.indexOf('TRUNCATED FILE SECTIONS:');
     const examplesSection = prompt.slice(examplesStart, examplesEnd);
     expect(examplesSection.length).toBeLessThan(600);
   });

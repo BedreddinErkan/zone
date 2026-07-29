@@ -99,7 +99,6 @@ import {
 } from "./antiThrash.js";
 import { UpstreamUnavailableError } from "./withExponentialBackoff.js";
 import { emitTokenBreakdown, emitBreakdownSummary, type BreakdownEvent } from "./tokenBreakdown.js";
-import { pruneStaleReads } from "./contextPruner.js";
 import { buildDefaultOrchestrator } from "./history/ContextOrchestrator.js";
 import type { Capability, CapabilityFilter } from "../tools/capabilities.js";
 import { resolveToolList } from "../tools/toolRegistry.js";
@@ -768,7 +767,6 @@ export function assembleAgentSystemPrompt(input: {
     `[shell] npx vitest run path/to/changed.test.ts 2>&1 → exitCode=1, "Tests 2 failed | 3 passed"\n` +
     `[agent] Real failure in target. Inspect output for cause, then retry the fix.\n\n` +
     (input.summaryFormat === "detailed" ? DETAILED_SUMMARY : COMPACT_SUMMARY) +
-    `ELIDED READS: tool_result blocks marked "[Earlier read: ...]" had their content removed to save context. Call read_file again if you need it.\n\n` +
     `TRUNCATED FILE SECTIONS: if you see a ZONE_CONTEXT_TRUNCATED marker, part of the file was omitted. Do NOT include the marker line in any apply_patch FIND block; use read_file with lineRange on the same path to fetch the hidden section. Only generate FIND blocks from lines you have fully read.\n\n` +
     `FINAL ASSESSMENT (required) — include exactly one tag on its own line in your final response:\n` +
     `  [ZONE_VERIFICATION: tests_passed]           — suite ran, all passed\n` +
@@ -2965,13 +2963,12 @@ Example:
     let finalSummary =
       "Token budget reached before a final answer was produced.";
     try {
-      const { pruned: wrapupPruned } = pruneStaleReads(messages);
       const wrapupModel = escalatedModel ?? getModelName("high", client.provider, requestCtx?.modelOverride);
       const wrapupResponse = await client.createChatCompletion(
         {
           model: wrapupModel,
           messages: [
-            ...wrapupPruned,
+            ...messages,
             {
               role: "user",
               content:

@@ -5,7 +5,6 @@ import {
   readProviderState,
   type ProviderThinkingBlock,
 } from "./anthropicAdapter/thinkingBlocks.js";
-import { pruneStaleReads } from "./contextPruner.js";
 import { stripTrailingManifests } from "./agentLoop.js";
 import { MANIFEST_CONTENT_PREFIX } from "./anthropicAdapter/cacheControlHelpers.js";
 import { BudgetReductionProcessor } from "./history/BudgetReductionProcessor.js";
@@ -52,45 +51,10 @@ describe("readProviderState", () => {
 // premise, not a formality — if any of them fails, the field is being silently
 // dropped somewhere in the pipeline and the feature is inert.
 describe("assistant messages survive the history pipeline by reference", () => {
-  it("pruneStaleReads keeps the field through an eviction", () => {
-    const big = "x".repeat(5000);
-    const history: ChatCompletionMessageParam[] = [
-      { role: "user", content: "fix the reducer" },
-      assistantWithThinking("c1", "old.ts"),
-      toolResult("c1", big),
-      assistantWithThinking("c2", "mid.ts"),
-      toolResult("c2", big),
-      assistantWithThinking("c3", "new.ts"),
-      toolResult("c3", big),
-      assistantWithThinking("c4", "newest.ts"),
-      toolResult("c4", big),
-    ];
-
-    const { pruned, stats } = pruneStaleReads(history, 1);
-    expect(stats.blocksReplaced).toBeGreaterThan(0); // the eviction actually happened
-
-    const assistants = pruned.filter((m) => m.role === "assistant");
-    expect(assistants).toHaveLength(4);
-    for (const msg of assistants) {
-      expect(readProviderState(msg)?.blocks[0]).toBe(BLOCK);
-    }
-  });
-
-  it("pruneStaleReads keeps the field on a re-prune of already-elided content", () => {
-    const history: ChatCompletionMessageParam[] = [
-      { role: "user", content: "task" },
-      assistantWithThinking("c1", "a.ts"),
-      toolResult("c1", "[Earlier read: a.ts, 40 lines, 1200 bytes]"),
-      assistantWithThinking("c2", "b.ts"),
-      toolResult("c2", "fresh"),
-      assistantWithThinking("c3", "c.ts"),
-      toolResult("c3", "fresh"),
-    ];
-    const { pruned } = pruneStaleReads(history, 1);
-    for (const msg of pruned.filter((m) => m.role === "assistant")) {
-      expect(readProviderState(msg)?.blocks[0]).toBe(BLOCK);
-    }
-  });
+  // Two pruneStaleReads cases lived here. R.2 and the U.1 shim were deleted —
+  // pruning rewrote an already-cached message and cost 2.3x measured — so there
+  // is no longer a processor that rebuilds a tool result. The premise they
+  // guarded still matters and is covered below by the processors that remain.
 
   it("stripTrailingManifests keeps the field, and a thinking turn does not hide a manifest", () => {
     const manifest: ChatCompletionMessageParam = {

@@ -31,7 +31,6 @@ export type ProcessorResult =
 // post-translation and lives in src/llm/anthropicAdapter/cacheControlHelpers.ts.
 
 export type ProcessorConfig =
-  | { kind: "r2_shim"; freshIterWindow?: number; useU1CacheAwareShim?: boolean }
   | { kind: "manifest_injection"; maxEntries?: number }
   | { kind: "polling_window"; everyKSteps: number; keepLastN: number }
   | { kind: "budget_reduction"; maxCharsPerToolResult: number };

@@ -42,13 +42,6 @@ vi.mock("../llm/taskClassifier.js", () => ({
 }));
 
 // Pass-through context pruner (no stale-read eviction).
-vi.mock("../llm/contextPruner.js", () => ({
-  pruneStaleReads: vi.fn((msgs: unknown[]) => ({
-    pruned: msgs,
-    stats: { blocksReplaced: 0, charsSaved: 0, blocksKept: (msgs as unknown[]).length },
-  })),
-  emitContextPruned: vi.fn(),
-}));
 
 // Return planDepth: "investigate" so dispatch enters the checkpoint loop.
 vi.mock("../api/diskModel.js", () => ({
