@@ -27,6 +27,7 @@ import {
   emitTierConstraints,
   emitTierArchetypeMismatch,
   emitTierGrantUnusable,
+  emitWriteCapabilityAbsent,
   emitCoachingRule,
   emitCommandCacheSummary,
   emitToolResultSummary,
@@ -2127,12 +2128,34 @@ async function runAgentLoopScoped(input: AgentLoopInput, stats: LoopRunStats): P
     : undefined;
   // Gap 6: resolve capability filter.
   // Precedence: capabilityFilter > tier-derived > allowedTools (shim) > mode default.
+  // Sequential ifs (not a bare `??` chain) so filterSource — which arm supplied the
+  // filter, read by [zone-write-capability-absent] below — comes from the SAME
+  // decision that picks effectiveFilter, not a second expression re-deriving it. A
+  // parallel derivation using `!== undefined`/truthiness would diverge from `??`'s
+  // null-or-undefined-only skip the moment a falsy-but-defined value (an empty Set)
+  // reached one of these arms — checked, not currently possible for any production
+  // caller, but the point is not to depend on that staying true.
+  const allowedToolsFilter = input.allowedTools ? allowedToolsToFilter(input.allowedTools) : undefined;
+  const modeDefault = hasExplicitMode ? modeDefaultFilter(mode) : undefined;
   // Changed to `let` so forced_tier_blocking promotion can relax it mid-run (B.3).
-  let effectiveFilter: CapabilityFilter | undefined =
-    input.capabilityFilter
-    ?? tierFilterFromClassifier
-    ?? (input.allowedTools ? allowedToolsToFilter(input.allowedTools) : undefined)
-    ?? (hasExplicitMode ? modeDefaultFilter(mode) : undefined);
+  let effectiveFilter: CapabilityFilter | undefined;
+  let filterSource: "capabilityFilter" | "tierFilterFromClassifier" | "allowedTools" | "modeDefault" | "none";
+  if (input.capabilityFilter != null) {
+    effectiveFilter = input.capabilityFilter;
+    filterSource = "capabilityFilter";
+  } else if (tierFilterFromClassifier != null) {
+    effectiveFilter = tierFilterFromClassifier;
+    filterSource = "tierFilterFromClassifier";
+  } else if (allowedToolsFilter != null) {
+    effectiveFilter = allowedToolsFilter;
+    filterSource = "allowedTools";
+  } else if (modeDefault != null) {
+    effectiveFilter = modeDefault;
+    filterSource = "modeDefault";
+  } else {
+    effectiveFilter = undefined;
+    filterSource = "none";
+  }
   // Phase 6.A Branch B: detect forceTier="simple" applied to archetypes that
   // need search/navigation tools (targeted_fix, refactor, debug, complex_multi_file).
   const ARCHETYPES_NEEDING_EXPLORATION = new Set<string>([
@@ -2173,6 +2196,30 @@ async function runAgentLoopScoped(input: AgentLoopInput, stats: LoopRunStats): P
   // Flat name set forwarded to executeTool for runtime enforcement.
   // `let` so forced_tier_blocking promotion can update it alongside toolsForLLM (B.3).
   let effectiveAllowedSet: ReadonlySet<string> = new Set(toolsForLLM.map(getZoneToolName));
+
+  // Diagnosed from a run where an approved patch plan reached execution with a
+  // read-only capability filter (the archetype dispatcher re-classified the task as
+  // "investigation") and nothing said so — silent except when tier separately
+  // tripped the unrelated [zone-tier-grant-unusable] subagent-quota gate. Gated on
+  // !isSubagentLoop: a subagent inheriting a read-only "explore" config from its
+  // parent is intentional, not this failure. Observation only — does not affect
+  // toolsForLLM, effectiveAllowedSet, or any control flow.
+  if (!isSubagentLoop && mode === "patch") {
+    const hasWriteCapableTool = resolvedTools.some(
+      (t) => effectiveAllowedSet.has(t.name) && t.capabilities.includes("fs.write")
+    );
+    if (!hasWriteCapableTool) {
+      emitWriteCapabilityAbsent({
+        runId: input.runId ?? null,
+        mode,
+        archetype: input.taskClassification?.archetype ?? null,
+        tier: input.taskClassification?.tier ?? "medium",
+        toolSubsetSize: toolsForLLM.length,
+        filterSource,
+        hasApprovedPlan: !!(input.executionPlan?.steps?.length),
+      });
+    }
+  }
 
   let midWarnInjected = false;
   let chainSaturationWarnInjected = false;

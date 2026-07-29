@@ -201,6 +201,32 @@ export function emitTierGrantUnusable(data: TierGrantUnusableData): void {
 }
 
 // ---------------------------------------------------------------------------
+// emitWriteCapabilityAbsent — [zone-write-capability-absent]
+// Emitted once per run when the resolved tool list contains no write-capable
+// tool while the run is a patch (execution) run, not an investigation/chat
+// one. Diagnosed from a run where the archetype dispatcher re-classified an
+// approved-plan execution as `investigation` and applied its read-only
+// capability filter — silent except when tier happened to also trip the
+// unrelated [zone-tier-grant-unusable] subagent-quota gate. `filterSource`
+// names which arm of the capability-filter precedence produced the read-only
+// set, so the condition is actionable, not just observed.
+// ---------------------------------------------------------------------------
+
+export interface WriteCapabilityAbsentData {
+  runId: string | null | undefined;
+  mode: string;
+  archetype: string | null;
+  tier: string;
+  toolSubsetSize: number;
+  filterSource: "capabilityFilter" | "tierFilterFromClassifier" | "allowedTools" | "modeDefault" | "none";
+  hasApprovedPlan: boolean;
+}
+
+export function emitWriteCapabilityAbsent(data: WriteCapabilityAbsentData): void {
+  log("[zone-write-capability-absent]", JSON.stringify(data));
+}
+
+// ---------------------------------------------------------------------------
 // emitCoachingRule — [zone-coaching-rule]
 // Emitted when the test-failure scope-check coaching rule fires.
 // ---------------------------------------------------------------------------
