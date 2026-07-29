@@ -18,6 +18,7 @@ const SCOPE_SUMMARY_MAX = 200;
 const RISK_HINT_MAX = 120;    // per-entry char cap
 const RISK_HINTS_LIMIT = 5;   // entry-count cap
 const FILES_LIKELY_MAX = 10;  // per-step file-list cap
+const STEPS_MAX = 8;          // step-list cap
 
 function renderFeedbackBuffer(buf: string, pos: number): string {
   return buf.slice(0, pos) + "▋" + buf.slice(pos);
@@ -119,7 +120,7 @@ export function PlanReadyModal({ proposal, dispatch }: PlanReadyModalProps): Rea
           </Text>
         </Box>
       )}
-      {proposal.steps.slice(0, 6).map((step, i) => (
+      {proposal.steps.slice(0, STEPS_MAX).map((step, i) => (
         <Box key={i} flexDirection="column">
           <Box flexDirection="row">
             <Text dimColor>{`  ${i + 1}. `}</Text>
@@ -142,8 +143,8 @@ export function PlanReadyModal({ proposal, dispatch }: PlanReadyModalProps): Rea
           )}
         </Box>
       ))}
-      {proposal.steps.length > 6 && (
-        <Text dimColor>{`  … +${proposal.steps.length - 6} more step(s)`}</Text>
+      {proposal.steps.length > STEPS_MAX && (
+        <Text dimColor>{`  … +${proposal.steps.length - STEPS_MAX} more step(s)`}</Text>
       )}
       {proposal.riskHints.length > 0 && (
         <>

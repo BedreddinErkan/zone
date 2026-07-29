@@ -487,6 +487,61 @@ describe("PlanReadyModal — filesLikely", () => {
   });
 });
 
+// PlanReady projection: steps widened 6→8 via STEPS_MAX, backing both the
+// slice and its comparison so a future edit can't move one without the other.
+describe("PlanReadyModal — steps (STEPS_MAX)", () => {
+  it("renders all 8 steps at the cap", () => {
+    const proposal = {
+      ...PROPOSAL,
+      steps: Array.from({ length: 8 }, (_, i) => ({
+        title: `Step ${i + 1}`, description: "", filesLikely: [],
+      })),
+    };
+    const { lastFrame, unmount } = render(
+      <PlanReadyModal proposal={proposal} dispatch={makeDispatch()} />
+    );
+    activeUnmount = unmount;
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("Step 1");
+    expect(frame).toContain("Step 8");
+    expect(frame).not.toContain("more step(s)");
+  });
+
+  it("renders 8 steps and a counted overflow line for a 9th (hand-built — exceeds the schema's .max(8), exercises only the modal's own defensive slice)", () => {
+    const proposal = {
+      ...PROPOSAL,
+      steps: Array.from({ length: 9 }, (_, i) => ({
+        title: `Step ${i + 1}`, description: "", filesLikely: [],
+      })),
+    };
+    const { lastFrame, unmount } = render(
+      <PlanReadyModal proposal={proposal} dispatch={makeDispatch()} />
+    );
+    activeUnmount = unmount;
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("Step 8");
+    expect(frame).not.toContain("Step 9");
+    // Full counter text, not the bare glyph.
+    expect(frame).toContain("+1 more step(s)");
+  });
+
+  it("does not render an overflow line when steps is under the 8-step cap", () => {
+    const proposal = {
+      ...PROPOSAL,
+      steps: Array.from({ length: 4 }, (_, i) => ({
+        title: `Step ${i + 1}`, description: "", filesLikely: [],
+      })),
+    };
+    const { lastFrame, unmount } = render(
+      <PlanReadyModal proposal={proposal} dispatch={makeDispatch()} />
+    );
+    activeUnmount = unmount;
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("Step 1"); // positive first
+    expect(frame).not.toContain("more step(s)");
+  });
+});
+
 // A replan can produce a stepless plan carrying noChangeReason/cannotVerifyReason
 // (none of E8a/E8b/the forceSteps safety net in dispatch.ts re-run after a
 // replan). The modal must show the reason, not just an empty step list.
