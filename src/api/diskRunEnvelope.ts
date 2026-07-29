@@ -315,18 +315,6 @@ export async function dismissEnvelope(key: string): Promise<void> {
   await saveRunEnvelope({ ...env, dismissedAt: new Date().toISOString() });
 }
 
-/**
- * Resolve an id or prefix to an envelope key.
- *
- * Filenames are matched first — that is the key, and for post-cutover envelopes
- * it is a runId. The content scan afterwards is the migration guarantee: before
- * per-run keying the filename WAS the sessionId, so a sessionId a user already
- * knows (from a toast, a log line, an older note) would silently stop resolving.
- * It reads envelope bodies, which is free at a handful of files and gets linearly
- * worse as they accumulate — recorded next to the growth bound in lessons.md,
- * because the two facts only mean something together.
- */
-/** Resolve a full session ID or 8-char prefix to the full session ID. */
 export interface EnvelopeCleanupPolicy {
   maxAgeDays: number;
   maxCount: number;
@@ -445,6 +433,17 @@ export async function maybeCleanupOldEnvelopes(
   return { ...result, ran: true };
 }
 
+/**
+ * Resolve an id or prefix to an envelope key.
+ *
+ * Filenames are matched first — that is the key, and for post-cutover envelopes
+ * it is a runId. The content scan afterwards is the migration guarantee: before
+ * per-run keying the filename WAS the sessionId, so a sessionId a user already
+ * knows (from a toast, a log line, an older note) would silently stop resolving.
+ * It reads envelope bodies, which is free at a handful of files and gets linearly
+ * worse as they accumulate — recorded next to the growth bound in lessons.md,
+ * because the two facts only mean something together.
+ */
 export async function resolveEnvelopeId(idOrPrefix: string): Promise<string | null> {
   const dir = envelopesDir();
   let files: string[];
