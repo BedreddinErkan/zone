@@ -234,10 +234,14 @@ export async function runOneShotInner(
                                              effectiveConfig.anthropicApiKey;
 
     // Context for plan-gen: honors user's selected model (fixes silent-Sonnet bug).
+    // runId included so generateExecutionPlan's usage records attribute to this run —
+    // without it they land in the ledger's empty-runId bucket and getRunCost() (the
+    // number the footer shows) silently excludes them.
     const planGenCtx = {
       provider: effectiveConfig.provider,
       modelOverride: { high: effectiveConfig.model, standard: effectiveConfig.model },
       effort: effectiveConfig.effort,
+      runId,
     };
 
     const diskSettings = loadDiskModelSync(effectiveConfig.repoPath);
