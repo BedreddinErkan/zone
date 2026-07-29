@@ -133,6 +133,88 @@ describe("deleteRunEnvelope", () => {
   });
 });
 
+// ---- Retention (age/count pruning + throttle) -------------------------------
+
+describe("pruneOldEnvelopes / maybeCleanupOldEnvelopes", () => {
+  async function writeEnvelopeAt(env: RunEnvelope, updatedAt: string): Promise<void> {
+    await saveRunEnvelope(env);
+    const p = join(envDir, `${env.sessionId}.envelope.json`);
+    const raw = JSON.parse(await readFile(p, "utf-8"));
+    raw.updatedAt = updatedAt;
+    await writeFile(p, JSON.stringify(raw));
+  }
+
+  it("removes envelopes older than maxAgeDays", async () => {
+    const { pruneOldEnvelopes } = await import("./diskRunEnvelope.js");
+    const old = makeEnvelope({ sessionId: "sess-old" });
+    const fresh = makeEnvelope({ sessionId: "sess-fresh" });
+    const oldIso = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString();
+    const freshIso = new Date().toISOString();
+    await writeEnvelopeAt(old, oldIso);
+    await writeEnvelopeAt(fresh, freshIso);
+
+    const result = await pruneOldEnvelopes();
+    expect(result.removed).toBe(1);
+    expect(await loadRunEnvelope("sess-old")).toBeNull();
+    expect(await loadRunEnvelope("sess-fresh")).not.toBeNull();
+  });
+
+  it("never prunes a status:running envelope with a live pid, even if old", async () => {
+    const { pruneOldEnvelopes } = await import("./diskRunEnvelope.js");
+    const live = makeEnvelope({ sessionId: "sess-live", status: "running", pid: process.pid });
+    const oldIso = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString();
+    await writeEnvelopeAt(live, oldIso);
+
+    const result = await pruneOldEnvelopes();
+    expect(result.removed).toBe(0);
+    expect(await loadRunEnvelope("sess-live")).not.toBeNull();
+  });
+
+  it("prunes down to maxCount, oldest first, when over the count cap", async () => {
+    const { pruneOldEnvelopes } = await import("./diskRunEnvelope.js");
+    const now = Date.now();
+    for (let i = 0; i < 5; i++) {
+      const env = makeEnvelope({ sessionId: `sess-${i}` });
+      const iso = new Date(now - i * 60 * 1000).toISOString(); // sess-0 newest, sess-4 oldest
+      await writeEnvelopeAt(env, iso);
+    }
+
+    const result = await pruneOldEnvelopes({ maxAgeDays: 30, maxCount: 3 });
+    expect(result.removed).toBe(2);
+    expect(await loadRunEnvelope("sess-4")).toBeNull();
+    expect(await loadRunEnvelope("sess-3")).toBeNull();
+    expect(await loadRunEnvelope("sess-0")).not.toBeNull();
+  });
+
+  it("marker throttle: a second call within 24h is a no-op (ran:false)", async () => {
+    const { maybeCleanupOldEnvelopes } = await import("./diskRunEnvelope.js");
+    const old = makeEnvelope({ sessionId: "sess-old" });
+    const oldIso = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString();
+    await writeEnvelopeAt(old, oldIso);
+
+    const first = await maybeCleanupOldEnvelopes();
+    expect(first.ran).toBe(true);
+    expect(first.removed).toBe(1);
+
+    // Re-seed another stale envelope; throttle should suppress the second sweep.
+    const old2 = makeEnvelope({ sessionId: "sess-old2" });
+    await writeEnvelopeAt(old2, oldIso);
+    const second = await maybeCleanupOldEnvelopes();
+    expect(second.ran).toBe(false);
+    expect(second.removed).toBe(0);
+    expect(await loadRunEnvelope("sess-old2")).not.toBeNull();
+  });
+
+  it("marker not enumerated by listResumableEnvelopes or resolveEnvelopeId", async () => {
+    const { maybeCleanupOldEnvelopes } = await import("./diskRunEnvelope.js");
+    await saveRunEnvelope(makeEnvelope({ sessionId: "sess-live2" }));
+    await maybeCleanupOldEnvelopes();
+    const list = await listResumableEnvelopes();
+    expect(list.some(e => (e as unknown as { file?: string }).file === ".envelope-last-cleanup")).toBe(false);
+    expect(await resolveEnvelopeId(".envelope-last-cleanup")).toBeNull();
+  });
+});
+
 // ---- Stamp ------------------------------------------------------------------
 
 describe("stampEnvelopeStatus", () => {

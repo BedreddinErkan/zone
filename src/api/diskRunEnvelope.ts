@@ -326,6 +326,125 @@ export async function dismissEnvelope(key: string): Promise<void> {
  * worse as they accumulate — recorded next to the growth bound in lessons.md,
  * because the two facts only mean something together.
  */
+/** Resolve a full session ID or 8-char prefix to the full session ID. */
+export interface EnvelopeCleanupPolicy {
+  maxAgeDays: number;
+  maxCount: number;
+}
+
+const DEFAULT_ENVELOPE_CLEANUP_POLICY: EnvelopeCleanupPolicy = {
+  maxAgeDays: 30,
+  maxCount: 200,
+};
+
+/**
+ * Prunes stale envelopes by age and count. Pruning is independent of
+ * EnvelopeStatus (including "awaiting_user_input" — /resume relies on
+ * age/count churn like everything else), EXCEPT a live status:"running"
+ * envelope with an alive pid, which is never pruned — that's a hard
+ * safety guard against deleting an in-flight run's state, not a status
+ * grace period.
+ */
+export async function pruneOldEnvelopes(
+  policy: Partial<EnvelopeCleanupPolicy> = {}
+): Promise<{ removed: number }> {
+  const { maxAgeDays, maxCount } = { ...DEFAULT_ENVELOPE_CLEANUP_POLICY, ...policy };
+  const dir = envelopesDir();
+  let files: string[];
+  try {
+    files = await fs.readdir(dir);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return { removed: 0 };
+    throw err;
+  }
+
+  const envelopeFiles = files.filter(f => f.endsWith(".envelope.json") && !f.endsWith(".tmp"));
+  const maxAgeMs = maxAgeDays * 24 * 60 * 60 * 1000;
+  const now = Date.now();
+
+  type Candidate = { file: string; updatedAt: string; keep: boolean };
+  const candidates: Candidate[] = [];
+
+  for (const file of envelopeFiles) {
+    try {
+      const raw = await fs.readFile(join(dir, file), "utf-8");
+      const env = JSON.parse(raw) as RunEnvelope;
+      if (env.version !== 1) continue;
+      // Safety guard: a live "running" envelope with an alive pid is never pruned.
+      const isLiveRun = env.status === "running" && isPidAlive(env.pid);
+      candidates.push({ file, updatedAt: env.updatedAt, keep: isLiveRun });
+    } catch {
+      // skip corrupt/unreadable files — leave them alone rather than risk mis-deleting
+    }
+  }
+
+  const toRemove = new Set<string>();
+
+  // Age cutoff: anything older than maxAgeDays (unless protected).
+  for (const c of candidates) {
+    if (c.keep) continue;
+    const age = now - new Date(c.updatedAt).getTime();
+    if (age > maxAgeMs) toRemove.add(c.file);
+  }
+
+  // Count cutoff: beyond maxCount survivors, remove oldest-first (protected entries excluded).
+  const survivors = candidates.filter(c => !toRemove.has(c.file));
+  if (survivors.length > maxCount) {
+    const prunable = survivors
+      .filter(c => !c.keep)
+      .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
+    const excess = survivors.length - maxCount;
+    for (let i = 0; i < Math.min(excess, prunable.length); i++) {
+      toRemove.add(prunable[i].file);
+    }
+  }
+
+  await Promise.all(
+    Array.from(toRemove).map(f => fs.unlink(join(dir, f)).catch(() => {}))
+  );
+
+  return { removed: toRemove.size };
+}
+
+const ENVELOPE_CLEANUP_MARKER_NAME = ".envelope-last-cleanup";
+const ENVELOPE_CLEANUP_THROTTLE_HOURS = 24;
+
+/**
+ * Runs pruneOldEnvelopes at most once per ENVELOPE_CLEANUP_THROTTLE_HOURS,
+ * tracked via the mtime of a marker file on disk — mirrors
+ * maybeCleanupOldSnapshots in src/snapshots/snapshotStore.ts verbatim, so a
+ * per-run readdir/stat sweep doesn't happen on every invocation. The marker
+ * filename does not end in ".envelope.json", so listResumableEnvelopes and
+ * resolveEnvelopeId never enumerate it as a run.
+ */
+export async function maybeCleanupOldEnvelopes(
+  policy: Partial<EnvelopeCleanupPolicy> = {}
+): Promise<{ removed: number; ran: boolean }> {
+  const dir = envelopesDir();
+  const markerPath = join(dir, ENVELOPE_CLEANUP_MARKER_NAME);
+  const thresholdMs = ENVELOPE_CLEANUP_THROTTLE_HOURS * 60 * 60 * 1000;
+
+  try {
+    const stat = await fs.stat(markerPath);
+    if (Date.now() - stat.mtimeMs < thresholdMs) {
+      return { removed: 0, ran: false };
+    }
+  } catch {
+    /* marker missing: fall through and run */
+  }
+
+  const result = await pruneOldEnvelopes(policy);
+
+  try {
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(markerPath, String(Date.now()), "utf8");
+  } catch {
+    /* swallow: throttle marker is best-effort */
+  }
+
+  return { ...result, ran: true };
+}
+
 export async function resolveEnvelopeId(idOrPrefix: string): Promise<string | null> {
   const dir = envelopesDir();
   let files: string[];
