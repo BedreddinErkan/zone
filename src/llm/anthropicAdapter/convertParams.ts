@@ -6,6 +6,7 @@ import type {
   ChatCompletionToolChoiceOption,
 } from "openai/resources/chat/completions";
 import { applyMessageCacheBreakpoint2 } from "./cacheControlHelpers.js";
+import { readProviderState, selectThinkingReplayIndices } from "./thinkingBlocks.js";
 import { supportsEffort, usesAdaptiveThinking, resolveEffortForModel } from "../modelRegistry.js";
 import { getMaxOutputTokens, lookupMaxOutputTokens, getCacheMinChars } from "../models.js";
 import type { EffortLevel } from "../modelRegistry.js";
@@ -91,7 +92,7 @@ export function convertParams(
 
   const { systemPrompt, conversational } = extractSystem(input.messages);
 
-  const messages = translateMessages(conversational);
+  const messages = translateMessages(conversational, input.model);
 
   let finalSystem = systemPrompt;
   if (
@@ -277,11 +278,17 @@ function extractTextFromContentArray(content: unknown): string {
 }
 
 function translateMessages(
-  messages: ChatCompletionMessageParam[]
+  messages: ChatCompletionMessageParam[],
+  requestModel?: string
 ): Anthropic.MessageParam[] {
   const out: Anthropic.MessageParam[] = [];
+  // Decided here, never by rewriting history: the R2 shim reuses its previous
+  // pruned array by reference, so stripping thinking from a message would
+  // corrupt a prefix another iteration is still holding.
+  const replayThinkingAt = selectThinkingReplayIndices(messages, requestModel);
 
-  for (const msg of messages) {
+  for (let msgIdx = 0; msgIdx < messages.length; msgIdx += 1) {
+    const msg = messages[msgIdx]!;
     if (msg.role === "user") {
       if (typeof msg.content === "string") {
         out.push({ role: "user", content: msg.content });
@@ -315,8 +322,26 @@ function translateMessages(
 
     if (msg.role === "assistant") {
       const blocks: Array<
-        Anthropic.TextBlockParam | Anthropic.ToolUseBlockParam
+        | Anthropic.TextBlockParam
+        | Anthropic.ToolUseBlockParam
+        | Anthropic.ThinkingBlockParam
+        | Anthropic.RedactedThinkingBlockParam
       > = [];
+
+      // Thinking goes first, ahead of text and tool_use, and by reference — the
+      // signature is validated over the block's exact bytes, so re-serializing
+      // it (even into an identical-looking object) is the one transform it
+      // cannot survive.
+      if (replayThinkingAt.has(msgIdx)) {
+        const state = readProviderState(msg);
+        if (state) {
+          blocks.push(
+            ...(state.blocks as unknown as Array<
+              Anthropic.ThinkingBlockParam | Anthropic.RedactedThinkingBlockParam
+            >)
+          );
+        }
+      }
 
       const textContent =
         typeof msg.content === "string"
@@ -348,6 +373,12 @@ function translateMessages(
             input: parsedInput,
           });
         }
+        out.push({ role: "assistant", content: blocks });
+      } else if (blocks.length > 0) {
+        // Only reachable if the replay selection is ever widened past turns with
+        // tool_calls. Emitting the array form rather than the string keeps that
+        // change from silently discarding thinking.
+        if (textContent) blocks.push({ type: "text", text: textContent });
         out.push({ role: "assistant", content: blocks });
       } else {
         out.push({ role: "assistant", content: textContent });

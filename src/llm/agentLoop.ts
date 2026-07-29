@@ -79,6 +79,7 @@ import { isTimeoutError } from "./anthropicAdapter.js";
 import { MANIFEST_CONTENT_PREFIX } from "./anthropicAdapter/cacheControlHelpers.js";
 import {
   ZONE_PROVIDER_FIELD,
+  countThinkingDroppedForModel,
   type ProviderThinkingBlock,
 } from "./anthropicAdapter/thinkingBlocks.js";
 import { CompactionExhaustedError, type CompactionResult } from "./compaction/types.js";
@@ -4759,6 +4760,14 @@ Example:
               debugLog("[zone-model-escalated]", JSON.stringify({
                 from: currentModel, to: up, pattern: persisting.pattern,
                 iter, costUsd: budget.snapshot().costUsd,
+                // Escalation fires when a run is already stalling — the moment
+                // the model most needs its prior reasoning and, because those
+                // blocks are signed by the model being replaced, the moment it
+                // certainly loses it. The drop is silent to the model by design
+                // (it has no expectation about a turn it did not produce), so
+                // this count is the only way a stall-after-escalation pattern is
+                // attributable rather than mysterious.
+                thinkingDropped: countThinkingDroppedForModel(responseInput, up),
               }));
               continue;
             }
