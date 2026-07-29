@@ -51,6 +51,14 @@ export function isThinkingBlock(block: unknown): block is ProviderThinkingBlock 
  *
  * Returns the SDK's own block objects — not copies. A copy would be a
  * re-serialization, which is the one thing byte-identity cannot survive.
+ *
+ * @unverified-probe(thinking:signature-replay) That a replayed block is accepted
+ * by the API is documented, not observed here: no live call has been made. The
+ * whole mechanism is unit-tested against byte-identity, which is the property
+ * the signature depends on — but whether the signature then validates is the
+ * API's answer to give. `scripts/thinking-probe.mjs` asks it; a 400 mentioning
+ * the signature would be a definitive negative and would make this feature
+ * inert rather than merely unproven.
  */
 export function captureThinkingBlocks(content: readonly unknown[]): ProviderThinkingBlock[] {
   const blocks: ProviderThinkingBlock[] = [];

@@ -332,6 +332,13 @@ function translateMessages(
       // signature is validated over the block's exact bytes, so re-serializing
       // it (even into an identical-looking object) is the one transform it
       // cannot survive.
+      //
+      // @unverified-probe(thinking:token-saving) The benefit is a hypothesis
+      // with n=1 behind it: one observed turn spent 906 thinking tokens
+      // re-deriving 579 tokens of reasoning it could not see. Whether replaying
+      // the block actually lowers turn-2 thinking, and by how much against the
+      // run-to-run spread, is what scripts/thinking-probe.mjs measures. The
+      // mechanism is correct either way; the payoff is not yet a number.
       if (replayThinkingAt.has(msgIdx)) {
         const state = readProviderState(msg);
         if (state) {
