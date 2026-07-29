@@ -153,6 +153,8 @@ export type StoreState = {
     objective: string;
     steps: Array<{ title: string; description: string; filesLikely: string[] }>;
     scopeNotes?: string;
+    noChangeReason?: string;
+    cannotVerifyReason?: string;
   } | null;
   stagedDiffProposal: {
     approvalId: string;
@@ -367,6 +369,8 @@ export type StoreAction =
       objective: string;
       steps: Array<{ title: string; description: string; filesLikely: string[] }>;
       scopeNotes?: string;
+      noChangeReason?: string;
+      cannotVerifyReason?: string;
     }
   | { type: "PLAN_READY_RESOLVED" }
   | {
@@ -779,6 +783,8 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
           objective: action.objective,
           steps: action.steps,
           ...(action.scopeNotes ? { scopeNotes: action.scopeNotes } : {}),
+          ...(action.noChangeReason ? { noChangeReason: action.noChangeReason } : {}),
+          ...(action.cannotVerifyReason ? { cannotVerifyReason: action.cannotVerifyReason } : {}),
         },
       };
 

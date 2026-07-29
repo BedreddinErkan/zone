@@ -7,7 +7,7 @@ import {
   setTrustAllForRun,
 } from "../api/commandApprovals.js";
 import { rejectPendingRevisionsForRun } from "../llm/revisionApprovals.js";
-import { requestPlanApproval, rejectPendingPlansForRun } from "../llm/planApprovals.js";
+import { requestPlanApproval, rejectPendingPlansForRun, emitPlanEmptyApproval } from "../llm/planApprovals.js";
 import type { ExecutionPlan } from "../llm/executionPlan.js";
 import { loadCliConfig, validateCliConfig, applyDiskKeyFallbacks, type CliConfig, type CliFlags } from "./config.js";
 import { loadDiskModelSync } from "../api/diskModel.js";
@@ -422,6 +422,8 @@ export async function runOneShotInner(
               objective: currentPlan.objective,
               steps: currentPlan.steps,
               scopeNotes: currentPlan.scopeNotes,
+              noChangeReason: currentPlan.noChangeReason,
+              cannotVerifyReason: currentPlan.cannotVerifyReason,
             },
             emit: (evt) => progressCallback({ stage: evt.type, progress: evt } as unknown as LlmPatchProgressUpdate),
             abortSignal: ac.signal,
@@ -458,6 +460,16 @@ export async function runOneShotInner(
                 debugLog("[zone-plan-replan-failed]", e instanceof Error ? e.message : String(e));
                 progressCallback({ stage: "narration", progress: { type: "narration", ts: Date.now(), runId, title: "Re-planning failed — continuing with the previous plan outline. Your feedback will still be applied during execution." } } as unknown as LlmPatchProgressUpdate);
               }
+              // None of E8a/E8b/the forceSteps safety net re-run on a replan, so a
+              // schema-valid stepless-with-reason response can reach here. This
+              // arm loops back to requestPlanApproval — the user WILL see it.
+              if (isNoChangePlan(currentPlan) || isCannotVerifyPlan(currentPlan)) {
+                emitPlanEmptyApproval({
+                  runId,
+                  reasonField: isNoChangePlan(currentPlan) ? "noChangeReason" : "cannotVerifyReason",
+                  reviewed: true,
+                });
+              }
               planFirstRefineCount++;
               continue;
             case "approve_with_feedback":
@@ -483,6 +495,17 @@ export async function runOneShotInner(
               } catch (e) {
                 debugLog("[zone-plan-replan-failed]", e instanceof Error ? e.message : String(e));
                 progressCallback({ stage: "narration", progress: { type: "narration", ts: Date.now(), runId, title: "Re-planning failed — continuing with the previous plan outline. Your feedback will still be applied during execution." } } as unknown as LlmPatchProgressUpdate);
+              }
+              // This arm does NOT loop back to requestPlanApproval — currentPlan
+              // goes straight to execution below (planForExecution = currentPlan).
+              // A stepless-with-reason plan here is shown to no one; this is the
+              // arm the reviewed:false count exists to measure.
+              if (isNoChangePlan(currentPlan) || isCannotVerifyPlan(currentPlan)) {
+                emitPlanEmptyApproval({
+                  runId,
+                  reasonField: isNoChangePlan(currentPlan) ? "noChangeReason" : "cannotVerifyReason",
+                  reviewed: false,
+                });
               }
               debugLog("[zone-plan-decision]", { mode: "plan-first", decision: "approve_with_feedback", refineCount: planFirstRefineCount });
               looping = false;

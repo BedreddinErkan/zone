@@ -5,6 +5,7 @@
  */
 
 import crypto from "node:crypto";
+import { log } from "../utils/logger.js";
 
 export interface PlanReadyProposal {
   runId: string;
@@ -12,6 +13,33 @@ export interface PlanReadyProposal {
   objective: string;
   steps: Array<{ title: string; description: string; filesLikely: string[]; subagentEligible?: boolean }>;
   scopeNotes?: string;
+  noChangeReason?: string;
+  cannotVerifyReason?: string;
+}
+
+/**
+ * A stepless (`noChangeReason`/`cannotVerifyReason`) plan reached this gate.
+ *
+ * The three gates that normally guarantee non-empty steps before the plan-first
+ * loop starts (E8a, E8b, the forceSteps/synthesizeMinimalPlan safety net —
+ * dispatch.ts) do not re-run after a replan. `reviewed` separates the two ways
+ * this can happen: `feedback`/`refine` loop back into `requestPlanApproval`, so
+ * the user sees it; `approve_with_feedback` does not loop back — the plan goes
+ * straight to execution with nothing shown. The unreviewed count is the one
+ * that matters, which is why this is one marker with a field rather than two.
+ *
+ * `log()`, matching `[zone-tier-grant-unusable]` (loopTelemetry.ts) — fires
+ * unconditionally, no ZONE_VERBOSE_LOGS gate. This is diagnostic only: it does
+ * not change what happens next, and it does not itself make the count
+ * queryable — see the commit message for what that claim does and does not
+ * cover.
+ */
+export function emitPlanEmptyApproval(data: {
+  runId: string;
+  reasonField: "noChangeReason" | "cannotVerifyReason";
+  reviewed: boolean;
+}): void {
+  log("[zone-plan-empty-approval]", JSON.stringify(data));
 }
 
 export type PlanDecision =
@@ -43,6 +71,8 @@ export function requestPlanApproval(input: {
     planObjective: string;
     planStepsJson: string;
     planScopeNotes?: string;
+    planNoChangeReason?: string;
+    planCannotVerifyReason?: string;
   }) => void;
   abortSignal?: AbortSignal;
   timeoutMs?: number;
@@ -96,6 +126,8 @@ export function requestPlanApproval(input: {
       planObjective: proposal.objective,
       planStepsJson: JSON.stringify(proposal.steps),
       ...(proposal.scopeNotes ? { planScopeNotes: proposal.scopeNotes } : {}),
+      ...(proposal.noChangeReason ? { planNoChangeReason: proposal.noChangeReason } : {}),
+      ...(proposal.cannotVerifyReason ? { planCannotVerifyReason: proposal.cannotVerifyReason } : {}),
     });
   });
 }

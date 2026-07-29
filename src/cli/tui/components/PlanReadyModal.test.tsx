@@ -1,7 +1,53 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render } from "ink-testing-library";
+import { render as inkRender } from "ink";
+import { EventEmitter } from "node:events";
 import React from "react";
 import { PlanReadyModal } from "./PlanReadyModal.js";
+import type { StoreAction } from "../store.js";
+
+/**
+ * ink-testing-library hardcodes columns=100, which masks width-squeeze bugs.
+ * `staticHarness.tsx:renderTranscriptAt` uses the same override-stdout
+ * technique but is wired specifically to <Transcript />, which never calls
+ * useInput — PlanReadyModal does, so a stdout-only mock isn't enough: Ink's
+ * useInput calls stdin.setRawMode, and without it Ink catches the throw and
+ * re-renders an error frame ("Raw mode is not supported…"), silently
+ * replacing the real content. The stdin shape below is copied from
+ * ink-testing-library's own internal mock (node_modules/ink-testing-library/
+ * build/index.js) — the minimum Ink's input handling requires.
+ */
+class MockStdin extends EventEmitter {
+  isTTY = true;
+  setEncoding(): void {}
+  setRawMode(): void {}
+  resume(): void {}
+  pause(): void {}
+  ref(): void {}
+  unref(): void {}
+}
+
+function renderPlanReadyModalAt(
+  proposal: React.ComponentProps<typeof PlanReadyModal>["proposal"],
+  dispatch: (action: StoreAction) => void,
+  columns: number,
+): { lastFrame: () => string | undefined; unmount: () => void } {
+  let lastFrame: string | undefined;
+  const stdout = Object.assign(new EventEmitter(), {
+    columns,
+    rows: 40,
+    write: (frame: string) => { lastFrame = frame; return true; },
+  });
+  const instance = inkRender(
+    <PlanReadyModal proposal={proposal} dispatch={dispatch} />,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    { stdout: stdout as any, stdin: new MockStdin() as any, debug: true, exitOnCtrlC: false, patchConsole: false },
+  );
+  return {
+    lastFrame: () => lastFrame,
+    unmount: () => instance.unmount(),
+  };
+}
 
 const mockResolvePlanApproval = vi.hoisted(() => vi.fn().mockReturnValue({ ok: true }));
 
@@ -262,5 +308,86 @@ describe("PlanReadyModal — scopeNotes", () => {
     // Ink wraps text across lines — count total x chars to verify cap
     const xCount = (frame.match(/x/g) ?? []).length;
     expect(xCount).toBe(200); // .slice(0, 200) applied — exactly 200 rendered
+  });
+});
+
+// A replan can produce a stepless plan carrying noChangeReason/cannotVerifyReason
+// (none of E8a/E8b/the forceSteps safety net in dispatch.ts re-run after a
+// replan). The modal must show the reason, not just an empty step list.
+describe("PlanReadyModal — stepless plan with a stated reason", () => {
+  const STEPLESS_PROPOSAL = {
+    ...PROPOSAL,
+    steps: [],
+  };
+
+  it("renders 'No changes needed:' and the reason text when noChangeReason is set", () => {
+    const proposal = { ...STEPLESS_PROPOSAL, noChangeReason: "Build already exits 0 — the asserted bug does not reproduce." };
+    const { lastFrame, unmount } = render(
+      <PlanReadyModal proposal={proposal} dispatch={makeDispatch()} />
+    );
+    activeUnmount = unmount;
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("No changes needed:");
+    expect(frame).toContain("Build already exits 0");
+    expect(frame).not.toContain("Could not verify:");
+  });
+
+  it("renders 'Could not verify:' and the reason text when cannotVerifyReason is set", () => {
+    const proposal = { ...STEPLESS_PROPOSAL, cannotVerifyReason: "Reproduce command was blocked — could not confirm the premise." };
+    const { lastFrame, unmount } = render(
+      <PlanReadyModal proposal={proposal} dispatch={makeDispatch()} />
+    );
+    activeUnmount = unmount;
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("Could not verify:");
+    expect(frame).toContain("Reproduce command was blocked");
+    expect(frame).not.toContain("No changes needed:");
+  });
+
+  it("renders neither reason label on a normal multi-step plan", () => {
+    const { lastFrame, unmount } = render(
+      <PlanReadyModal proposal={PROPOSAL} dispatch={makeDispatch()} />
+    );
+    activeUnmount = unmount;
+    const frame = lastFrame() ?? "";
+    expect(frame).not.toContain("No changes needed:");
+    expect(frame).not.toContain("Could not verify:");
+  });
+
+  it("truncates the reason text to 200 chars", () => {
+    const longReason = "x".repeat(300);
+    const proposal = { ...STEPLESS_PROPOSAL, noChangeReason: longReason };
+    const { lastFrame, unmount } = render(
+      <PlanReadyModal proposal={proposal} dispatch={makeDispatch()} />
+    );
+    activeUnmount = unmount;
+    const frame = lastFrame() ?? "";
+    const xCount = (frame.match(/x/g) ?? []).length;
+    expect(xCount).toBe(200);
+  });
+
+  it("still renders all four action keys — the reason changes visibility, not approval semantics", () => {
+    const proposal = { ...STEPLESS_PROPOSAL, noChangeReason: "Verified clean." };
+    const { lastFrame, unmount } = render(
+      <PlanReadyModal proposal={proposal} dispatch={makeDispatch()} />
+    );
+    activeUnmount = unmount;
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("[1]");
+    expect(frame).toContain("[2]");
+    expect(frame).toContain("[3]");
+    expect(frame).toContain("[4]");
+  });
+
+  it("does not break the footer at 60 or 80 columns", () => {
+    const proposal = { ...STEPLESS_PROPOSAL, cannotVerifyReason: "Reproduce command was blocked — could not confirm the premise." };
+    for (const columns of [60, 80]) {
+      const { lastFrame, unmount } = renderPlanReadyModalAt(proposal, makeDispatch(), columns);
+      const frame = lastFrame() ?? "";
+      expect(frame).toContain("Could not verify:");
+      expect(frame).toContain("[1]");
+      expect(frame).toContain("[4]");
+      unmount();
+    }
   });
 });

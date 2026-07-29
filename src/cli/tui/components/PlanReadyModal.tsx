@@ -96,6 +96,16 @@ export function PlanReadyModal({ proposal, dispatch }: PlanReadyModalProps): Rea
       <Text dimColor>Objective:</Text>
       <Text>{proposal.objective.slice(0, 200)}</Text>
       <Text> </Text>
+      {(proposal.noChangeReason || proposal.cannotVerifyReason) && (
+        <Box flexDirection="column" marginBottom={1}>
+          <Text bold color="yellow">
+            {proposal.noChangeReason ? "No changes needed:" : "Could not verify:"}
+          </Text>
+          <Text color="yellow">
+            {(proposal.noChangeReason ?? proposal.cannotVerifyReason ?? "").slice(0, 200)}
+          </Text>
+        </Box>
+      )}
       {proposal.steps.slice(0, 6).map((step, i) => (
         <Box key={i} flexDirection="column">
           <Box flexDirection="row">

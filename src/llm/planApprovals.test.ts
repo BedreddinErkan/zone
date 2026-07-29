@@ -8,6 +8,7 @@ import {
   requestPlanApproval,
   resolvePlanApproval,
   rejectPendingPlansForRun,
+  emitPlanEmptyApproval,
   type PlanReadyProposal,
 } from "./planApprovals.js";
 
@@ -235,5 +236,78 @@ describe("scopeNotes in PlanReadyProposal", () => {
     expect(Object.prototype.hasOwnProperty.call(evt, "planScopeNotes")).toBe(false);
     resolvePlanApproval({ planId: "plan-scope-002", runId: PROPOSAL.runId, decision: "reject" });
     await p;
+  });
+});
+
+// The gap: none of E8a/E8b/the forceSteps safety net (dispatch.ts) re-run after
+// a replan, so a stepless plan carrying noChangeReason/cannotVerifyReason can
+// reach this gate. Without these fields threaded through, the user sees an
+// empty step list and four live action keys with no stated reason at all.
+describe("noChangeReason / cannotVerifyReason in PlanReadyProposal", () => {
+  it("noChangeReason on proposal is emitted as planNoChangeReason in the event", async () => {
+    const { emit, events } = makeEmit();
+    const proposal: PlanReadyProposal = {
+      ...PROPOSAL,
+      planId: "plan-nochange-001",
+      steps: [],
+      noChangeReason: "Build already exits 0 — the asserted bug does not reproduce.",
+    };
+    const p = requestPlanApproval({ proposal, emit: emit as any });
+    await Promise.resolve();
+    const evt = events[0] as Record<string, unknown>;
+    expect(evt["planNoChangeReason"]).toBe("Build already exits 0 — the asserted bug does not reproduce.");
+    expect(Object.prototype.hasOwnProperty.call(evt, "planCannotVerifyReason")).toBe(false);
+    resolvePlanApproval({ planId: "plan-nochange-001", runId: PROPOSAL.runId, decision: "reject" });
+    await p;
+  });
+
+  it("cannotVerifyReason on proposal is emitted as planCannotVerifyReason in the event", async () => {
+    const { emit, events } = makeEmit();
+    const proposal: PlanReadyProposal = {
+      ...PROPOSAL,
+      planId: "plan-cannotverify-001",
+      steps: [],
+      cannotVerifyReason: "Reproduce command was blocked — could not confirm the premise.",
+    };
+    const p = requestPlanApproval({ proposal, emit: emit as any });
+    await Promise.resolve();
+    const evt = events[0] as Record<string, unknown>;
+    expect(evt["planCannotVerifyReason"]).toBe("Reproduce command was blocked — could not confirm the premise.");
+    expect(Object.prototype.hasOwnProperty.call(evt, "planNoChangeReason")).toBe(false);
+    resolvePlanApproval({ planId: "plan-cannotverify-001", runId: PROPOSAL.runId, decision: "reject" });
+    await p;
+  });
+
+  it("both are absent in the event when neither is set on the proposal", async () => {
+    const { emit, events } = makeEmit();
+    const p = requestPlanApproval({ proposal: PROPOSAL, emit: emit as any });
+    await Promise.resolve();
+    const evt = events[0] as Record<string, unknown>;
+    expect(Object.prototype.hasOwnProperty.call(evt, "planNoChangeReason")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(evt, "planCannotVerifyReason")).toBe(false);
+    resolvePlanApproval({ planId: PROPOSAL.planId, runId: PROPOSAL.runId, decision: "reject" });
+    await p;
+  });
+});
+
+describe("emitPlanEmptyApproval", () => {
+  it("logs unconditionally via console.log (log(), not debugLog — matches [zone-tier-grant-unusable])", () => {
+    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+    emitPlanEmptyApproval({ runId: "run-x", reasonField: "noChangeReason", reviewed: true });
+    expect(spy).toHaveBeenCalledWith(
+      "[zone-plan-empty-approval]",
+      JSON.stringify({ runId: "run-x", reasonField: "noChangeReason", reviewed: true }),
+    );
+    spy.mockRestore();
+  });
+
+  it("carries reviewed:false for the unreviewed (approve_with_feedback) arm", () => {
+    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+    emitPlanEmptyApproval({ runId: "run-y", reasonField: "cannotVerifyReason", reviewed: false });
+    expect(spy).toHaveBeenCalledWith(
+      "[zone-plan-empty-approval]",
+      JSON.stringify({ runId: "run-y", reasonField: "cannotVerifyReason", reviewed: false }),
+    );
+    spy.mockRestore();
   });
 });

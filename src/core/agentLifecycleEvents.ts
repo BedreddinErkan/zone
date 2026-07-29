@@ -318,6 +318,8 @@ export type ZoneStructuredProgressEvent = {
   planObjective?: string;
   planStepsJson?: string;
   planScopeNotes?: string;
+  planNoChangeReason?: string;
+  planCannotVerifyReason?: string;
   /** staged_diffs_ready_for_approval: R3 checkpoint fields. */
   stagedFilesJson?: string;
   stagedVerificationSummary?: string;

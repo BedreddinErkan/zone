@@ -8,6 +8,7 @@ void buildLoopCompleteSummary;
 void buildRunSummary;
 import type { RunTodo, TodoStatus } from "../../../core/todoLifecycle.js";
 import type { StagedFile } from "../../../core/fileDiff.js";
+import { debugLog } from "../../../utils/logger.js";
 
 export const SPINNER_LABEL_STARTING = "Starting…";
 export const SPINNER_LABEL_PLANNING = "Planning…";
@@ -322,7 +323,17 @@ export function eventToActions(
       let steps: Array<{ title: string; description: string; filesLikely: string[] }> = [];
       try {
         if (evt.planStepsJson) steps = JSON.parse(evt.planStepsJson);
-      } catch { /* malformed JSON — render with empty steps */ }
+      } catch {
+        // No live producer known for this today (see planApprovals.ts:97 — the
+        // string is JSON.stringify'd from schema-validated data and parsed back
+        // in the same synchronous call). Bare diagnostic only; deliberately not
+        // threaded into a render state — see commit message.
+        debugLog("[zone-plan-steps-unparsed]", JSON.stringify({
+          planId: evt.planId,
+          runId: evt.runId,
+          payloadBytes: Buffer.byteLength(evt.planStepsJson ?? "", "utf8"),
+        }));
+      }
       return {
         actions: [
           { type: "SPINNER_STOP" },
@@ -333,6 +344,8 @@ export function eventToActions(
             objective: evt.planObjective ?? "",
             steps,
             scopeNotes: evt.planScopeNotes,
+            noChangeReason: evt.planNoChangeReason,
+            cannotVerifyReason: evt.planCannotVerifyReason,
           },
         ],
         intents: [],
