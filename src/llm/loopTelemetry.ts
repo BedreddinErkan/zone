@@ -153,6 +153,13 @@ export interface TierConstraintsData {
   fallbackUsed: boolean;
   /** Set only when a tier-derived tool subset is active (B.2). Omitted for complex / subagent loops. */
   toolSubsetSize?: number;
+  /** Whether a real classifier output informed `tier`, or it's the "medium" literal
+   *  default applied when no classification exists (e.g. the plan-investigation path,
+   *  which calls runAgentLoop with no taskClassification at all). Without this, a
+   *  record with confidence 0 and fallbackUsed false is indistinguishable from a
+   *  real classification result unless the reader already knows buildFallback always
+   *  sets fallbackUsed true. */
+  classificationSource: "classifier" | "absent";
 }
 
 export function emitTierConstraints(data: TierConstraintsData): void {

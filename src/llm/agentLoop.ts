@@ -2242,6 +2242,7 @@ async function runAgentLoopScoped(input: AgentLoopInput, stats: LoopRunStats): P
       softIterWarn: effectiveSoftIterWarn,
       classificationConfidence: input.taskClassification?.confidence ?? 0,
       fallbackUsed: input.taskClassification?.fallbackUsed ?? false,
+      classificationSource: input.taskClassification == null ? "absent" : "classifier",
       toolSubsetSize: tierFilterFromClassifier ? toolsForLLM.length : undefined,
     });
     // Tier grants a subagent quota; the archetype's pipeline decides the
