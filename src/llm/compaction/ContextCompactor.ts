@@ -231,14 +231,23 @@ export class ContextCompactor {
           `progress, recommend the user break this task into smaller subtasks.`
         : "";
 
-    // J.3: manifest block prepended to summary in the synthetic system turn
+    // J.3: manifest block prepended to summary in the synthetic turn
     const manifestBlock = manifest ? `${manifest}\n\n` : "";
 
     for (let i = 0; i < args.responseInput.length; i++) {
       if (candidateIndices.has(i)) {
         if (i === firstCandidateIdx) {
+          // role:"user", NOT role:"system". extractSystem (convertParams.ts)
+          // hoists every system message into the top-level system prompt no
+          // matter where it sits in the array, so a mid-array system turn
+          // rewrites the cached system+tools prefix — breakpoint #1, the ~3.9k
+          // static prefix, which is the most expensive thing in the request to
+          // invalidate. Measured: as system the prompt goes 22,427 -> 22,664
+          // chars with the summary hoisted in; as user it is byte-identical.
+          // Breakpoint #2 still busts here, which is inherent to deleting
+          // history; #1 is the avoidable half.
           newResponseInput.push({
-            role: "system",
+            role: "user",
             content: `[compacted_history]\n${manifestBlock}${summaryText}${recurringNotice}\n[/compacted_history]`,
           });
         }

@@ -646,8 +646,10 @@ describe("ContextCompactor.checkAndMaybeCompact — compaction structure", () =>
     // First two: verbatim system and user
     expect(nr[0]).toEqual({ role: "system", content: "sys" });
     expect(nr[1]).toEqual({ role: "user", content: "task" });
-    // Third: synthetic system turn with compacted_history wrapper
-    expect(nr[2].role).toBe("system");
+    // Third: synthetic turn with compacted_history wrapper. role:"user", not
+    // "system" — a mid-array system message is hoisted into the top-level system
+    // prompt by extractSystem, rewriting cache breakpoint #1.
+    expect(nr[2].role).toBe("user");
     expect(typeof nr[2].content).toBe("string");
     expect((nr[2].content as string)).toMatch(/\[compacted_history\]/);
     expect((nr[2].content as string)).toMatch(/\[\/compacted_history\]/);
@@ -725,7 +727,7 @@ describe("ContextCompactor.checkAndMaybeCompact — compaction structure", () =>
         client: stubClient,
       });
       const syntheticTurn = result.newResponseInput?.find(
-        (t) => t.role === "system" && typeof t.content === "string" && (t.content as string).includes("[compacted_history]")
+        (t) => t.role === "user" && typeof t.content === "string" && (t.content as string).includes("[compacted_history]")
       );
       expect(syntheticTurn).toBeDefined();
       expect((syntheticTurn!.content as string)).not.toContain("NOTE:");
@@ -752,7 +754,7 @@ describe("ContextCompactor.checkAndMaybeCompact — compaction structure", () =>
         client: stubClient,
       });
       const syntheticTurn = result.newResponseInput?.find(
-        (t) => t.role === "system" && typeof t.content === "string" && (t.content as string).includes("[compacted_history]")
+        (t) => t.role === "user" && typeof t.content === "string" && (t.content as string).includes("[compacted_history]")
       );
       expect(syntheticTurn).toBeDefined();
       const content = syntheticTurn!.content as string;
@@ -936,7 +938,7 @@ describe("Phase J.3 — buildFileReadManifest", () => {
     });
     expect(result.compacted).toBe(true);
     const synth = result.newResponseInput?.find(
-      (t) => t.role === "system" && typeof t.content === "string" && (t.content as string).includes("[compacted_history]")
+      (t) => t.role === "user" && typeof t.content === "string" && (t.content as string).includes("[compacted_history]")
     );
     expect(synth).toBeDefined();
     const content = synth!.content as string;
