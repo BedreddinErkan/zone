@@ -1,5 +1,37 @@
 import type Anthropic from "@anthropic-ai/sdk";
+import { createHash } from "node:crypto";
 import { log } from "../../utils/logger.js";
+
+/**
+ * SHA-256 of the cached prefix — everything up to and including the breakpoint-#2
+ * marker, as it goes on the wire.
+ *
+ * This is deliberately NOT the probe at `agentLoop.ts`'s ZONE_DEBUG_CACHE_PROBE
+ * block. That one hashes `prunedMessages`, the internal pre-translation shape,
+ * which is the wrong object for a cache question in two directions: it includes
+ * Zone-internal fields the API never sees (so it reports a bust when one is
+ * added), and it excludes the translation itself (so a change in how a message
+ * is rendered is invisible to it). Cache identity is a property of the request.
+ *
+ * @internal exported for tests
+ */
+export function hashCachedPrefix(
+  messages: Anthropic.MessageParam[],
+  markerIdx: number
+): string {
+  const prefix = messages.slice(0, markerIdx + 1);
+  // cache_control is stripped. It is Zone's directive, not conversation content,
+  // and it MUST move forward every iteration — the marker sits on the last tool
+  // result, which advances as the run proceeds. Hashing it in would report a
+  // change on every single iteration and the probe would say nothing. Marker
+  // position is reported separately by [zone-cache-marker-placed]; this hash
+  // answers the other question, which is whether the content underneath drifted.
+  return createHash("sha256").update(JSON.stringify(prefix, cacheControlOmitter)).digest("hex");
+}
+
+function cacheControlOmitter(key: string, value: unknown): unknown {
+  return key === "cache_control" ? undefined : value;
+}
 
 /**
  * Stable content prefix that identifies a manifest message injected by ManifestInjectionProcessor.
@@ -106,6 +138,13 @@ export function applyMessageCacheBreakpoint2(
       contentBlockCount: Array.isArray(targetMsg?.content) ? targetMsg.content.length : 1,
       totalMessages: result.length,
       manifestSkipped: manifestFallbackIdx >= 0 && lastUserIdx !== manifestFallbackIdx,
+    }));
+    // The prefix as the API sees it. Compare across iterations: it must be
+    // identical for a cache hit, and it is the only hash that answers that.
+    log("[zone-cache-prefix-hash]", JSON.stringify({
+      markerIdx: lastUserIdx,
+      prefixHash: hashCachedPrefix(result, lastUserIdx),
+      prefixMessages: lastUserIdx + 1,
     }));
   }
 
