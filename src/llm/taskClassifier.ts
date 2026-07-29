@@ -9,6 +9,7 @@ import {
 import { extractUsage } from "./recordingClient.js";
 import { getRequestContext } from "./openaiContext.js";
 import { totalCost, type ProviderName } from "../usage/pricing.js";
+import { getMaxOutputTokens } from "./models.js";
 import { log } from "../utils/logger.js";
 
 export type TaskTier = "simple" | "medium" | "complex";
@@ -162,12 +163,40 @@ Boundary rules:
 - "Failing test" + "fix" = debug (not targeted_fix). Reproduction matters.
 - When uncertain between targeted_fix and debug: debug if failure repro needed, targeted_fix if bug is already pinpointed.
 - When uncertain between any narrow archetype and complex_multi_file: pick complex_multi_file (safer).
-- "list / enumerate / show all" + filesystem scope = question (NOT complex_multi_file).`;
+- "list / enumerate / show all" + filesystem scope = question (NOT complex_multi_file).
+
+Respond with the JSON object and nothing else: no prose, no rationale, no markdown fences, no text before or after it.`;
 
 const DEFAULT_TIMEOUT_MS = 5000;
 /** Confidence gate: classifier outputs below this threshold are overridden to "medium". */
 export const CLASSIFIER_CONFIDENCE_THRESHOLD = 0.5;
-const MAX_OUTPUT_TOKENS = 300;
+/**
+ * Hard ceiling on classifier output.
+ *
+ * What it protects against: a reasoning-style model spending its thinking budget
+ * inside `max_tokens` and burning a large allowance to produce a ~110-token JSON
+ * object. It is a safety net, not the operating point.
+ *
+ * The previous value — a bare 300 — was the operating point: 6 of 14 measured
+ * calls hit it, making truncation the classifier's default behaviour on
+ * read-only tasks rather than its failure mode. Measured output with the
+ * JSON-only instruction is 111 tokens (max 120), so this leaves ~8x headroom and
+ * does not bind. Verified directly: raising the cap 300 -> 1024 changed nothing
+ * (same average, same maximum, zero truncation), because the instruction is what
+ * bounds the response and the cap only ever decided whether it survived.
+ */
+const CLASSIFIER_OUTPUT_CEILING = 1024;
+
+/**
+ * Output budget for one classification: the model's own ceiling, clamped.
+ *
+ * `getMaxOutputTokens` returns 64000 for the default Haiku, so the clamp is what
+ * applies today — but a model whose ceiling is *below* it gets its own, which a
+ * literal could never do.
+ */
+function classifierMaxOutputTokens(model: string): number {
+  return Math.min(getMaxOutputTokens(model), CLASSIFIER_OUTPUT_CEILING);
+}
 
 /** The tier vocabulary. */
 const VALID_TIERS: readonly string[] = ["simple", "medium", "complex"];
@@ -530,7 +559,7 @@ export async function classifyTask(
         // gpt-5.x mini / reasoning-style models reject `max_tokens` — they
         // require `max_completion_tokens`. The OpenAI SDK accepts both fields,
         // so prefer the new spelling everywhere this classifier runs.
-        max_completion_tokens: MAX_OUTPUT_TOKENS,
+        max_completion_tokens: classifierMaxOutputTokens(model),
         messages: [
           { role: "system", content: CLASSIFIER_SYSTEM_PROMPT },
           { role: "user", content: `Task: ${normalized}\n\nClassify this task.` },
