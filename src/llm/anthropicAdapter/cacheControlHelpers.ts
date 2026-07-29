@@ -3,8 +3,16 @@ import { createHash } from "node:crypto";
 import { log } from "../../utils/logger.js";
 
 /**
- * SHA-256 of the cached prefix — everything up to and including the breakpoint-#2
- * marker, as it goes on the wire.
+ * SHA-256 of the conversational message slice up to and including the
+ * breakpoint-#2 marker, as it goes on the wire.
+ *
+ * Scope, precisely: this hashes only the `messages` array it's given. It has
+ * no parameter for `system` or `tools` and hashes neither — callers who also
+ * need to detect a change in either (e.g. across a plan→execute boundary,
+ * where both the system prompt and the tool set change) must compare those
+ * separately. Every existing call site passes only the conversational array
+ * because within one agent loop the system prompt never changes mid-run, so
+ * this gap never mattered before; it would for a cross-boundary handoff.
  *
  * This is deliberately NOT the probe at `agentLoop.ts`'s ZONE_DEBUG_CACHE_PROBE
  * block. That one hashes `wireMessages`, the internal pre-translation shape,
