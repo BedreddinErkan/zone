@@ -6375,6 +6375,30 @@ const initializeTodosFromPlan = (): void => {
       }
     }
 
+    // Envelope retention: same once-per-run, marker-file-throttled pattern as
+    // snapshot cleanup above (not CLI-startup — that would run every invocation).
+    // Every non-natural-completion exit leaves an envelope behind forever
+    // otherwise, since deleteRunEnvelope is only ever called on graceful success.
+    if (runId) {
+      try {
+        const { maybeCleanupOldEnvelopes } = await import(
+          "../api/diskRunEnvelope.js"
+        );
+        const result = await maybeCleanupOldEnvelopes();
+        if (result.ran && result.removed > 0) {
+          debugLog(
+            "[zone-envelope-cleanup]",
+            JSON.stringify({ removed: result.removed })
+          );
+        }
+      } catch (err) {
+        errorLog(
+          "[zone-envelope-cleanup-error]",
+          err instanceof Error ? err.message : String(err)
+        );
+      }
+    }
+
     if (runId) {
       const summary = assembleRunSummary({
         fileDiffs,
