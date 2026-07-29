@@ -29,7 +29,7 @@ function markerSinkPath(): string {
 }
 
 /** The stated bound IS the enforced bound: this is the only threshold checked. */
-export const MARKER_SINK_MAX_BYTES = 512 * 1024;
+export const MARKER_SINK_MAX_BYTES = 2 * 1024 * 1024;
 /**
  * A trim packs the file down to here, not up to MAX_BYTES — guaranteeing
  * ~256KB of headroom (hence appends) between trims regardless of line size.

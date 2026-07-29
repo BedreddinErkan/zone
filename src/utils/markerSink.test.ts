@@ -132,9 +132,9 @@ describe("headroom — trim packs to the low-water mark, not the ceiling", () =>
     // starting size (one line, a couple KB) — trivially "low" for reasons
     // that have nothing to do with trimming. Skip past where a first trim
     // could plausibly have fired before tracking the minimum at all.
-    const WARMUP_ITERATIONS = 260;
+    const WARMUP_ITERATIONS = 1040;
     let minSize = Infinity;
-    for (let i = 0; i < WARMUP_ITERATIONS + 150; i++) {
+    for (let i = 0; i < WARMUP_ITERATIONS + 600; i++) {
       appendMarkerRecord(bigLine(i));
       if (i >= WARMUP_ITERATIONS) minSize = Math.min(minSize, fs.statSync(testPath).size);
     }
@@ -142,8 +142,8 @@ describe("headroom — trim packs to the low-water mark, not the ceiling", () =>
     // Hardcoded expected range — NOT read back from MARKER_SINK_TRIM_TARGET_BYTES.
     // If the target is ever reverted to pack up to the cap instead of away from
     // it, the minimum never drops this low: mutation 4 covers exactly that.
-    expect(minSize).toBeGreaterThan(200 * 1024);
-    expect(minSize).toBeLessThanOrEqual(300 * 1024);
+    expect(minSize).toBeGreaterThan(800 * 1024);
+    expect(minSize).toBeLessThanOrEqual(1200 * 1024);
   });
 });
 
