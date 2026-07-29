@@ -403,6 +403,80 @@ function computeResponseCost(
   });
 }
 
+/**
+ * Whether the model ran out of output budget mid-response.
+ *
+ * Read off the response, never inferred from a parse failure. Truncation and
+ * malformed output are different defects with different fixes, and they do not
+ * coincide: 6 of 14 measured calls truncated *without* failing to parse, because
+ * the JSON happened to precede the prose the model appended. Inferring from a
+ * parse failure would have missed every one of those, which is how a 43%
+ * truncation rate survived an audit cycle described as "safe with default Haiku".
+ *
+ * `"length"` is the Chat Completions spelling on both providers — OpenAI emits it
+ * natively, and the Anthropic adapter maps `stop_reason:"max_tokens"` onto it
+ * (`anthropicAdapter/convertResponse.ts`). The Responses-API shapes are checked
+ * too, since this classifier is routed by provider and may meet either.
+ */
+function wasTruncated(response: unknown): boolean {
+  if (typeof response !== "object" || response === null) return false;
+  const r = response as Record<string, unknown>;
+  const first = Array.isArray(r.choices) ? r.choices[0] : undefined;
+  if (first && typeof first === "object") {
+    if ((first as Record<string, unknown>).finish_reason === "length") return true;
+  }
+  if (r.finish_reason === "length") return true;
+  const incomplete = r.incomplete_details;
+  if (incomplete && typeof incomplete === "object") {
+    if ((incomplete as Record<string, unknown>).reason === "max_output_tokens") return true;
+  }
+  return false;
+}
+
+/** Why a classification did not come out of the model intact. */
+type ClassifierFallbackReason =
+  | "truncated"
+  | "invalid_tier"
+  | "low_tier_confidence"
+  | "error";
+
+interface ClassifierFallbackEvent {
+  reason: ClassifierFallbackReason;
+  taskHash: string;
+  classifierModel: string;
+  provider: string;
+  /** The field Zone could not use, and what was in it. */
+  rejectedField?: string;
+  rejectedValue?: string;
+  /** The values actually used. Absent when nothing fell back. */
+  fellBackTo?: { tier: TaskTier; archetype: TaskArchetype };
+  /** Whether the archetype in effect came from the model or from configuration. */
+  archetypeSource?: "model" | "fallback";
+  /** `truncated` only: whether a usable classification came out anyway. */
+  classificationSurvived?: boolean;
+  /** `truncated` only: the model's own output. */
+  rawResponse?: string;
+  impact: string;
+}
+
+/**
+ * A classification that degraded, on stderr.
+ *
+ * stdout is wrong for this: the TUI's stdoutShield swallows every `[zone-*]`
+ * line, so `log()` here is invisible in the one place a user would see it.
+ * stderr survives under ZONE_TUI_DEBUG=1 / ZONE_VERBOSE_LOGS=1, which is the
+ * convention `[zone-context-window-fallback]` (`models.ts`) already sets for
+ * "your input was not what this code expected".
+ *
+ * `rawResponse` is carried deliberately. It is a few hundred tokens of the
+ * model's own JSON and contains no user code — and it is precisely the evidence
+ * that was missing when `invalid tier: investigation` had to be re-derived from
+ * a live classifier because the log was gone.
+ */
+function emitClassifierFallback(event: ClassifierFallbackEvent): void {
+  console.warn("[zone-classifier-fallback]", JSON.stringify(event));
+}
+
 export async function classifyTask(
   taskDescription: string,
   options: ClassifyTaskOptions = {}
@@ -478,7 +552,46 @@ export async function classifyTask(
       throw new Error(`text extraction failed: ${extraction.reason}`);
     }
 
-    const parsed = parseClassifierResponse(extraction.text);
+    const truncated = wasTruncated(response);
+    const emitTruncated = (classificationSurvived: boolean): void =>
+      emitClassifierFallback({
+        reason: "truncated",
+        taskHash: cacheKey,
+        classifierModel: model,
+        provider,
+        classificationSurvived,
+        rawResponse: extraction.text,
+        impact: classificationSurvived
+          ? "classifier hit its output cap; this response parsed anyway because the " +
+            "JSON preceded the cut, which is luck rather than a property"
+          : "classifier hit its output cap and the response was unusable; the run " +
+            "falls back to medium tier with no archetype signal",
+      });
+
+    let parsed: ParsedClassifierResponse;
+    try {
+      parsed = parseClassifierResponse(extraction.text);
+    } catch (parseErr) {
+      if (truncated) emitTruncated(false);
+      throw parseErr;
+    }
+    if (truncated) emitTruncated(true);
+
+    if (parsed.rejectedTier !== undefined) {
+      emitClassifierFallback({
+        reason: "invalid_tier",
+        taskHash: cacheKey,
+        classifierModel: model,
+        provider,
+        rejectedField: "tier",
+        rejectedValue: parsed.rejectedTier,
+        fellBackTo: { tier: parsed.tier, archetype: parsed.archetype },
+        archetypeSource: "model",
+        impact:
+          "tier degraded to medium with confidence 0; the archetype is unaffected " +
+          "and still selects the pipeline",
+      });
+    }
 
     // Q.8 large-file trigger: bump simple → medium if any target file exceeds threshold.
     // Applied before the confidence gate so a bumped tier is reflected in the fallback path too.
@@ -523,10 +636,25 @@ export async function classifyTask(
       // fires with no parse error at all: a response reading
       // {archetype:"investigation", archetypeConfidence:0.95, confidence:0.4}
       // became a patch run.
-      if (parsed.archetypeConfidence >= CLASSIFIER_CONFIDENCE_THRESHOLD) {
+      const archetypePreserved = parsed.archetypeConfidence >= CLASSIFIER_CONFIDENCE_THRESHOLD;
+      if (archetypePreserved) {
         fallback.archetype = parsed.archetype;
         fallback.archetypeConfidence = parsed.archetypeConfidence;
       }
+      emitClassifierFallback({
+        reason: "low_tier_confidence",
+        taskHash: cacheKey,
+        classifierModel: model,
+        provider,
+        rejectedField: "confidence",
+        rejectedValue: String(parsed.confidence),
+        fellBackTo: { tier: fallback.tier, archetype: fallback.archetype },
+        archetypeSource: archetypePreserved ? "model" : "fallback",
+        impact: archetypePreserved
+          ? "tier fell back to medium; the archetype was confident enough to keep"
+          : "tier and archetype both fell back; the archetype is ZONE_FALLBACK_ARCHETYPE, " +
+            "not a judgement about this task",
+      });
       classificationCache.set(cacheKey, fallback);
       if (parsed.tier !== "medium") {
         log(
@@ -612,6 +740,18 @@ export async function classifyTask(
       })
     );
     const fallback = buildFallback(model, costUsd, startTime, errPayload.message);
+    emitClassifierFallback({
+      reason: "error",
+      taskHash: cacheKey,
+      classifierModel: model,
+      provider,
+      rejectedValue: errPayload.message,
+      fellBackTo: { tier: fallback.tier, archetype: fallback.archetype },
+      archetypeSource: "fallback",
+      impact:
+        "no classification at all; the archetype is ZONE_FALLBACK_ARCHETYPE and " +
+        "carries no signal about this task",
+    });
     log(
       "[zone-task-classified]",
       JSON.stringify({
