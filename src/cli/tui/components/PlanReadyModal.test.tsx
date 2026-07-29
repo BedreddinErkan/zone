@@ -447,6 +447,46 @@ describe("PlanReadyModal — riskHints", () => {
   });
 });
 
+// PlanReady projection: filesLikely widened 3→10, converted from an inline
+// ", …" ellipsis to the counted-overflow list dialect (matching riskHints/
+// steps) — a separate overflow line, not a suffix on the same line.
+describe("PlanReadyModal — filesLikely", () => {
+  it("renders up to 10 files and a counted overflow line for more", () => {
+    const proposal = {
+      ...PROPOSAL,
+      steps: [{
+        title: "Refactor",
+        description: "",
+        filesLikely: Array.from({ length: 11 }, (_, i) => `src/f${i + 1}.ts`),
+      }],
+    };
+    const { lastFrame, unmount } = render(
+      <PlanReadyModal proposal={proposal} dispatch={makeDispatch()} />
+    );
+    activeUnmount = unmount;
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("src/f1.ts");
+    expect(frame).toContain("src/f10.ts");
+    expect(frame).not.toContain("src/f11.ts");
+    // Full counter text, not the bare glyph.
+    expect(frame).toContain("+1 more file(s)");
+  });
+
+  it("does not render an overflow line when filesLikely is under the 10-file cap", () => {
+    const proposal = {
+      ...PROPOSAL,
+      steps: [{ title: "Small step", description: "", filesLikely: ["src/a.ts", "src/b.ts"] }],
+    };
+    const { lastFrame, unmount } = render(
+      <PlanReadyModal proposal={proposal} dispatch={makeDispatch()} />
+    );
+    activeUnmount = unmount;
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("src/a.ts"); // positive first
+    expect(frame).not.toContain("more file(s)");
+  });
+});
+
 // A replan can produce a stepless plan carrying noChangeReason/cannotVerifyReason
 // (none of E8a/E8b/the forceSteps safety net in dispatch.ts re-run after a
 // replan). The modal must show the reason, not just an empty step list.

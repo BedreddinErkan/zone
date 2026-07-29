@@ -15,8 +15,9 @@ interface PlanReadyModalProps {
 // that never happened (comparison stuck low, or mutated true, while the slice
 // is fine).
 const SCOPE_SUMMARY_MAX = 200;
-const RISK_HINT_MAX = 120;   // per-entry char cap
-const RISK_HINTS_LIMIT = 5;  // entry-count cap
+const RISK_HINT_MAX = 120;    // per-entry char cap
+const RISK_HINTS_LIMIT = 5;   // entry-count cap
+const FILES_LIKELY_MAX = 10;  // per-step file-list cap
 
 function renderFeedbackBuffer(buf: string, pos: number): string {
   return buf.slice(0, pos) + "▋" + buf.slice(pos);
@@ -131,7 +132,12 @@ export function PlanReadyModal({ proposal, dispatch }: PlanReadyModalProps): Rea
           )}
           {step.filesLikely.length > 0 && (
             <Box marginLeft={5}>
-              <Text dimColor>{`(${step.filesLikely.slice(0, 3).join(", ")}${step.filesLikely.length > 3 ? ", …" : ""})`}</Text>
+              <Text dimColor>{`(${step.filesLikely.slice(0, FILES_LIKELY_MAX).join(", ")})`}</Text>
+            </Box>
+          )}
+          {step.filesLikely.length > FILES_LIKELY_MAX && (
+            <Box marginLeft={5}>
+              <Text dimColor>{`  … +${step.filesLikely.length - FILES_LIKELY_MAX} more file(s)`}</Text>
             </Box>
           )}
         </Box>
