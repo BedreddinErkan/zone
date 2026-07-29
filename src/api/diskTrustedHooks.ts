@@ -1,4 +1,8 @@
-import { readFileSync, writeFileSync, mkdirSync, renameSync, chmodSync } from "node:fs";
+// Namespace import, not named bindings: the test-suite home guard
+// (src/test/setup/homeGuard.ts) intercepts writes by assigning over the fs
+// module's properties, and a named function import snapshots the binding at
+// evaluation and never sees that assignment.
+import fs from "node:fs";
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import { canonicalizePath } from "./diskTrustedProjects.js";
@@ -27,7 +31,7 @@ function trustedHooksFilePath(): string {
 function loadTrustedHooks(): TrustedHooksFile {
   const p = trustedHooksFilePath();
   try {
-    const raw = readFileSync(p, "utf-8");
+    const raw = fs.readFileSync(p, "utf-8");
     const parsed = JSON.parse(raw) as TrustedHooksFile;
     if (parsed.version !== 1 || !Array.isArray(parsed.entries)) {
       return { version: 1, entries: [] };
@@ -41,11 +45,11 @@ function loadTrustedHooks(): TrustedHooksFile {
 
 function saveTrustedHooks(store: TrustedHooksFile): void {
   const p = trustedHooksFilePath();
-  mkdirSync(dirname(p), { recursive: true });
+  fs.mkdirSync(dirname(p), { recursive: true });
   const tmp = `${p}.tmp`;
-  writeFileSync(tmp, JSON.stringify(store, null, 2), "utf-8");
-  renameSync(tmp, p);
-  try { chmodSync(p, 0o600); } catch { /* Windows/non-POSIX — best effort */ }
+  fs.writeFileSync(tmp, JSON.stringify(store, null, 2), "utf-8");
+  fs.renameSync(tmp, p);
+  try { fs.chmodSync(p, 0o600); } catch { /* Windows/non-POSIX — best effort */ }
 }
 
 export function isHooksTrusted(projectPath: string, hash: string): boolean {

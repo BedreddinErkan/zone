@@ -3,7 +3,11 @@
 // Default values live in TIER_LIMITS (tierLimits.ts) — this module only
 // stores user-supplied deltas.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+// Namespace import, not named bindings: the test-suite home guard
+// (src/test/setup/homeGuard.ts) intercepts writes by assigning over the fs
+// module's properties, and a named function import snapshots the binding at
+// evaluation and never sees that assignment.
+import fs from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { TaskTier } from "../llm/taskClassifier.js";
@@ -27,8 +31,16 @@ export interface TierSettingsFile {
 
 export type TierSettings = Partial<Record<TaskTier, PerTierSettings>>;
 
-const SETTINGS_DIR = join(homedir(), ".zone");
-const SETTINGS_PATH = join(SETTINGS_DIR, "tier-limits.json");
+// Resolved per call, never captured into a module-level const: a path captured
+// at module load ignores any later redirection of the home directory, which is
+// how test runs end up writing into the real ~/.zone.
+function settingsDir(): string {
+  return join(homedir(), ".zone");
+}
+
+function settingsPath(): string {
+  return join(settingsDir(), "tier-limits.json");
+}
 
 const VALIDATION = {
   tokenBudgetCap: { min: 10_000, max: 2_000_000 },
@@ -70,13 +82,13 @@ function validateAndSanitize(raw: unknown): TierSettings {
 }
 
 export function getTierSettingsPath(): string {
-  return SETTINGS_PATH;
+  return settingsPath();
 }
 
 export function readTierSettings(): TierSettings {
   try {
-    if (!existsSync(SETTINGS_PATH)) return {};
-    const raw = readFileSync(SETTINGS_PATH, "utf8");
+    if (!fs.existsSync(settingsPath())) return {};
+    const raw = fs.readFileSync(settingsPath(), "utf8");
     return validateAndSanitize(JSON.parse(raw));
   } catch (err) {
     console.warn("[zone-tier-settings-read-failed]", String(err));
@@ -85,26 +97,26 @@ export function readTierSettings(): TierSettings {
 }
 
 export function writeTierSettings(settings: TierSettings): TierSettings {
-  if (!existsSync(SETTINGS_DIR)) {
-    mkdirSync(SETTINGS_DIR, { recursive: true });
+  if (!fs.existsSync(settingsDir())) {
+    fs.mkdirSync(settingsDir(), { recursive: true });
   }
   const sanitized = validateAndSanitize(settings);
-  writeFileSync(SETTINGS_PATH, JSON.stringify(sanitized, null, 2), "utf8");
+  fs.writeFileSync(settingsPath(), JSON.stringify(sanitized, null, 2), "utf8");
   return sanitized;
 }
 
 function readRawFile(): Record<string, unknown> {
   try {
-    if (!existsSync(SETTINGS_PATH)) return {};
-    return JSON.parse(readFileSync(SETTINGS_PATH, "utf8")) as Record<string, unknown>;
+    if (!fs.existsSync(settingsPath())) return {};
+    return JSON.parse(fs.readFileSync(settingsPath(), "utf8")) as Record<string, unknown>;
   } catch {
     return {};
   }
 }
 
 function writeRawFile(data: Record<string, unknown>): void {
-  if (!existsSync(SETTINGS_DIR)) mkdirSync(SETTINGS_DIR, { recursive: true });
-  writeFileSync(SETTINGS_PATH, JSON.stringify(data, null, 2), "utf8");
+  if (!fs.existsSync(settingsDir())) fs.mkdirSync(settingsDir(), { recursive: true });
+  fs.writeFileSync(settingsPath(), JSON.stringify(data, null, 2), "utf8");
 }
 
 /** Phase AS: reads the autoAuditComplexTasks setting. Defaults to true when absent. */
