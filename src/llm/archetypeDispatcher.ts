@@ -67,6 +67,48 @@ export const QUESTION_PIPELINE: Readonly<PipelineConfig> = Object.freeze({
   allowExploration: false,
 });
 
+/**
+ * `investigation` used to share QUESTION_PIPELINE, and the fit was wrong in the
+ * one dimension that matters: iterCap 3 with no coaching is "one command, one
+ * summary", while investigation is multi-step exploration by definition. A
+ * dogfood trace task hit the cap at iteration 3 and was rescued by the iter_cap
+ * promotion — the promotion machinery compensating for a pipeline that was never
+ * right for the archetype.
+ *
+ * iterCap 12, from two runs of the same trace task:
+ *   - misclassified as `refactor` (REFACTOR cap 12, search tools present):
+ *     finished at iteration 10 for $0.2498. With the tools investigation needs,
+ *     10 is what this task costs.
+ *   - correctly classified (QUESTION cap 3, search tools absent): 14 iterations
+ *     for $0.5138, of which seven were blind lineRange reads standing in for one
+ *     search call.
+ * So the cap must not bind at ~10. 12 is REFACTOR's existing value — chosen to
+ * avoid minting a new constant, not tuned. n=2, and neither run observed the
+ * configuration this ships: run A had the tools with the wrong pipeline, run B
+ * the pipeline without the tools.
+ *
+ * coachingBudget 2 is a judgement rather than a measurement (SIMPLE_ADD's
+ * value). QUESTION's 0 means the first tool failure exhausts coaching
+ * immediately — observed promoting a question run at iteration 1 — and
+ * `read_file_nonexistent` is a read-only-relevant trigger.
+ */
+export const INVESTIGATION_PIPELINE: Readonly<PipelineConfig> = Object.freeze({
+  skipPhase1: true,
+  skipPlan: true,
+  skipPlanSSE: true,
+  skipAudit: true,
+  iterCap: 12,
+  coachingBudget: 2,
+  allowSubagentDispatch: false,
+  allowScopeRevision: false,
+  preserveSyntaxChecker: false,
+  preserveReadBeforePatch: false,
+  skipCrossFileHeuristic: true,
+  readOnlyPipeline: true,
+  // The difference that motivated splitting from QUESTION.
+  allowExploration: true,
+});
+
 // CE.4.1.a: per-archetype iter caps — targeted_fix (10) and refactor (12)
 // CE.4.1.f: per-archetype coachingBudget — targeted_fix:3, refactor:4 (complex_multi_file/debug→5 via null fallback)
 // Lower budget fires coaching_exhausted soft promotion earlier; L5.1b-2 absorbs via relaxation.
@@ -155,11 +197,11 @@ export function buildPipelineConfig(
   if (archetype === "simple_add" && flags.simpleAddEnabled) {
     return { ...SIMPLE_ADD_PIPELINE };
   }
-  if (
-    (archetype === "question" && flags.questionEnabled) ||
-    (archetype === "investigation" && flags.investigationEnabled)
-  ) {
+  if (archetype === "question" && flags.questionEnabled) {
     return { ...QUESTION_PIPELINE };
+  }
+  if (archetype === "investigation" && flags.investigationEnabled) {
+    return { ...INVESTIGATION_PIPELINE };
   }
   if (archetype === "targeted_fix" && flags.targetedFixEnabled) {
     return { ...TARGETED_FIX_PIPELINE };

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  INVESTIGATION_PIPELINE,
   QUESTION_PIPELINE,
   REFACTOR_PIPELINE,
   SIMPLE_ADD_PIPELINE,
@@ -206,5 +207,63 @@ describe("CE.4.1.f: per-archetype coachingBudget tuning", () => {
   it("buildPipelineConfig refactor returns coachingBudget:4", () => {
     const result = buildPipelineConfig("refactor", ALL_ON);
     expect(result?.coachingBudget).toBe(4);
+  });
+});
+
+/**
+ * `investigation` shared QUESTION_PIPELINE until a dogfood run showed the fit
+ * was wrong where it counts: iterCap 3 is "one command, one summary", and
+ * investigation is multi-step exploration. The run hit the cap at iteration 3
+ * and only finished because the iter_cap promotion rescued it.
+ */
+describe("investigation has its own pipeline", () => {
+  const ALL_ON = {
+    dispatcherEnabled: true,
+    simpleAddEnabled: true,
+    questionEnabled: true,
+    investigationEnabled: true,
+    targetedFixEnabled: true,
+    refactorEnabled: true,
+  };
+
+  it("no longer resolves to QUESTION_PIPELINE", () => {
+    expect(buildPipelineConfig("investigation", ALL_ON)).toEqual(INVESTIGATION_PIPELINE);
+    expect(buildPipelineConfig("investigation", ALL_ON)).not.toEqual(QUESTION_PIPELINE);
+  });
+
+  it("question is unchanged", () => {
+    expect(buildPipelineConfig("question", ALL_ON)).toEqual(QUESTION_PIPELINE);
+    expect(QUESTION_PIPELINE.iterCap).toBe(3);
+    expect(QUESTION_PIPELINE.allowExploration).toBe(false);
+  });
+
+  it("its cap clears the only observed completion of an investigation task", () => {
+    // The same trace task finished at iteration 10 when it was misclassified as
+    // `refactor` and therefore had search tools. A cap at or below that would
+    // bind and re-trigger the promotion this split exists to remove.
+    const OBSERVED_EQUIPPED_ITERATIONS = 10;
+    expect(INVESTIGATION_PIPELINE.iterCap).toBeGreaterThan(OBSERVED_EQUIPPED_ITERATIONS);
+  });
+
+  it("can explore, which is the difference from question", () => {
+    expect(INVESTIGATION_PIPELINE.allowExploration).toBe(true);
+    expect(INVESTIGATION_PIPELINE.readOnlyPipeline).toBe(true);
+  });
+
+  it("has a coaching budget, so one failed read does not exhaust it", () => {
+    // QUESTION's 0 was observed promoting a question run at iteration 1 on
+    // trigger `coaching_exhausted` — the first tool failure.
+    expect(INVESTIGATION_PIPELINE.coachingBudget).toBeGreaterThan(0);
+  });
+
+  it("still writes nothing and dispatches nothing", () => {
+    expect(INVESTIGATION_PIPELINE.allowSubagentDispatch).toBe(false);
+    expect(INVESTIGATION_PIPELINE.allowScopeRevision).toBe(false);
+  });
+
+  it("respects ZONE_ARCHETYPE_ENABLE_INVESTIGATION=0", () => {
+    expect(
+      buildPipelineConfig("investigation", { ...ALL_ON, investigationEnabled: false }),
+    ).toBeNull();
   });
 });
