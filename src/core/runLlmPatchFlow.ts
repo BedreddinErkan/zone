@@ -6352,6 +6352,29 @@ const initializeTodosFromPlan = (): void => {
       }
     }
 
+    // Snapshot retention: run once per run (throttled to at most once per
+    // 24h via a marker file mtime) rather than per patch flush, since
+    // createSnapshot fires many times per run.
+    if (runId) {
+      try {
+        const { maybeCleanupOldSnapshots } = await import(
+          "../snapshots/snapshotStore.js"
+        );
+        const result = await maybeCleanupOldSnapshots();
+        if (result.ran && result.removed > 0) {
+          debugLog(
+            "[zone-snapshot-cleanup]",
+            JSON.stringify({ removed: result.removed })
+          );
+        }
+      } catch (err) {
+        errorLog(
+          "[zone-snapshot-cleanup-error]",
+          err instanceof Error ? err.message : String(err)
+        );
+      }
+    }
+
     if (runId) {
       const summary = assembleRunSummary({
         fileDiffs,
