@@ -11,8 +11,9 @@
  */
 const DEFAULT_ROWS = 24;           // Ink's own non-TTY fallback — ink.js:695
 const COMPACT_ROWS_THRESHOLD = 30; // below this, callers may switch to compact chrome
-const FRAME_CHROME_LINES = 11;     // PLACEHOLDER — pending direct measurement against
-                                    // the real rendered frame; not yet pinned
+const FRAME_CHROME_LINES = 9;       // measured directly against the degenerate-fixture
+                                     // frame (PlanReadyModal.test.tsx pin 1) — column-
+                                     // independent: 9 at both 60 and 80 cols
 
 export function planModalLineBudget(
   rows: unknown,

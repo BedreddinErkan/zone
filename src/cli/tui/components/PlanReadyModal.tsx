@@ -25,6 +25,129 @@ function renderFeedbackBuffer(buf: string, pos: number): string {
   return buf.slice(0, pos) + "▋" + buf.slice(pos);
 }
 
+// Greedy word-wrap line counter, matching Ink's default textWrap="wrap"
+// (word-boundary breaks, not character-boundary — a word straddling the
+// width is pushed whole to the next line). `\n` is a hard break, split
+// first; an empty segment between two `\n`s is still a blank row Ink
+// renders (a wholly empty string is the one case that renders as zero
+// rows — that's `estimateWrappedLines`'s own early return, not this one).
+export function estimateWrappedLines(text: string, width: number): number {
+  if (text.length === 0) return 0;
+  return text.split("\n").reduce((total, segment) => total + estimateSegmentLines(segment, width), 0);
+}
+
+function estimateSegmentLines(segment: string, width: number): number {
+  if (segment.length === 0) return 1;
+  let lines = 1;
+  let lineLen = 0;
+  for (const word of segment.split(" ")) {
+    if (word.length > width) {
+      if (lineLen > 0) lines += 1;
+      lines += Math.ceil(word.length / width) - 1;
+      lineLen = word.length % width || width;
+      continue;
+    }
+    const nextLen = lineLen === 0 ? word.length : lineLen + 1 + word.length;
+    if (nextLen > width) {
+      lines += 1;
+      lineLen = word.length;
+    } else {
+      lineLen = nextLen;
+    }
+  }
+  return lines;
+}
+
+// Magnitudes, not membership — riskHintsShown/filesLikelyShown/stepsShown/
+// descriptionsShown each start at their field's existing cap and only ever
+// decrease, so a future budget walk can narrow them one step at a time
+// instead of jumping straight to zero. dropSummary stays boolean: scopeSummary
+// is one field and presence is the whole decision, nothing to make numeric.
+export interface CutState {
+  descriptionsShown: number;
+  dropSummary: boolean;
+  riskHintsShown: number;
+  filesLikelyShown: number;
+  stepsShown: number;
+}
+
+export const NO_CUTS: CutState = {
+  descriptionsShown: STEPS_MAX,
+  dropSummary: false,
+  riskHintsShown: RISK_HINTS_LIMIT,
+  filesLikelyShown: FILES_LIKELY_MAX,
+  stepsShown: STEPS_MAX,
+};
+
+/**
+ * Total content-line count for exactly what would render under a given cut
+ * state, at a given terminal width — everything in PlanReadyModal's frame
+ * EXCEPT chrome (borders, paddingY, the always-on "Ready to code?"/
+ * "Objective:" labels and their surrounding spacers) and the footer, which
+ * don't vary with proposal content and are measured separately.
+ *
+ * Not wired into the component's render yet — `NO_CUTS` is the only value
+ * passed to it this pass.
+ */
+export function estimatePlanContentLines(
+  proposal: PlanReadyModalProps["proposal"],
+  columns: number,
+  cutState: CutState,
+): number {
+  const contentWidth = columns - 6;        // border(2) + paddingX(4)
+  const indentedWidth = contentWidth - 5;  // marginLeft=5 / row-sibling prefix width
+
+  let lines = estimateWrappedLines(proposal.objective.slice(0, 200), contentWidth);
+
+  if (!cutState.dropSummary && proposal.scopeSummary) {
+    const summaryText = `${proposal.scopeSummary.slice(0, SCOPE_SUMMARY_MAX)}${proposal.scopeSummary.length > SCOPE_SUMMARY_MAX ? "…" : ""}`;
+    lines += 2 + estimateWrappedLines(summaryText, contentWidth); // spacer + label
+  }
+
+  if (proposal.noChangeReason || proposal.cannotVerifyReason) {
+    const reasonText = (proposal.noChangeReason ?? proposal.cannotVerifyReason ?? "").slice(0, 200);
+    lines += 2 + estimateWrappedLines(reasonText, contentWidth); // label + marginBottom
+  }
+
+  const stepsShown = Math.min(proposal.steps.length, cutState.stepsShown);
+  for (let i = 0; i < stepsShown; i++) {
+    const step = proposal.steps[i];
+    lines += estimateWrappedLines(step.title, indentedWidth);
+    if (step.description && i < cutState.descriptionsShown) {
+      const descText = `${step.description.slice(0, STEP_DESCRIPTION_MAX)}${step.description.length > STEP_DESCRIPTION_MAX ? "…" : ""}`;
+      lines += estimateWrappedLines(descText, indentedWidth);
+    }
+    if (step.filesLikely.length > 0 && cutState.filesLikelyShown > 0) {
+      const filesText = `(${step.filesLikely.slice(0, cutState.filesLikelyShown).join(", ")})`;
+      lines += estimateWrappedLines(filesText, indentedWidth);
+    }
+    if (step.filesLikely.length > cutState.filesLikelyShown) {
+      lines += 1; // "+N more file(s)"
+    }
+  }
+  if (proposal.steps.length > cutState.stepsShown) {
+    lines += 1; // "+N more step(s)"
+  }
+
+  if (proposal.riskHints.length > 0) {
+    lines += 2; // spacer + "Risks:" label
+    for (const hint of proposal.riskHints.slice(0, cutState.riskHintsShown)) {
+      const hintText = `  • ${hint.slice(0, RISK_HINT_MAX)}${hint.length > RISK_HINT_MAX ? "…" : ""}`;
+      lines += estimateWrappedLines(hintText, contentWidth);
+    }
+    if (proposal.riskHints.length > cutState.riskHintsShown) {
+      lines += 1; // "+N more risk(s)"
+    }
+  }
+
+  if (proposal.scopeNotes) {
+    const notesText = `Scope: ${proposal.scopeNotes.slice(0, 200)}`;
+    lines += 1 + estimateWrappedLines(notesText, contentWidth); // spacer
+  }
+
+  return lines;
+}
+
 export function PlanReadyModal({ proposal, dispatch }: PlanReadyModalProps): React.ReactElement {
   const [feedbackMode, setFeedbackMode] = useState(false);
   const [pendingDecision, setPendingDecision] = useState<"feedback" | "approve_with_feedback" | null>(null);

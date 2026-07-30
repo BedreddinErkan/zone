@@ -3,8 +3,11 @@ import { render } from "ink-testing-library";
 import { render as inkRender } from "ink";
 import { EventEmitter } from "node:events";
 import React from "react";
-import { PlanReadyModal } from "./PlanReadyModal.js";
+import { PlanReadyModal, estimateWrappedLines, estimatePlanContentLines, NO_CUTS } from "./PlanReadyModal.js";
+import { StoreProvider } from "../store.js";
 import type { StoreAction } from "../store.js";
+import { Composer } from "./Composer.js";
+import { StatusBar } from "./StatusBar.js";
 
 /**
  * ink-testing-library hardcodes columns=100, which masks width-squeeze bugs.
@@ -654,5 +657,227 @@ describe("PlanReadyModal — stepless plan with a stated reason", () => {
       expect(frame).toContain("[4]");
       unmount();
     }
+  });
+});
+
+// Height-budget pins — validate the pure estimator functions
+// (estimateWrappedLines, estimatePlanContentLines) against the real
+// renderer, and measure the constants a future budget mechanism will need
+// (chrome, footer, sibling reservation). Nothing here is wired into the
+// component's render yet: NO_CUTS is the only cutState value used, there is
+// no tier walk, no cut state applied to the render, and no attribution line.
+describe("PlanReadyModal — height-budget pins", () => {
+  describe("estimateWrappedLines — direct unit test", () => {
+    it("returns 0 for an empty string", () => {
+      expect(estimateWrappedLines("", 10)).toBe(0);
+    });
+
+    it("returns 1 for text that fits within the width", () => {
+      expect(estimateWrappedLines("hello", 10)).toBe(1);
+    });
+
+    it("splits on an embedded \\n as a hard break", () => {
+      expect(estimateWrappedLines("a\nb", 10)).toBe(2);
+    });
+
+    it("counts the blank line between two \\n as its own row", () => {
+      expect(estimateWrappedLines("a\n\nb", 10)).toBe(3);
+    });
+
+    it("word-wraps at a space boundary, not mid-word", () => {
+      // "aaaaa bbbbb" (11 chars) at width 6: "aaaaa" fits (5 <= 6); adding
+      // " bbbbb" would make 11 > 6, so the whole word moves to line 2.
+      expect(estimateWrappedLines("aaaaa bbbbb", 6)).toBe(2);
+    });
+
+    it("hard-breaks a single word longer than the width", () => {
+      expect(estimateWrappedLines("x".repeat(25), 10)).toBe(Math.ceil(25 / 10));
+    });
+
+    it("fits exactly at the width boundary without wrapping (> not >=)", () => {
+      // "abcd edcba": lineLen after "abcd" is 4; adding " edcba" (1+5) makes
+      // nextLen exactly 10 — equal to width, not over it, so it must stay on
+      // one line. A >= mutation here would wrap it to 2 lines instead.
+      expect(estimateWrappedLines("abcd edcba", 10)).toBe(1);
+    });
+  });
+
+  // Shared by pin 1 and pin 3 so the margin formula reads pin 1's own
+  // measured value rather than a second hardcoded literal that could drift.
+  function measureChromeAndFooter(columns: number): { chromeLines: number; footerLines: number; totalLines: number } {
+    const degenerateProposal = {
+      planId: "p", runId: "r",
+      objective: "", scopeSummary: "", riskHints: [] as string[], steps: [],
+    };
+    const { lastFrame, unmount } = renderPlanReadyModalAt(degenerateProposal, makeDispatch(), columns);
+    const frame = lastFrame() ?? "";
+    const lines = frame.split("\n");
+    unmount();
+    // Footer's content is known text (the action-key hints) — identify its
+    // lines by that content, not a fixed position, then derive chrome by
+    // subtracting the measured footer from the total.
+    const footerStart = lines.findIndex((l) => l.includes("[1]"));
+    if (footerStart === -1) {
+      throw new Error(`could not locate footer start in degenerate frame at columns=${columns}`);
+    }
+    let footerEnd = footerStart;
+    for (let i = footerStart + 1; i < lines.length; i++) {
+      if (stripBoxChars(lines[i]).trim() === "") break; // blank padding row — footer ended
+      footerEnd = i;
+    }
+    const footerLines = footerEnd - footerStart + 1;
+    const totalLines = lines.length;
+    return { chromeLines: totalLines - footerLines, footerLines, totalLines };
+  }
+
+  // Measured once: chrome is 9 at both 60 and 80 cols (column-independent —
+  // confirms the assumption several other design choices already relied
+  // on); footer is 3 at 60, 2 at 80 (restacks narrower). FRAME_CHROME_LINES
+  // in planModalLineBudget.ts is pinned to 9 from this measurement.
+  const FRAME_CHROME_LINES = 9;
+  const FOOTER_LINES_NORMAL = 3; // conservative: the narrower (60-col) footer height
+
+  describe("pin 1 — chrome + footer (degenerate fixture)", () => {
+    it("measures footer and chrome directly, both widths, conservative relation", () => {
+      const at60 = measureChromeAndFooter(60);
+      const at80 = measureChromeAndFooter(80);
+      // eslint-disable-next-line no-console
+      console.log("PIN1_MEASURED", JSON.stringify({ at60, at80 }));
+
+      // Chrome itself is column-independent — if this ever fails, that's a
+      // broken premise several other design choices already assume, not a
+      // pin to patch by making the function column-aware unilaterally.
+      expect(at80.chromeLines).toBe(at60.chromeLines);
+
+      // Conservative relation: the fixed constant never under-reserves at
+      // any tested width, and is exact (not idly padded) at the narrowest.
+      expect(at60.totalLines).toBeLessThanOrEqual(FRAME_CHROME_LINES + FOOTER_LINES_NORMAL);
+      expect(at60.totalLines).toBe(FRAME_CHROME_LINES + FOOTER_LINES_NORMAL);
+      expect(at80.totalLines).toBeLessThanOrEqual(FRAME_CHROME_LINES + FOOTER_LINES_NORMAL);
+    });
+  });
+
+  describe("pin 2 — per-section overhead (indented vs flat width)", () => {
+    it("increment over the empty-proposal baseline matches title + filesLikely at width 49/69, not 54/74", () => {
+      // Joined filesLikely string is 51 chars — fits within flat 54 (a buggy
+      // flat-width estimate would predict no wrap) but not within the
+      // indented 49 (marginLeft=5) — the gap this pin exists to catch.
+      const files = ["src/a-file-name-here.ts", "src/another-file-name.ts"];
+      const filesText = `(${files.join(", ")})`;
+      expect(filesText.length).toBe(51);
+
+      const baseline = { planId: "p", runId: "r", objective: "", scopeSummary: "", riskHints: [] as string[], steps: [] };
+      const oneSection = {
+        ...baseline,
+        steps: [{ title: "T", description: "", filesLikely: files }],
+      };
+
+      for (const columns of [60, 80] as const) {
+        const { lastFrame: baseFrame, unmount: u1 } = renderPlanReadyModalAt(baseline, makeDispatch(), columns);
+        const baseLines = (baseFrame() ?? "").split("\n").length;
+        u1();
+        const { lastFrame: oneFrame, unmount: u2 } = renderPlanReadyModalAt(oneSection, makeDispatch(), columns);
+        const oneLines = (oneFrame() ?? "").split("\n").length;
+        u2();
+
+        const indentedWidth = columns - 6 - 5;
+        const expectedIncrement =
+          estimateWrappedLines("T", indentedWidth) + estimateWrappedLines(filesText, indentedWidth);
+        expect(oneLines - baseLines).toBe(expectedIncrement);
+      }
+    });
+  });
+
+  describe("pin 3 — estimatePlanContentLines aggregate vs the real renderer", () => {
+    it("margin against actualTotalLines equals pin 1's own measured over-reservation, per width", () => {
+      // Word-shaped tokens (long enough to wrap several lines) + a token
+      // straddling the 54-col boundary at 60 cols + an embedded \n + a step
+      // title that wraps at the row-sibling-reduced width (49, not the raw
+      // 54) + several surviving sections (objective, summary, risks, two
+      // steps) so label+spacer summing is exercised across more than one.
+      const wordyLine1 = "aaaaa bbbbbbbbbb ccccccc dddddddddddd eeee ffffffffff ggggg hhhhhhhhhh";
+      const wordyLine2 = "iiiii jjjjjjjjjj kkkkk";
+      const fixture = {
+        planId: "p", runId: "r",
+        objective: "Objective text for the estimator pin",
+        scopeSummary: `${wordyLine1}\n${wordyLine2}`,
+        riskHints: ["risk one here", "risk two here"],
+        steps: [
+          { title: "Short title", description: "", filesLikely: [] },
+          {
+            title: "A title long enough that it should wrap across more than one rendered line at these widths for sure",
+            description: "",
+            filesLikely: [],
+          },
+        ],
+      };
+
+      for (const columns of [60, 80] as const) {
+        const { lastFrame, unmount } = renderPlanReadyModalAt(fixture, makeDispatch(), columns);
+        const actualTotalLines = (lastFrame() ?? "").split("\n").length;
+        unmount();
+
+        const estimate = estimatePlanContentLines(fixture, columns, NO_CUTS);
+        const margin = estimate - (actualTotalLines - (FRAME_CHROME_LINES + FOOTER_LINES_NORMAL));
+        const expectedOverReservation =
+          (FRAME_CHROME_LINES + FOOTER_LINES_NORMAL) - measureChromeAndFooter(columns).totalLines;
+
+        // eslint-disable-next-line no-console
+        console.log(`PIN3 columns=${columns} actualTotalLines=${actualTotalLines} estimate=${estimate} margin=${margin}`);
+        expect(margin).toBe(expectedOverReservation);
+        // At 60 (the narrowest tested width) pin 1's own relation is exact,
+        // so expectedOverReservation — and therefore this margin — reduces
+        // to precisely 0; asserted here rather than as a separate fixture,
+        // since a fixture too short to straddle the indented-width boundary
+        // would pass this regardless of whether the width bug exists at all.
+        if (columns === 60) expect(margin).toBe(0);
+      }
+    });
+  });
+
+  describe("pin 4 — SIBLING_LINES (real Composer + StatusBar)", () => {
+    it("measures total lines at 60 and 80 columns", () => {
+      // StatusBar.tsx reads process.stdout.columns directly (not via
+      // useStdout()), so Ink's injected mock stdout never reaches it — in
+      // this (non-TTY) test environment that property is undefined, and
+      // StatusBar silently falls back to its own hardcoded 80 regardless of
+      // the width under test. Stub the real property for the duration of
+      // each render so the separator is actually computed for that width,
+      // restoring it after — otherwise this measurement is an artifact of
+      // whatever terminal happens to run the suite, not a real one.
+      const originalColumns = process.stdout.columns;
+      const measured: Record<number, number> = {};
+      try {
+        for (const columns of [60, 80] as const) {
+          process.stdout.columns = columns;
+          let lastFrame: string | undefined;
+          const stdout = Object.assign(new EventEmitter(), {
+            columns,
+            rows: 40,
+            write: (frame: string) => { lastFrame = frame; return true; },
+          });
+          const instance = inkRender(
+            <StoreProvider initialValues={{ model: "test-model", capUsd: 10 }}>
+              <>
+                <Composer onSubmit={vi.fn()} onExit={() => {}} />
+                <StatusBar />
+              </>
+            </StoreProvider>,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            { stdout: stdout as any, stdin: new MockStdin() as any, debug: true, exitOnCtrlC: false, patchConsole: false },
+          );
+          measured[columns] = (lastFrame ?? "").split("\n").length;
+          instance.unmount();
+        }
+      } finally {
+        process.stdout.columns = originalColumns;
+      }
+      // eslint-disable-next-line no-console
+      console.log("PIN4_MEASURED", JSON.stringify(measured));
+      const SIBLING_LINES = Math.max(measured[60], measured[80]);
+      expect(SIBLING_LINES).toBe(5); // JSX-derived estimate (Composer 1 + StatusBar 4) confirmed
+      expect(measured[60]).toBeLessThanOrEqual(SIBLING_LINES);
+      expect(measured[80]).toBeLessThanOrEqual(SIBLING_LINES);
+    });
   });
 });
