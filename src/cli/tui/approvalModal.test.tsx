@@ -246,7 +246,17 @@ describe("TUI.4.4 approval modal", () => {
   });
 });
 
-describe("PlanReadyModal", () => {
+// Renamed from "PlanReadyModal" — that component is deleted (plan mode §3);
+// this end-to-end flow now renders through PlanBody (transcript content) +
+// PlanActionPrompt (the always-mounted action prompt). Every assertion below
+// needed NO changes beyond the "[1] auto-accept all" footer-hint proxy fixed
+// in the previous commit: these tests drive the real bus event through the
+// real App tree and assert on the observable contract (content appears, a
+// key resolves the right decision, the interactive prompt disappears after)
+// rather than on PlanReadyModal internals, so they kept passing straight
+// through the deletion. That's a real finding about the redesign, not an
+// assumption — confirmed by running the suite, not by inspection.
+describe("plan-ready approval — full App flow (transcript + PlanActionPrompt)", () => {
   let resolvePlanApproval: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {

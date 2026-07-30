@@ -13,7 +13,7 @@ import { PermissionsView } from "./components/PermissionsView.js";
 import { ApiKeysView } from "./components/ApiKeysView.js";
 import { SessionsModal } from "./components/SessionsModal.js";
 import { PlanModal } from "./components/PlanModal.js";
-import { PlanReadyModal } from "./components/PlanReadyModal.js";
+import { PlanActionPrompt } from "./components/PlanActionPrompt.js";
 import { StagedDiffModal } from "./components/StagedDiffModal.js";
 import { ModelModal } from "./components/ModelModal.js";
 import { EffortModal } from "./components/EffortModal.js";
@@ -278,9 +278,6 @@ function AppInner({ bus, initialPrompt, initialMode, onSubmit, onUndoRequest, on
       {state.planProposal !== null && (
         <PlanModal proposal={state.planProposal} dispatch={dispatch} />
       )}
-      {state.planReadyProposal !== null && (
-        <PlanReadyModal proposal={state.planReadyProposal} dispatch={dispatch} />
-      )}
       {state.stagedDiffProposal !== null && (
         <StagedDiffModal proposal={state.stagedDiffProposal} dispatch={dispatch} />
       )}
@@ -294,6 +291,7 @@ function AppInner({ bus, initialPrompt, initialMode, onSubmit, onUndoRequest, on
       </Box>
       <Spinner />
       {modals}
+      <PlanActionPrompt proposal={state.planReadyProposal} dispatch={dispatch} />
       <Composer
         onSubmit={handleComposerSubmit}
         onExit={() => { runAcRef.current?.abort(); exit(); }}
