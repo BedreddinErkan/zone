@@ -216,6 +216,174 @@ describe("TRANSCRIPT_APPEND_NARRATION / NARRATION_COMMIT", () => {
   });
 });
 
+describe("read-only tool-call batching (TOOL_CALL_OPEN / TOOL_RESULT_PUSH)", () => {
+  function openAndResolve(
+    s: ReturnType<typeof initialState>,
+    toolName: string,
+    args: string,
+    ok: boolean,
+    detail = "ok"
+  ) {
+    let next = reducer(s, { type: "TOOL_CALL_OPEN", toolName, args });
+    next = reducer(next, { type: "TOOL_RESULT_PUSH", ok, detail });
+    next = reducer(next, { type: "TOOL_CALL_CLOSE" });
+    return next;
+  }
+
+  it("two consecutive successful read-only calls buffer — zero individual entries land in the transcript", () => {
+    let s = initialState();
+    s = openAndResolve(s, "read_file", "a.ts", true);
+    s = openAndResolve(s, "read_file", "b.ts", true);
+    expect(s.transcript).toHaveLength(0);
+    expect(s.liveTail.pendingReadOnlyBatch).toEqual([{ toolName: "read_file" }, { toolName: "read_file" }]);
+  });
+
+  it("a write tool commits individually, flushing any pending batch first, in chronological order", () => {
+    let s = initialState();
+    s = openAndResolve(s, "read_file", "a.ts", true);
+    s = openAndResolve(s, "read_file", "b.ts", true);
+    s = openAndResolve(s, "apply_patch", "c.ts", true);
+    expect(s.transcript).toHaveLength(2);
+    expect(s.transcript[0]!.kind).toBe("tool_call_group");
+    expect(s.transcript[1]!.kind).toBe("tool_call");
+    expect(s.liveTail.pendingReadOnlyBatch).toEqual([]);
+  });
+
+  it("READ_ONLY_BATCH_MAX_SIZE consecutive successful reads flush on their own — no write, no NARRATION_COMMIT needed", () => {
+    let s = initialState();
+    for (let i = 0; i < 5; i++) {
+      s = openAndResolve(s, "read_file", `f${i}.ts`, true);
+    }
+    expect(s.transcript).toHaveLength(1);
+    const entry = s.transcript[0]!;
+    expect(entry.kind).toBe("tool_call_group");
+    if (entry.kind !== "tool_call_group") throw new Error("unreachable");
+    expect(entry.calls).toHaveLength(5);
+    expect(s.liveTail.pendingReadOnlyBatch).toEqual([]);
+  });
+
+  it("4 consecutive successful reads (below the size cap) stay pending — the gap the size trigger closes", () => {
+    let s = initialState();
+    for (let i = 0; i < 4; i++) {
+      s = openAndResolve(s, "read_file", `f${i}.ts`, true);
+    }
+    expect(s.transcript).toHaveLength(0);
+    expect(s.liveTail.pendingReadOnlyBatch).toHaveLength(4);
+  });
+
+  it("one failure among three reads: a group of the 2 successes plus a separate individual failure entry — not folded into a count", () => {
+    let s = initialState();
+    s = openAndResolve(s, "read_file", "a.ts", true);
+    s = openAndResolve(s, "read_file", "b.ts", true);
+    s = openAndResolve(s, "read_file", "missing.ts", false, "ENOENT: no such file");
+    expect(s.transcript).toHaveLength(2);
+
+    const group = s.transcript[0]!;
+    expect(group.kind).toBe("tool_call_group");
+    if (group.kind !== "tool_call_group") throw new Error("unreachable");
+    expect(group.calls).toHaveLength(2);
+
+    const failure = s.transcript[1]!;
+    expect(failure.kind).toBe("tool_call");
+    if (failure.kind !== "tool_call") throw new Error("unreachable");
+    expect(failure.results[0]!.ok).toBe(false);
+    // The real error text survives — this is what a bare {toolName, ok} count would have lost.
+    expect(failure.results[0]!.detail).toBe("ENOENT: no such file");
+    expect(s.liveTail.pendingReadOnlyBatch).toEqual([]);
+  });
+
+  it("three reads, all succeed: one group once flushed, no individual entry, no failure indication anywhere", () => {
+    let s = initialState();
+    s = openAndResolve(s, "read_file", "a.ts", true);
+    s = openAndResolve(s, "read_file", "b.ts", true);
+    s = openAndResolve(s, "read_file", "c.ts", true);
+    expect(s.transcript).toHaveLength(0); // below the size cap; nothing has flushed it yet
+    s = reducer(s, { type: "RUN_DONE" });
+    expect(s.transcript).toHaveLength(1);
+    const entry = s.transcript[0]!;
+    expect(entry.kind).toBe("tool_call_group");
+    if (entry.kind !== "tool_call_group") throw new Error("unreachable");
+    expect(entry.calls).toHaveLength(3);
+    // No `ok` field anywhere in a committed group — successes only, by construction.
+    expect(entry.calls.every(c => !("ok" in c))).toBe(true);
+  });
+});
+
+describe("read-only batch flush on terminal/pause transitions (prevents silent data loss)", () => {
+  function oneBufferedRead(s: ReturnType<typeof initialState>) {
+    let next = reducer(s, { type: "TOOL_CALL_OPEN", toolName: "read_file", args: "a.ts" });
+    next = reducer(next, { type: "TOOL_RESULT_PUSH", ok: true, detail: "1 line" });
+    next = reducer(next, { type: "TOOL_CALL_CLOSE" });
+    return next;
+  }
+
+  it("RUN_ABORTED flushes a pending batch instead of discarding it (bare dispatch, no preceding NARRATION_COMMIT)", () => {
+    let s = oneBufferedRead(initialState());
+    expect(s.liveTail.pendingReadOnlyBatch).toHaveLength(1);
+    s = reducer(s, { type: "RUN_ABORTED" });
+    expect(s.transcript).toHaveLength(1);
+    expect(s.transcript[0]!.kind).toBe("tool_call_group");
+    expect(s.liveTail.pendingReadOnlyBatch).toEqual([]);
+  });
+
+  it("RUN_FAILED flushes a pending batch instead of discarding it", () => {
+    let s = oneBufferedRead(initialState());
+    s = reducer(s, { type: "RUN_FAILED" });
+    expect(s.transcript).toHaveLength(1);
+    expect(s.transcript[0]!.kind).toBe("tool_call_group");
+  });
+
+  it("USER_QUESTION_ASKED flushes a pending batch — its own null of currentToolCall would otherwise hide it for the whole pause", () => {
+    let s = oneBufferedRead(initialState());
+    s = reducer(s, { type: "USER_QUESTION_ASKED", questionId: "q1", runId: "r1", question: "Which approach?" });
+    expect(s.transcript).toHaveLength(1);
+    expect(s.transcript[0]!.kind).toBe("tool_call_group");
+    expect(s.liveTail.currentToolCall).toBeNull();
+  });
+
+  it("PLAN_READY_PROPOSED flushes a pending batch before appending plan_ready, preserving chronological order", () => {
+    let s = oneBufferedRead(initialState());
+    s = reducer(s, {
+      type: "PLAN_READY_PROPOSED",
+      planId: "p1",
+      runId: "r1",
+      objective: "Do the thing",
+      steps: [],
+      riskHints: [],
+      scopeSummary: "",
+    });
+    expect(s.transcript).toHaveLength(2);
+    expect(s.transcript[0]!.kind).toBe("tool_call_group");
+    expect(s.transcript[1]!.kind).toBe("plan_ready");
+  });
+
+  it("STAGED_DIFFS_PROPOSED flushes a pending batch before the diff review opens", () => {
+    let s = oneBufferedRead(initialState());
+    s = reducer(s, {
+      type: "STAGED_DIFFS_PROPOSED",
+      approvalId: "appr-1",
+      runId: "r1",
+      files: [],
+      verificationSummary: "",
+      trigger: "natural_completion",
+    });
+    expect(s.transcript).toHaveLength(1);
+    expect(s.transcript[0]!.kind).toBe("tool_call_group");
+  });
+
+  it("SESSION_RESUME resets the batch without flushing into the transcript it is about to discard", () => {
+    let s = oneBufferedRead(initialState());
+    const resumedSession = {
+      sessionId: "resumed-1",
+      startedAt: "2026-01-01T00:00:00.000Z",
+      transcript: [{ kind: "user_prompt" as const, text: "old task" }],
+    };
+    s = reducer(s, { type: "SESSION_RESUME", session: resumedSession });
+    expect(s.transcript).toEqual(resumedSession.transcript);
+    expect(s.liveTail.pendingReadOnlyBatch).toEqual([]);
+  });
+});
+
 describe("buildInitialState", () => {
   it("includes transcriptGeneration: 0", () => {
     const state = buildInitialState({});

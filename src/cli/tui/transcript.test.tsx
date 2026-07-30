@@ -319,18 +319,59 @@ describe("TUI.2 transcript rendering", () => {
     unmount();
   });
 
-  it("tool_call + tool_result produces transcript entry with clean toolName", async () => {
+  it("tool_call produces a live entry with clean toolName", async () => {
+    // read_file is read-only: a successful result buffers into
+    // pendingReadOnlyBatch rather than committing an individual transcript
+    // entry (see store-core.ts TOOL_RESULT_PUSH), so the clean-toolName parse
+    // is asserted on the live in-flight line (which still carries full args),
+    // not on the post-result settled state as this test did pre-batching.
+    const bus = createEventBus();
+    const { frames, unmount } = render(<App bus={bus} initialPrompt="test task" />);
+
+    bus.emit("agent_loop_start", makeEvt("agent_loop_start"));
+    bus.emit("tool_call", makeEvt("tool_call", { title: "[tool] read_file: src/cli/tui/App.tsx" }));
+    await wait(50);
+
+    expect(frames.some(f => f?.includes("Read("))).toBe(true);
+    expect(frames.some(f => f?.includes("src/cli/tui/App.tsx"))).toBe(true);
+    expect(frames.every(f => !f?.includes("[tool]"))).toBe(true);
+
+    bus.emit("tool_result", makeEvt("tool_result", { toolName: "read_file", status: "success", detail: "42 lines" }));
+    await wait(50);
+    unmount();
+  });
+
+  it("a single completed read-only call flushes into the transcript on run end", async () => {
+    // The buffered call from the case above is not lost — it surfaces as a
+    // one-call tool_call_group once something flushes it, here the run ending.
     const bus = createEventBus();
     const { frames, unmount } = render(<App bus={bus} initialPrompt="test task" />);
 
     bus.emit("agent_loop_start", makeEvt("agent_loop_start"));
     bus.emit("tool_call", makeEvt("tool_call", { title: "[tool] read_file: src/cli/tui/App.tsx" }));
     bus.emit("tool_result", makeEvt("tool_result", { toolName: "read_file", status: "success", detail: "42 lines" }));
+    bus.emit("agent_loop_complete", makeEvt("agent_loop_complete", { iter: 1, detail: "" }));
     await wait(50);
 
-    expect(frames.some(f => f?.includes("Read("))).toBe(true);
-    expect(frames.some(f => f?.includes("src/cli/tui/App.tsx"))).toBe(true);
-    expect(frames.every(f => !f?.includes("[tool]"))).toBe(true);
+    expect(frames.some(f => f?.includes("Read ×1"))).toBe(true);
+    unmount();
+  });
+
+  it("two read calls buffered, the in-progress line reflects the count", async () => {
+    const bus = createEventBus();
+    const { frames, unmount } = render(<App bus={bus} initialPrompt="test task" />);
+
+    bus.emit("agent_loop_start", makeEvt("agent_loop_start"));
+    bus.emit("tool_call", makeEvt("tool_call", { title: "[tool] read_file: a.ts" }));
+    bus.emit("tool_result", makeEvt("tool_result", { toolName: "read_file", status: "success", detail: "1 line" }));
+    bus.emit("tool_call", makeEvt("tool_call", { title: "[tool] read_file: b.ts" }));
+    bus.emit("tool_result", makeEvt("tool_result", { toolName: "read_file", status: "success", detail: "1 line" }));
+    // Third call opens and stays in flight (no result yet) — this is the only
+    // thing on screen for the whole batch until something flushes it.
+    bus.emit("tool_call", makeEvt("tool_call", { title: "[tool] read_file: c.ts" }));
+    await wait(50);
+
+    expect(frames.some(f => f?.includes("Read(c.ts)") && f?.includes("+2 more this batch"))).toBe(true);
     unmount();
   });
 

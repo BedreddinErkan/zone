@@ -11,6 +11,20 @@ import { startTodo, completeTodo } from "../../core/todoLifecycle.js";
 import type { UserCommand } from "./userCommands.js";
 import type { StagedFile } from "../../core/fileDiff.js";
 import type { UserHooksConfig } from "../../api/diskHooks.js";
+import { READ_ONLY_TOOLS } from "../../tools/toolDefinitions.js";
+
+// Local copy, not a mutation of the shared export: READ_ONLY_TOOLS also gates
+// EXPLORE_ALLOWED_TOOLS and AUDIT_ALLOWED_TOOLS (subagents.ts) — real subagent
+// tool-availability, not just a display concept. AUDIT_ALLOWED_TOOLS's own
+// `[...READ_ONLY_TOOLS, "run_command_readonly"]` is direct evidence that tool is
+// deliberately excluded from the shared list; adding it here to widen batching
+// would silently widen Explore-subagent tool access too. This Set is for
+// TUI-display read/write classification only.
+const READ_ONLY_TOOL_SET = new Set<string>(READ_ONLY_TOOLS);
+
+// Small, tunable — not deeply derived. Mirrors the "5+ reads is a smell" figure
+// already in agentLoop.ts's EFFICIENCY CONTRACT directive.
+const READ_ONLY_BATCH_MAX_SIZE = 5;
 
 export type { TuiMode };
 
@@ -31,12 +45,22 @@ export type ModalEntry = {
 export type LiveTailState = {
   currentToolCall: { toolName: string; args: string; patch?: string } | null;
   narrationBuffer: string;
+  /**
+   * Consecutive successful read-only calls, buffered for one collapsed transcript
+   * entry instead of one line each. No `ok` field: a failed read-only call is
+   * never pushed here at all (it flushes whatever is pending, then commits
+   * individually via the ordinary `tool_call` path, so its existing glyph +
+   * error-detail rendering is never lost inside a group's count) — so every
+   * entry that ever reaches this array is, by construction, a success.
+   */
+  pendingReadOnlyBatch: Array<{ toolName: string }>;
 };
 
 export type TranscriptEntry =
   | { kind: "narration"; text: string }
   | { kind: "thinking"; text: string }
   | { kind: "tool_call"; toolName: string; args: string; patch?: string; results: { ok: boolean; detail: string; blocked?: true }[] }
+  | { kind: "tool_call_group"; calls: Array<{ toolName: string }> }
   | { kind: "error"; text: string }
   | { kind: "phase_marker"; phase: string }
   | { kind: "user_prompt"; text: string }
@@ -223,7 +247,7 @@ export function buildInitialState(initialValues?: {
     sessionId: initialValues?.resumedSessionId ?? randomUUID(),
     sessionStartedAt: initialValues?.resumedStartedAt ?? new Date().toISOString(),
     isResumed: !!initialValues?.resumedTranscript,
-    liveTail: { currentToolCall: null, narrationBuffer: "" },
+    liveTail: { currentToolCall: null, narrationBuffer: "", pendingReadOnlyBatch: [] },
     spinner: null,
     statusBar: {
       iter: 0,
@@ -413,6 +437,24 @@ export type StoreAction =
   | { type: "MCP_TRUST_APPROVED"; manager: import("../../mcp/mcpClientManager.js").McpClientManager }
   | { type: "MCP_TRUST_DENIED" };
 
+/**
+ * Commits the pending read-only batch as one `tool_call_group` transcript entry,
+ * a no-op when nothing is buffered. Centralized so every call site — the
+ * write-open flush, the size-cap flush, the failed-read flush, and every
+ * terminal/pause transition below — builds the exact same entry shape and can
+ * never forget to also clear the buffer.
+ */
+function flushReadOnlyBatch(state: StoreState): StoreState {
+  const { pendingReadOnlyBatch } = state.liveTail;
+  if (pendingReadOnlyBatch.length === 0) return state;
+  const entry: TranscriptEntry = { kind: "tool_call_group", calls: pendingReadOnlyBatch };
+  return {
+    ...state,
+    transcript: [...state.transcript, entry],
+    liveTail: { ...state.liveTail, pendingReadOnlyBatch: [] },
+  };
+}
+
 export function reducer(state: StoreState, action: StoreAction): StoreState {
   switch (action.type) {
     case "SPINNER_START":
@@ -441,21 +483,41 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
     case "SPINNER_STOP":
       return { ...state, spinner: null };
 
-    case "TOOL_CALL_OPEN":
+    case "TOOL_CALL_OPEN": {
+      // A write tool opening closes out whatever read-only batch came before it —
+      // narration/other tools never trigger this; only a write call's own open does.
+      const isWrite = !READ_ONLY_TOOL_SET.has(action.toolName);
+      const base = isWrite ? flushReadOnlyBatch(state) : state;
       return {
-        ...state,
+        ...base,
         liveTail: {
-          ...state.liveTail,
+          ...base.liveTail,
           currentToolCall: { toolName: action.toolName, args: action.args, patch: action.patch },
         },
       };
+    }
 
     case "TOOL_RESULT_PUSH": {
       const tc = state.liveTail.currentToolCall;
       if (!tc) return state;
-      // Always append a fresh entry. Ink's <Static> renders each index once and
-      // never re-renders existing items, so updating in-place would make repeated
-      // approvals of the same command invisible. One entry per call is correct.
+
+      if (READ_ONLY_TOOL_SET.has(tc.toolName) && action.ok) {
+        // Buffer instead of committing individually. Ink's <Static> never
+        // re-renders a committed index, but nothing here is committed yet —
+        // this only ever touches liveTail, never state.transcript.
+        const nextBatch = [...state.liveTail.pendingReadOnlyBatch, { toolName: tc.toolName }];
+        const withBatch: StoreState = { ...state, liveTail: { ...state.liveTail, pendingReadOnlyBatch: nextBatch } };
+        return nextBatch.length >= READ_ONLY_BATCH_MAX_SIZE ? flushReadOnlyBatch(withBatch) : withBatch;
+      }
+
+      // A write tool's result (success or failure), or a FAILED read-only call —
+      // either way this commits as its own entry, same as every call did before
+      // batching existed. A failed read-only call is never absorbed into the
+      // batch's count: flush what's already pending first (a write's own open
+      // already flushed it, so this is a no-op there; a failed read's open never
+      // does, so this is the only place it happens), then append individually so
+      // ToolCall.tsx's existing glyph + error-detail rendering still applies.
+      const flushed = flushReadOnlyBatch(state);
       const entry: TranscriptEntry = {
         kind: "tool_call",
         toolName: tc.toolName,
@@ -463,7 +525,7 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         ...(tc.patch ? { patch: tc.patch } : {}),
         results: [{ ok: action.ok, detail: action.detail, ...(action.blocked ? { blocked: true as const } : {}) }],
       };
-      return { ...state, transcript: [...state.transcript, entry] };
+      return { ...flushed, transcript: [...flushed.transcript, entry] };
     }
 
     case "TOOL_CALL_CLOSE":
@@ -502,51 +564,59 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         transcript: [...state.transcript, { kind: "error", text: action.text }],
       };
 
-    case "RUN_DONE":
+    case "RUN_DONE": {
+      // Self-contained flush, not reliant on a preceding NARRATION_COMMIT: RUN_DONE
+      // is dispatched from multiple call sites (init.ts, eventToActions.ts), and a
+      // run that ends with reads still buffered must not drop them from the record.
+      const flushed = flushReadOnlyBatch(state);
       return {
-        ...state,
+        ...flushed,
         spinner: null,
         runState: "done",
         // Bank a park still in flight. A run that ENDS while parked — which is
         // exactly what suspending on a question does — would otherwise report
         // the whole wait as work.
-        parkedMs: state.parkedMs + (state.parkStartedMs != null ? Date.now() - state.parkStartedMs : 0),
+        parkedMs: flushed.parkedMs + (flushed.parkStartedMs != null ? Date.now() - flushed.parkStartedMs : 0),
         parkStartedMs: undefined,
         // Freeze the duration at completion (excludes idle / reading time).
         runEndMs: Date.now(),
         pendingQuestion: null,
-        liveTail: { ...state.liveTail, currentToolCall: null },
+        liveTail: { ...flushed.liveTail, currentToolCall: null },
       };
+    }
 
-    case "RUN_ABORTED":
+    case "RUN_ABORTED": {
+      // Self-contained flush (see RUN_DONE) — RUN_ABORTED is dispatched bare, with
+      // no preceding NARRATION_COMMIT, from PlanModal/PlanActionPrompt/StagedDiffModal
+      // and App.tsx's Esc-abort alike; every one of those paths must surface a
+      // buffered batch rather than silently discard it.
+      const flushed = flushReadOnlyBatch(state);
       return {
-        ...state,
+        ...flushed,
         spinner: null,
         runState: "aborted",
-        // Bank a park still in flight. A run that ENDS while parked — which is
-        // exactly what suspending on a question does — would otherwise report
-        // the whole wait as work.
-        parkedMs: state.parkedMs + (state.parkStartedMs != null ? Date.now() - state.parkStartedMs : 0),
+        parkedMs: flushed.parkedMs + (flushed.parkStartedMs != null ? Date.now() - flushed.parkStartedMs : 0),
         parkStartedMs: undefined,
         runEndMs: Date.now(),
         pendingQuestion: null,
-        liveTail: { ...state.liveTail, currentToolCall: null },
+        liveTail: { ...flushed.liveTail, currentToolCall: null },
       };
+    }
 
-    case "RUN_FAILED":
+    case "RUN_FAILED": {
+      // Self-contained flush (see RUN_DONE).
+      const flushed = flushReadOnlyBatch(state);
       return {
-        ...state,
+        ...flushed,
         spinner: null,
         runState: "failed",
-        // Bank a park still in flight. A run that ENDS while parked — which is
-        // exactly what suspending on a question does — would otherwise report
-        // the whole wait as work.
-        parkedMs: state.parkedMs + (state.parkStartedMs != null ? Date.now() - state.parkStartedMs : 0),
+        parkedMs: flushed.parkedMs + (flushed.parkStartedMs != null ? Date.now() - flushed.parkStartedMs : 0),
         parkStartedMs: undefined,
         runEndMs: Date.now(),
         pendingQuestion: null,
-        liveTail: { ...state.liveTail, currentToolCall: null },
+        liveTail: { ...flushed.liveTail, currentToolCall: null },
       };
+    }
 
     case "USER_PROMPT":
       return {
@@ -576,9 +646,14 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
     case "PENDING_APPROVAL_RESOLVED":
       return { ...state, pendingApproval: null };
 
-    case "USER_QUESTION_ASKED":
+    case "USER_QUESTION_ASKED": {
+      // Flush first: this nulls currentToolCall below, which is the live
+      // indicator's only render condition (Transcript.tsx) — without flushing,
+      // a pending batch would go fully invisible for the whole pause, right when
+      // the user is looking at the screen to answer.
+      const flushed = flushReadOnlyBatch(state);
       return {
-        ...state,
+        ...flushed,
         pendingQuestion: {
           kind: "live",
           questionId: action.questionId,
@@ -590,8 +665,9 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         // Nothing is being computed while we wait, and a spinner next to a
         // question reads as "still working", i.e. "don't type".
         spinner: null,
-        liveTail: { ...state.liveTail, currentToolCall: null },
+        liveTail: { ...flushed.liveTail, currentToolCall: null },
       };
+    }
 
     case "USER_QUESTION_CARRIED":
       // Resumed from an envelope: the question outlived the process that asked
@@ -746,7 +822,10 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         sessionId: action.session.sessionId,
         sessionStartedAt: action.session.startedAt,
         isResumed: true,
-        liveTail: { currentToolCall: null, narrationBuffer: "" },
+        // Reset, not flush: the transcript this batch would flush into is about to
+        // be replaced wholesale by the resumed session's own, so there is nothing
+        // to preserve it for.
+        liveTail: { currentToolCall: null, narrationBuffer: "", pendingReadOnlyBatch: [] },
         spinner: null,
         runState: "idle",
         pendingQuestion: null,
@@ -787,9 +866,14 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
     case "PLAN_RESOLVED":
       return { ...state, modalView: "none", planProposal: null };
 
-    case "PLAN_READY_PROPOSED":
+    case "PLAN_READY_PROPOSED": {
+      // Flush first, then append plan_ready after it — matching chronological
+      // order (the reads that informed the plan happened before the plan did).
+      // Without this, files read while building the plan could stay buffered and
+      // invisible right when the user is reviewing the plan they informed.
+      const flushed = flushReadOnlyBatch(state);
       return {
-        ...state,
+        ...flushed,
         modalView: "plan_ready",
         planReadyProposal: {
           planId: action.planId,
@@ -803,7 +887,7 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
           scopeSummary: action.scopeSummary,
         },
         transcript: [
-          ...state.transcript,
+          ...flushed.transcript,
           {
             kind: "plan_ready" as const,
             objective: action.objective,
@@ -816,15 +900,19 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
           },
         ],
       };
+    }
 
     case "PLAN_READY_RESOLVED":
       // Plan mode is sticky (Claude-Code-like): keep state.mode so follow-up
       // tasks stay in plan mode until the user toggles out via Shift+Tab.
       return { ...state, modalView: "none", planReadyProposal: null };
 
-    case "STAGED_DIFFS_PROPOSED":
+    case "STAGED_DIFFS_PROPOSED": {
+      // Flush first (see PLAN_READY_PROPOSED) — reads leading up to the staged
+      // diff must not sit invisible in liveTail while the user reviews it.
+      const flushed = flushReadOnlyBatch(state);
       return {
-        ...state,
+        ...flushed,
         modalView: "staged_diffs",
         stagedDiffProposal: {
           approvalId: action.approvalId,
@@ -834,6 +922,7 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
           trigger: action.trigger,
         },
       };
+    }
 
     case "STAGED_DIFFS_RESOLVED":
       return { ...state, modalView: "none", stagedDiffProposal: null };

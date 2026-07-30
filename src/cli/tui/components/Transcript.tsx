@@ -1,6 +1,7 @@
 import { Box, Static, Text, useStdout } from "ink";
 import { useStore, type TranscriptEntry } from "../store.js";
 import { ToolCall } from "./ToolCall.js";
+import { ToolCallGroup } from "./ToolCallGroup.js";
 import { ErrorLine } from "./ErrorLine.js";
 import { IterMarker } from "./IterMarker.js";
 import { getToolDisplayName, formatToolArgs } from "./toolCallFormat.js";
@@ -44,6 +45,12 @@ function renderEntry(entry: TranscriptEntry, index: number, colWidth: number): R
       return (
         <Box key={index} marginTop={1}>
           <ToolCall toolName={entry.toolName} args={entry.args} results={entry.results} patch={entry.patch} />
+        </Box>
+      );
+    case "tool_call_group":
+      return (
+        <Box key={index} marginTop={1}>
+          <ToolCallGroup calls={entry.calls} />
         </Box>
       );
     case "error":
@@ -105,6 +112,7 @@ export function Transcript(): React.ReactElement {
   const { stdout } = useStdout();
   const liveToolCall = state.liveTail.currentToolCall;
   const liveNarration = state.liveTail.narrationBuffer;
+  const pendingBatchCount = state.liveTail.pendingReadOnlyBatch.length;
 
   return (
     <Box flexDirection="column">
@@ -126,7 +134,10 @@ export function Transcript(): React.ReactElement {
         </Box>
       )}
       {liveToolCall && (
-        <Text dimColor>○ {getToolDisplayName(liveToolCall.toolName)}({formatToolArgs(liveToolCall.toolName, liveToolCall.args)})</Text>
+        <Text dimColor>
+          ○ {getToolDisplayName(liveToolCall.toolName)}({formatToolArgs(liveToolCall.toolName, liveToolCall.args)})
+          {pendingBatchCount > 0 ? ` · +${pendingBatchCount} more this batch` : ""}
+        </Text>
       )}
     </Box>
   );
