@@ -590,6 +590,13 @@ const DIVERGENCE_CHECK_DIRECTIVE =
   `Flag any path that re-implements logic available in a shared helper, or diverges from the ` +
   `dominant pattern — a path that works in isolation is a latent bug if it has drifted from its siblings.\n\n`;
 
+// Patch-branch only, and suppressed when input.planApproved is true — an approved plan
+// already carries write permission for its steps; capping prose to one sentence per tool
+// call is a fit for open-ended exploration, not for executing steps a human already read
+// and approved. Shared constant: edit in ONE commit, every wording change is a cold-cache reset.
+export const NARRATION_CAP_DIRECTIVE =
+  `Between tool calls, emit AT MOST one sentence. After a tool result, do NOT restate, summarize, or interpret it in prose — issue the next tool call directly (no "Now I'll…", "Let me…", "I can see…" preambles). The only place to be thorough is the FINAL SUMMARY; mid-run, the single pre-tool NARRATION sentence is the whole of your prose.\n`;
+
 // Single source of truth for the archetype-ternary branch headers below — a run's
 // prompt-branch telemetry (agentLoop.ts, runAgentLoopScoped) scans systemContent for
 // these same two exported constants rather than its own copy of the header text. Two
@@ -723,7 +730,7 @@ export function assembleAgentSystemPrompt(input: {
         : `BREVITY RULES (read once, apply always):\n\n` +
           `Default to action over explanation. Tools speak louder than narration.\n` +
           `Before opening a 4th read_file or search_in_files in a row, ask: "do I have enough to act?" If yes, act.\n` +
-          `Between tool calls, emit AT MOST one sentence. After a tool result, do NOT restate, summarize, or interpret it in prose — issue the next tool call directly (no "Now I'll…", "Let me…", "I can see…" preambles). The only place to be thorough is the FINAL SUMMARY; mid-run, the single pre-tool NARRATION sentence is the whole of your prose.\n` +
+          (input.planApproved ? "" : NARRATION_CAP_DIRECTIVE) +
           `These caps apply to PROSE ONLY — never shorten or omit a FIND/REPLACE block, write_file body, run_command, the [ZONE_VERIFICATION] tag, or the ## Tests line. Brevity never touches tool payloads or verification output.\n\n` +
           `EFFICIENCY CONTRACT:\n` +
           `Cost ceiling: $0.50 typical / $1.00 hard. Each LLM call costs ~$0.05.\n` +

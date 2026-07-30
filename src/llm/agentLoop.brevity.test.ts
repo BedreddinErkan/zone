@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   assembleAgentSystemPrompt,
   assembleInvestigationSystemPrompt,
+  NARRATION_CAP_DIRECTIVE,
 } from './agentLoop.js';
 
 const PATCH_INPUT = {
@@ -151,6 +152,43 @@ describe('R1/R6: DIVERGENCE CHECK directive and investigation archetype preamble
     const prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, archetype: 'question', planApproved: true });
     expect(prompt).not.toContain('Q&A / LISTING MODE');
     expect(prompt).toContain('BREVITY RULES');
+  });
+});
+
+describe('NARRATION_CAP_DIRECTIVE: suppressed for approved-plan runs, byte-identical otherwise', () => {
+  it('default branch (no planApproved) contains the narration cap', () => {
+    const prompt = assembleAgentSystemPrompt(PATCH_INPUT);
+    expect(prompt).toContain(NARRATION_CAP_DIRECTIVE);
+  });
+
+  it('default branch + planApproved:true omits the narration cap', () => {
+    const prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, planApproved: true });
+    expect(prompt).not.toContain(NARRATION_CAP_DIRECTIVE);
+  });
+
+  it('investigation archetype + planApproved:true omits the narration cap, not just the header', () => {
+    const prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, archetype: 'investigation', planApproved: true });
+    expect(prompt).not.toContain(NARRATION_CAP_DIRECTIVE);
+  });
+
+  it('question archetype + planApproved:true omits the narration cap, not just the header', () => {
+    const prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, archetype: 'question', planApproved: true });
+    expect(prompt).not.toContain(NARRATION_CAP_DIRECTIVE);
+  });
+
+  it('the PROSE ONLY scope clarifier survives with its FIND/REPLACE protection intact, planApproved or not', () => {
+    const withCap = assembleAgentSystemPrompt(PATCH_INPUT);
+    const withoutCap = assembleAgentSystemPrompt({ ...PATCH_INPUT, planApproved: true });
+    for (const prompt of [withCap, withoutCap]) {
+      expect(prompt).toContain('These caps apply to PROSE ONLY');
+      expect(prompt).toContain('FIND/REPLACE block');
+    }
+  });
+
+  it('byte-identical except for NARRATION_CAP_DIRECTIVE itself (mutation-proof of the gate)', () => {
+    const withCap = assembleAgentSystemPrompt(PATCH_INPUT);
+    const withoutCap = assembleAgentSystemPrompt({ ...PATCH_INPUT, planApproved: true });
+    expect(withoutCap).toBe(withCap.replace(NARRATION_CAP_DIRECTIVE, ''));
   });
 });
 
