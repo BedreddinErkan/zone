@@ -23,7 +23,7 @@ function InputBox({ buffer, disabled }: { buffer: string; disabled: boolean }): 
       <Text dimColor={disabled}>{prefix}</Text>
       <Box flexGrow={1}>
         <Text dimColor={disabled}>{displayBuffer}</Text>
-        {!disabled && !buffer && <Text dimColor>{"Type a task or /help"}</Text>}
+        {!disabled && !buffer && <Text dimColor>{"Type a task or /help · /model /commit /resume"}</Text>}
       </Box>
     </Box>
   );
@@ -71,5 +71,15 @@ describe("TUI.10.G composer border", () => {
     expect(frame.split("\n")).toHaveLength(3);
     expect(ghostRows(frame)).toHaveLength(0);
     expect(frame).toContain("Type a task or /help");
+  });
+
+  it("idle placeholder names at least one command, without adding a row", () => {
+    const { lastFrame } = render(<InputBox buffer="" disabled={false} />);
+    const frame = lastFrame() ?? "";
+    // Structural pin unchanged — a wider hint must still fit a 3-row box.
+    expect(frame.split("\n")).toHaveLength(3);
+    expect(ghostRows(frame)).toHaveLength(0);
+    expect(frame).toContain("Type a task or /help");
+    expect(frame).toMatch(/\/(model|commit|resume)/);
   });
 });

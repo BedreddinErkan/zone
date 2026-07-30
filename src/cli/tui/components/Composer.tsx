@@ -741,7 +741,7 @@ export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, onRemot
         <Box flexGrow={1}>
           <Text dimColor={disabled}>{displayBuffer}</Text>
           {!disabled && !buffer && (
-            <Text dimColor>{"Type a task or /help"}</Text>
+            <Text dimColor>{"Type a task or /help · /model /commit /resume"}</Text>
           )}
         </Box>
       </Box>

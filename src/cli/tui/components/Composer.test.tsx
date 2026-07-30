@@ -567,3 +567,17 @@ describe("Composer — vision gate (T-VISION)", () => {
     unmount();
   });
 });
+
+describe("Composer — idle placeholder", () => {
+  it("names at least one command alongside the base hint, on the real component", () => {
+    const { lastFrame, unmount } = render(
+      <StoreProvider initialValues={{ model: "test-model", capUsd: 10 }}>
+        <Composer onSubmit={vi.fn()} onExit={() => {}} />
+      </StoreProvider>
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("Type a task or /help");
+    expect(frame).toMatch(/\/(model|commit|resume)/);
+    unmount();
+  });
+});
