@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Text } from "ink";
 import { useStore } from "../store.js";
 import { SPINNER_LABEL_STARTING, SPINNER_LABEL_PLANNING } from "../hooks/useAgentEvents.js";
+import { formatTokens } from "./StatusBar.js";
 
 const FRAMES = ["✦", "✧", "✶", "✷", "✸", "✹", "✺", "✶"];
 const FRAME_MS = 100;
@@ -40,5 +41,22 @@ export function Spinner(): React.ReactElement | null {
   const words = ROTATABLE[label];
   const displayLabel = words ? words[labelIdx % words.length] : label;
 
-  return <Text bold color="magenta">{FRAMES[frame]}{displayLabel ? ` ${displayLabel}` : ""}</Text>;
+  // Elapsed / tokens / effort context, computed fresh on every render rather
+  // than via a second timer: the glyph animation above already re-renders this
+  // component at FRAME_MS while active, so this rides along for free. No
+  // explicit runState check for elapsed — USER_QUESTION_ASKED nulls
+  // state.spinner itself, so the early return above already covers the park.
+  const elapsedSec =
+    state.runStartMs != null
+      ? (Math.max(0, Date.now() - state.runStartMs - state.parkedMs) / 1000).toFixed(1)
+      : null;
+  const tokens = state.statusBar.cumulativeTokens;
+  const effort = state.modelSettings?.effort;
+  const contextParts: string[] = [];
+  if (elapsedSec != null) contextParts.push(`${elapsedSec}s`);
+  if (tokens > 0) contextParts.push(`${formatTokens(tokens)} tokens`);
+  if (effort) contextParts.push(`effort: ${effort}`);
+  const context = contextParts.length > 0 ? ` (${contextParts.join(" · ")})` : "";
+
+  return <Text bold color="magenta">{FRAMES[frame]}{displayLabel ? ` ${displayLabel}` : ""}{context}</Text>;
 }
