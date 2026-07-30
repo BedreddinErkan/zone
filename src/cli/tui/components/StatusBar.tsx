@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { Box, Text } from "ink";
 import { useStore, type RunState, type TuiMode } from "../store.js";
 
@@ -14,6 +15,7 @@ function leftText(
   elapsedSec: string | null,
   cumulativeTokens: number,
   waitedSec: string | null,
+  liveElapsedSec: string | null,
 ): string {
   const m = model || "default";
   const tokStr = cumulativeTokens > 0 ? ` (${formatTokens(cumulativeTokens)} tok)` : "";
@@ -21,7 +23,7 @@ function leftText(
     case "idle":
       return `idle · ${m} · perm: default`;
     case "running":
-      return `$${costUsd.toFixed(4)}${tokStr} · ${m} · perm: default`;
+      return `$${costUsd.toFixed(4)}${tokStr}${liveElapsedSec ? ` · ${liveElapsedSec}s` : ""} · ${m} · perm: default`;
     case "awaiting_input":
       return `waiting for you · $${costUsd.toFixed(4)}${tokStr} · ${m}`;
     case "done":
@@ -73,6 +75,24 @@ export function StatusBar(): React.ReactElement {
       : null;
   const waitedSec = elapsedSec != null && parkedMs > 0 ? (parkedMs / 1000).toFixed(1) : null;
 
+  // Live ticker, running only — not isRunInFlight (which also covers
+  // awaiting_input): parkedMs banks a park's duration only once it ends, so
+  // ticking through an active park would show raw wall-clock including the
+  // pending wait, against parkedMs's own purpose (store-core.ts:121-129).
+  // New per-second re-render pressure for the run's duration — Spinner's own
+  // timer is local to Spinner and never touches the store, so this does not
+  // ride along with it for free.
+  const [, forceTick] = useState(0);
+  useEffect(() => {
+    if (runState !== "running") return;
+    const id = setInterval(() => forceTick((t) => t + 1), 1000);
+    return () => clearInterval(id);
+  }, [runState]);
+  const liveElapsedSec =
+    runState === "running" && runStartMs != null
+      ? (Math.max(0, Date.now() - runStartMs - parkedMs) / 1000).toFixed(1)
+      : null;
+
   const tokenColor =
     tokenBudgetRatio >= 0.9 ? "red" : tokenBudgetRatio >= 0.7 ? "yellow" : undefined;
 
@@ -93,7 +113,7 @@ export function StatusBar(): React.ReactElement {
     <Box flexDirection="column">
       <Text dimColor>{sep}</Text>
       <Box justifyContent="space-between" paddingX={1}>
-        <Text color={tokenColor}>{leftText(runState, costUsd, model, elapsedSec, cumulativeTokens, waitedSec)}{webSearch ? " · [W]" : ""}</Text>
+        <Text color={tokenColor}>{leftText(runState, costUsd, model, elapsedSec, cumulativeTokens, waitedSec, liveElapsedSec)}{webSearch ? " · [W]" : ""}</Text>
         {pill ? <Text color={pillColor}>{pill}</Text> : null}
         <Text dimColor>{rightHint(runState, state.pendingQuestion?.kind ?? null)}</Text>
       </Box>
