@@ -579,6 +579,15 @@ const DIVERGENCE_CHECK_DIRECTIVE =
   `Flag any path that re-implements logic available in a shared helper, or diverges from the ` +
   `dominant pattern — a path that works in isolation is a latent bug if it has drifted from its siblings.\n\n`;
 
+// Single source of truth for the archetype-ternary branch headers below — a run's
+// prompt-branch telemetry (agentLoop.ts, runAgentLoopScoped) scans systemContent for
+// these same two exported constants rather than its own copy of the header text. Two
+// independent copies would let a prompt-wording edit silently desync the detector: the
+// telemetry would keep reporting "default" forever with no error, exactly the kind of
+// drift a `slice`/comparison pair duplicates elsewhere in this codebase. Edit here only.
+export const QA_HEADER = "Q&A / LISTING MODE:";
+export const INVESTIGATION_HEADER = "INVESTIGATION GUIDE:";
+
 export function assembleAgentSystemPrompt(input: {
   agentIntro: string;
   frameworkLines: string[];
@@ -593,8 +602,17 @@ export function assembleAgentSystemPrompt(input: {
   planAnnotationsBlock?: string;
   /** Step B: when set, appends TRUST_PHASE1_DIRECTIVE before the repo path line. */
   auditFindings?: unknown;
-  /** When "question" or "investigation", prepends a Q&A/Listing mode preamble. */
+  /** When "question" or "investigation", prepends a Q&A/Listing mode preamble —
+   *  unless planApproved is true, which overrides archetype entirely (see
+   *  effectiveArchetype below): a user-approved plan's steps mean no read-only
+   *  preamble applies, whichever archetype produced it. */
   archetype?: string;
+  /** True when this run carries a user-approved plan with real steps. Overrides the
+   *  WHOLE archetype ternary below to its default (patch-mode) branch — not one arm —
+   *  since the "question" archetype has the identical structural exposure as
+   *  "investigation" and the user consented to the plan's steps regardless of which
+   *  archetype classification produced it. */
+  planApproved?: boolean;
   /** "compact" = terse 900-char default; "detailed" = richer ~2500-char report. Default: compact. */
   summaryFormat?: "compact" | "detailed";
 }): string {
@@ -666,18 +684,25 @@ export function assembleAgentSystemPrompt(input: {
     // Low fire-rate (≤5% each). Reference only; full text in .zone/audits/final-summary-recovery-examples.md
     `[Recovery-mode examples (APPLY_ROLLED_BACK, max_iterations) → .zone/audits/final-summary-recovery-examples.md]\n\n`;
 
+  // planApproved overrides archetype entirely: the user consented to the plan's steps,
+  // so no read-only preamble applies regardless of which archetype produced it. One
+  // shared condition, computed once, rather than `&& !planApproved` on each archetype
+  // branch below — this also covers any archetype added later with no per-branch
+  // carve-out needed.
+  const effectiveArchetype = input.planApproved ? undefined : input.archetype;
+
   return (
     `${input.agentIntro}\n\n` +
-    (input.archetype === "question"
-      ? `Q&A / LISTING MODE:\n` +
+    (effectiveArchetype === "question"
+      ? `${QA_HEADER}\n` +
         `- Use ONE shell command via run_command (e.g. find . -name "*.ts" -type f | sort, ls -la, grep -rn pattern src/) to answer the query.\n` +
         `- For enumeration: PREFER find ... -type f | sort — returns the FULL accurate listing. Do NOT use list_files (truncates) or search_in_files (paginates).\n` +
         `- Do NOT read source files unless the user explicitly asks for context.\n` +
         `- Final response: full command output plus a one-sentence summary.\n` +
         `- Iteration budget is 3 — one command, optional confirmation, one summary.\n\n` +
         WEB_SEARCH_DIRECTIVE
-      : input.archetype === "investigation"
-        ? `INVESTIGATION GUIDE:\n` +
+      : effectiveArchetype === "investigation"
+        ? `${INVESTIGATION_HEADER}\n` +
           `- Goal: understand how this path works, identify gaps, and compare against sibling implementations.\n` +
           `- You have a tight iteration budget — use it efficiently: one search to locate the concern, one find_references to check sibling call sites (DIVERGENCE CHECK), one synthesis.\n` +
           `- Use search_in_files and find_references; read source files as needed. Do NOT avoid source reads — they are the point.\n` +
@@ -2809,6 +2834,7 @@ Example:
         planAnnotationsBlock: buildPlanAnnotationsBlock(input.executionPlan),
         auditFindings: input.auditFindings,
         archetype: input.taskClassification?.archetype,
+        planApproved: input.planApproved,
         summaryFormat: input.summaryFormat,
       });
   // X.0.1: mode prefix relocated out of system head to keep the system prompt

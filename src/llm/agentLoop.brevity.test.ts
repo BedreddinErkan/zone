@@ -140,6 +140,18 @@ describe('R1/R6: DIVERGENCE CHECK directive and investigation archetype preamble
     const prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, archetype: 'question' });
     expect(prompt).toContain('Q&A / LISTING MODE');
   });
+
+  it('investigation archetype + planApproved:true gets the default branch instead (read-only suppression fix)', () => {
+    const prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, archetype: 'investigation', planApproved: true });
+    expect(prompt).not.toContain('INVESTIGATION GUIDE');
+    expect(prompt).toContain('BREVITY RULES');
+  });
+
+  it('question archetype + planApproved:true gets the default branch instead (read-only suppression fix)', () => {
+    const prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, archetype: 'question', planApproved: true });
+    expect(prompt).not.toContain('Q&A / LISTING MODE');
+    expect(prompt).toContain('BREVITY RULES');
+  });
 });
 
 describe('summaryFormat preset selection', () => {
