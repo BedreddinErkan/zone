@@ -186,12 +186,17 @@ export function formatExecutionPlanForPrompt(plan?: ExecutionPlan | null): strin
     })
     .join("\n");
 
-  return [
+  const lines = [
     `Objective: ${plan.objective}`,
     "Steps:",
     steps,
     `Scope: ${plan.scopeSummary}`,
-  ].join("\n");
+  ];
+  if (plan.riskHints.length > 0) {
+    lines.push("Risks:");
+    lines.push(plan.riskHints.map((hint) => `- ${hint}`).join("\n"));
+  }
+  return lines.join("\n");
 }
 
 export async function generateExecutionPlan(input: {

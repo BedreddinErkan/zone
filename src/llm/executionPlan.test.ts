@@ -16,7 +16,8 @@ vi.mock("../utils/logger.js", () => ({
   debugLog: mocks.debugLog,
 }));
 
-import { generateExecutionPlan, tryParseExecutionPlan, isNoChangePlan, isCannotVerifyPlan } from "./executionPlan.js";
+import { generateExecutionPlan, tryParseExecutionPlan, isNoChangePlan, isCannotVerifyPlan, formatExecutionPlanForPrompt } from "./executionPlan.js";
+import type { ExecutionPlan } from "./executionPlan.js";
 
 function mockPlanResponse(plan: unknown) {
   mocks.createChatCompletion.mockResolvedValueOnce({
@@ -601,5 +602,42 @@ describe("executionPlanSchema salvage — steps + reason", () => {
     expect(result).not.toBeNull();
     const salvagedCalls = mocks.debugLog.mock.calls.filter((c: unknown[]) => String(c[0]).includes("[zone-plan-salvaged]"));
     expect(salvagedCalls).toHaveLength(0);
+  });
+});
+
+describe("formatExecutionPlanForPrompt", () => {
+  const BASE_PLAN: ExecutionPlan = {
+    objective: "Add a login feature",
+    steps: [
+      { title: "Add login route", description: "Create the route", filesLikely: ["src/routes/login.ts"] },
+    ],
+    riskHints: [],
+    scopeSummary: "Add a login feature end to end.",
+  };
+
+  it("returns an empty string when no plan is given", () => {
+    expect(formatExecutionPlanForPrompt(undefined)).toBe("");
+    expect(formatExecutionPlanForPrompt(null)).toBe("");
+  });
+
+  it("renders objective, steps, and scope unchanged when riskHints is empty", () => {
+    const text = formatExecutionPlanForPrompt(BASE_PLAN);
+    expect(text).toContain("Objective: Add a login feature");
+    expect(text).toContain("1. Add login route: Create the route (files: src/routes/login.ts)");
+    expect(text).toContain("Scope: Add a login feature end to end.");
+    expect(text).not.toContain("Risks:");
+  });
+
+  it("appends a Risks: section listing every riskHint when present", () => {
+    const plan: ExecutionPlan = { ...BASE_PLAN, riskHints: ["Might break auth middleware", "Touches shared config"] };
+    const text = formatExecutionPlanForPrompt(plan);
+    expect(text).toContain("Risks:");
+    expect(text).toContain("- Might break auth middleware");
+    expect(text).toContain("- Touches shared config");
+  });
+
+  it("does not render a Risks: label when riskHints is empty (no dangling header)", () => {
+    const text = formatExecutionPlanForPrompt({ ...BASE_PLAN, riskHints: [] });
+    expect(text).not.toContain("Risks:");
   });
 });
