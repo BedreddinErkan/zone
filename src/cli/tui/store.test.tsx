@@ -242,6 +242,49 @@ describe("buildInitialState", () => {
   });
 });
 
+describe("PLAN_READY_PROPOSED", () => {
+  const PLAN_READY_ACTION = {
+    type: "PLAN_READY_PROPOSED" as const,
+    planId: "plan-1",
+    runId: "run-1",
+    objective: "Add a widget to the dashboard",
+    steps: [{ title: "Create the widget", description: "New component", filesLikely: ["src/Widget.tsx"] }],
+    riskHints: ["Shares a layout helper with the settings page"],
+    scopeSummary: "Touches only the dashboard module",
+  };
+
+  it("appends a 'plan_ready' transcript entry with the full plan content", () => {
+    const s = reducer(initialState(), PLAN_READY_ACTION);
+    expect(s.transcript).toHaveLength(1);
+    const entry = s.transcript[0]!;
+    expect(entry.kind).toBe("plan_ready");
+    if (entry.kind !== "plan_ready") throw new Error("unreachable");
+    expect(entry.objective).toBe(PLAN_READY_ACTION.objective);
+    expect(entry.steps).toEqual(PLAN_READY_ACTION.steps);
+    expect(entry.riskHints).toEqual(PLAN_READY_ACTION.riskHints);
+    expect(entry.scopeSummary).toBe(PLAN_READY_ACTION.scopeSummary);
+  });
+
+  it("still sets modalView:'plan_ready' and planReadyProposal, unchanged from before", () => {
+    const s = reducer(initialState(), PLAN_READY_ACTION);
+    expect(s.modalView).toBe("plan_ready");
+    expect(s.planReadyProposal?.objective).toBe(PLAN_READY_ACTION.objective);
+  });
+
+  it("a refine cycle appends the revised plan as a second entry, v2 after v1 — proves append, not replace", () => {
+    const v1 = { ...PLAN_READY_ACTION, objective: "OBJECTIVE_V1_MARKER" };
+    const v2 = { ...PLAN_READY_ACTION, objective: "OBJECTIVE_V2_MARKER" };
+    let s = reducer(initialState(), v1);
+    s = reducer(s, v2);
+
+    expect(s.transcript).toHaveLength(2);
+    const [first, second] = s.transcript;
+    if (first!.kind !== "plan_ready" || second!.kind !== "plan_ready") throw new Error("unreachable");
+    expect(first!.objective).toBe("OBJECTIVE_V1_MARKER");
+    expect(second!.objective).toBe("OBJECTIVE_V2_MARKER");
+  });
+});
+
 describe("PLAN_READY_RESOLVED (sticky plan mode)", () => {
   it("keeps state.mode and clears the proposal/modal", () => {
     const s0 = { ...buildInitialState({ model: "m", capUsd: 10, mode: "plan" }), modalView: "plan_ready" as const };

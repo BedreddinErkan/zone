@@ -301,7 +301,11 @@ describe("PlanReadyModal", () => {
     expect(resolvePlanApproval).toHaveBeenCalledWith(
       expect.objectContaining({ planId: "plan-test-2", decision: "accept_all" })
     );
-    expect(lastFrame()).not.toContain("Ready to code?");
+    // Not "Ready to code?" — that header now also lives in the permanent transcript
+    // entry (PLAN_READY_PROPOSED appends it to history) and is expected to survive
+    // resolution by design. The footer hint is unique to the still-mounted modal's
+    // own action-prompt chrome (PlanReadyModal.tsx), which does close on resolve.
+    expect(lastFrame()).not.toContain("[1] auto-accept all");
     unmount();
   });
 
@@ -323,7 +327,8 @@ describe("PlanReadyModal", () => {
     expect(resolvePlanApproval).toHaveBeenCalledWith(
       expect.objectContaining({ planId: "plan-test-3", decision: "manual" })
     );
-    expect(lastFrame()).not.toContain("Ready to code?");
+    // See the accept_all test above for why this checks the footer hint, not the header.
+    expect(lastFrame()).not.toContain("[1] auto-accept all");
     unmount();
   });
 
@@ -347,7 +352,8 @@ describe("PlanReadyModal", () => {
     expect(resolvePlanApproval).toHaveBeenCalledWith(
       expect.objectContaining({ planId: "plan-test-4", decision: "reject" })
     );
-    expect(lastFrame()).not.toContain("Ready to code?");
+    // See the accept_all test above for why this checks the footer hint, not the header.
+    expect(lastFrame()).not.toContain("[1] auto-accept all");
     expect(lastFrame()).toContain("aborted");
     unmount();
   });

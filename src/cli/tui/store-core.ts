@@ -41,7 +41,17 @@ export type TranscriptEntry =
   | { kind: "phase_marker"; phase: string }
   | { kind: "user_prompt"; text: string }
   | { kind: "assistant_final"; text: string }
-  | { kind: "post_execute_diffs"; files: StagedFile[] };
+  | { kind: "post_execute_diffs"; files: StagedFile[] }
+  | {
+      kind: "plan_ready";
+      objective: string;
+      steps: Array<{ title: string; description: string; filesLikely: string[] }>;
+      scopeNotes?: string;
+      noChangeReason?: string;
+      cannotVerifyReason?: string;
+      riskHints: string[];
+      scopeSummary: string;
+    };
 
 export type StatusBarState = {
   iter: number;
@@ -792,6 +802,19 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
           riskHints: action.riskHints,
           scopeSummary: action.scopeSummary,
         },
+        transcript: [
+          ...state.transcript,
+          {
+            kind: "plan_ready" as const,
+            objective: action.objective,
+            steps: action.steps,
+            ...(action.scopeNotes ? { scopeNotes: action.scopeNotes } : {}),
+            ...(action.noChangeReason ? { noChangeReason: action.noChangeReason } : {}),
+            ...(action.cannotVerifyReason ? { cannotVerifyReason: action.cannotVerifyReason } : {}),
+            riskHints: action.riskHints,
+            scopeSummary: action.scopeSummary,
+          },
+        ],
       };
 
     case "PLAN_READY_RESOLVED":

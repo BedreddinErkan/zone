@@ -6,6 +6,7 @@ import { IterMarker } from "./IterMarker.js";
 import { getToolDisplayName, formatToolArgs } from "./toolCallFormat.js";
 import { MarkdownText } from "./MarkdownText.js";
 import { DiffView } from "./DiffView.js";
+import { PlanBody } from "./PlanBody.js";
 
 function renderEntry(entry: TranscriptEntry, index: number, colWidth: number): React.ReactElement {
   switch (entry.kind) {
@@ -82,6 +83,20 @@ function renderEntry(entry: TranscriptEntry, index: number, colWidth: number): R
         </Box>
       );
     }
+    case "plan_ready":
+      return (
+        <Box key={index} marginTop={1} marginBottom={1}>
+          <PlanBody
+            objective={entry.objective}
+            steps={entry.steps}
+            scopeNotes={entry.scopeNotes}
+            noChangeReason={entry.noChangeReason}
+            cannotVerifyReason={entry.cannotVerifyReason}
+            riskHints={entry.riskHints}
+            scopeSummary={entry.scopeSummary}
+          />
+        </Box>
+      );
   }
 }
 
