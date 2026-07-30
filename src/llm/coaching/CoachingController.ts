@@ -2,6 +2,12 @@ import { debugLog, log } from "../../utils/logger.js";
 import type { SelfCorrectTrigger } from "../agentLoop.js";
 import type { FailureContext, CoachingDecision, CoachingControllerOpts, CoachingDeps } from "./types.js";
 
+// Larger than the 200-char debug preview elsewhere in this file (:~140/:~246) — several of
+// the failure paths that fall through to "unknown" (out-of-plan-scope, escalated-file,
+// edit-rejected) carry well over 200 chars of guidance text, and a rolled-back
+// inline-tsc-syntax-error message can carry multiple error rows.
+const UNCLASSIFIED_FAILURE_TEXT_CAP = 500;
+
 export class CoachingController {
   private _attempts = 0;
   private _budgetExhausted = false;
@@ -17,6 +23,37 @@ export class CoachingController {
 
   get budgetExhausted(): boolean {
     return this._budgetExhausted;
+  }
+
+  // Fires regardless of coaching budget — called from both the coaching branch and the
+  // exhausted branch of routeFailure below. [zone-apply-patch-retry] (the sibling marker)
+  // only fires while attempts < maxAttempts; placed the same way, this would go dark on
+  // exactly the failure pile-up that precedes an expensive whole-file rewrite — the case
+  // this marker exists to observe.
+  //
+  // signal.failedToolOutput is declared `string` (ToolResult.output, toolExecutor.ts:213,
+  // is likewise required, not optional) — verified, not assumed, so no currently-traced
+  // path produces `undefined` here. The `?? ""` stays anyway: an empty string is still
+  // type-permitted, and a 0-length rawFailureText is a recorded fact (via
+  // rawFailureTextLength), not a crash or a silent gap.
+  private emitUnclassifiedIfNeeded(
+    routedTrigger: SelfCorrectTrigger,
+    signal: FailureContext["signal"],
+    filePath: string | null,
+    attemptCount: number
+  ): void {
+    if (signal.failedToolName !== "apply_patch") return;
+    const reason = this._deps.applyPatchRetryReason(routedTrigger);
+    if (reason !== "unknown") return;
+    const rawFailureText = signal.failedToolOutput ?? "";
+    log("[zone-apply-patch-unclassified]", JSON.stringify({
+      runId: this._opts.runId ?? null,
+      trigger: routedTrigger,
+      filePath,
+      attemptCount,
+      rawFailureText: rawFailureText.slice(0, UNCLASSIFIED_FAILURE_TEXT_CAP),
+      rawFailureTextLength: rawFailureText.length,
+    }));
   }
 
   routeFailure(ctx: FailureContext): CoachingDecision {
@@ -152,6 +189,7 @@ export class CoachingController {
           attemptCount: perFileAttempt || this._attempts,
         }));
       }
+      this.emitUnclassifiedIfNeeded(routedTrigger, signal, routedFilePath ?? null, perFileAttempt || this._attempts);
 
       if (routedTrigger === "test_failed" || routedTrigger === "tool_command_spawn_failure") {
         const parsedFailingFile = diagnostic.parsed?.failingFile ?? null;
@@ -229,6 +267,8 @@ export class CoachingController {
       const perFileAttempt = routedFilePath
         ? ctx.failureHistory.get(routedFilePath)?.length ?? 0
         : 0;
+
+      this.emitUnclassifiedIfNeeded(routedTrigger, signal, routedFilePath ?? null, perFileAttempt || this._attempts);
 
       debugLog("[zone-agent-self-correct]", JSON.stringify({
         iter: ctx.iter + 1,

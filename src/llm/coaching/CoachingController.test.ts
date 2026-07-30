@@ -284,3 +284,57 @@ describe("repeat-read counter integration (Phase 6.A Branch B)", () => {
     }
   });
 });
+
+function unclassifiedCalls(): Array<Record<string, unknown>> {
+  return mockLog.mock.calls
+    .filter((c: unknown[]) => c[0] === "[zone-apply-patch-unclassified]")
+    .map((c: unknown[]) => JSON.parse(c[1] as string) as Record<string, unknown>);
+}
+
+describe("CoachingController — [zone-apply-patch-unclassified]", () => {
+  it("fires with the raw failure text truncated to the cap and its true pre-truncation length", () => {
+    const longOutput = "x".repeat(600);
+    const deps = makeDeps({ applyPatchRetryReason: vi.fn().mockReturnValue("unknown") });
+    const ctrl = new CoachingController(makeOpts(), deps);
+    ctrl.routeFailure(makeCtx({ signal: makeSignal({ failedToolOutput: longOutput }) }));
+
+    const [evt] = unclassifiedCalls();
+    expect(evt).toBeDefined();
+    expect(evt!.rawFailureText).toBe(longOutput.slice(0, 500));
+    expect(evt!.rawFailureText).not.toBe(longOutput);
+    expect(evt!.rawFailureTextLength).toBe(600);
+  });
+
+  it("does not fire when the failure classifies (reason !== 'unknown')", () => {
+    // makeDeps() default: applyPatchRetryReason -> "find_mismatch"
+    const ctrl = new CoachingController(makeOpts(), makeDeps());
+    ctrl.routeFailure(makeCtx());
+    expect(unclassifiedCalls()).toHaveLength(0);
+  });
+
+  it("still fires once the coaching budget is exhausted — the case this marker exists to fix", () => {
+    const deps = makeDeps({ applyPatchRetryReason: vi.fn().mockReturnValue("unknown") });
+    const ctrl = new CoachingController(makeOpts(), deps);
+    const ctx = makeCtx({ maxAttempts: 1 });
+
+    ctrl.routeFailure(ctx); // consumes the only budgeted attempt (coaching branch)
+    mockLog.mockClear(); // isolate the SECOND call, which must hit the exhausted branch
+    const result = ctrl.routeFailure(ctx);
+
+    expect(result.kind).toBe("exhausted");
+    expect(unclassifiedCalls()).toHaveLength(1);
+  });
+
+  it("records rawFailureTextLength 0 for an absent/empty failure text, rather than throwing", () => {
+    const deps = makeDeps({ applyPatchRetryReason: vi.fn().mockReturnValue("unknown") });
+    const ctrl = new CoachingController(makeOpts(), deps);
+    // edit_rejected_by_user-shaped surfaces need no failure text at all to be unclassifiable —
+    // this is the case most likely to be reached in production of the ten candidates.
+    ctrl.routeFailure(makeCtx({ signal: makeSignal({ failedToolOutput: "" }) }));
+
+    const [evt] = unclassifiedCalls();
+    expect(evt).toBeDefined();
+    expect(evt!.rawFailureText).toBe("");
+    expect(evt!.rawFailureTextLength).toBe(0);
+  });
+});
