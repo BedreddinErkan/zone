@@ -49,6 +49,9 @@ function renderPlanReadyModalAt(
   const stdout = Object.assign(new EventEmitter(), {
     columns,
     rows: 40,
+    isTTY: false, // deliberate, not absence: this harness wants the budget mechanism OFF
+                  // (NO_CUTS always) for its ~33 callers — see makeTtyStdoutMock below for
+                  // the one place a TTY stdout gets built instead.
     write: (frame: string) => { lastFrame = frame; return true; },
   });
   const instance = inkRender(
@@ -84,22 +87,41 @@ const SIBLING_LINES = 5;
 // reads stdout.rows directly. Kept separate from renderPlanReadyModalAt
 // (which stays untouched, columns-only) rather than adding a rows param to
 // it, per house convention.
+/**
+ * The only way a test gets a stdout mock with the budget path active —
+ * isTTY:true is baked into the return value here, not a per-call-site object
+ * literal a future test could copy-paste without it. That exact omission is
+ * what silently disabled the budget mechanism earlier this session: isTTY
+ * missing => stdout?.isTTY falsy => contentBudget stays undefined => cutState
+ * stays NO_CUTS => every assertion that only checks for an absence still
+ * passes. See renderPlanReadyModalAt above for the sibling harness that
+ * wants the mechanism off — it now states that explicitly instead.
+ */
+function makeTtyStdoutMock(
+  columns: number,
+  rows: unknown,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+): { stdout: any; getLastFrame: () => string | undefined } {
+  let lastFrame: string | undefined;
+  const stdout = Object.assign(new EventEmitter(), {
+    columns,
+    rows,
+    isTTY: true as const,
+    write: (frame: string) => {
+      if (!MODE_TOGGLE_ONLY_RE.test(frame)) lastFrame = frame;
+      return true;
+    },
+  });
+  return { stdout, getLastFrame: () => lastFrame };
+}
+
 function renderPlanReadyModalAtRows(
   proposal: React.ComponentProps<typeof PlanReadyModal>["proposal"],
   dispatch: (action: StoreAction) => void,
   columns: number,
   rows: unknown,
 ): { lastFrame: () => string | undefined; rerender: () => void; unmount: () => void } {
-  let lastFrame: string | undefined;
-  const stdout = Object.assign(new EventEmitter(), {
-    columns,
-    rows,
-    isTTY: true,
-    write: (frame: string) => {
-      if (!MODE_TOGGLE_ONLY_RE.test(frame)) lastFrame = frame;
-      return true;
-    },
-  });
+  const { stdout, getLastFrame } = makeTtyStdoutMock(columns, rows);
   const element = <PlanReadyModal proposal={proposal} dispatch={dispatch} />;
   const instance = inkRender(
     element,
@@ -107,7 +129,7 @@ function renderPlanReadyModalAtRows(
     { stdout: stdout as any, stdin: new MockStdin() as any, debug: true, exitOnCtrlC: false, patchConsole: false },
   );
   return {
-    lastFrame: () => lastFrame,
+    lastFrame: getLastFrame,
     rerender: () => instance.rerender(element),
     unmount: () => instance.unmount(),
   };
@@ -978,9 +1000,20 @@ describe("PlanReadyModal — tier walk", () => {
     });
 
     it("does not emit when rows is valid", async () => {
-      const { unmount } = renderPlanReadyModalAtRows(PROPOSAL, makeDispatch(), 60, 40);
+      // rows=22 is still a valid positive integer (so the rows-implausible
+      // marker correctly never fires) but drives contentBudget to 3 —
+      // confirmed via walkTiers this forces all four tiers to fire without
+      // also tripping floorUnmet (rows=20 or lower trips the *other*
+      // marker too, which would conflate this test's scope). The
+      // attribution line below is therefore a real, positive fact that the
+      // budget mechanism actually ran — not a fixture that just happens to
+      // fit, which would look identical if the harness's isTTY were silently
+      // broken.
+      const { lastFrame, unmount } = renderPlanReadyModalAtRows(PROPOSAL, makeDispatch(), 60, 22);
       activeUnmount = unmount;
       await wait();
+      const frame = lastFrame() ?? "";
+      expect(flattenContent(frame)).toContain("trimmed to fit terminal"); // positive first
       expect(mockLog).not.toHaveBeenCalledWith(
         "[zone-plan-modal-rows-implausible]",
         expect.anything(),
@@ -1019,9 +1052,16 @@ describe("PlanReadyModal — tier walk", () => {
     });
 
     it("does not emit when the walk fits", async () => {
-      const { unmount } = renderPlanReadyModalAtRows(MAXIMAL_PROPOSAL, makeDispatch(), 60, 50);
+      // rows=50, columns=60: confirmed via walkTiers directly that all four
+      // tiers fire (descriptions, summary, risks, steps) with
+      // floorUnmet:false — a real cut, not a fixture that happens to
+      // already fit, so the attribution line below is a genuine positive
+      // fact that the budget mechanism ran.
+      const { lastFrame, unmount } = renderPlanReadyModalAtRows(MAXIMAL_PROPOSAL, makeDispatch(), 60, 50);
       activeUnmount = unmount;
       await wait();
+      const frame = lastFrame() ?? "";
+      expect(flattenContent(frame)).toContain("trimmed to fit terminal"); // positive first
       expect(mockLog).not.toHaveBeenCalledWith(
         "[zone-plan-modal-budget-unmet]",
         expect.anything(),
@@ -1054,6 +1094,18 @@ describe("PlanReadyModal — tier walk", () => {
   describe("free no-cut assertion — the walk's entry condition, not its interior", () => {
     it("cuts nothing when the bare estimate already fits, even though bare+reservation would not", async () => {
       // contentBudget = rows - 9 - 3 - 5 = rows - 17; rows=28 -> budget=11.
+      //
+      // No positive "budget was active" fact is available here, unlike the
+      // rest of this describe block — this test's entire premise is that
+      // NOTHING gets cut, so "cutState below NO_CUTS" and "attribution line
+      // present" are both false by design, not just unchecked. A stdout mock
+      // silently missing isTTY (contentBudget stuck at undefined, cutState
+      // stuck at NO_CUTS) would reproduce this exact frame; this test alone
+      // cannot tell the two apart. The minimality guard below, same
+      // NO_CUT_FIXTURE at rows=27 (one content-line tighter), is the sibling
+      // test that actually proves the harness is wired for this fixture
+      // family — it DOES cut, and asserts "+4 more risk(s)", a fact a broken
+      // mock cannot produce.
       const { lastFrame, unmount } = renderPlanReadyModalAtRows(NO_CUT_FIXTURE, makeDispatch(), 60, 28);
       activeUnmount = unmount;
       await wait();
@@ -1091,10 +1143,10 @@ describe("PlanReadyModal — tier walk", () => {
       activeUnmount = unmount;
       await wait();
       const frame = lastFrame() ?? "";
-      expect(frame).toContain("risk one"); // the one surviving hint
+      expect(frame).toContain("risk one"); // positive first — the one surviving hint
+      expect(frame).toContain("+4 more risk(s)"); // positive, budget-active fact — before any absence check
       expect(frame).not.toContain("risk two");
       expect(frame).not.toContain("risk five");
-      expect(frame).toContain("+4 more risk(s)");
       expect(frame).toContain("Short title one"); // steps untouched
       expect(frame).toContain("Short title two");
     });
