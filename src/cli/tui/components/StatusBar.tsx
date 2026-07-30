@@ -83,8 +83,11 @@ export function StatusBar(): React.ReactElement {
   const pillColor: "yellow" | "cyan" = mode === "autoAccept" ? "yellow" : "cyan";
 
   const modelLabel = model || "default";
+  // Absent for models that don't support effort (EffortModal.tsx:52's own read pattern).
+  const effort = state.modelSettings?.effort;
+  const effortStr = effort ? ` · effort: ${effort}` : "";
   const usedStr = dailyUsedUsd > 0 ? ` · used $${dailyUsedUsd.toFixed(2)}` : "";
-  const badgeLine = `${modelLabel}${usedStr} · cap $${(capUsd ?? 10).toFixed(2)}`;
+  const badgeLine = `${modelLabel}${effortStr}${usedStr} · cap $${(capUsd ?? 10).toFixed(2)}`;
 
   return (
     <Box flexDirection="column">
