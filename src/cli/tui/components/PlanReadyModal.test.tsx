@@ -359,6 +359,16 @@ describe("PlanReadyModal — scopeNotes", () => {
 // present, unlike scopeNotes, so no absent/present branch to test, only the
 // truncation-marker guard.
 describe("PlanReadyModal — scopeSummary", () => {
+  it("does not render 'Summary:' when scopeSummary is empty", () => {
+    const proposal = { ...PROPOSAL, scopeSummary: "" };
+    const { lastFrame, unmount } = render(
+      <PlanReadyModal proposal={proposal} dispatch={makeDispatch()} />
+    );
+    activeUnmount = unmount;
+    const frame = lastFrame() ?? "";
+    expect(frame).not.toContain("Summary:");
+  });
+
   it("renders 'Summary:' label and the scopeSummary text", () => {
     const { lastFrame, unmount } = render(
       <PlanReadyModal proposal={PROPOSAL} dispatch={makeDispatch()} />

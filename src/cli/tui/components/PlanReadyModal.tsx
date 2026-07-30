@@ -107,9 +107,13 @@ export function PlanReadyModal({ proposal, dispatch }: PlanReadyModalProps): Rea
       <Text> </Text>
       <Text dimColor>Objective:</Text>
       <Text>{proposal.objective.slice(0, 200)}</Text>
-      <Text> </Text>
-      <Text dimColor>Summary:</Text>
-      <Text>{`${proposal.scopeSummary.slice(0, SCOPE_SUMMARY_MAX)}${proposal.scopeSummary.length > SCOPE_SUMMARY_MAX ? "…" : ""}`}</Text>
+      {!!proposal.scopeSummary && (
+        <>
+          <Text> </Text>
+          <Text dimColor>Summary:</Text>
+          <Text>{`${proposal.scopeSummary.slice(0, SCOPE_SUMMARY_MAX)}${proposal.scopeSummary.length > SCOPE_SUMMARY_MAX ? "…" : ""}`}</Text>
+        </>
+      )}
       <Text> </Text>
       {(proposal.noChangeReason || proposal.cannotVerifyReason) && (
         <Box flexDirection="column" marginBottom={1}>
