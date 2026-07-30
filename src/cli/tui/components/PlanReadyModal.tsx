@@ -19,6 +19,7 @@ const RISK_HINT_MAX = 120;    // per-entry char cap
 const RISK_HINTS_LIMIT = 5;   // entry-count cap
 const FILES_LIKELY_MAX = 10;  // per-step file-list cap
 const STEPS_MAX = 8;          // step-list cap
+const STEP_DESCRIPTION_MAX = 48; // per-step description char cap
 
 function renderFeedbackBuffer(buf: string, pos: number): string {
   return buf.slice(0, pos) + "▋" + buf.slice(pos);
@@ -128,7 +129,7 @@ export function PlanReadyModal({ proposal, dispatch }: PlanReadyModalProps): Rea
           </Box>
           {!!step.description && (
             <Box flexGrow={1} marginLeft={5}>
-              <Text dimColor>{step.description.slice(0, 200)}</Text>
+              <Text dimColor>{`${step.description.slice(0, STEP_DESCRIPTION_MAX)}${step.description.length > STEP_DESCRIPTION_MAX ? "…" : ""}`}</Text>
             </Box>
           )}
           {step.filesLikely.length > 0 && (

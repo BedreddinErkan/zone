@@ -118,7 +118,7 @@ describe("PlanReadyModal — normal mode", () => {
     expect(frame).toContain("Create the route");
   });
 
-  it("truncates long step description at 200 chars", () => {
+  it("truncates a long step description at 48 chars with a trailing … marker", () => {
     const longDesc = "x".repeat(250);
     const proposal = {
       ...PROPOSAL,
@@ -129,9 +129,33 @@ describe("PlanReadyModal — normal mode", () => {
     );
     activeUnmount = unmount;
     const frame = lastFrame() ?? "";
-    // Count occurrences of "x" — robust to line-wrapping by Ink
-    const xCount = (frame.match(/x/g) ?? []).length;
-    expect(xCount).toBe(200);
+    // A plain toContain("x".repeat(48) + "…") is satisfied by ANY longer run
+    // of x's too — the last 48 characters of a 60-x run followed by "…" are
+    // themselves "x".repeat(48) + "…", so that assertion can't tell 48 from
+    // 60. Capture the full contiguous run with a greedy regex instead, so the
+    // match's own length pins the boundary exactly, in both directions.
+    const match = flattenContent(frame).match(/x+…/);
+    expect(match).not.toBeNull();
+    expect(match![0]).toBe("x".repeat(48) + "…");
+  });
+
+  it("does not append … when step description is under the 48-char cap", () => {
+    const shortDesc = "A short, untruncated description.";
+    const proposal = {
+      ...PROPOSAL,
+      steps: [{ title: "Short step", description: shortDesc, filesLikely: [] }],
+    };
+    const { lastFrame, unmount } = render(
+      <PlanReadyModal proposal={proposal} dispatch={makeDispatch()} />
+    );
+    activeUnmount = unmount;
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain(shortDesc); // positive first
+    // Scoped to this fixture's own line, not the whole frame — an unrelated
+    // overflow line elsewhere must not be able to satisfy this check.
+    const line = frame.split("\n").find((l) => l.includes(shortDesc));
+    expect(line).toBeDefined();
+    expect(stripBoxChars(line!)).not.toContain("…");
   });
 
   it("renders footer with 4 numbered actions and no (stub) labels", () => {
