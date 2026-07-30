@@ -34,6 +34,9 @@ import {
   emitAskUser,
   emitAskUserRefused,
   emitTerminalCallFailed as emitTerminalCallFailedTelemetry,
+  emitReadOnlyPipelineSuppressed,
+  emitReadOnlySuppressionMismatch,
+  type PromptBranch,
 } from "./loopTelemetry.js";
 import { getAndClearToolResultSummary } from "./toolResultSizeTracker.js";
 import type { TaskArchetype, TaskClassification, TaskTier } from "./taskClassifier.js";
@@ -212,6 +215,14 @@ export interface AgentLoopInput {
    *  reviewed. Gates whether the plan's full content (objective/steps/risks/scope) is
    *  injected into the execution prompt at all. */
   planApproved?: boolean;
+  /** True when runLlmPatchFlow.ts:5944 lifted the read-only capability filter because
+   *  an approved plan justified writing (pipelineCfg.readOnlyPipeline && hasApprovedSteps
+   *  — the same condition that sets planApproved). Read by runAgentLoopScoped to emit
+   *  [zone-readonly-pipeline-suppressed] with the prompt branch actually selected, and
+   *  [zone-readonly-suppression-mismatch] if that branch isn't "default" — which can only
+   *  happen if this field and planApproved have drifted apart, since they're threaded
+   *  separately with nothing enforcing agreement between them. */
+  readOnlyPipelineSuppressed?: boolean;
   /** agent-persistence Tur: full repo file list, used by buildVerifyDiagnostic
    *  to surface candidate culprits when a build/test failure points to a
    *  framework-generated path. Optional — when missing, the diagnostic still
@@ -2841,6 +2852,35 @@ Example:
   // byte-stable across explicit/implicit mode calls. Mode signal is appended
   // to the user message tail instead; system prompt is always baseSystemContent.
   const systemContent = baseSystemContent;
+
+  // Read-only suppression telemetry (moved from runLlmPatchFlow.ts's suppression
+  // decision site, which runs before this prompt exists and could only report
+  // intent): promptBranch observes which archetype-ternary branch actually fired,
+  // by checking for the same QA_HEADER/INVESTIGATION_HEADER constants the ternary
+  // itself builds from — not a re-evaluation of the planApproved/archetype
+  // condition that chose it.
+  if (input.readOnlyPipelineSuppressed) {
+    const promptBranch: PromptBranch = systemContent.includes(QA_HEADER)
+      ? "question"
+      : systemContent.includes(INVESTIGATION_HEADER)
+        ? "investigation"
+        : "default";
+    const telemetryData = {
+      runId: input.runId ?? null,
+      archetype: input.taskClassification?.archetype ?? null,
+      stepCount: input.executionPlan?.steps.length ?? 0,
+      promptBranch,
+    };
+    emitReadOnlyPipelineSuppressed(telemetryData);
+    // Invariant: suppression only fires when planApproved is true (same condition,
+    // runLlmPatchFlow.ts:5944), and planApproved forces effectiveArchetype to
+    // undefined — so promptBranch can only be "default" here. If it isn't,
+    // readOnlyPipelineSuppressed and planApproved have drifted apart (they're
+    // threaded onto AgentLoopInput separately, with nothing enforcing agreement).
+    if (promptBranch !== "default") {
+      emitReadOnlySuppressionMismatch(telemetryData);
+    }
+  }
 
   // J.5: when a prior run's summary is threaded in, prepend it to the user
   // message as a labeled framing block. The agent's system prompt

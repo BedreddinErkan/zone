@@ -115,7 +115,6 @@ import {
   type PipelineConfig,
 } from "../llm/archetypeDispatcher.js";
 import { type CapabilityFilter } from "../tools/capabilities.js";
-import { emitReadOnlyPipelineSuppressed } from "../llm/loopTelemetry.js";
 import { getRunCost } from "../usage/usageTracker.js";
 import {
   generateFinalRunReport,
@@ -5941,12 +5940,12 @@ const initializeTodosFromPlan = (): void => {
     // capability filter is suppressed; pipelineCfg itself (iterCap, coachingBudget,
     // skipPlan, ...) is untouched and still flows through below unchanged.
     const hasApprovedSteps = !!input.preGeneratedPlan && input.preGeneratedPlan.steps.length > 0;
-    if (pipelineCfg?.readOnlyPipeline && hasApprovedSteps) {
-      emitReadOnlyPipelineSuppressed({
-        runId,
-        archetype: taskClassification?.archetype ?? null,
-        stepCount: input.preGeneratedPlan!.steps.length,
-      });
+    // Telemetry for this decision moved to agentLoop.ts's runAgentLoopScoped, which
+    // emits [zone-readonly-pipeline-suppressed] once the prompt actually exists — this
+    // site only decides; it no longer reports, since a report built before the prompt
+    // is assembled can only record what was intended, not what was actually built.
+    const readOnlyPipelineSuppressed = !!(pipelineCfg?.readOnlyPipeline && hasApprovedSteps);
+    if (readOnlyPipelineSuppressed) {
       _dispatcherCapabilityFilter = undefined;
     }
 
@@ -5972,6 +5971,7 @@ const initializeTodosFromPlan = (): void => {
       // which was never reviewed. Gates whether the plan's full content reaches the
       // execution prompt at all.
       planApproved: hasApprovedSteps,
+      readOnlyPipelineSuppressed,
       repoSummary: projectSummary,
       relevantFiles: agentLoopPlanFiles,
       // agent-persistence Tur: feed the full repo file list so

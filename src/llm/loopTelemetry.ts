@@ -242,16 +242,47 @@ export function emitWriteCapabilityAbsent(data: WriteCapabilityAbsentData): void
 // tier-derived (write-capable) filter instead; iterCap/coachingBudget are
 // left exactly as the pipeline set them. This is a silent-default override by
 // construction, so it is not allowed to itself be silent.
+//
+// Emitted from agentLoop.ts's runAgentLoopScoped, after the system prompt is
+// actually assembled — not from the suppression decision site
+// (runLlmPatchFlow.ts, before the prompt exists), which can only ever report
+// intent. `promptBranch` is the prompt-cage half of the fix: it's derived by
+// checking which archetype-ternary header is actually present in the built
+// system prompt (agentLoop.ts's QA_HEADER/INVESTIGATION_HEADER), so it
+// reports the branch that really fired, not a re-evaluation of the condition
+// that chose it.
 // ---------------------------------------------------------------------------
+
+export type PromptBranch = "question" | "investigation" | "default";
 
 export interface ReadOnlyPipelineSuppressedData {
   runId: string | null | undefined;
   archetype: string | null;
   stepCount: number;
+  promptBranch: PromptBranch;
 }
 
 export function emitReadOnlyPipelineSuppressed(data: ReadOnlyPipelineSuppressedData): void {
   log("[zone-readonly-pipeline-suppressed]", JSON.stringify(data));
+}
+
+// ---------------------------------------------------------------------------
+// emitReadOnlySuppressionMismatch — [zone-readonly-suppression-mismatch]
+// Once the fix above lands, `promptBranch` is an invariant, not a variable:
+// suppression only fires when planApproved is true, and planApproved forces
+// the archetype ternary to its default branch unconditionally — so
+// promptBranch can only ever be "default" when this marker's sibling fires.
+// `readOnlyPipelineSuppressed` and `planApproved` are threaded onto
+// AgentLoopInput separately, with nothing enforcing that they agree; if they
+// ever drift (or a future archetype grows its own read-only preamble outside
+// the effectiveArchetype gate), promptBranch stops being "default" while
+// suppression is still true. That is the exact signature of the drift this
+// whole fix exists to close, so it gets its own distinctly-named marker
+// rather than a value sitting inside the payload above that nobody diffs.
+// ---------------------------------------------------------------------------
+
+export function emitReadOnlySuppressionMismatch(data: ReadOnlyPipelineSuppressedData): void {
+  log("[zone-readonly-suppression-mismatch]", JSON.stringify(data));
 }
 
 // ---------------------------------------------------------------------------

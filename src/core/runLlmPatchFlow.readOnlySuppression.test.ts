@@ -10,9 +10,16 @@ import type { RepoFile } from "../types/project.js";
  *
  * These tests exercise the suppression guard added at that site. runAgentLoop
  * is mocked in this file's harness (see setupRunLlmPatchFlowMocks below), so
- * agentLoop.ts's own body — including [zone-write-capability-absent]'s call
- * site — never runs here. What IS observable and is what this commit changes:
- * whether capabilityFilter is present on the object passed to runAgentLoop.
+ * agentLoop.ts's own body never runs here — including the
+ * [zone-readonly-pipeline-suppressed]/[zone-readonly-suppression-mismatch]
+ * telemetry, which moved to agentLoop.ts's runAgentLoopScoped (it needs the
+ * assembled system prompt to report the branch that actually fired, which
+ * doesn't exist yet at this layer). What IS observable here, and what this
+ * file tests, is the two fields this site threads onto the object passed to
+ * runAgentLoop: whether capabilityFilter is present, and whether
+ * readOnlyPipelineSuppressed is set — the signal the telemetry now reads.
+ * The telemetry's own outcome-based assertions live in
+ * agentLoop.readOnlySuppressionTelemetry.test.ts, against the real function.
  */
 
 const scanRepoMock = vi.fn();
@@ -72,12 +79,6 @@ function classification(archetype: "investigation" | "question") {
   };
 }
 
-function events(spy: ReturnType<typeof vi.spyOn>): Array<Record<string, unknown>> {
-  return spy.mock.calls
-    .filter((c: unknown[]) => c[0] === "[zone-readonly-pipeline-suppressed]")
-    .map((c: unknown[]) => JSON.parse(c[1] as string) as Record<string, unknown>);
-}
-
 beforeEach(() => {
   delete process.env["ZONE_FORCE_FLOW"];
   vi.clearAllMocks();
@@ -133,41 +134,31 @@ async function runWith(opts: {
 }
 
 describe("read-only pipeline suppression when an approved plan justifies writing", () => {
-  it("investigation + approved plan with steps → capabilityFilter suppressed, marker fires", async () => {
-    const consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  it("investigation + approved plan with steps → capabilityFilter suppressed, readOnlyPipelineSuppressed threaded", async () => {
     const call = await runWith({ archetype: "investigation", preGeneratedPlan: APPROVED_PLAN, runId: "run-inv-1" });
 
     expect(call?.capabilityFilter).toBeUndefined();
-    const [evt] = events(consoleLogSpy);
-    expect(evt).toBeDefined();
-    expect(evt.archetype).toBe("investigation");
-    expect(evt.stepCount).toBe(1);
+    expect(call?.readOnlyPipelineSuppressed).toBe(true);
   });
 
-  it("question + approved plan with steps → capabilityFilter suppressed, marker fires", async () => {
-    const consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  it("question + approved plan with steps → capabilityFilter suppressed, readOnlyPipelineSuppressed threaded", async () => {
     const call = await runWith({ archetype: "question", preGeneratedPlan: APPROVED_PLAN, runId: "run-q-1" });
 
     expect(call?.capabilityFilter).toBeUndefined();
-    const [evt] = events(consoleLogSpy);
-    expect(evt).toBeDefined();
-    expect(evt.archetype).toBe("question");
-    expect(evt.stepCount).toBe(1);
+    expect(call?.readOnlyPipelineSuppressed).toBe(true);
   });
 
-  it("investigation + approved but stepless plan (noChangeReason) → stays read-only, marker silent", async () => {
-    const consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  it("investigation + approved but stepless plan (noChangeReason) → stays read-only, readOnlyPipelineSuppressed not set", async () => {
     const call = await runWith({ archetype: "investigation", preGeneratedPlan: STEPLESS_PLAN, runId: "run-inv-2" });
 
     expect(call?.capabilityFilter).toBeDefined();
-    expect(events(consoleLogSpy)).toHaveLength(0);
+    expect(call?.readOnlyPipelineSuppressed).not.toBe(true);
   });
 
-  it("investigation + no approved plan → unchanged, stays read-only, marker silent", async () => {
-    const consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  it("investigation + no approved plan → unchanged, stays read-only, readOnlyPipelineSuppressed not set", async () => {
     const call = await runWith({ archetype: "investigation", runId: "run-inv-3" });
 
     expect(call?.capabilityFilter).toBeDefined();
-    expect(events(consoleLogSpy)).toHaveLength(0);
+    expect(call?.readOnlyPipelineSuppressed).not.toBe(true);
   });
 });
