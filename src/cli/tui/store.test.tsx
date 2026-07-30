@@ -235,7 +235,10 @@ describe("read-only tool-call batching (TOOL_CALL_OPEN / TOOL_RESULT_PUSH)", () 
     s = openAndResolve(s, "read_file", "a.ts", true);
     s = openAndResolve(s, "read_file", "b.ts", true);
     expect(s.transcript).toHaveLength(0);
-    expect(s.liveTail.pendingReadOnlyBatch).toEqual([{ toolName: "read_file" }, { toolName: "read_file" }]);
+    expect(s.liveTail.pendingReadOnlyBatch).toEqual([
+      { toolName: "read_file", arg: "a.ts" },
+      { toolName: "read_file", arg: "b.ts" },
+    ]);
   });
 
   it("a write tool commits individually, flushing any pending batch first, in chronological order", () => {
@@ -306,6 +309,9 @@ describe("read-only tool-call batching (TOOL_CALL_OPEN / TOOL_RESULT_PUSH)", () 
     expect(entry.calls).toHaveLength(3);
     // No `ok` field anywhere in a committed group — successes only, by construction.
     expect(entry.calls.every(c => !("ok" in c))).toBe(true);
+    // The committed group carries each call's identifying argument, not just its
+    // count — a bare {toolName} shape could never distinguish which files these were.
+    expect(entry.calls.map(c => c.arg)).toEqual(["a.ts", "b.ts", "c.ts"]);
   });
 });
 

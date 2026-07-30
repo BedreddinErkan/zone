@@ -51,16 +51,19 @@ export type LiveTailState = {
    * never pushed here at all (it flushes whatever is pending, then commits
    * individually via the ordinary `tool_call` path, so its existing glyph +
    * error-detail rendering is never lost inside a group's count) — so every
-   * entry that ever reaches this array is, by construction, a success.
+   * entry that ever reaches this array is, by construction, a success. `arg`
+   * carries the call's identifying detail (path/pattern) so the committed group
+   * can render it — dropping it collapses to a bare count with no way to tell
+   * what was actually touched.
    */
-  pendingReadOnlyBatch: Array<{ toolName: string }>;
+  pendingReadOnlyBatch: Array<{ toolName: string; arg: string }>;
 };
 
 export type TranscriptEntry =
   | { kind: "narration"; text: string }
   | { kind: "thinking"; text: string }
   | { kind: "tool_call"; toolName: string; args: string; patch?: string; results: { ok: boolean; detail: string; blocked?: true }[] }
-  | { kind: "tool_call_group"; calls: Array<{ toolName: string }> }
+  | { kind: "tool_call_group"; calls: Array<{ toolName: string; arg: string }> }
   | { kind: "error"; text: string }
   | { kind: "phase_marker"; phase: string }
   | { kind: "user_prompt"; text: string }
@@ -505,7 +508,7 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         // Buffer instead of committing individually. Ink's <Static> never
         // re-renders a committed index, but nothing here is committed yet —
         // this only ever touches liveTail, never state.transcript.
-        const nextBatch = [...state.liveTail.pendingReadOnlyBatch, { toolName: tc.toolName }];
+        const nextBatch = [...state.liveTail.pendingReadOnlyBatch, { toolName: tc.toolName, arg: tc.args }];
         const withBatch: StoreState = { ...state, liveTail: { ...state.liveTail, pendingReadOnlyBatch: nextBatch } };
         return nextBatch.length >= READ_ONLY_BATCH_MAX_SIZE ? flushReadOnlyBatch(withBatch) : withBatch;
       }

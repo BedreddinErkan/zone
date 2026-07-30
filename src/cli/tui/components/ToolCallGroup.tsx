@@ -1,16 +1,24 @@
 import React from "react";
 import { Box, Text } from "ink";
-import { getToolDisplayName } from "./toolCallFormat.js";
+import { getToolDisplayName, formatToolArgs } from "./toolCallFormat.js";
 
 export interface ToolCallGroupProps {
-  calls: Array<{ toolName: string }>;
+  calls: Array<{ toolName: string; arg: string }>;
 }
 
 /**
- * One collapsed line for a run of consecutive successful read-only calls.
+ * One collapsed count header for a run of consecutive successful read-only
+ * calls, plus one detail line per call underneath naming what it touched —
+ * the count alone can't tell a reader which files or patterns were involved.
  * Every entry here already succeeded (store-core.ts never batches a failure —
  * it flushes and commits that call individually instead), so there is no
- * success/failure branching to do: just count by display name.
+ * success/failure branching to do for either line.
+ *
+ * All N calls render, never a truncated "first few" — the batch is already
+ * capped at READ_ONLY_BATCH_MAX_SIZE (store-core.ts) by construction, so N is
+ * always small; a truncation branch would be complexity with nothing to
+ * truncate. Detail lines stay in call order, not regrouped by tool: that's
+ * what happened, and it needs no extra sort step.
  */
 export function ToolCallGroup({ calls }: ToolCallGroupProps): React.ReactElement {
   const counts = new Map<string, number>();
@@ -20,10 +28,17 @@ export function ToolCallGroup({ calls }: ToolCallGroupProps): React.ReactElement
   }
   const parts = [...counts.entries()].map(([name, count]) => `${name} ×${count}`);
   return (
-    <Box>
-      {/* No explicit color: matches getStatusGlyph's own success case (icon only, no color). */}
-      <Text>{"● "}</Text>
-      <Text dimColor>{parts.join(", ")}</Text>
+    <Box flexDirection="column">
+      <Box>
+        {/* No explicit color: matches getStatusGlyph's own success case (icon only, no color). */}
+        <Text>{"● "}</Text>
+        <Text dimColor>{parts.join(", ")}</Text>
+      </Box>
+      {calls.map((call, i) => (
+        <Box key={i} paddingLeft={2}>
+          <Text dimColor>{"└ "}{formatToolArgs(call.toolName, call.arg)}</Text>
+        </Box>
+      ))}
     </Box>
   );
 }
