@@ -199,6 +199,28 @@ export function formatExecutionPlanForPrompt(plan?: ExecutionPlan | null): strin
   return lines.join("\n");
 }
 
+/**
+ * Wraps `formatExecutionPlanForPrompt` with a labeled header/footer for the ONE-TIME
+ * injection into the first user message (cache breakpoint #2 territory — never the
+ * system prompt, which is built once before the run and cached at breakpoint #1).
+ * Shared so the initial injection and any later reference to "the approved plan" use
+ * identical framing text.
+ */
+export function buildApprovedPlanBlock(plan: ExecutionPlan): string {
+  return `--- APPROVED PLAN ---\n${formatExecutionPlanForPrompt(plan)}\n--- END APPROVED PLAN ---`;
+}
+
+/**
+ * A replan mutates `executionPlan` well after the first user message (containing
+ * `buildApprovedPlanBlock`'s output) is already part of the cached prefix — that
+ * message must never be rewritten. This is the append-only alternative: fresh content
+ * for a NEW message at the current cache frontier, never an edit to the original.
+ * Shared between both replan sites so the two don't drift in wording.
+ */
+export function formatPlanRevisedNote(plan: ExecutionPlan): string {
+  return `Plan revised — ${plan.steps.length} steps.\n\n${formatExecutionPlanForPrompt(plan)}`;
+}
+
 export async function generateExecutionPlan(input: {
   task: string;
   repoSummary: string;

@@ -5967,6 +5967,11 @@ const initializeTodosFromPlan = (): void => {
       // Tur P2-scope: forward the plan so the tool layer can hard-block
       // writes that fall outside `plan.steps[*].filesLikely`.
       executionPlan,
+      // hasApprovedSteps (above) — not mere executionPlan presence — distinguishes a
+      // user-reviewed plan from this function's own generateExecutionPlan fallback,
+      // which was never reviewed. Gates whether the plan's full content reaches the
+      // execution prompt at all.
+      planApproved: hasApprovedSteps,
       repoSummary: projectSummary,
       relevantFiles: agentLoopPlanFiles,
       // agent-persistence Tur: feed the full repo file list so

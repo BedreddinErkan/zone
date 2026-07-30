@@ -16,7 +16,7 @@ vi.mock("../utils/logger.js", () => ({
   debugLog: mocks.debugLog,
 }));
 
-import { generateExecutionPlan, tryParseExecutionPlan, isNoChangePlan, isCannotVerifyPlan, formatExecutionPlanForPrompt } from "./executionPlan.js";
+import { generateExecutionPlan, tryParseExecutionPlan, isNoChangePlan, isCannotVerifyPlan, formatExecutionPlanForPrompt, buildApprovedPlanBlock, formatPlanRevisedNote } from "./executionPlan.js";
 import type { ExecutionPlan } from "./executionPlan.js";
 
 function mockPlanResponse(plan: unknown) {
@@ -639,5 +639,40 @@ describe("formatExecutionPlanForPrompt", () => {
   it("does not render a Risks: label when riskHints is empty (no dangling header)", () => {
     const text = formatExecutionPlanForPrompt({ ...BASE_PLAN, riskHints: [] });
     expect(text).not.toContain("Risks:");
+  });
+});
+
+describe("buildApprovedPlanBlock", () => {
+  const PLAN: ExecutionPlan = {
+    objective: "Add a login feature",
+    steps: [{ title: "Add login route", description: "Create the route", filesLikely: [] }],
+    riskHints: [],
+    scopeSummary: "Add a login feature end to end.",
+  };
+
+  it("wraps formatExecutionPlanForPrompt's output with header and footer", () => {
+    const block = buildApprovedPlanBlock(PLAN);
+    expect(block).toContain("--- APPROVED PLAN ---");
+    expect(block).toContain("--- END APPROVED PLAN ---");
+    expect(block).toContain("Objective: Add a login feature");
+  });
+});
+
+describe("formatPlanRevisedNote", () => {
+  const PLAN: ExecutionPlan = {
+    objective: "Revised objective",
+    steps: [
+      { title: "Step A", description: "Do A", filesLikely: [] },
+      { title: "Step B", description: "Do B", filesLikely: [] },
+    ],
+    riskHints: [],
+    scopeSummary: "Revised scope.",
+  };
+
+  it("leads with a step-count summary line and includes the full plan content", () => {
+    const note = formatPlanRevisedNote(PLAN);
+    expect(note.startsWith("Plan revised — 2 steps.")).toBe(true);
+    expect(note).toContain("Objective: Revised objective");
+    expect(note).toContain("Revised scope.");
   });
 });

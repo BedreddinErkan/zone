@@ -46,7 +46,7 @@ import { readDailyUsdCapOverride } from "../visual/tierSettings.js";
 import { cacheHitRatio } from "../usage/iterCostMeter.js";
 import { webSearchFee } from "../usage/pricing.js";
 import { parseTodoProgressMarkers, executionPlanToTodos, type RunTodo } from "../core/todoLifecycle.js";
-import { generateExecutionPlan } from "./executionPlan.js";
+import { generateExecutionPlan, buildApprovedPlanBlock, formatPlanRevisedNote } from "./executionPlan.js";
 import {
   saveRunEnvelope,
   currentEnvelopesDir,
@@ -205,6 +205,13 @@ export interface AgentLoopInput {
   /** Tur P2-scope: when present, write tools reject paths outside the
    *  union of plan.steps[*].filesLikely. Forwarded into executeTool. */
   executionPlan?: import("./executionPlan.js").ExecutionPlan | null;
+  /** True only when `executionPlan` is the plan the user actually reviewed and approved
+   *  via the plan-mode modal — mirrors runLlmPatchFlow.ts's `hasApprovedSteps`. `executionPlan`
+   *  alone is not sufficient: the non-plan-mode default path self-generates its own
+   *  executionPlan purely for scopeGuard/evaluatePlanAlignment, and that one was never
+   *  reviewed. Gates whether the plan's full content (objective/steps/risks/scope) is
+   *  injected into the execution prompt at all. */
+  planApproved?: boolean;
   /** agent-persistence Tur: full repo file list, used by buildVerifyDiagnostic
    *  to surface candidate culprits when a build/test failure points to a
    *  framework-generated path. Optional — when missing, the diagnostic still
@@ -2874,6 +2881,17 @@ Example:
   const restageSeedBlock = input.restageSeed && input.restageSeed.size > 0
     ? buildRestageSeedBlock(input.restageSeed, input.repoPath)
     : "";
+  // Plan mode §2: thread the user-approved plan's full content (objective, steps,
+  // risks, scope) into the execution prompt — same rule as every block above, first
+  // user message only, never assembleAgentSystemPrompt. `input.planApproved` (not mere
+  // `executionPlan` presence) gates this: the non-plan-mode default path self-generates
+  // its own executionPlan purely for scopeGuard/evaluatePlanAlignment, and that one was
+  // never reviewed by the user — it must not leak into the prompt as if it had been.
+  // Built once, here, before the loop; a replan later must append a fresh note
+  // (formatPlanRevisedNote, at both performReplan call sites) rather than rewrite this.
+  const planContextBlock = input.planApproved && input.executionPlan
+    ? buildApprovedPlanBlock(input.executionPlan) + "\n\n"
+    : "";
   // Resume: compact context block injected into the first user message only (never system prompt —
   // cache breakpoint #2 invariant). Empty string when not resuming.
   // The answer to a carried-over question, for the COLD branch only.
@@ -2907,11 +2925,12 @@ Example:
         auditContextBlock +
         restageSeedBlock +
         resumeBlock +
+        planContextBlock +
         input.task
       )
-    : resumeBlock + sessionMemBlock + auditContextBlock + restageSeedBlock + input.task) + modeTag;
+    : resumeBlock + sessionMemBlock + auditContextBlock + restageSeedBlock + planContextBlock + input.task) + modeTag;
 
-  const afterHeader = (auditContextBlock + restageSeedBlock + String(input.task ?? "")).trim();
+  const afterHeader = (auditContextBlock + restageSeedBlock + planContextBlock + String(input.task ?? "")).trim();
   if (sessionMemBlock && !afterHeader) {
     userContent +=
       "\n\nNo explicit task text was included for this turn. " +
@@ -4300,8 +4319,13 @@ Example:
               const replanned = await performReplan({
                 toolEventCtx, userFeedback, trigger: "agent_suggest_scope_change",
               });
+              // Full plan content only when the ORIGINAL plan was approved — an unapproved,
+              // self-generated plan's revision must not be the first time plan text
+              // appears in the prompt (see planContextBlock's gate above, same reasoning).
               const ackMsg = replanned
-                ? `Plan revised — ${input.executionPlan?.steps.length ?? 0} steps.`
+                ? (input.planApproved && input.executionPlan
+                    ? formatPlanRevisedNote(input.executionPlan)
+                    : `Plan revised — ${input.executionPlan?.steps.length ?? 0} steps.`)
                 : "Scope revision request received but plan could not be regenerated. Continue with current plan.";
               responseInput.push({ role: "tool", tool_call_id: callId, content: ackMsg });
               toolCallLog.push({ id: callId, tool: name, args: parsedArgs, result: ackMsg, success: replanned });
@@ -4621,6 +4645,17 @@ Example:
           const replanned = await performReplan({
             toolEventCtx, userFeedback, trigger: "scope_block", blockedPath: toolEvent.blockedPath,
           });
+          if (replanned && input.planApproved && input.executionPlan) {
+            // Previously this site's success path told the model nothing — only the
+            // failure branch below appended anything. A replan here mutates
+            // input.executionPlan the same way the agent-driven site does, so it needs
+            // the same fix: append (never rewrite) the revised plan's full content onto
+            // the tool-result message that's already the current cache frontier.
+            const last = toolEventCtx.responseInput[toolEventCtx.responseInput.length - 1];
+            if (last?.role === "tool" && typeof last.content === "string") {
+              last.content += `\n\n${formatPlanRevisedNote(input.executionPlan)}`;
+            }
+          }
           if (!replanned) {
             const last = toolEventCtx.responseInput[toolEventCtx.responseInput.length - 1];
             if (last?.role === "tool" && typeof last.content === "string") {
