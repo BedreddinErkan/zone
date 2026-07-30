@@ -3,11 +3,21 @@ import { render } from "ink-testing-library";
 import { render as inkRender } from "ink";
 import { EventEmitter } from "node:events";
 import React from "react";
-import { PlanReadyModal, estimateWrappedLines, estimatePlanContentLines, NO_CUTS } from "./PlanReadyModal.js";
+import {
+  PlanReadyModal,
+  estimateWrappedLines,
+  estimatePlanContentLines,
+  walkTiers,
+  firedTierNames,
+  NO_CUTS,
+} from "./PlanReadyModal.js";
 import { StoreProvider } from "../store.js";
 import type { StoreAction } from "../store.js";
 import { Composer } from "./Composer.js";
 import { StatusBar } from "./StatusBar.js";
+
+const mockLog = vi.hoisted(() => vi.fn());
+vi.mock("../../../utils/logger.js", () => ({ log: mockLog }));
 
 /**
  * ink-testing-library hardcodes columns=100, which masks width-squeeze bugs.
@@ -48,6 +58,57 @@ function renderPlanReadyModalAt(
   );
   return {
     lastFrame: () => lastFrame,
+    unmount: () => instance.unmount(),
+  };
+}
+
+// A bare private-mode set/reset sequence with nothing else — e.g. Ink's own
+// bracketed-paste-mode toggle ("\x1b[?2004h"/"...l", written directly via
+// stdout.write from a usePaste effect, bypassing Ink's render/reconciler
+// entirely). Only fires once `stdout.isTTY` is true (gated on stdin.isTTY
+// *and* stdout.isTTY together), which renderPlanReadyModalAt never sets —
+// this harness does, to activate the budget path, so it must filter these
+// out or the "last write wins" capture below would clobber real frame
+// content with a bare escape code and nothing else.
+const MODE_TOGGLE_ONLY_RE = /^\x1b\[\?\d+[hl]$/;
+
+// Shared, module-level: measured (not guessed) values pin 1/pin 4 confirm
+// directly — used by the acceptance grid below so it can't silently drift
+// from what those pins actually found.
+const FRAME_CHROME_LINES = 9;
+const FOOTER_LINES_NORMAL = 3; // conservative: the narrower (60-col) footer height
+const SIBLING_LINES = 5;
+
+// Height-budget variant of the harness above — same isTTY+columns mock, but
+// `rows` is a parameter instead of hardcoded 40, since the budget mechanism
+// reads stdout.rows directly. Kept separate from renderPlanReadyModalAt
+// (which stays untouched, columns-only) rather than adding a rows param to
+// it, per house convention.
+function renderPlanReadyModalAtRows(
+  proposal: React.ComponentProps<typeof PlanReadyModal>["proposal"],
+  dispatch: (action: StoreAction) => void,
+  columns: number,
+  rows: unknown,
+): { lastFrame: () => string | undefined; rerender: () => void; unmount: () => void } {
+  let lastFrame: string | undefined;
+  const stdout = Object.assign(new EventEmitter(), {
+    columns,
+    rows,
+    isTTY: true,
+    write: (frame: string) => {
+      if (!MODE_TOGGLE_ONLY_RE.test(frame)) lastFrame = frame;
+      return true;
+    },
+  });
+  const element = <PlanReadyModal proposal={proposal} dispatch={dispatch} />;
+  const instance = inkRender(
+    element,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    { stdout: stdout as any, stdin: new MockStdin() as any, debug: true, exitOnCtrlC: false, patchConsole: false },
+  );
+  return {
+    lastFrame: () => lastFrame,
+    rerender: () => instance.rerender(element),
     unmount: () => instance.unmount(),
   };
 }
@@ -100,6 +161,7 @@ let activeUnmount: (() => void) | null = null;
 
 beforeEach(() => {
   mockResolvePlanApproval.mockClear();
+  mockLog.mockClear();
   activeUnmount = null;
 });
 
@@ -734,8 +796,8 @@ describe("PlanReadyModal — height-budget pins", () => {
   // confirms the assumption several other design choices already relied
   // on); footer is 3 at 60, 2 at 80 (restacks narrower). FRAME_CHROME_LINES
   // in planModalLineBudget.ts is pinned to 9 from this measurement.
-  const FRAME_CHROME_LINES = 9;
-  const FOOTER_LINES_NORMAL = 3; // conservative: the narrower (60-col) footer height
+  // (FRAME_CHROME_LINES/FOOTER_LINES_NORMAL are declared once, module-level,
+  // above — shared with the acceptance grid further down.)
 
   describe("pin 1 — chrome + footer (degenerate fixture)", () => {
     it("measures footer and chrome directly, both widths, conservative relation", () => {
@@ -874,10 +936,244 @@ describe("PlanReadyModal — height-budget pins", () => {
       }
       // eslint-disable-next-line no-console
       console.log("PIN4_MEASURED", JSON.stringify(measured));
-      const SIBLING_LINES = Math.max(measured[60], measured[80]);
-      expect(SIBLING_LINES).toBe(5); // JSX-derived estimate (Composer 1 + StatusBar 4) confirmed
+      // SIBLING_LINES itself is declared once, module-level, above (shared
+      // with the acceptance grid) — assert the measurement against it here.
+      const measuredMax = Math.max(measured[60], measured[80]);
+      expect(measuredMax).toBe(SIBLING_LINES); // JSX-derived estimate (Composer 1 + StatusBar 4) confirmed
       expect(measured[60]).toBeLessThanOrEqual(SIBLING_LINES);
       expect(measured[80]).toBeLessThanOrEqual(SIBLING_LINES);
+    });
+  });
+});
+
+// Tier-walk pass — four tiers wired into the actual render: descriptions,
+// summary, risks, steps. `files` stays deferred (filesLikelyShown fixed at
+// FILES_LIKELY_MAX, no branch in the walk or attribution derivation — see
+// the design record's addendum for the measured reasoning and the named
+// residual band this leaves). Compact chrome (Commit 6) stays out of scope.
+describe("PlanReadyModal — tier walk", () => {
+  describe("rows-implausible marker", () => {
+    it("emits [zone-plan-modal-rows-implausible] with the exact received value, including rows: null", async () => {
+      const { unmount } = renderPlanReadyModalAtRows(PROPOSAL, makeDispatch(), 60, null);
+      activeUnmount = unmount;
+      await wait();
+      expect(mockLog).toHaveBeenCalledWith(
+        "[zone-plan-modal-rows-implausible]",
+        JSON.stringify({ received: null, receivedType: "object" }),
+      );
+    });
+
+    it("emits once, not once per re-render, for the same invalid rows", async () => {
+      const { rerender, unmount } = renderPlanReadyModalAtRows(PROPOSAL, makeDispatch(), 60, NaN);
+      activeUnmount = unmount;
+      await wait();
+      rerender();
+      await wait();
+      rerender();
+      await wait();
+      const callsForThisMarker = mockLog.mock.calls.filter(
+        (args) => args[0] === "[zone-plan-modal-rows-implausible]",
+      );
+      expect(callsForThisMarker.length).toBe(1);
+    });
+
+    it("does not emit when rows is valid", async () => {
+      const { unmount } = renderPlanReadyModalAtRows(PROPOSAL, makeDispatch(), 60, 40);
+      activeUnmount = unmount;
+      await wait();
+      expect(mockLog).not.toHaveBeenCalledWith(
+        "[zone-plan-modal-rows-implausible]",
+        expect.anything(),
+      );
+    });
+  });
+
+  // Maximal fixture, with a wrapping title (shared with the acceptance grid
+  // below) so the estimator's title-wrap honesty is exercised here too.
+  const MAXIMAL_PROPOSAL = {
+    planId: "p", runId: "r",
+    objective: "O".repeat(200),
+    steps: Array.from({ length: 8 }, (_, i) => ({
+      title: i === 0
+        ? "A title long enough that it should wrap across more than one rendered line at these widths for sure"
+        : `Step ${i + 1}`,
+      description: "D".repeat(200),
+      filesLikely: Array.from({ length: 11 }, (_, j) => `src/file${i}_${j}.ts`),
+    })),
+    riskHints: Array.from({ length: 5 }, (_, i) => `R${i}` + "r".repeat(118)),
+    scopeSummary: "S".repeat(200),
+  };
+
+  describe("floor-unmet marker", () => {
+    it("emits [zone-plan-modal-budget-unmet] with {rows, requiredLines, achievedLines} when even the full cut doesn't fit", async () => {
+      // rows=24, columns=60: contentBudget=7, floor content is 8 lines —
+      // confirmed via walkTiers directly (design record's addendum: 8 lines
+      // on both fixtures at this row/column pair).
+      const { unmount } = renderPlanReadyModalAtRows(MAXIMAL_PROPOSAL, makeDispatch(), 60, 24);
+      activeUnmount = unmount;
+      await wait();
+      expect(mockLog).toHaveBeenCalledWith(
+        "[zone-plan-modal-budget-unmet]",
+        JSON.stringify({ rows: 24, requiredLines: 8, achievedLines: 7 }),
+      );
+    });
+
+    it("does not emit when the walk fits", async () => {
+      const { unmount } = renderPlanReadyModalAtRows(MAXIMAL_PROPOSAL, makeDispatch(), 60, 50);
+      activeUnmount = unmount;
+      await wait();
+      expect(mockLog).not.toHaveBeenCalledWith(
+        "[zone-plan-modal-budget-unmet]",
+        expect.anything(),
+      );
+    });
+  });
+
+  // Two steps, empty descriptions, no scopeSummary — a fixture whose bare
+  // NO_CUTS estimate is exactly 11 at 60 columns (confirmed directly). The
+  // attribution line's worst-case reservation for this pass's 4 tier names
+  // is exactly 2 lines at both 60 and 80 columns (confirmed directly:
+  // estimateWrappedLines of the full "descriptions, summary, risks, steps
+  // (still taller than your terminal)" text). contentBudget=11 sits exactly
+  // at the boundary the earlier, wrong draft would have gotten backwards:
+  // bare(11) <= budget(11), so nothing should be cut — but bare + reservation
+  // (13) > budget(11), which is what the earlier, wrong version of the
+  // walk's entry check would have compared instead, incorrectly starting to
+  // cut a proposal that already fit.
+  const NO_CUT_FIXTURE = {
+    planId: "p", runId: "r",
+    objective: "Objective text for the minimality guard fixture, padded a bit more so there is room",
+    scopeSummary: "",
+    riskHints: ["risk one", "risk two", "risk three", "risk four", "risk five"],
+    steps: [
+      { title: "Short title one", description: "", filesLikely: [] },
+      { title: "Short title two", description: "", filesLikely: [] },
+    ],
+  };
+
+  describe("free no-cut assertion — the walk's entry condition, not its interior", () => {
+    it("cuts nothing when the bare estimate already fits, even though bare+reservation would not", async () => {
+      // contentBudget = rows - 9 - 3 - 5 = rows - 17; rows=28 -> budget=11.
+      const { lastFrame, unmount } = renderPlanReadyModalAtRows(NO_CUT_FIXTURE, makeDispatch(), 60, 28);
+      activeUnmount = unmount;
+      await wait();
+      const frame = lastFrame() ?? "";
+      expect(frame).toContain("risk one"); // positive first — nothing cut
+      expect(frame).toContain("risk five");
+      expect(frame).not.toContain("more risk(s)");
+      expect(frame).not.toContain("trimmed to fit terminal");
+    });
+  });
+
+  describe("minimality guard — the walk doesn't cut more than it takes", () => {
+    it("decrements riskHintsShown one at a time rather than jumping to 0", () => {
+      // contentBudget=10 at 60 columns: descriptions/summary flip as no-ops
+      // (this fixture's own description/scopeSummary are already empty, so
+      // flipping them changes nothing), risks lands at riskHintsShown=1 —
+      // confirmed directly via walkTiers, not assumed — steps stays
+      // untouched (stepsShown remains at its cap, no step dropped).
+      //
+      // This proves minimality relative to the four tiers actually
+      // implemented this pass (descriptions, summary, risks, steps) — not a
+      // global minimum across all five possible tiers. `files` isn't in
+      // TIER_LIST at all, so a cut that could have been satisfied by
+      // trimming a file list instead is not something this guard (or the
+      // walk) can find; see the design record's addendum for the named
+      // real-plan band (rows 37-39) where that gap actually bites.
+      const result = walkTiers(NO_CUT_FIXTURE, 60, 10);
+      expect(result.cutState.riskHintsShown).toBe(1);
+      expect(result.cutState.stepsShown).toBe(NO_CUTS.stepsShown);
+    });
+
+    it("the real render matches: 1 of 5 risk hints shown, others counted, nothing else touched", async () => {
+      // rows - 17 = 10 -> rows = 27.
+      const { lastFrame, unmount } = renderPlanReadyModalAtRows(NO_CUT_FIXTURE, makeDispatch(), 60, 27);
+      activeUnmount = unmount;
+      await wait();
+      const frame = lastFrame() ?? "";
+      expect(frame).toContain("risk one"); // the one surviving hint
+      expect(frame).not.toContain("risk two");
+      expect(frame).not.toContain("risk five");
+      expect(frame).toContain("+4 more risk(s)");
+      expect(frame).toContain("Short title one"); // steps untouched
+      expect(frame).toContain("Short title two");
+    });
+  });
+
+  describe("negative contentBudget must not corrupt output silently", () => {
+    it("lands the walk on its natural floor — all four implemented tiers exhausted, no negative-slice artifact", async () => {
+      // rows=10 -> contentBudget = 10 - 9 - 3 - 5 = -7, well under the floor.
+      const { lastFrame, unmount } = renderPlanReadyModalAtRows(MAXIMAL_PROPOSAL, makeDispatch(), 60, 10);
+      activeUnmount = unmount;
+      await wait();
+      const frame = lastFrame() ?? "";
+      // "Risks:" stays gated on riskHints.length > 0, not on riskHintsShown —
+      // the field still exists on the proposal, it's just fully budget-cut,
+      // so the label persists with a full "+5 more risk(s)" counter rather
+      // than disappearing (same shape as summary/descriptions being absent
+      // only when the underlying field itself is absent, not merely cut).
+      expect(frame).toContain("Risks:");
+      expect(frame).toContain("+5 more risk(s)"); // all 5 hidden, never larger than the array
+      expect(frame).toContain("+8 more step(s)"); // stepsShown=0, all 8 fixture steps hidden
+      expect(frame).not.toContain("Step 2"); // no step shown at all
+      // flattenContent, not raw frame — at 60 columns this attribution line
+      // wraps across 2 physical lines, splitting the clause's own text at
+      // the wrap boundary.
+      // "taller than your terminal)" rather than the full clause including
+      // "still" — flattenContent strips whitespace at both ends of every
+      // physical line, so a *word*-wrap boundary (unlike a hard character
+      // wrap) loses the inter-word space entirely; "still" and "taller" can
+      // legitimately land on separate lines here (confirmed at rows=24,
+      // columns=80). The closing paren keeps this substring distinctive.
+      expect(flattenContent(frame)).toContain("trimmed to fit terminal");
+      expect(flattenContent(frame)).toContain("taller than your terminal)");
+    });
+
+    it("walkTiers directly: dropSummary true, all three numeric fields at 0, filesLikelyShown untouched at cap", () => {
+      const result = walkTiers(MAXIMAL_PROPOSAL, 60, -7);
+      expect(result.cutState).toEqual({
+        descriptionsShown: 0,
+        dropSummary: true,
+        riskHintsShown: 0,
+        filesLikelyShown: NO_CUTS.filesLikelyShown, // untouched — files stays deferred
+        stepsShown: 0,
+      });
+      expect(result.floorUnmet).toBe(true);
+    });
+  });
+
+  // rows=24/29 are exactly where the earlier provisional-constant bug lived
+  // (design record) — this grid is what would have caught it. Disjunction:
+  // either the frame fits within rows − SIBLING_LINES, or the floor-unmet
+  // path fired correctly (marker + attribution clause) — an over-tall frame
+  // with no acknowledgment is the one outcome never allowed. Which branch
+  // each row/column pair takes isn't predicted here; it's read off the
+  // actual render and reported.
+  describe("acceptance grid", () => {
+    it.each([
+      [24, 60], [24, 80],
+      [29, 60], [29, 80],
+      [30, 60], [30, 80],
+      [50, 60], [50, 80],
+    ] as const)("rows=%d columns=%d: fits, or honestly admits it doesn't", async (rows, columns) => {
+      const { lastFrame, unmount } = renderPlanReadyModalAtRows(MAXIMAL_PROPOSAL, makeDispatch(), columns, rows);
+      activeUnmount = unmount;
+      await wait();
+      const frame = lastFrame() ?? "";
+      const totalFrameLines = frame.split("\n").length;
+      const fits = totalFrameLines <= rows - SIBLING_LINES;
+      // flattenContent, not raw frame — the attribution line can wrap
+      // across physical lines. Checking for "taller than your terminal)"
+      // rather than the full clause: flattenContent strips whitespace at
+      // both ends of every physical line, so a *word*-wrap boundary loses
+      // the inter-word space entirely — "still" and "taller" can legitimately
+      // land on separate lines (confirmed at rows=24/columns=80).
+      const floorUnmetFired =
+        mockLog.mock.calls.some((args) => args[0] === "[zone-plan-modal-budget-unmet]") &&
+        flattenContent(frame).includes("taller than your terminal)");
+      // eslint-disable-next-line no-console
+      console.log(`GRID rows=${rows} columns=${columns} totalFrameLines=${totalFrameLines} target=${rows - SIBLING_LINES} fits=${fits} floorUnmetFired=${floorUnmetFired}`);
+      expect(fits || floorUnmetFired).toBe(true);
     });
   });
 });

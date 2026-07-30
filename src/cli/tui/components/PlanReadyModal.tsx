@@ -1,8 +1,10 @@
-import React, { useState } from "react";
-import { Box, Text, useInput, usePaste } from "ink";
+import React, { useEffect, useState } from "react";
+import { Box, Text, useInput, usePaste, useStdout } from "ink";
 import type { Dispatch } from "react";
 import type { StoreAction, StoreState } from "../store.js";
 import { resolvePlanApproval } from "../../../llm/planApprovals.js";
+import { planModalLineBudget } from "../planModalLineBudget.js";
+import { log } from "../../../utils/logger.js";
 
 interface PlanReadyModalProps {
   proposal: NonNullable<StoreState["planReadyProposal"]>;
@@ -20,6 +22,12 @@ const RISK_HINTS_LIMIT = 5;   // entry-count cap
 const FILES_LIKELY_MAX = 10;  // per-step file-list cap
 const STEPS_MAX = 8;          // step-list cap
 const STEP_DESCRIPTION_MAX = 48; // per-step description char cap
+const FOOTER_LINES_NORMAL = 3; // measured directly (PlanReadyModal.test.tsx pin 1): 3 at 60
+                                // cols, 2 at 80 — the fixed constant reserves the narrower-width
+                                // value. Normal-mode footer only; feedback-mode's own (taller)
+                                // footer height is not yet reserved for — out of scope this pass.
+const SIBLING_LINES = 5; // measured directly (PlanReadyModal.test.tsx pin 4): Composer(1) +
+                          // StatusBar(4), column-independent (60 and 80 cols)
 
 function renderFeedbackBuffer(buf: string, pos: number): string {
   return buf.slice(0, pos) + "▋" + buf.slice(pos);
@@ -148,11 +156,128 @@ export function estimatePlanContentLines(
   return lines;
 }
 
+// Four tiers this pass, not five — `files` is measured (see the design record's addendum) to be
+// independently load-bearing on real data only at a narrow row band, and subsumed by `steps`
+// firing whenever both would. `filesLikelyShown` stays in `CutState` at `FILES_LIKELY_MAX` (the
+// aggregate already counts it — today's render cap) but is deliberately absent from this list,
+// so there's no `files` branch in the walk or in attribution derivation to leave unreachable —
+// re-adding it later is one more list entry, not a rewrite.
+type NumericTierField = "descriptionsShown" | "riskHintsShown" | "stepsShown";
+type TierStep =
+  | { name: string; kind: "decrement"; field: NumericTierField }
+  | { name: string; kind: "flip"; field: "dropSummary" };
+
+const TIER_LIST: TierStep[] = [
+  { name: "descriptions", kind: "decrement", field: "descriptionsShown" },
+  { name: "summary", kind: "flip", field: "dropSummary" },
+  { name: "risks", kind: "decrement", field: "riskHintsShown" },
+  { name: "steps", kind: "decrement", field: "stepsShown" },
+];
+
+function isTierFired(tier: TierStep, cutState: CutState): boolean {
+  if (tier.kind === "flip") return cutState[tier.field] === true;
+  return cutState[tier.field] < NO_CUTS[tier.field];
+}
+
+export function firedTierNames(cutState: CutState): string[] {
+  return TIER_LIST.filter((tier) => isTierFired(tier, cutState)).map((tier) => tier.name);
+}
+
+const ATTRIBUTION_PREFIX = "  … trimmed to fit terminal: ";
+const FLOOR_UNMET_CLAUSE = " (still taller than your terminal)";
+
+// Worst-case attribution text — all four tier names plus the floor clause —
+// budgeted before the walk starts, not appended after: reserving space for a
+// notice that only exists once cutting happens, using the exact text once
+// cutting is known to have happened, would let the notice itself overflow
+// the budget it reports on.
+function attributionWorstCaseText(): string {
+  return `${ATTRIBUTION_PREFIX}${TIER_LIST.map((t) => t.name).join(", ")}${FLOOR_UNMET_CLAUSE}`;
+}
+
+export interface WalkResult {
+  cutState: CutState;
+  floorUnmet: boolean;
+  finalEstimate: number;
+}
+
+/**
+ * Two comparisons against two different numbers, in sequence — not one check
+ * that folds the attribution reservation into the no-cut decision. The bare
+ * estimate decides whether anything needs cutting at all (no cut ⇒ no
+ * attribution line ⇒ nothing to reserve space for); only once cutting is
+ * known to be necessary does the reservation come off the budget, and every
+ * subsequent fit-check in the walk is against that reduced number.
+ */
+export function walkTiers(
+  proposal: PlanReadyModalProps["proposal"],
+  columns: number,
+  contentBudget: number,
+): WalkResult {
+  const bareEstimate = estimatePlanContentLines(proposal, columns, NO_CUTS);
+  if (bareEstimate <= contentBudget) {
+    return { cutState: NO_CUTS, floorUnmet: false, finalEstimate: bareEstimate };
+  }
+
+  const contentWidth = columns - 6;
+  const reservation = estimateWrappedLines(attributionWorstCaseText(), contentWidth);
+  const effectiveBudget = contentBudget - reservation;
+
+  let cutState: CutState = { ...NO_CUTS };
+  const fits = () => estimatePlanContentLines(proposal, columns, cutState) <= effectiveBudget;
+
+  for (const tier of TIER_LIST) {
+    if (fits()) break;
+    if (tier.kind === "flip") {
+      cutState = { ...cutState, [tier.field]: true };
+    } else {
+      // One shared decrement loop for every numeric tier: one step at a
+      // time, down to (never below) 0, stopping the moment it fits — a
+      // field reaches 0 only if 0 is actually what it takes, never because
+      // the tier "fired" jumped it there.
+      while (!fits() && cutState[tier.field] > 0) {
+        cutState = { ...cutState, [tier.field]: cutState[tier.field] - 1 };
+      }
+    }
+  }
+
+  const finalEstimate = estimatePlanContentLines(proposal, columns, cutState);
+  return { cutState, floorUnmet: finalEstimate > effectiveBudget, finalEstimate };
+}
+
 export function PlanReadyModal({ proposal, dispatch }: PlanReadyModalProps): React.ReactElement {
   const [feedbackMode, setFeedbackMode] = useState(false);
   const [pendingDecision, setPendingDecision] = useState<"feedback" | "approve_with_feedback" | null>(null);
   const [feedbackBuffer, setFeedbackBuffer] = useState("");
   const [feedbackCursor, setFeedbackCursor] = useState(0);
+
+  const { stdout } = useStdout();
+  const { contentBudget, rowsValid, receivedRows } = stdout?.isTTY
+    ? planModalLineBudget(stdout.rows, FOOTER_LINES_NORMAL, SIBLING_LINES)
+    : { contentBudget: undefined, rowsValid: true, receivedRows: undefined };
+  const columns = stdout?.columns ?? 80;
+
+  const { cutState, floorUnmet, finalEstimate } =
+    contentBudget !== undefined
+      ? walkTiers(proposal, columns, contentBudget)
+      : { cutState: NO_CUTS, floorUnmet: false, finalEstimate: 0 };
+  const firedNames = firedTierNames(cutState);
+
+  useEffect(() => {
+    if (!rowsValid) {
+      log("[zone-plan-modal-rows-implausible]", JSON.stringify({ received: receivedRows, receivedType: typeof receivedRows }));
+    }
+  }, [rowsValid, receivedRows]);
+
+  useEffect(() => {
+    if (contentBudget !== undefined && floorUnmet) {
+      log("[zone-plan-modal-budget-unmet]", JSON.stringify({
+        rows: stdout?.rows,
+        requiredLines: finalEstimate,
+        achievedLines: contentBudget,
+      }));
+    }
+  }, [contentBudget, floorUnmet, finalEstimate, stdout?.rows]);
 
   useInput((input, key) => {
     if (feedbackMode) {
@@ -230,7 +355,7 @@ export function PlanReadyModal({ proposal, dispatch }: PlanReadyModalProps): Rea
       <Text> </Text>
       <Text dimColor>Objective:</Text>
       <Text>{proposal.objective.slice(0, 200)}</Text>
-      {!!proposal.scopeSummary && (
+      {!cutState.dropSummary && !!proposal.scopeSummary && (
         <>
           <Text> </Text>
           <Text dimColor>Summary:</Text>
@@ -248,13 +373,13 @@ export function PlanReadyModal({ proposal, dispatch }: PlanReadyModalProps): Rea
           </Text>
         </Box>
       )}
-      {proposal.steps.slice(0, STEPS_MAX).map((step, i) => (
+      {proposal.steps.slice(0, cutState.stepsShown).map((step, i) => (
         <Box key={i} flexDirection="column">
           <Box flexDirection="row">
             <Text dimColor>{`  ${i + 1}. `}</Text>
             <Text>{step.title}</Text>
           </Box>
-          {!!step.description && (
+          {!!step.description && i < cutState.descriptionsShown && (
             <Box flexGrow={1} marginLeft={5}>
               <Text dimColor>{`${step.description.slice(0, STEP_DESCRIPTION_MAX)}${step.description.length > STEP_DESCRIPTION_MAX ? "…" : ""}`}</Text>
             </Box>
@@ -271,18 +396,18 @@ export function PlanReadyModal({ proposal, dispatch }: PlanReadyModalProps): Rea
           )}
         </Box>
       ))}
-      {proposal.steps.length > STEPS_MAX && (
-        <Text dimColor>{`  … +${proposal.steps.length - STEPS_MAX} more step(s)`}</Text>
+      {proposal.steps.length > cutState.stepsShown && (
+        <Text dimColor>{`  … +${proposal.steps.length - cutState.stepsShown} more step(s)`}</Text>
       )}
       {proposal.riskHints.length > 0 && (
         <>
           <Text> </Text>
           <Text dimColor>Risks:</Text>
-          {proposal.riskHints.slice(0, RISK_HINTS_LIMIT).map((hint, i) => (
+          {proposal.riskHints.slice(0, cutState.riskHintsShown).map((hint, i) => (
             <Text key={i}>{`  • ${hint.slice(0, RISK_HINT_MAX)}${hint.length > RISK_HINT_MAX ? "…" : ""}`}</Text>
           ))}
-          {proposal.riskHints.length > RISK_HINTS_LIMIT && (
-            <Text dimColor>{`  … +${proposal.riskHints.length - RISK_HINTS_LIMIT} more risk(s)`}</Text>
+          {proposal.riskHints.length > cutState.riskHintsShown && (
+            <Text dimColor>{`  … +${proposal.riskHints.length - cutState.riskHintsShown} more risk(s)`}</Text>
           )}
         </>
       )}
@@ -293,6 +418,12 @@ export function PlanReadyModal({ proposal, dispatch }: PlanReadyModalProps): Rea
             <Text dimColor>{"Scope: "}</Text>
             <Text dimColor>{proposal.scopeNotes.slice(0, 200)}</Text>
           </Box>
+        </>
+      )}
+      {firedNames.length > 0 && (
+        <>
+          <Text> </Text>
+          <Text dimColor>{`${ATTRIBUTION_PREFIX}${firedNames.join(", ")}${floorUnmet ? FLOOR_UNMET_CLAUSE : ""}`}</Text>
         </>
       )}
       <Text> </Text>
