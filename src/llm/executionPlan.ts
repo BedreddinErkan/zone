@@ -4,7 +4,7 @@ import { AUX_CALL_MAX_OUTPUT_TOKENS } from "./models.js";
 import { createLLMClient, PlanRefusalError } from "./factory.js";
 import { getRequestContext } from "./openaiContext.js";
 import type { LLMProvider } from "./types.js";
-import { debugLog } from "../utils/logger.js";
+import { debugLog, log } from "../utils/logger.js";
 
 export type ExecutionPlan = {
   objective: string;
@@ -399,8 +399,21 @@ ${input.forceSteps
  * Guarantees non-empty steps and validates against executionPlanSchema so
  * callers receive a schema-compliant ExecutionPlan (fails loudly if invariants
  * are violated, future-proofing against schema changes).
+ *
+ * Emits `[zone-plan-synthesized]` from inside the function rather than from the
+ * call site: the output is structurally indistinguishable from a real plan to
+ * every downstream consumer — PlanBody renders its one step like any other,
+ * hasApprovedSteps computes true from it, and stepCount reports 1 — so a marker
+ * at one call site would leave a future second caller silent again, which is the
+ * failure being fixed. `log`, not `debugLog`: this has to reach the marker sink.
  */
-export function synthesizeMinimalPlan(task: string, relevantFiles: string[] = []): ExecutionPlan {
+export function synthesizeMinimalPlan(
+  task: string,
+  relevantFiles: string[] = [],
+  /** Message from the forceSteps regeneration that threw just before this
+   *  fallback ran, when there was one. Only the caller has it in scope. */
+  forceStepsFailReason?: string,
+): ExecutionPlan {
   const pathTokens = [...task.matchAll(/\b[\w./][\w./-]*\.\w{2,5}\b/g)]
     .map(m => m[0]).slice(0, 5);
   const filesLikely = [...new Set([...pathTokens, ...relevantFiles.slice(0, 3)])];
@@ -410,5 +423,10 @@ export function synthesizeMinimalPlan(task: string, relevantFiles: string[] = []
     riskHints: [],
     scopeSummary: task.slice(0, 160),
   };
+  log("[zone-plan-synthesized]", JSON.stringify({
+    taskLength: task.length,
+    filesLikelyCount: filesLikely.length,
+    forceStepsFailReason: forceStepsFailReason ?? null,
+  }));
   return executionPlanSchema.parse(raw);
 }

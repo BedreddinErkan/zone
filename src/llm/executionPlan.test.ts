@@ -3,6 +3,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 const mocks = vi.hoisted(() => ({
   createChatCompletion: vi.fn(),
   debugLog: vi.fn(),
+  log: vi.fn(),
 }));
 
 vi.mock("./factory.js", () => ({
@@ -12,11 +13,14 @@ vi.mock("./factory.js", () => ({
   })),
 }));
 
+// Both names, not just debugLog: executionPlan.ts imports `log` too, and a mock
+// missing it makes `log` undefined at call time rather than failing at import.
 vi.mock("../utils/logger.js", () => ({
   debugLog: mocks.debugLog,
+  log: mocks.log,
 }));
 
-import { generateExecutionPlan, tryParseExecutionPlan, isNoChangePlan, isCannotVerifyPlan, formatExecutionPlanForPrompt, buildApprovedPlanBlock, formatPlanRevisedNote } from "./executionPlan.js";
+import { generateExecutionPlan, tryParseExecutionPlan, isNoChangePlan, isCannotVerifyPlan, formatExecutionPlanForPrompt, buildApprovedPlanBlock, formatPlanRevisedNote, synthesizeMinimalPlan } from "./executionPlan.js";
 import type { ExecutionPlan } from "./executionPlan.js";
 
 function mockPlanResponse(plan: unknown) {
@@ -602,6 +606,41 @@ describe("executionPlanSchema salvage — steps + reason", () => {
     expect(result).not.toBeNull();
     const salvagedCalls = mocks.debugLog.mock.calls.filter((c: unknown[]) => String(c[0]).includes("[zone-plan-salvaged]"));
     expect(salvagedCalls).toHaveLength(0);
+  });
+});
+
+describe("synthesizeMinimalPlan — [zone-plan-synthesized]", () => {
+  function synthesizedCalls(): Array<Record<string, unknown>> {
+    return mocks.log.mock.calls
+      .filter((c: unknown[]) => c[0] === "[zone-plan-synthesized]")
+      .map((c: unknown[]) => JSON.parse(c[1] as string) as Record<string, unknown>);
+  }
+
+  it("emits via log (the marker sink channel), not debugLog", () => {
+    synthesizeMinimalPlan("Add a helper to src/utils/dates.ts", []);
+    expect(synthesizedCalls()).toHaveLength(1);
+    const debugCalls = mocks.debugLog.mock.calls.filter((c: unknown[]) =>
+      String(c[0]).includes("[zone-plan-synthesized]")
+    );
+    expect(debugCalls).toHaveLength(0);
+  });
+
+  it("payload carries taskLength, filesLikelyCount and the preceding throw reason", () => {
+    const task = "Add a helper to src/utils/dates.ts";
+    synthesizeMinimalPlan(task, ["src/other.ts"], "generateExecutionPlan: no steps returned (forceSteps)");
+    const [payload] = synthesizedCalls();
+    expect(payload).toMatchObject({
+      taskLength: task.length,
+      // src/utils/dates.ts scraped from the task text + src/other.ts from relevantFiles
+      filesLikelyCount: 2,
+      forceStepsFailReason: "generateExecutionPlan: no steps returned (forceSteps)",
+    });
+  });
+
+  it("reason is null, not absent, when no throw preceded the fallback", () => {
+    synthesizeMinimalPlan("Add a helper", []);
+    const [payload] = synthesizedCalls();
+    expect(payload).toHaveProperty("forceStepsFailReason", null);
   });
 });
 

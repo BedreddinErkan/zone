@@ -398,6 +398,9 @@ export async function runOneShotInner(
 
       // Safety net: a non-problem task whose plan returned empty steps must still reach the modal.
       if (preGeneratedPlan.steps.length === 0) {
+        // Hoisted purely so the synthesis marker can name what failed just before
+        // it: `e` is scoped to the catch below and out of scope at the fallback.
+        let forceStepsFailReason: string | undefined;
         try {
           preGeneratedPlan = await withRequestContext(planGenCtx, () =>
             generateExecutionPlan({
@@ -409,9 +412,12 @@ export async function runOneShotInner(
               forceSteps: true,
             })
           );
-        } catch (e) { debugLog("[zone-plan-force-steps-failed]", e instanceof Error ? e.message : String(e)); }
+        } catch (e) {
+          forceStepsFailReason = e instanceof Error ? e.message : String(e);
+          debugLog("[zone-plan-force-steps-failed]", forceStepsFailReason);
+        }
         if (preGeneratedPlan.steps.length === 0) {
-          preGeneratedPlan = synthesizeMinimalPlan(task, planCtxRelevantFiles);
+          preGeneratedPlan = synthesizeMinimalPlan(task, planCtxRelevantFiles, forceStepsFailReason);
         }
       }
 
