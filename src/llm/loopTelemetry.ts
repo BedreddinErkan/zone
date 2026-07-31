@@ -34,6 +34,12 @@ export interface ArchetypeData {
   /** Wall-clock spent parked on a human. Excluded from the reported duration so a
    *  long pause reads as a pause, not as slow inference. */
   parkedMs: number;
+  /** dispatch.ts's plan-mode gate decision, carried alongside the archetype it
+   *  preceded so a misfire is one jq against this marker, no join against
+   *  [zone-plan-mode] by runId. Null when the gate wasn't computed for this run
+   *  (strict/checkpoint path, durable resume, or non-plan-mode runs). */
+  leadVerb: string | null;
+  mode: string | null;
 }
 
 export function emitArchetype(data: ArchetypeData): void {

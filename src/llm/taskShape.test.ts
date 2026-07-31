@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { taskAssertsProblem } from "./taskShape.js";
+import { taskAssertsProblem, matchedLeadVerb } from "./taskShape.js";
 import { synthesizeMinimalPlan } from "./executionPlan.js";
 
 describe("taskAssertsProblem", () => {
@@ -33,6 +33,24 @@ describe("taskAssertsProblem", () => {
   for (const [task, expected] of cases) {
     it(`${JSON.stringify(task)} → ${expected}`, () => {
       expect(taskAssertsProblem(task)).toBe(expected);
+    });
+  }
+});
+
+describe("matchedLeadVerb", () => {
+  const cases: [string, string | null][] = [
+    ["add a helper function", "add"],
+    ["Set up the CI pipeline", "set up"], // full matched phrase, not a bare first word
+    ["ADD a file", "add"], // case-insensitive, returned lowercased
+    ["why does X fail", null], // problem-shaped, no lead-verb match
+    ["make X robust", null], // "make" deliberately excluded from PURE_ADDITION_LEAD_VERBS
+    ["refactor the auth module", null], // structural verb, not pure-addition
+    ["update the docs", null], // no recognized lead verb at all
+  ];
+
+  for (const [task, expected] of cases) {
+    it(`${JSON.stringify(task)} → ${JSON.stringify(expected)}`, () => {
+      expect(matchedLeadVerb(task)).toBe(expected);
     });
   }
 });

@@ -16,7 +16,7 @@ import { createSpinner, buildCliSink } from "./sink.js";
 import type { LlmPatchProgressUpdate, ZoneStructuredProgressEvent } from "../core/agentLifecycleEvents.js";
 import { preparePlanContext } from "../core/preparePlanContext.js";
 import { generateExecutionPlan, isNoChangePlan, isCannotVerifyPlan, synthesizeMinimalPlan } from "../llm/executionPlan.js";
-import { taskAssertsProblem, isPureAddition } from "../llm/taskShape.js";
+import { taskAssertsProblem, isPureAddition, matchedLeadVerb } from "../llm/taskShape.js";
 import { rejectPendingEditsForRun } from "../api/editApprovals.js";
 import { rejectPendingStagedForRun } from "../api/stagedApprovals.js";
 import { rejectPendingQuestionsForRun } from "../api/questionApprovals.js";
@@ -215,6 +215,12 @@ export async function runOneShotInner(
   let editApprovalMode: "auto" | "manual" = opts.editApprovalMode ?? "auto";
   let feedbackForExecution = "";
   let useCheckpointLoop = false;
+  // Set only inside the "quick" plan-gen gate below — stays undefined for the
+  // strict/checkpoint path and the durable-resume path, neither of which
+  // computes this gate at all. [zone-archetype] threading reads these as
+  // optional, so undefined here means "not applicable", not "lost".
+  let gateLeadVerb: string | null | undefined;
+  let gateModeValue: string | undefined;
 
   if (opts.mode === "plan") {
     if (isChitchat(task) || isVagueDeveloperTask(task)) {
@@ -274,9 +280,18 @@ export async function runOneShotInner(
           investigationFlag === "0" ? false :
           !isPureAddition(task);   // default: investigate unless a clear pure addition
         const investigationModel = process.env["ZONE_PLAN_INVESTIGATION_MODEL"];
-        debugLog("[zone-plan-mode]", JSON.stringify({
-          mode: shouldInvestigate ? "investigate-first" : "quick-lexical",
+        // Single source of truth for both the marker below and the fields threaded
+        // into runLlmPatchFlow -> [zone-archetype] further down — not two independent
+        // computations of the same decision. Assigns the outer-scope locals declared
+        // near planForExecution, since this block closes before the common
+        // runLlmPatchFlow call that needs them.
+        gateLeadVerb = matchedLeadVerb(task);
+        gateModeValue = shouldInvestigate ? "investigate-first" : "quick-lexical";
+        log("[zone-plan-mode]", JSON.stringify({
+          runId,
+          mode: gateModeValue,
           gatedBy: investigationFlag === undefined ? "default-non-additive" : "env",
+          leadVerb: gateLeadVerb,
           ...(shouldInvestigate ? { model: investigationModel ?? "inherit" } : {}),
         }));
         if (shouldInvestigate) {
@@ -654,6 +669,8 @@ export async function runOneShotInner(
         forceTier: effectiveConfig.forceTier,
         mode: "patch",
         preGeneratedPlan: planForExecution ?? opts.preGeneratedPlan,
+        gateLeadVerb,
+        gateMode: gateModeValue,
         summaryFormat: effectiveConfig.summaryFormat,
         priorSessionSummary: opts.priorSessionSummary,
         webSearchEnabled: effectiveConfig.webSearchEnabled,

@@ -160,6 +160,12 @@ export interface AgentLoopInput {
   excludeTools?: ReadonlySet<string>;
   pipelineApplied?: boolean;
   originalArchetype?: TaskArchetype;
+  /** dispatch.ts's plan-mode gate decision, forwarded through runLlmPatchFlow.ts's
+   *  agentLoopBaseInput — read only by emitArchetype below, renamed to
+   *  leadVerb/mode in that marker's payload (distinct from this field's own
+   *  `mode`, the agent loop's operating mode). */
+  gateLeadVerb?: string | null;
+  gateMode?: string;
   onProgress?: (msg: string) => void;
   onToolCall?: (name: string, args: Record<string, unknown>) => void;
   onToolResult?: (name: string, result: ToolResult) => void;
@@ -2052,6 +2058,11 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         tier: input.taskClassification?.tier ?? null,
         fallbackUsed: input.taskClassification?.fallbackUsed ?? false,
         userOverride: null,
+        // dispatch.ts's plan-mode gate decision, alongside the archetype it
+        // preceded — a misfire (leadVerb null but archetype simple_add, or
+        // vice versa) is now one jq against this single marker, no join.
+        leadVerb: input.gateLeadVerb ?? null,
+        mode: input.gateMode ?? null,
         finalIter: result.iterCount ?? null,
         finalCostUsd: costUsd,
         success: terminationReason === "natural_completion",

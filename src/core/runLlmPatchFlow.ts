@@ -4552,6 +4552,12 @@ export async function runLlmPatchFlow(input: {
   forceTier?: TaskTier;
   /** Phase AS: pre-computed classification from server.ts audit gate. Skips re-classification. */
   preClassifiedTask?: TaskClassification;
+  /** dispatch.ts's plan-mode gate decision — forwarded to agentLoopBaseInput so
+   *  [zone-archetype] can carry both sides of the gate-vs-archetype comparison
+   *  in one marker. Undefined when the gate wasn't computed (strict/checkpoint
+   *  path, durable resume). */
+  gateLeadVerb?: string | null;
+  gateMode?: string;
   /** Phase X.0.1: distilled findings from the pre-execution scope audit.
    *  Forwarded to agentLoopBaseInput so the execute agent sees the AUDIT CONTEXT block. */
   auditFindings?: {
@@ -5980,6 +5986,8 @@ const initializeTodosFromPlan = (): void => {
       repoFilePaths: developerContextFiles.map((f) => f.path),
       maxIterations: iterBudgetComputed,
       taskClassification,
+      gateLeadVerb: input.gateLeadVerb ?? null,
+      gateMode: input.gateMode,
       forceTier: input.forceTier,
       // J.5: thread the prior run's rollback summary (if any) so the
       // agent reads APPLY_ROLLED_BACK markers from previous attempts

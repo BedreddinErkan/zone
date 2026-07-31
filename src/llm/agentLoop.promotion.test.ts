@@ -237,6 +237,46 @@ describe("L5.1b-2 happy path (no promotion)", () => {
   });
 });
 
+describe("dispatch.ts's gate decision threaded into [zone-archetype] as leadVerb/mode", () => {
+  it("carries gateLeadVerb/gateMode through as leadVerb/mode, renamed to avoid the AgentLoopInput.mode collision", async () => {
+    mocks.createChatCompletion.mockResolvedValueOnce(makeDoneResponse());
+
+    await runAgentLoop({
+      task: "add a helper function",
+      repoPath,
+      runId: "test-gate-thread",
+      gateLeadVerb: "add",
+      gateMode: "quick-lexical",
+    });
+
+    const archetypeLogs = mocks.log.mock.calls.filter(
+      (c: unknown[]) => c[0] === "[zone-archetype]"
+    );
+    expect(archetypeLogs.length).toBe(1);
+    const payload = JSON.parse(archetypeLogs[0][1] as string) as Record<string, unknown>;
+    expect(payload.leadVerb).toBe("add");
+    expect(payload.mode).toBe("quick-lexical");
+  });
+
+  it("leadVerb/mode are null when the gate wasn't computed for this run (gateLeadVerb/gateMode absent)", async () => {
+    mocks.createChatCompletion.mockResolvedValueOnce(makeDoneResponse());
+
+    await runAgentLoop({
+      task: "add a helper function",
+      repoPath,
+      runId: "test-gate-absent",
+    });
+
+    const archetypeLogs = mocks.log.mock.calls.filter(
+      (c: unknown[]) => c[0] === "[zone-archetype]"
+    );
+    expect(archetypeLogs.length).toBe(1);
+    const payload = JSON.parse(archetypeLogs[0][1] as string) as Record<string, unknown>;
+    expect(payload.leadVerb).toBeNull();
+    expect(payload.mode).toBeNull();
+  });
+});
+
 describe("L5.1b-2 default env (no pipelineApplied)", () => {
   it("never emits [zone-archetype-promoted] when pipelineApplied is absent", async () => {
     // Simulate conditions that would trigger promotion if pipelineApplied were set:

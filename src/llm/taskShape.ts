@@ -56,3 +56,14 @@ const PURE_ADDITION_RE = /^(add|create|implement|build|scaffold|introduce|genera
 export function isPureAddition(task: string): boolean {
   return PURE_ADDITION_RE.test(task.trim());
 }
+
+/**
+ * The lead-verb PURE_ADDITION_RE actually matched, lowercased, or null when
+ * isPureAddition would return false. Exposed for telemetry — the plan-mode
+ * gate needs to record what its decision keyed on, not just the boolean
+ * result, since [zone-plan-mode]'s `mode` field alone can't be trusted when
+ * an env override forced a branch independent of what this predicate says.
+ */
+export function matchedLeadVerb(task: string): string | null {
+  return PURE_ADDITION_RE.exec(task.trim())?.[0]?.toLowerCase() ?? null;
+}
