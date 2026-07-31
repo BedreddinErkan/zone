@@ -58,7 +58,7 @@ vi.mock("../llm/executionPlan.js", async (importOriginal) => {
     // unconditionally to build forceSteps.
     isAnswerOnlyPlan: actual.isAnswerOnlyPlan,
     generateExecutionPlan: mockGenerateExecutionPlan,
-    isNoChangePlan: mockIsCannotVerifyPlan,
+    isNoChangePlan: mockIsNoChangePlan,
     isCannotVerifyPlan: mockIsCannotVerifyPlan,
     synthesizeMinimalPlan: (task: string) => ({
       objective: task.slice(0, 200),
