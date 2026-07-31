@@ -585,12 +585,16 @@ describe("executionPlanSchema salvage — steps + reason", () => {
     expect(result!.steps).toHaveLength(1);
   });
 
-  it("[zone-plan-salvaged] counter emitted via debugLog on salvage", () => {
+  it("[zone-plan-salvaged] counter emitted via log (marker sink) on salvage", () => {
     tryParseExecutionPlan(
       wrapJson({ objective: "Fix", steps: [STEP], riskHints: [], scopeSummary: "S.", cannotVerifyReason: "did not run" })
     );
-    const calls = mocks.debugLog.mock.calls.map((c: unknown[]) => String(c[0]));
+    const calls = mocks.log.mock.calls.map((c: unknown[]) => String(c[0]));
     expect(calls.some((s: string) => s.includes("[zone-plan-salvaged]") && s.includes("cannotVerifyReason"))).toBe(true);
+    // Negative half: the old channel must be empty, or a future revert to
+    // debugLog would leave this test green while the marker went dark again.
+    const debugCalls = mocks.debugLog.mock.calls.map((c: unknown[]) => String(c[0]));
+    expect(debugCalls.some((s: string) => s.includes("[zone-plan-salvaged]"))).toBe(false);
   });
 
   it("regression: empty steps + neither reason → still null (branch 1 preserved)", () => {
@@ -601,10 +605,10 @@ describe("executionPlanSchema salvage — steps + reason", () => {
     expect(tryParseExecutionPlan(wrapJson({ objective: "X", steps: [], riskHints: [], scopeSummary: "S", noChangeReason: "ok", cannotVerifyReason: "blocked" }))).toBeNull();
   });
 
-  it("regression: clean plan → unchanged, debugLog not called for salvage", () => {
+  it("regression: clean plan → unchanged, no salvage marker emitted", () => {
     const result = tryParseExecutionPlan(wrapJson({ objective: "Fix", steps: [STEP], riskHints: [], scopeSummary: "S." }));
     expect(result).not.toBeNull();
-    const salvagedCalls = mocks.debugLog.mock.calls.filter((c: unknown[]) => String(c[0]).includes("[zone-plan-salvaged]"));
+    const salvagedCalls = mocks.log.mock.calls.filter((c: unknown[]) => String(c[0]).includes("[zone-plan-salvaged]"));
     expect(salvagedCalls).toHaveLength(0);
   });
 });

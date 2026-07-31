@@ -4,7 +4,7 @@ import { AUX_CALL_MAX_OUTPUT_TOKENS } from "./models.js";
 import { createLLMClient, PlanRefusalError } from "./factory.js";
 import { getRequestContext } from "./openaiContext.js";
 import type { LLMProvider } from "./types.js";
-import { debugLog, log } from "../utils/logger.js";
+import { log } from "../utils/logger.js";
 
 export type ExecutionPlan = {
   objective: string;
@@ -99,7 +99,11 @@ const executionPlanSchema = z
       ]
         .filter((f): f is string => f !== null)
         .join(", ");
-      debugLog(`[zone-plan-salvaged] dropped ${dropped} (steps=${data.steps.length})`);
+      // log, not debugLog: debugLog only reaches console.log under
+      // ZONE_VERBOSE_LOGS=1, so the line never existed for stdoutShield's
+      // marker sink to intercept — the same defect 19c98c6a fixed for
+      // [zone-plan-mode].
+      log(`[zone-plan-salvaged] dropped ${dropped} (steps=${data.steps.length})`);
       return { ...data, noChangeReason: undefined, cannotVerifyReason: undefined };
     }
     return data;
