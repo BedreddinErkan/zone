@@ -490,6 +490,11 @@ export async function runOneShotInner(
                     previousPlan: currentPlan,
                     userFeedback: result.feedback,
                     abortSignal: ac.signal,
+                    // The plan being replanned was answer-shaped (nothing to do,
+                    // question asked) — "[3] plan a fix instead" must force
+                    // concrete steps, not let the model re-emit answerOnlyReason.
+                    // Falsy (unchanged) for every other plan shape.
+                    forceSteps: isAnswerOnlyPlan(currentPlan),
                   })
                 );
                 if (result.feedback?.trim()) {
@@ -532,6 +537,11 @@ export async function runOneShotInner(
                     previousPlan: currentPlan,
                     userFeedback: result.feedback,
                     abortSignal: ac.signal,
+                    // Applied uniformly with the feedback/refine arm above: an
+                    // unlisted [4] on an answer-shaped plan does exactly what
+                    // [3] advertises (plans a fix), just without the footer
+                    // telling the user that's what's about to happen.
+                    forceSteps: isAnswerOnlyPlan(currentPlan),
                   })
                 );
                 if (result.feedback?.trim()) {

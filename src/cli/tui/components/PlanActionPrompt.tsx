@@ -104,14 +104,24 @@ export function PlanActionPrompt({ proposal, dispatch }: PlanActionPromptProps):
     <Box flexDirection="column">
       {feedbackMode ? (
         <>
-          <Text dimColor>{pendingDecision === "approve_with_feedback" ? "Feedback (then run):" : "Feedback (then revise):"}</Text>
+          <Text dimColor>
+            {pendingDecision === "approve_with_feedback"
+              ? "Feedback (then run):"
+              : proposal.answerOnlyReason
+                ? "Feedback (then plan a fix):"
+                : "Feedback (then revise):"}
+          </Text>
           <Box borderStyle="single" borderColor="cyan">
             <Text>{renderFeedbackBuffer(feedbackBuffer, feedbackCursor)}</Text>
           </Box>
           <Text dimColor>{"Enter to submit  ·  Esc to cancel"}</Text>
         </>
       ) : (
-        <Text dimColor>{"[1] auto-accept all  ·  [2] manually approve changes  ·  [3] give feedback  ·  [4] feedback+run  ·  Esc cancel"}</Text>
+        <Text dimColor>
+          {proposal.answerOnlyReason
+            ? "[1] answer now (read-only)  ·  [3] plan a fix instead  ·  Esc cancel"
+            : "[1] auto-accept all  ·  [2] manually approve changes  ·  [3] give feedback  ·  [4] feedback+run  ·  Esc cancel"}
+        </Text>
       )}
     </Box>
   );

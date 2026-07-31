@@ -78,6 +78,11 @@ vi.mock("../llm/executionPlan.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../llm/executionPlan.js")>();
   return {
     planTerminalShape: actual.planTerminalShape,
+    // Real predicate (C7): both replan call sites now call isAnswerOnlyPlan
+    // unconditionally to build forceSteps — unlike the safety net's call,
+    // this one isn't short-circuited by steps.length===0, so every test that
+    // reaches either replan arm exercises it, not just the answer-shaped ones.
+    isAnswerOnlyPlan: actual.isAnswerOnlyPlan,
     generateExecutionPlan: mockGenerateExecutionPlan,
     isNoChangePlan: mockIsNoChangePlan,
     isCannotVerifyPlan: mockIsCannotVerifyPlan,
@@ -298,5 +303,56 @@ describe("stepless plan reaching the replan arms — [zone-plan-empty-approval]"
       reasonField: "answerOnlyReason",
       reviewed: false,
     });
+  });
+});
+
+describe("C7 — forceSteps inference on the replan calls is keyed on currentPlan's shape", () => {
+  it("answer-shaped currentPlan through the feedback arm → forceSteps:true on the replan call", async () => {
+    mockRequestPlanApproval
+      .mockResolvedValueOnce({ planId: "plan-1", decision: "feedback", feedback: "give me a fix", modalEmitted: true })
+      .mockResolvedValueOnce({ planId: "plan-2", decision: "reject", modalEmitted: true });
+    // Call 1 (initial plan-gen) resolves to the answer-shaped plan itself, so
+    // currentPlan IS answer-shaped by the time the replan call below is built —
+    // forceSteps is evaluated against currentPlan BEFORE this call's own return
+    // value overwrites it.
+    mockGenerateExecutionPlan
+      .mockResolvedValueOnce(ANSWER_ONLY_PLAN)
+      .mockResolvedValueOnce(FAKE_PLAN);
+
+    await runOneShotInner(ADDITIVE_TASK, BASE_CONFIG, "run-answer-forcesteps-feedback", { mode: "plan" });
+
+    const replanCall = mockGenerateExecutionPlan.mock.calls[1]![0] as { forceSteps?: boolean };
+    expect(replanCall.forceSteps).toBe(true);
+  });
+
+  it("normal (real-stepped) currentPlan through the feedback arm → forceSteps stays falsy — the contrast proving the inference is keyed on shape, not hardcoded true", async () => {
+    mockRequestPlanApproval
+      .mockResolvedValueOnce({ planId: "plan-1", decision: "feedback", feedback: "split step 1", modalEmitted: true })
+      .mockResolvedValueOnce({ planId: "plan-2", decision: "reject", modalEmitted: true });
+    mockGenerateExecutionPlan
+      .mockResolvedValueOnce(FAKE_PLAN)
+      .mockResolvedValueOnce(FAKE_PLAN);
+
+    await runOneShotInner(ADDITIVE_TASK, BASE_CONFIG, "run-normal-forcesteps-feedback", { mode: "plan" });
+
+    const replanCall = mockGenerateExecutionPlan.mock.calls[1]![0] as { forceSteps?: boolean };
+    expect(replanCall.forceSteps).toBe(false);
+  });
+
+  it("answer-shaped currentPlan through the approve_with_feedback arm → forceSteps:true too (the corrected [4] finding — same inference, not hardcoded to only the feedback arm)", async () => {
+    mockRequestPlanApproval.mockResolvedValueOnce({
+      planId: "plan-1",
+      decision: "approve_with_feedback",
+      feedback: "just do it",
+      modalEmitted: true,
+    });
+    mockGenerateExecutionPlan
+      .mockResolvedValueOnce(ANSWER_ONLY_PLAN)
+      .mockResolvedValueOnce(FAKE_PLAN);
+
+    await runOneShotInner(ADDITIVE_TASK, BASE_CONFIG, "run-answer-forcesteps-awf", { mode: "plan" });
+
+    const replanCall = mockGenerateExecutionPlan.mock.calls[1]![0] as { forceSteps?: boolean };
+    expect(replanCall.forceSteps).toBe(true);
   });
 });

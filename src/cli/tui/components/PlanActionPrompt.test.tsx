@@ -23,6 +23,16 @@ const PROPOSAL: NonNullable<StoreState["planReadyProposal"]> = {
   scopeSummary: "",
 };
 
+const ANSWER_ONLY_PROPOSAL: NonNullable<StoreState["planReadyProposal"]> = {
+  planId: "plan-2",
+  runId: "run-2",
+  objective: "Explain the marker sink",
+  steps: [],
+  riskHints: [],
+  scopeSummary: "Explain the marker sink",
+  answerOnlyReason: "The task is a question; nothing needs to change.",
+};
+
 function makeDispatch() {
   return vi.fn();
 }
@@ -231,6 +241,40 @@ describe("PlanActionPrompt — feedback mode", () => {
     expect(mockResolvePlanApproval).toHaveBeenCalledWith(
       expect.objectContaining({ decision: "feedback", feedback: "pasted feedback" })
     );
+  });
+});
+
+describe("PlanActionPrompt — answer-only proposal (C7)", () => {
+  it("renders the 3-action footer for an answer-shaped proposal, not the normal 4-action footer", () => {
+    const { lastFrame, unmount } = render(<PlanActionPrompt proposal={ANSWER_ONLY_PROPOSAL} dispatch={makeDispatch()} />);
+    activeUnmount = unmount;
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("[1] answer now (read-only)  ·  [3] plan a fix instead  ·  Esc cancel");
+    expect(frame).not.toContain("[2] manually approve changes");
+  });
+
+  it("[1] on an answer-shaped proposal still resolves accept_all — no new PlanDecision variant (D3)", async () => {
+    const { stdin, unmount } = render(<PlanActionPrompt proposal={ANSWER_ONLY_PROPOSAL} dispatch={makeDispatch()} />);
+    activeUnmount = unmount;
+    stdin.write("1");
+    await wait();
+    expect(mockResolvePlanApproval).toHaveBeenCalledWith(
+      expect.objectContaining({ decision: "accept_all" })
+    );
+  });
+
+  it("[3] feedback-mode hint reads 'plan a fix' for an answer-shaped proposal; the existing 'revise' hint is unchanged for a normal one", async () => {
+    const answer = render(<PlanActionPrompt proposal={ANSWER_ONLY_PROPOSAL} dispatch={makeDispatch()} />);
+    answer.stdin.write("3");
+    await wait();
+    expect(answer.lastFrame() ?? "").toContain("Feedback (then plan a fix):");
+    answer.unmount();
+
+    const normal = render(<PlanActionPrompt proposal={PROPOSAL} dispatch={makeDispatch()} />);
+    normal.stdin.write("3");
+    await wait();
+    expect(normal.lastFrame() ?? "").toContain("Feedback (then revise):");
+    normal.unmount();
   });
 });
 

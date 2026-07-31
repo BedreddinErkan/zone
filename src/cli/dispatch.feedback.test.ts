@@ -53,6 +53,9 @@ vi.mock("../llm/executionPlan.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../llm/executionPlan.js")>();
   return {
     planTerminalShape: actual.planTerminalShape,
+    // Real predicate (C7): both replan call sites now call isAnswerOnlyPlan
+    // unconditionally to build forceSteps.
+    isAnswerOnlyPlan: actual.isAnswerOnlyPlan,
     generateExecutionPlan: mockGenerateExecutionPlan,
     isNoChangePlan: mockIsNoChangePlan,
     isCannotVerifyPlan: mockIsCannotVerifyPlan,
