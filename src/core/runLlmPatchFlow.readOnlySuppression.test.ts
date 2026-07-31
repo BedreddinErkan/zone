@@ -69,6 +69,19 @@ const STEPLESS_PLAN = {
   noChangeReason: "Build already exits 0 — the asserted bug does not reproduce.",
 };
 
+/** Same steps:[] shape as STEPLESS_PLAN, but answer-shaped (C6) — the iter
+ *  budget must come from ANSWER_ONLY_ITER_BUDGET (8), not
+ *  computeWorkerMaxIterations's 0→1 coercion (6), so this needs a genuinely
+ *  distinct value to prove the new branch fired rather than coincidentally
+ *  matching the old one. */
+const ANSWER_ONLY_PLAN = {
+  objective: "Explain the marker sink",
+  steps: [],
+  scopeSummary: "Explain the marker sink",
+  riskHints: [],
+  answerOnlyReason: "The task is a question; nothing needs to change.",
+};
+
 function classification(archetype: "investigation" | "question") {
   return {
     tier: "medium" as const,
@@ -114,7 +127,7 @@ afterEach(() => {
 
 async function runWith(opts: {
   archetype: "investigation" | "question";
-  preGeneratedPlan?: typeof APPROVED_PLAN | typeof STEPLESS_PLAN;
+  preGeneratedPlan?: typeof APPROVED_PLAN | typeof STEPLESS_PLAN | typeof ANSWER_ONLY_PLAN;
   runId: string;
 }) {
   classifyTaskMock.mockResolvedValue(classification(opts.archetype));
@@ -172,5 +185,96 @@ describe("read-only pipeline suppression when an approved plan justifies writing
 
     expect(call?.capabilityFilter).toBeDefined();
     expect(call?.readOnlyPipelineSuppressed).not.toBe(true);
+  });
+
+  it("investigation + answer-only plan (answerOnlyReason) → maxIterations comes from ANSWER_ONLY_ITER_BUDGET, not the worker floor", async () => {
+    const call = await runWith({ archetype: "investigation", preGeneratedPlan: ANSWER_ONLY_PLAN, runId: "run-inv-4" });
+
+    expect(call?.maxIterations).toBe(8);
+  });
+});
+
+/**
+ * [zone-answer-only-budget-exhausted] (C6) — reuses this file's harness
+ * rather than a new one: runAgentLoopMock is already fully controllable here
+ * and preGeneratedPlan wiring is already exercised above. log() is not
+ * mocked at module level in this file (an unmocked call falls through to
+ * real console.log), so these tests spy on console.log locally instead of
+ * widening the file's module mocks.
+ */
+describe("answer-only budget exhaustion marker (C6)", () => {
+  function findMarkerCall(logSpy: ReturnType<typeof vi.spyOn>) {
+    return logSpy.mock.calls.find((c) => c[0] === "[zone-answer-only-budget-exhausted]");
+  }
+
+  it("fires with iterBudget:8 when an answer-only plan's run hits token_budget_exceeded", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    runAgentLoopMock.mockResolvedValue({
+      success: false,
+      summary: "",
+      toolCallLog: [],
+      filesModified: [],
+      patchValidatedByAgent: false,
+      verificationReason: "tests_inconclusive",
+      terminationReason: "token_budget_exceeded",
+      iterCount: 8,
+      promotedFromArchetype: null,
+      promotionTrigger: null,
+      promotedAtIter: null,
+    });
+
+    await runWith({ archetype: "investigation", preGeneratedPlan: ANSWER_ONLY_PLAN, runId: "run-answer-exhausted" });
+
+    const markerCall = findMarkerCall(logSpy);
+    expect(markerCall).toBeDefined();
+    expect(JSON.parse(markerCall![1] as string)).toMatchObject({ iterBudget: 8 });
+
+    logSpy.mockRestore();
+  });
+
+  it("does not fire when the run terminates via natural_completion", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    runAgentLoopMock.mockResolvedValue({
+      success: true,
+      summary: "The build passes; nothing needs to change.",
+      toolCallLog: [],
+      filesModified: [],
+      patchValidatedByAgent: false,
+      verificationReason: "tests_inconclusive",
+      terminationReason: "natural_completion",
+      iterCount: 3,
+      promotedFromArchetype: null,
+      promotionTrigger: null,
+      promotedAtIter: null,
+    });
+
+    await runWith({ archetype: "investigation", preGeneratedPlan: ANSWER_ONLY_PLAN, runId: "run-answer-ok" });
+
+    expect(findMarkerCall(logSpy)).toBeUndefined();
+
+    logSpy.mockRestore();
+  });
+
+  it("does not fire for a non-answer stepless plan even at token_budget_exceeded — the marker is answer-shape-specific, not a general iter-cap marker", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    runAgentLoopMock.mockResolvedValue({
+      success: false,
+      summary: "",
+      toolCallLog: [],
+      filesModified: [],
+      patchValidatedByAgent: false,
+      verificationReason: "tests_inconclusive",
+      terminationReason: "token_budget_exceeded",
+      iterCount: 6,
+      promotedFromArchetype: null,
+      promotionTrigger: null,
+      promotedAtIter: null,
+    });
+
+    await runWith({ archetype: "investigation", preGeneratedPlan: STEPLESS_PLAN, runId: "run-stepless-exhausted" });
+
+    expect(findMarkerCall(logSpy)).toBeUndefined();
+
+    logSpy.mockRestore();
   });
 });

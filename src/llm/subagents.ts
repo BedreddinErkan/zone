@@ -34,6 +34,27 @@ export const WORKER_ITER_FLOOR = 6; // K.2: tightened from 20 → 6
 export const WORKER_ITER_CEILING = 24; // K.2: tightened from 60 → 24
 export const WORKER_ITER_PER_STEP = 4; // K.2: tightened from 8 → 4
 
+/** Iteration budget for an approved answer-only plan's execution phase — a
+ *  bounded read-only synthesis, not scaled by step count (there are none) and
+ *  not WORKER_ITER_FLOOR's coercion of 0. Deliberately a DIFFERENT value from
+ *  WORKER_ITER_FLOOR (6), even though both are small bounded-investigation
+ *  budgets: an identical value would make the branch that selects between them
+ *  behaviorally untestable — any regression or mutation test asserting the
+ *  resulting number would pass whether or not the new branch actually fired,
+ *  which is the same "vacuous positive" shape the measurement pass's positive
+ *  control existed to rule out.
+ *
+ *  UNVALIDATED: this number is a judgment call, not a measurement. It is a
+ *  REDUCTION against the only two real answer-shaped-adjacent runs on record
+ *  (d67abf4c, 3a12c912 — 16 and 20 budgeted iterations respectively, though
+ *  neither was answer-shaped; those were investigation-phase runs, not this
+ *  execution-phase budget). No answer-only run has ever executed against this
+ *  constant, and the session files for the two reference runs are gone, so 8
+ *  cannot be checked retroactively against real behavior. [zone-answer-only-
+ *  budget-exhausted] (below) exists specifically to make the eventual retune
+ *  data-driven instead of a second guess replacing this one. */
+export const ANSWER_ONLY_ITER_BUDGET = 8;
+
 export function computeExploreMaxIterations(planStepsCount: number): number {
   const steps = Math.max(1, planStepsCount || 1);
   return Math.min(

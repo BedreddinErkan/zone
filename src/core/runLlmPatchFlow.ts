@@ -21,6 +21,7 @@ import { tryRecoverDeveloperPatchFromModelOutput } from "./patchConversion.js";
 import { detectFramework, type ProjectFramework } from "../repo/detectFramework.js";
 import {
   generateExecutionPlan,
+  isAnswerOnlyPlan,
   type ExecutionPlan,
 } from "../llm/executionPlan.js";
 import { computeRiskScore } from "./computeRiskScore.js";
@@ -101,7 +102,7 @@ import {
 } from "./agentLifecycleEvents.js";
 import { cacheHitRatio, type IterCostUpdatePayload } from "../usage/iterCostMeter.js";
 import { costLogPath, appendIterCostRecord, appendRunSummary } from "../usage/costLogger.js";
-import { computeWorkerMaxIterations } from "../llm/subagents.js";
+import { computeWorkerMaxIterations, ANSWER_ONLY_ITER_BUDGET } from "../llm/subagents.js";
 import {
   classifyTask,
   type TaskArchetype,
@@ -5856,7 +5857,9 @@ const initializeTodosFromPlan = (): void => {
     // ESCALATION_BONUS_ITERATIONS logic for repeat apply_patch failures
     // remains active.
     const iterBudgetPlanSteps = executionPlan?.steps?.length ?? 1;
-    const iterBudgetComputed = computeWorkerMaxIterations(iterBudgetPlanSteps);
+    const iterBudgetComputed = executionPlan && isAnswerOnlyPlan(executionPlan)
+      ? ANSWER_ONLY_ITER_BUDGET
+      : computeWorkerMaxIterations(iterBudgetPlanSteps);
     debugLog("[zone-iter-budget]", JSON.stringify({
       mode: "patch",
       planStepsCount: iterBudgetPlanSteps,
@@ -6057,6 +6060,12 @@ const initializeTodosFromPlan = (): void => {
       loop = aggregateOrchestratorResults(stepResults);
     } else {
       loop = await runAgentLoop(agentLoopBaseInput);
+      if (executionPlan && isAnswerOnlyPlan(executionPlan) && loop.terminationReason === "token_budget_exceeded") {
+        log("[zone-answer-only-budget-exhausted]", JSON.stringify({
+          runId: runId || null,
+          iterBudget: ANSWER_ONLY_ITER_BUDGET,
+        }));
+      }
     }
 
     if (_costLogPath !== null && latestIterCostUpdate !== null) {
