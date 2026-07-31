@@ -2293,6 +2293,26 @@ async function runAgentLoopScoped(input: AgentLoopInput, stats: LoopRunStats): P
     const effectiveSoftIterWarn = tierLimits.softIterWarn;
     // Soft warn replaces hard-cap: loop runs up to 3× the warn threshold;
     // tokenBudgetCap is the real terminator. Escalation disabled since tier is authoritative.
+    //
+    // This overwrite is unconditional within the tierLimits branch — it does not check
+    // whether a caller supplied an explicit `maxIterations`, so any such value is
+    // silently discarded here and never restored (the guard at :2364-2367 below
+    // re-applies `maxIterationsOverride` only). resolveTierLimits never returns null
+    // (tierLimits.ts:51-81), so this fires for EVERY main loop. Four call sites supply
+    // maxIterations today and all four are main loops: runLlmPatchFlow.ts:5959
+    // (plan-aware worker budget), :9943 (5), :10211 (8), investigationFlow.ts:132.
+    // House rule 3: a field that looks like it bounds the run and does not must say so
+    // rather than be quietly routed around. Additive — zero behavior change. This is
+    // also the instrument that makes the eventual general fix data-driven.
+    if (typeof input.maxIterations === "number") {
+      log("[zone-iter-budget-discarded]", JSON.stringify({
+        runId: input.runId ?? null,
+        mode,
+        suppliedMaxIterations: input.maxIterations,
+        effectiveMaxIterations: effectiveSoftIterWarn * 3,
+        tier: input.taskClassification?.tier ?? "medium",
+      }));
+    }
     iterationBudget = { ...iterationBudget, maxIterationsForRun: effectiveSoftIterWarn * 3 };
     escalationEnabled = false;
     emitTierConstraints({

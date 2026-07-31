@@ -153,8 +153,13 @@ describe("read-only pipeline suppression when an approved plan justifies writing
     expect(call?.capabilityFilter).toBeUndefined();
     expect(call?.readOnlyPipelineSuppressed).toBe(true);
     // Contrast partner to the stepless case below: 1 step and 0 steps both land on
-    // WORKER_ITER_FLOOR, so the budget cannot distinguish "one thing to do" from
+    // WORKER_ITER_FLOOR, so this VALUE cannot distinguish "one thing to do" from
     // "nothing to do" (computeWorkerMaxIterations coerces 0 via `|| 1`, subagents.ts:46).
+    //
+    // R3: 6 is the argument passed, NOT the loop's bound. `maxIterations` is discarded
+    // by agentLoop.ts:2292-2296 and never restored, so the run is really bounded at
+    // softIterWarn*3 (75 at medium). This assertion pins the call-site contract and
+    // says nothing about behavior — do not read it as "this run gets 6 iterations".
     expect(call?.planApproved).toBe(true);
     expect(call?.maxIterations).toBe(6);
   });
@@ -176,7 +181,10 @@ describe("read-only pipeline suppression when an approved plan justifies writing
     // is what makes the stepless branch measured rather than read.
     expect(call?.planApproved).toBe(false);
     // 0 steps → WORKER_ITER_FLOOR, not 0: `planStepsCount || 1` (subagents.ts:46) coerces
-    // 0 to 1 before the floor applies, so a plan declaring nothing to do still budgets 6.
+    // 0 to 1 before the floor applies, so a plan declaring nothing to do still asks for 6.
+    // R3, as above: this pins the argument, not the bound — agentLoop.ts:2292-2296
+    // discards it. A noChangeReason plan still routes through `maxIterations`; only the
+    // answer-only shape moved to maxIterationsOverride.
     expect(call?.maxIterations).toBe(6);
   });
 
@@ -187,10 +195,28 @@ describe("read-only pipeline suppression when an approved plan justifies writing
     expect(call?.readOnlyPipelineSuppressed).not.toBe(true);
   });
 
-  it("investigation + answer-only plan (answerOnlyReason) → maxIterations comes from ANSWER_ONLY_ITER_BUDGET, not the worker floor", async () => {
+  it("investigation + answer-only plan → the budget routes through maxIterationsOverride, the only field that actually binds", async () => {
     const call = await runWith({ archetype: "investigation", preGeneratedPlan: ANSWER_ONLY_PLAN, runId: "run-inv-4" });
 
-    expect(call?.maxIterations).toBe(8);
+    // ANSWER_ONLY_ITER_BUDGET, on the field that survives the tier block. Probed
+    // directly against the real loop: maxIterationsOverride:1 bounds at 1 iteration,
+    // maxIterations:1 ran 75 — see agentLoop.terminationReasonProbe.test.ts.
+    expect(call?.maxIterationsOverride).toBe(8);
+    // The contrast that makes the assertion above about ROUTING rather than value:
+    // if the budget were still on `maxIterations`, both could hold 8 and this test
+    // would pass while the loop stayed bounded at softIterWarn*3.
+    expect(call?.maxIterations).toBeUndefined();
+  });
+
+  it("answer-only + a TIGHTER archetype cap → the archetype cap wins, not the answer-only budget", async () => {
+    // `question` carries iterCap 3 (archetypeDispatcher.ts:58) — below
+    // ANSWER_ONLY_ITER_BUDGET, and the archetype an answer-only plan most often gets.
+    // Both budgets land on the same field, so whichever is written last would win on
+    // key order alone; the clamp is what makes the outcome a decision rather than an
+    // ordering accident. Without it this reads 8 and silently relaxes a tighter cap.
+    const call = await runWith({ archetype: "question", preGeneratedPlan: ANSWER_ONLY_PLAN, runId: "run-q-answer" });
+
+    expect(call?.maxIterationsOverride).toBe(3);
   });
 });
 
@@ -227,7 +253,12 @@ describe("answer-only budget exhaustion marker (C6)", () => {
 
     const markerCall = findMarkerCall(logSpy);
     expect(markerCall).toBeDefined();
-    expect(JSON.parse(markerCall![1] as string)).toMatchObject({ iterBudget: 8 });
+    // Both numbers: the nominal budget AND what the loop actually ran. The mocked
+    // loop reports iterCount 8 here, but the two can legitimately differ (a tier whose
+    // softIterWarn*3 is below 8 fails the `< current` guard at agentLoop.ts:2364-2367
+    // and leaves the run bounded lower), which is exactly why the observed value is
+    // recorded rather than inferred from the constant.
+    expect(JSON.parse(markerCall![1] as string)).toMatchObject({ iterBudget: 8, observedIterCount: 8 });
 
     logSpy.mockRestore();
   });

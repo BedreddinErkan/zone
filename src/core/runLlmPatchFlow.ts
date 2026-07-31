@@ -5856,14 +5856,28 @@ const initializeTodosFromPlan = (): void => {
     // Passed via `maxIterations` (not `maxIterationsOverride`) so the
     // ESCALATION_BONUS_ITERATIONS logic for repeat apply_patch failures
     // remains active.
+    //
+    // MEASURED CAVEAT (2026-07-31): for a tier-classified main loop `maxIterations`
+    // does NOT bound the run at all. agentLoop.ts:2292-2296 overwrites
+    // maxIterationsForRun with softIterWarn*3 unconditionally, and the restore at
+    // :2364-2367 re-applies only `maxIterationsOverride`. Probed directly:
+    // maxIterations:1 ran 75 iterations (medium tier), maxIterationsOverride:1 ran 1.
+    // Every non-answer-only budget below is therefore nominal, not effective —
+    // [zone-iter-budget-discarded] (agentLoop.ts) records the gap per run so the
+    // general fix can be driven by data instead of a second guess. Deliberately NOT
+    // fixed here: making it bind would move every plan-mode run from ~75 to 6-24
+    // with no measurement of real iteration distributions behind it.
     const iterBudgetPlanSteps = executionPlan?.steps?.length ?? 1;
-    const iterBudgetComputed = executionPlan && isAnswerOnlyPlan(executionPlan)
+    const isAnswerOnlyRun = !!executionPlan && isAnswerOnlyPlan(executionPlan);
+    const iterBudgetComputed = isAnswerOnlyRun
       ? ANSWER_ONLY_ITER_BUDGET
       : computeWorkerMaxIterations(iterBudgetPlanSteps);
     debugLog("[zone-iter-budget]", JSON.stringify({
       mode: "patch",
       planStepsCount: iterBudgetPlanSteps,
       computedMax: iterBudgetComputed,
+      // Which field carries it — only one of the two actually binds (see above).
+      field: isAnswerOnlyRun ? "maxIterationsOverride" : "maxIterations",
     }));
 
     // Phase L.1: pre-dispatch task classification. Informational only — L.2
@@ -5956,7 +5970,11 @@ const initializeTodosFromPlan = (): void => {
       // buildVerifyDiagnostic can surface candidate culprits when a
       // build/test failure points to a framework-generated path.
       repoFilePaths: developerContextFiles.map((f) => f.path),
-      maxIterations: iterBudgetComputed,
+      // Answer-only runs deliberately omit maxIterations entirely — it would be
+      // discarded by the tier block anyway, and setting it would fire
+      // [zone-iter-budget-discarded] for a budget that was never meant to travel on
+      // this field. Their bound is applied below, after the pipeline spread.
+      ...(isAnswerOnlyRun ? {} : { maxIterations: iterBudgetComputed }),
       taskClassification,
       gateLeadVerb: input.gateLeadVerb ?? null,
       gateMode: input.gateMode,
@@ -6014,6 +6032,24 @@ const initializeTodosFromPlan = (): void => {
           capabilityFilter: _dispatcherCapabilityFilter,
         }),
       }),
+      // The answer-only budget routes through maxIterationsOverride because that is the
+      // only one of the two fields that survives the tier block (see MEASURED CAVEAT
+      // above). Escalation is disabled as a side effect (agentLoop.ts:2137) — inert for
+      // this shape, which is offered no write tool and so can never reach the
+      // repeat-apply_patch-failure path escalation exists for.
+      //
+      // Placed AFTER the pipeline spread deliberately: that spread sets
+      // maxIterationsOverride too and would otherwise win on key order. Clamped to the
+      // tighter of the two rather than overwriting — QUESTION's iterCap is 3
+      // (archetypeDispatcher.ts:58), below ANSWER_ONLY_ITER_BUDGET, and `question` is
+      // exactly the archetype an answer-only plan is most likely to carry. Letting 8
+      // win there would RELAX a deliberately tighter cap, not bound an unbounded run.
+      ...(isAnswerOnlyRun && {
+        maxIterationsOverride: Math.min(
+          iterBudgetComputed,
+          (pipelineCfg as PipelineConfig | null)?.iterCap ?? Number.POSITIVE_INFINITY,
+        ),
+      }),
     };
 
     let loop: AgentLoopResult;
@@ -6063,7 +6099,17 @@ const initializeTodosFromPlan = (): void => {
       if (executionPlan && isAnswerOnlyPlan(executionPlan) && loop.terminationReason === "token_budget_exceeded") {
         log("[zone-answer-only-budget-exhausted]", JSON.stringify({
           runId: runId || null,
+          // Nominal: what was requested. maxIterationsOverride applies only under the
+          // > 0 AND < current guards (agentLoop.ts:2364-2367), so a tier whose
+          // softIterWarn*3 falls below this value leaves the run bounded LOWER than
+          // the nominal budget. Defaults are 45/75/120 (simple/medium/complex) so
+          // that cannot happen today, but ~/.zone/tier-limits.json can override
+          // softIterWarn (tierLimits.ts:78) and make it happen.
           iterBudget: ANSWER_ONLY_ITER_BUDGET,
+          // Effective: what the loop actually ran. Telemetry reports outcome, not
+          // intent — a retune driven by the nominal number would be a retune of a
+          // number that never applied.
+          observedIterCount: loop.iterCount ?? null,
         }));
       }
     }
