@@ -1727,10 +1727,19 @@ export async function executeTool(
       try {
         const stagedOrig = stagedRead(input?.stagingFiles, abs);
         original = stagedOrig !== null ? stagedOrig : fs.readFileSync(abs, "utf8");
-      } catch {
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === "ENOENT") {
+          return {
+            success: false,
+            output: `File not found: ${filePath}. Use write_file to create new files.`,
+          };
+        }
+        const message = (err as NodeJS.ErrnoException).message || `${code ?? "unknown error"}`;
+        const raw = `Failed to read ${filePath} before patching: ${message}`;
         return {
           success: false,
-          output: `File not found: ${filePath}. Use write_file to create new files.`,
+          output: raw.length > 300 ? `${raw.slice(0, 300)}…` : raw,
         };
       }
 
