@@ -34,9 +34,10 @@ export const WORKER_ITER_FLOOR = 6; // K.2: tightened from 20 → 6
 export const WORKER_ITER_CEILING = 24; // K.2: tightened from 60 → 24
 export const WORKER_ITER_PER_STEP = 4; // K.2: tightened from 8 → 4
 
-/** Iteration budget for an approved answer-only plan's execution phase — a
- *  bounded read-only synthesis, not scaled by step count (there are none) and
- *  not WORKER_ITER_FLOOR's coercion of 0. Deliberately a DIFFERENT value from
+/** THIS IS A PRE-PROMOTION THRESHOLD, NOT THE EXECUTION BUDGET. Iteration
+ *  budget for an approved answer-only plan's execution phase — a bounded
+ *  read-only synthesis, not scaled by step count (there are none) and not
+ *  WORKER_ITER_FLOOR's coercion of 0. Deliberately a DIFFERENT value from
  *  WORKER_ITER_FLOOR (6), even though both are small bounded-investigation
  *  budgets: an identical value would make the branch that selects between them
  *  behaviorally untestable — any regression or mutation test asserting the
@@ -44,15 +45,26 @@ export const WORKER_ITER_PER_STEP = 4; // K.2: tightened from 8 → 4
  *  which is the same "vacuous positive" shape the measurement pass's positive
  *  control existed to rule out.
  *
+ *  Probed directly (runLlmPatchFlow.terminationReasonProbe.test.ts): the run
+ *  really is bounded at this value — [zone-archetype-promoted] fires with
+ *  atIter:8, trigger:"iter_cap" — but L5.1b-2 soft promotion then relaxes
+ *  maxIterationsForRun to BASE_MAX_ITERATIONS and the run continues to 15.
+ *  [zone-answer-only-budget-exhausted]'s observedIterCount therefore records
+ *  the POST-PROMOTION bound (15), not this constant (8) — an eventual retune
+ *  must be driven by observedIterCount, not by iterBudget, or it would be
+ *  tuning a number the run never actually stopped at.
+ *
  *  UNVALIDATED: this number is a judgment call, not a measurement. It is a
  *  REDUCTION against the only two real answer-shaped-adjacent runs on record
  *  (d67abf4c, 3a12c912 — 16 and 20 budgeted iterations respectively, though
  *  neither was answer-shaped; those were investigation-phase runs, not this
- *  execution-phase budget). No answer-only run has ever executed against this
- *  constant, and the session files for the two reference runs are gone, so 8
- *  cannot be checked retroactively against real behavior. [zone-answer-only-
- *  budget-exhausted] (below) exists specifically to make the eventual retune
- *  data-driven instead of a second guess replacing this one. */
+ *  execution-phase budget). No real production answer-only run has ever
+ *  executed against this constant (a test probe has, which is how the
+ *  pre-/post-promotion split above was found), and the session files for the
+ *  two reference runs are gone, so 8 cannot be checked retroactively against
+ *  real production behavior. [zone-answer-only-budget-exhausted] (below)
+ *  exists specifically to make the eventual retune data-driven instead of a
+ *  second guess replacing this one. */
 export const ANSWER_ONLY_ITER_BUDGET = 8;
 
 export function computeExploreMaxIterations(planStepsCount: number): number {
