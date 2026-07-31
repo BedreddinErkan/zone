@@ -15,7 +15,7 @@ import { runPlanInvestigation } from "../llm/planInvestigation.js";
 import { createSpinner, buildCliSink } from "./sink.js";
 import type { LlmPatchProgressUpdate, ZoneStructuredProgressEvent } from "../core/agentLifecycleEvents.js";
 import { preparePlanContext } from "../core/preparePlanContext.js";
-import { generateExecutionPlan, isNoChangePlan, isCannotVerifyPlan, synthesizeMinimalPlan } from "../llm/executionPlan.js";
+import { generateExecutionPlan, isNoChangePlan, isCannotVerifyPlan, synthesizeMinimalPlan, planTerminalShape } from "../llm/executionPlan.js";
 import { taskAssertsProblem, isPureAddition, matchedLeadVerb } from "../llm/taskShape.js";
 import { rejectPendingEditsForRun } from "../api/editApprovals.js";
 import { rejectPendingStagedForRun } from "../api/stagedApprovals.js";
@@ -38,6 +38,16 @@ import {
 const QUICK_PLAN_FILES = 5;
 const QUICK_PLAN_FILE_CAP = 3_000;   // chars per file
 const QUICK_PLAN_TOTAL_CAP = 12_000; // chars total budget
+
+// Maps planTerminalShape's discriminator to the reason-field name
+// emitPlanEmptyApproval expects — used at both replan arms below, written once
+// so the two can't drift into naming the same shape two different ways.
+const SHAPE_TO_REASON_FIELD = {
+  no_change: "noChangeReason",
+  cannot_verify: "cannotVerifyReason",
+  answer: "answerOnlyReason",
+  unknown: "unknown",
+} as const;
 
 export type TuiMode = "normal" | "autoAccept" | "plan";
 
@@ -449,6 +459,7 @@ export async function runOneShotInner(
               scopeNotes: currentPlan.scopeNotes,
               noChangeReason: currentPlan.noChangeReason,
               cannotVerifyReason: currentPlan.cannotVerifyReason,
+              answerOnlyReason: currentPlan.answerOnlyReason,
               riskHints: currentPlan.riskHints,
               scopeSummary: currentPlan.scopeSummary,
             },
@@ -491,12 +502,18 @@ export async function runOneShotInner(
               // None of E8a/E8b/the forceSteps safety net re-run on a replan, so a
               // schema-valid stepless-with-reason response can reach here. This
               // arm loops back to requestPlanApproval — the user WILL see it.
-              if (isNoChangePlan(currentPlan) || isCannotVerifyPlan(currentPlan)) {
-                emitPlanEmptyApproval({
-                  runId,
-                  reasonField: isNoChangePlan(currentPlan) ? "noChangeReason" : "cannotVerifyReason",
-                  reviewed: true,
-                });
+              // planTerminalShape, not isNoChangePlan/isCannotVerifyPlan: fires for
+              // all four non-"steps" shapes (including "answer" and "unknown"), not
+              // just two, so a shape this ternary never anticipated is still recorded.
+              {
+                const shape = planTerminalShape(currentPlan);
+                if (shape !== "steps") {
+                  emitPlanEmptyApproval({
+                    runId,
+                    reasonField: SHAPE_TO_REASON_FIELD[shape],
+                    reviewed: true,
+                  });
+                }
               }
               planFirstRefineCount++;
               continue;
@@ -528,12 +545,15 @@ export async function runOneShotInner(
               // goes straight to execution below (planForExecution = currentPlan).
               // A stepless-with-reason plan here is shown to no one; this is the
               // arm the reviewed:false count exists to measure.
-              if (isNoChangePlan(currentPlan) || isCannotVerifyPlan(currentPlan)) {
-                emitPlanEmptyApproval({
-                  runId,
-                  reasonField: isNoChangePlan(currentPlan) ? "noChangeReason" : "cannotVerifyReason",
-                  reviewed: false,
-                });
+              {
+                const shape = planTerminalShape(currentPlan);
+                if (shape !== "steps") {
+                  emitPlanEmptyApproval({
+                    runId,
+                    reasonField: SHAPE_TO_REASON_FIELD[shape],
+                    reviewed: false,
+                  });
+                }
               }
               log("[zone-plan-decision]", JSON.stringify({ runId, planId: result.planId, decision: result.decision, planAttempt: planFirstRefineCount + 1, reviewed: result.modalEmitted }));
               looping = false;

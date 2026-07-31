@@ -43,19 +43,23 @@ vi.mock("./sink.js", () => ({
 }));
 vi.mock("../llm/auditPipeline.js", () => ({ runAuditPipeline: mockRunAuditPipeline }));
 vi.mock("../core/preparePlanContext.js", () => ({ preparePlanContext: mockPreparePlanContext }));
-vi.mock("../llm/executionPlan.js", () => ({
-  generateExecutionPlan: mockGenerateExecutionPlan,
-  isNoChangePlan: mockIsNoChangePlan,
-  isCannotVerifyPlan: mockIsCannotVerifyPlan,
-  // synthesizeMinimalPlan is pure — let it run real; the dispatch fallback
-  // only calls it when generateExecutionPlan throws in tests.
-  synthesizeMinimalPlan: (task: string) => ({
-    objective: task.slice(0, 200),
-    steps: [{ title: task.slice(0, 80), description: task, filesLikely: [] }],
-    riskHints: [],
-    scopeSummary: task.slice(0, 160),
-  }),
-}));
+vi.mock("../llm/executionPlan.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../llm/executionPlan.js")>();
+  return {
+    planTerminalShape: actual.planTerminalShape,
+    generateExecutionPlan: mockGenerateExecutionPlan,
+    isNoChangePlan: mockIsNoChangePlan,
+    isCannotVerifyPlan: mockIsCannotVerifyPlan,
+    // synthesizeMinimalPlan is pure — let it run real; the dispatch fallback
+    // only calls it when generateExecutionPlan throws in tests.
+    synthesizeMinimalPlan: (task: string) => ({
+      objective: task.slice(0, 200),
+      steps: [{ title: task.slice(0, 80), description: task, filesLikely: [] }],
+      riskHints: [],
+      scopeSummary: task.slice(0, 160),
+    }),
+  };
+});
 vi.mock("../visual/tierSettings.js", () => ({ readAuditModeSetting: mockReadAuditModeSetting, readDailyUsdCapOverride: vi.fn() }));
 vi.mock("../api/diskModel.js", () => ({ loadDiskModelSync: mockLoadDiskModelSync }));
 vi.mock("../api/diskKeys.js", () => ({

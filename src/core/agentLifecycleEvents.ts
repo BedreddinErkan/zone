@@ -320,6 +320,7 @@ export type ZoneStructuredProgressEvent = {
   planScopeNotes?: string;
   planNoChangeReason?: string;
   planCannotVerifyReason?: string;
+  planAnswerOnlyReason?: string;
   planRiskHints?: string[];
   planScopeSummary?: string;
   /** staged_diffs_ready_for_approval: R3 checkpoint fields. */

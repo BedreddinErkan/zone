@@ -76,6 +76,7 @@ export type TranscriptEntry =
       scopeNotes?: string;
       noChangeReason?: string;
       cannotVerifyReason?: string;
+      answerOnlyReason?: string;
       riskHints: string[];
       scopeSummary: string;
     };
@@ -192,6 +193,7 @@ export type StoreState = {
     scopeNotes?: string;
     noChangeReason?: string;
     cannotVerifyReason?: string;
+    answerOnlyReason?: string;
     riskHints: string[];
     scopeSummary: string;
   } | null;
@@ -410,6 +412,7 @@ export type StoreAction =
       scopeNotes?: string;
       noChangeReason?: string;
       cannotVerifyReason?: string;
+      answerOnlyReason?: string;
       riskHints: string[];
       scopeSummary: string;
     }
@@ -886,6 +889,7 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
           ...(action.scopeNotes ? { scopeNotes: action.scopeNotes } : {}),
           ...(action.noChangeReason ? { noChangeReason: action.noChangeReason } : {}),
           ...(action.cannotVerifyReason ? { cannotVerifyReason: action.cannotVerifyReason } : {}),
+          ...(action.answerOnlyReason ? { answerOnlyReason: action.answerOnlyReason } : {}),
           riskHints: action.riskHints,
           scopeSummary: action.scopeSummary,
         },
@@ -898,6 +902,7 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
             ...(action.scopeNotes ? { scopeNotes: action.scopeNotes } : {}),
             ...(action.noChangeReason ? { noChangeReason: action.noChangeReason } : {}),
             ...(action.cannotVerifyReason ? { cannotVerifyReason: action.cannotVerifyReason } : {}),
+            ...(action.answerOnlyReason ? { answerOnlyReason: action.answerOnlyReason } : {}),
             riskHints: action.riskHints,
             scopeSummary: action.scopeSummary,
           },

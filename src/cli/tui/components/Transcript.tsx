@@ -99,6 +99,7 @@ function renderEntry(entry: TranscriptEntry, index: number, colWidth: number): R
             scopeNotes={entry.scopeNotes}
             noChangeReason={entry.noChangeReason}
             cannotVerifyReason={entry.cannotVerifyReason}
+            answerOnlyReason={entry.answerOnlyReason}
             riskHints={entry.riskHints}
             scopeSummary={entry.scopeSummary}
           />

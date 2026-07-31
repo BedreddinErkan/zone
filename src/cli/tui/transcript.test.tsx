@@ -660,3 +660,34 @@ describe("TUI chrome — borderless user-prompt tinted block (width-safety)", ()
   });
 });
 
+// The answer-only field's full nine-file chain, proven end to end rather than at any
+// one component's boundary — a real bus event through the real eventToActions ->
+// real store-core.ts reducer -> real Transcript -> real PlanBody, with zero
+// hand-constructed intermediate state. Every other new test added for this field
+// (PlanBody.test.tsx included) passes answerOnlyReason directly as a prop, which
+// proves nothing about whether the field actually survives the chain that carries it
+// in production.
+describe("plan_ready_for_approval — answerOnlyReason survives the full chain", () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("renders the answer-only label end to end", async () => {
+    const bus = createEventBus();
+    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
+    bus.emit("plan_ready_for_approval", makeEvt("plan_ready_for_approval", {
+      planId: "p1",
+      planObjective: "Explain the marker sink",
+      planStepsJson: "[]",
+      planAnswerOnlyReason: "The task is a question; nothing needs to change.",
+      planRiskHints: [],
+      planScopeSummary: "Answer only",
+    }));
+    await wait(50);
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("Answering read-only:");
+    expect(frame).toContain("The task is a question; nothing needs to change.");
+    unmount();
+  });
+});
+

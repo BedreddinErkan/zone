@@ -57,10 +57,30 @@ describe("PlanBody — content rendering", () => {
     expect(frame).toContain("Reproduce command was blocked.");
   });
 
+  it("renders 'Answering read-only:' and the reason when answerOnlyReason is set", () => {
+    const { lastFrame } = render(<PlanBody {...BASE_PROPS} answerOnlyReason="The task is a question; nothing needs to change." />);
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("Answering read-only:");
+    expect(frame).toContain("The task is a question; nothing needs to change.");
+  });
+
   it("renders neither reason label on a normal multi-step plan", () => {
     const frame = lastFrame_(BASE_PROPS);
     expect(frame).not.toContain("No changes needed:");
     expect(frame).not.toContain("Could not verify:");
+    expect(frame).not.toContain("Answering read-only:");
+  });
+
+  it('renders "Ready to answer?" instead of "Ready to code?" when answerOnlyReason is set', () => {
+    const { lastFrame } = render(<PlanBody {...BASE_PROPS} answerOnlyReason="Nothing to change." />);
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("Ready to answer?");
+    expect(frame).not.toContain("Ready to code?");
+  });
+
+  it('renders "Ready to code?" unchanged for a normal plan', () => {
+    const frame = lastFrame_(BASE_PROPS);
+    expect(frame).toContain("Ready to code?");
   });
 
   it("does not render 'Risks:' when riskHints is empty", () => {

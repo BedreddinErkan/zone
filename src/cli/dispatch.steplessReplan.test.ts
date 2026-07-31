@@ -70,17 +70,25 @@ vi.mock("./sink.js", () => ({
 }));
 vi.mock("../llm/auditPipeline.js", () => ({ runAuditPipeline: mockRunAuditPipeline }));
 vi.mock("../core/preparePlanContext.js", () => ({ preparePlanContext: mockPreparePlanContext }));
-vi.mock("../llm/executionPlan.js", () => ({
-  generateExecutionPlan: mockGenerateExecutionPlan,
-  isNoChangePlan: mockIsNoChangePlan,
-  isCannotVerifyPlan: mockIsCannotVerifyPlan,
-  synthesizeMinimalPlan: (task: string) => ({
-    objective: task.slice(0, 200),
-    steps: [{ title: task.slice(0, 80), description: task, filesLikely: [] }],
-    riskHints: [],
-    scopeSummary: task.slice(0, 160),
-  }),
-}));
+// Partial mock: dispatch.ts's two emitPlanEmptyApproval sites now call the REAL
+// planTerminalShape (a pure classifier) rather than isNoChangePlan/isCannotVerifyPlan
+// directly, so it must not be replaced with a stand-in here — a hand-copied second
+// implementation could drift from the real one and this file would never notice.
+vi.mock("../llm/executionPlan.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../llm/executionPlan.js")>();
+  return {
+    planTerminalShape: actual.planTerminalShape,
+    generateExecutionPlan: mockGenerateExecutionPlan,
+    isNoChangePlan: mockIsNoChangePlan,
+    isCannotVerifyPlan: mockIsCannotVerifyPlan,
+    synthesizeMinimalPlan: (task: string) => ({
+      objective: task.slice(0, 200),
+      steps: [{ title: task.slice(0, 80), description: task, filesLikely: [] }],
+      riskHints: [],
+      scopeSummary: task.slice(0, 160),
+    }),
+  };
+});
 vi.mock("../visual/tierSettings.js", () => ({ readAuditModeSetting: mockReadAuditModeSetting, readDailyUsdCapOverride: vi.fn() }));
 vi.mock("../api/diskModel.js", () => ({ loadDiskModelSync: mockLoadDiskModelSync }));
 vi.mock("../llm/planInvestigation.js", () => ({ runPlanInvestigation: mockRunPlanInvestigation }));
@@ -122,6 +130,16 @@ const STEPLESS_PLAN = {
   riskHints: [],
   scopeSummary: "Check the build",
   noChangeReason: "Build already exits 0 — the asserted bug does not reproduce.",
+};
+
+/** Same shape as STEPLESS_PLAN, answer-shaped instead of no_change-shaped — the
+ *  third terminal shape planTerminalShape must recognize at these two arms. */
+const ANSWER_ONLY_PLAN = {
+  objective: "Explain the marker sink",
+  steps: [] as Array<{ title: string; description: string; filesLikely: string[] }>,
+  riskHints: [],
+  scopeSummary: "Explain the marker sink",
+  answerOnlyReason: "The task is a question; nothing needs to change.",
 };
 
 const SUCCESS_RESULT = { ok: true, patchPreview: "", warnings: [], decisionMode: "safe_to_apply" as const };
@@ -241,5 +259,44 @@ describe("stepless plan reaching the replan arms — [zone-plan-empty-approval]"
     const flowInput = mockRunLlmPatchFlow.mock.calls[0]![0] as { preGeneratedPlan?: { steps: unknown[]; noChangeReason?: string } };
     expect(flowInput.preGeneratedPlan?.steps).toHaveLength(0);
     expect(flowInput.preGeneratedPlan?.noChangeReason).toBe(STEPLESS_PLAN.noChangeReason);
+  });
+
+  it("answer-shaped plan through the feedback arm → reasonField:\"answerOnlyReason\", reviewed:true", async () => {
+    mockRequestPlanApproval
+      .mockResolvedValueOnce({ planId: "plan-1", decision: "feedback", feedback: "smaller", modalEmitted: true })
+      .mockResolvedValueOnce({ planId: "plan-2", decision: "reject", modalEmitted: true });
+    mockGenerateExecutionPlan
+      .mockResolvedValueOnce(FAKE_PLAN)
+      .mockResolvedValueOnce(ANSWER_ONLY_PLAN);
+
+    await runOneShotInner(ADDITIVE_TASK, BASE_CONFIG, "run-answer-feedback", { mode: "plan" });
+
+    expect(mockEmitPlanEmptyApproval).toHaveBeenCalledTimes(1);
+    expect(mockEmitPlanEmptyApproval).toHaveBeenCalledWith({
+      runId: "run-answer-feedback",
+      reasonField: "answerOnlyReason",
+      reviewed: true,
+    });
+  });
+
+  it("answer-shaped plan through the approve_with_feedback arm → reasonField:\"answerOnlyReason\", reviewed:false", async () => {
+    mockRequestPlanApproval.mockResolvedValueOnce({
+      planId: "plan-1",
+      decision: "approve_with_feedback",
+      feedback: "smaller",
+      modalEmitted: true,
+    });
+    mockGenerateExecutionPlan
+      .mockResolvedValueOnce(FAKE_PLAN)
+      .mockResolvedValueOnce(ANSWER_ONLY_PLAN);
+
+    await runOneShotInner(ADDITIVE_TASK, BASE_CONFIG, "run-answer-awf", { mode: "plan" });
+
+    expect(mockEmitPlanEmptyApproval).toHaveBeenCalledTimes(1);
+    expect(mockEmitPlanEmptyApproval).toHaveBeenCalledWith({
+      runId: "run-answer-awf",
+      reasonField: "answerOnlyReason",
+      reviewed: false,
+    });
   });
 });

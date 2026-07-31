@@ -15,6 +15,7 @@ export interface PlanReadyProposal {
   scopeNotes?: string;
   noChangeReason?: string;
   cannotVerifyReason?: string;
+  answerOnlyReason?: string;
   riskHints: string[];
   scopeSummary: string;
 }
@@ -38,7 +39,7 @@ export interface PlanReadyProposal {
  */
 export function emitPlanEmptyApproval(data: {
   runId: string;
-  reasonField: "noChangeReason" | "cannotVerifyReason";
+  reasonField: "noChangeReason" | "cannotVerifyReason" | "answerOnlyReason" | "unknown";
   reviewed: boolean;
 }): void {
   log("[zone-plan-empty-approval]", JSON.stringify(data));
@@ -75,6 +76,7 @@ export function requestPlanApproval(input: {
     planScopeNotes?: string;
     planNoChangeReason?: string;
     planCannotVerifyReason?: string;
+    planAnswerOnlyReason?: string;
     planRiskHints: string[];
     planScopeSummary: string;
   }) => void;
@@ -139,6 +141,7 @@ export function requestPlanApproval(input: {
       ...(proposal.scopeNotes ? { planScopeNotes: proposal.scopeNotes } : {}),
       ...(proposal.noChangeReason ? { planNoChangeReason: proposal.noChangeReason } : {}),
       ...(proposal.cannotVerifyReason ? { planCannotVerifyReason: proposal.cannotVerifyReason } : {}),
+      ...(proposal.answerOnlyReason ? { planAnswerOnlyReason: proposal.answerOnlyReason } : {}),
     });
     modalEmitted = true;
   });

@@ -36,13 +36,17 @@ vi.mock("../llm/planApprovals.js", () => ({
 vi.mock("./sink.js", () => ({ buildCliSink: mockBuildCliSink, createSpinner: mockCreateSpinner }));
 vi.mock("../llm/auditPipeline.js", () => ({ runAuditPipeline: mockRunAuditPipeline }));
 vi.mock("../core/preparePlanContext.js", () => ({ preparePlanContext: mockPreparePlanContext }));
-vi.mock("../llm/executionPlan.js", () => ({
-  generateExecutionPlan: mockGenerateExecutionPlan,
-  isNoChangePlan: mockIsNoChangePlan,
-  isCannotVerifyPlan: mockIsCannotVerifyPlan,
-  synthesizeMinimalPlan: (task: string) => ({ objective: task.slice(0, 200), steps: [{ title: "s", filesLikely: [] }] }),
-  tryParseExecutionPlan: () => null,
-}));
+vi.mock("../llm/executionPlan.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../llm/executionPlan.js")>();
+  return {
+    planTerminalShape: actual.planTerminalShape,
+    generateExecutionPlan: mockGenerateExecutionPlan,
+    isNoChangePlan: mockIsNoChangePlan,
+    isCannotVerifyPlan: mockIsCannotVerifyPlan,
+    synthesizeMinimalPlan: (task: string) => ({ objective: task.slice(0, 200), steps: [{ title: "s", filesLikely: [] }] }),
+    tryParseExecutionPlan: () => null,
+  };
+});
 vi.mock("../visual/tierSettings.js", () => ({ readAuditModeSetting: mockReadAuditModeSetting, readDailyUsdCapOverride: vi.fn() }));
 vi.mock("../api/diskModel.js", () => ({ loadDiskModelSync: mockLoadDiskModelSync }));
 vi.mock("../llm/planInvestigation.js", () => ({ runPlanInvestigation: mockRunPlanInvestigation }));

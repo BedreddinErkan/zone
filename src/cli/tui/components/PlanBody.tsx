@@ -7,6 +7,7 @@ export interface PlanBodyProps {
   scopeNotes?: string;
   noChangeReason?: string;
   cannotVerifyReason?: string;
+  answerOnlyReason?: string;
   riskHints: string[];
   scopeSummary: string;
 }
@@ -17,12 +18,13 @@ export function PlanBody({
   scopeNotes,
   noChangeReason,
   cannotVerifyReason,
+  answerOnlyReason,
   riskHints,
   scopeSummary,
 }: PlanBodyProps): React.ReactElement {
   return (
     <Box flexDirection="column">
-      <Text bold color="cyan">Ready to code?</Text>
+      <Text bold color="cyan">{answerOnlyReason ? "Ready to answer?" : "Ready to code?"}</Text>
       <Text> </Text>
       <Text dimColor>Objective:</Text>
       <Text>{objective}</Text>
@@ -34,12 +36,12 @@ export function PlanBody({
         </>
       )}
       <Text> </Text>
-      {(noChangeReason || cannotVerifyReason) && (
+      {(noChangeReason || cannotVerifyReason || answerOnlyReason) && (
         <Box flexDirection="column" marginBottom={1}>
           <Text bold color="yellow">
-            {noChangeReason ? "No changes needed:" : "Could not verify:"}
+            {noChangeReason ? "No changes needed:" : cannotVerifyReason ? "Could not verify:" : "Answering read-only:"}
           </Text>
-          <Text color="yellow">{noChangeReason ?? cannotVerifyReason ?? ""}</Text>
+          <Text color="yellow">{noChangeReason ?? cannotVerifyReason ?? answerOnlyReason ?? ""}</Text>
         </Box>
       )}
       {steps.map((step, i) => (

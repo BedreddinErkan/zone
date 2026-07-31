@@ -346,6 +346,7 @@ export function eventToActions(
             scopeNotes: evt.planScopeNotes,
             noChangeReason: evt.planNoChangeReason,
             cannotVerifyReason: evt.planCannotVerifyReason,
+            answerOnlyReason: evt.planAnswerOnlyReason,
             riskHints: evt.planRiskHints ?? [],
             scopeSummary: evt.planScopeSummary ?? "",
           },
