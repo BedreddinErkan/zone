@@ -224,6 +224,29 @@ describe("generateExecutionPlan — Q.3 subagent annotation", () => {
   });
 });
 
+describe("generateExecutionPlan — forceSteps prompt", () => {
+  it("exclusion list names all three reason fields, not just the original two", async () => {
+    mockPlanResponse({
+      objective: "Add a helper",
+      steps: [{ title: "T", description: "D", filesLikely: ["x.ts"] }],
+      riskHints: [],
+      scopeSummary: "S",
+    });
+
+    await generateExecutionPlan({
+      task: "Add a helper function",
+      repoSummary: "",
+      relevantFiles: [],
+      forceSteps: true,
+    });
+
+    const prompt = String(
+      mocks.createChatCompletion.mock.calls[0]?.[0]?.messages?.[0]?.content ?? ""
+    );
+    expect(prompt).toContain("Do NOT set noChangeReason, cannotVerifyReason, or answerOnlyReason.");
+  });
+});
+
 // Phase 2a: Option B — seeded file contents + scopeNotes
 describe("generateExecutionPlan — seededFileContents + scopeNotes", () => {
   it("seededFileContents is included in the prompt when provided", async () => {

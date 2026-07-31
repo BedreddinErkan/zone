@@ -392,12 +392,13 @@ JSON shape:
   "scopeSummary": "string",
   "scopeNotes": "string (optional)",
   ${input.forceSteps
-    ? `// noChangeReason and cannotVerifyReason are NOT valid for this task type.`
+    ? `// noChangeReason, cannotVerifyReason, and answerOnlyReason are NOT valid for this task type.`
     : `"noChangeReason": "string (optional — set ONLY when the reproduce command ran and exited 0; steps MUST be []; mutually exclusive with cannotVerifyReason)",
-  "cannotVerifyReason": "string (optional — set ONLY when the reproduce command did NOT run (blocked/denied/infra error); steps MUST be []; mutually exclusive with noChangeReason)"`}
+  "cannotVerifyReason": "string (optional — set ONLY when the reproduce command did NOT run (blocked/denied/infra error); steps MUST be []; mutually exclusive with noChangeReason)",
+  "answerOnlyReason": "string (optional — set when the task is a question and the investigation found nothing that needs to change; steps MUST be [])"`}
 }
 ${input.forceSteps
-    ? `IMPORTANT: This is an additive or creation task. You MUST return at least one concrete implementation step. Do NOT set noChangeReason or cannotVerifyReason.`
+    ? `IMPORTANT: This is an additive or creation task. You MUST return at least one concrete implementation step. Do NOT set noChangeReason, cannotVerifyReason, or answerOnlyReason.`
     : `- noChangeReason: if you ran the relevant command and it exited 0, set this and leave steps as []. Do not fabricate steps for a problem you could not reproduce.
 - cannotVerifyReason: if the reproduce command did not run even bare, set this and leave steps as []. Do NOT read files to guess a fix.`}
 `.trim();

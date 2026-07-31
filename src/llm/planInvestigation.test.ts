@@ -135,42 +135,50 @@ describe("runPlanInvestigation — fallback path", () => {
 
 describe("E3/S4: buildPrompt — reproduce-first + noChangeReason + cannotVerifyReason", () => {
   it("buildPrompt contains noChangeReason in JSON shape", () => {
-    const prompt = buildPrompt("fix the build error", ["src/index.ts"]);
+    const prompt = buildPrompt("fix the build error", ["src/index.ts"], true);
     expect(prompt).toContain("noChangeReason");
   });
 
   it("buildPrompt contains cannotVerifyReason in JSON shape", () => {
-    const prompt = buildPrompt("fix the build error", ["src/index.ts"]);
+    const prompt = buildPrompt("fix the build error", ["src/index.ts"], true);
     expect(prompt).toContain("cannotVerifyReason");
   });
 
   it("buildPrompt contains reproduce-first instruction (step 0)", () => {
-    const prompt = buildPrompt("fix the build error", ["src/index.ts"]);
+    const prompt = buildPrompt("fix the build error", ["src/index.ts"], true);
     expect(prompt).toContain("exit_code=0");
     expect(prompt).toContain("npm run build");
   });
 
   it("buildPrompt contains BARE directive (no 2>&1/pipes)", () => {
-    const prompt = buildPrompt("fix the build error", []);
+    const prompt = buildPrompt("fix the build error", [], true);
     expect(prompt).toContain("BARE");
     expect(prompt).toContain("2>&1");
   });
 
   it("buildPrompt contains STOP directive for unrunnable commands", () => {
-    const prompt = buildPrompt("fix the build error", []);
+    const prompt = buildPrompt("fix the build error", [], true);
     expect(prompt).toContain("STOP");
     expect(prompt).toContain("did not run");
   });
 
   it("buildPrompt gates steps 1-2 on ONLY after observing the error", () => {
-    const prompt = buildPrompt("fix the build error", []);
+    const prompt = buildPrompt("fix the build error", [], true);
     expect(prompt).toContain("ONLY");
     expect(prompt).toContain("does not assert a runtime problem");
   });
 
   it("buildPrompt rules mention no-fabricate directive", () => {
-    const prompt = buildPrompt("fix failing tests", []);
+    const prompt = buildPrompt("fix failing tests", [], true);
     expect(prompt).toContain("Never fabricate steps");
+  });
+
+  it("buildPrompt(allowAnswerOnly=true) documents answerOnlyReason; allowAnswerOnly=false omits it", () => {
+    const withAnswerOnly = buildPrompt("fix the build error", ["src/index.ts"], true);
+    expect(withAnswerOnly).toContain("answerOnlyReason");
+
+    const withoutAnswerOnly = buildPrompt("fix the build error", ["src/index.ts"], false);
+    expect(withoutAnswerOnly).not.toContain("answerOnlyReason");
   });
 
   it("no-change plan from tryParseExecutionPlan skips fallback generateExecutionPlan", async () => {

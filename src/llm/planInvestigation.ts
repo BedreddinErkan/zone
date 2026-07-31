@@ -45,8 +45,15 @@ export interface PlanInvestigationInput {
   progressCallback: (update: LlmPatchProgressUpdate) => void;
 }
 
-/** Exported for direct testing of prompt content. */
-export function buildPrompt(task: string, relevantFiles: string[]): string {
+/**
+ * Exported for direct testing of prompt content.
+ *
+ * allowAnswerOnly has no default — shape-permission is a caller decision, not
+ * something this function should assume. The one call site (runPlanInvestigation,
+ * below) passes `true` explicitly; a future second caller must make its own choice
+ * rather than silently inheriting this one's.
+ */
+export function buildPrompt(task: string, relevantFiles: string[], allowAnswerOnly: boolean): string {
   const fileList = relevantFiles.length > 0 ? relevantFiles.join("\n") : "(none)";
   return `You are planning a coding task. Read the listed files, then output a JSON ExecutionPlan.
 
@@ -72,7 +79,10 @@ There is no pre-existing problem to reproduce.
    Steps 1-2 (read/search) apply ONLY after you have observed the error in step (d),
    OR directly when the TASK does not assert a runtime problem (nothing to reproduce).
 1. Use read_file to examine each listed file.
-2. Note what is already implemented or clearly out of scope for this task.
+2. Note what is already implemented or clearly out of scope for this task.${allowAnswerOnly ? `
+If the TASK itself is a question — not a request to change anything — and steps 1-2
+found nothing that needs to change, set answerOnlyReason and use steps:[] instead of
+fabricating a change nobody asked for.` : ""}
 3. Produce the ExecutionPlan JSON in a \`\`\`json block as your FINAL message.
 
 JSON shape:
@@ -91,14 +101,16 @@ JSON shape:
   "scopeSummary": "string (≤160 chars)",
   "scopeNotes": "string (optional, ≤200 chars — what is already done / out of scope)",
   "noChangeReason": "string (optional — set when reproduce command ran and exited 0; steps MUST be [])",
-  "cannotVerifyReason": "string (optional — set when reproduce command did NOT run; steps MUST be [])"
+  "cannotVerifyReason": "string (optional — set when reproduce command did NOT run; steps MUST be [])"${allowAnswerOnly ? `,
+  "answerOnlyReason": "string (optional — set when the task is a question and the investigation found nothing that needs to change; steps MUST be [])"` : ""}
 }
 
 Rules:
 - filesLikely: copy paths VERBATIM from the files you read. Never invent or alter extensions.
 - scopeNotes: populate if you observed already-implemented or out-of-scope work; omit if nothing notable.
 - noChangeReason: if you ran the reproduce step and exit_code=0, set this and use steps:[]. Never fabricate steps for a problem that did not reproduce.
-- cannotVerifyReason: mutually exclusive with noChangeReason. Set only when the reproduce command did not run even bare. Do NOT set this to avoid investigation — only for genuine infrastructure blocks.
+- cannotVerifyReason: mutually exclusive with noChangeReason. Set only when the reproduce command did not run even bare. Do NOT set this to avoid investigation — only for genuine infrastructure blocks.${allowAnswerOnly ? `
+- answerOnlyReason: mutually exclusive with the other two. Set only when the TASK asked a question and the investigation found nothing requiring a code change — not for a claimed bug that didn't reproduce (that's noChangeReason) and not for a blocked reproduce attempt (that's cannotVerifyReason).` : ""}
 - Terminate as soon as you have enough information to write the plan — do not over-investigate.
 - Your final turn MUST contain the \`\`\`json block.`.trim();
 }
@@ -127,7 +139,7 @@ export async function runPlanInvestigation(
   };
 
   const loop = await runAgentLoop({
-    task: buildPrompt(input.task, cappedFiles),
+    task: buildPrompt(input.task, cappedFiles, true),
     repoPath: input.repoPath,
     runId: runId || undefined,
     userApiKey: input.userApiKey,
