@@ -82,12 +82,21 @@ export function StatusBar(): React.ReactElement {
   // New per-second re-render pressure for the run's duration — Spinner's own
   // timer is local to Spinner and never touches the store, so this does not
   // ride along with it for free.
+  //
+  // Also frozen while a human decision is pending (plan-ready, staged-diffs,
+  // or a command/edit/trust approval): runState stays "running" through all
+  // three — none of their reducer cases touch it — so without this guard the
+  // 1Hz re-render continues the whole time the proposal sits waiting, which
+  // is what was destroying mouse selection during plan approval. A pending
+  // approval is a waiting state, not a working one; nothing needs animating.
+  const runBlockedOnHuman =
+    state.modalView === "plan_ready" || state.modalView === "staged_diffs" || state.pendingApproval !== null;
   const [, forceTick] = useState(0);
   useEffect(() => {
-    if (runState !== "running") return;
+    if (runState !== "running" || runBlockedOnHuman) return;
     const id = setInterval(() => forceTick((t) => t + 1), 1000);
     return () => clearInterval(id);
-  }, [runState]);
+  }, [runState, runBlockedOnHuman]);
   const liveElapsedSec =
     runState === "running" && runStartMs != null
       ? (Math.max(0, Date.now() - runStartMs - parkedMs) / 1000).toFixed(1)

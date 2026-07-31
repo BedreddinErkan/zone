@@ -102,4 +102,101 @@ describe("StatusBar — live elapsed-time ticker", () => {
     expect(frame).not.toMatch(/\d+\.\ds/);
     unmount();
   });
+
+  it("freezes while a plan-ready proposal is pending — runState stays running throughout", async () => {
+    vi.useFakeTimers();
+    const { lastFrame, unmount, dispatch } = renderLive();
+    dispatch({ type: "SPINNER_START", label: "Working" });
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(lastFrame()).toContain("2.0s");
+
+    dispatch({
+      type: "PLAN_READY_PROPOSED",
+      planId: "p1",
+      runId: "r1",
+      objective: "x",
+      steps: [],
+      riskHints: [],
+      scopeSummary: "",
+    });
+    // Flush so the ticker effect's cleanup (dependency change) runs before the
+    // big jump — otherwise the stale interval fires once more first.
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(3000);
+    // Still running (not awaiting_input), so the figure stays put rather than
+    // vanishing — this is a freeze, not the same shape as the park case above.
+    expect(lastFrame()).toContain("2.0s");
+    unmount();
+  });
+
+  it("freezes while a staged-diffs proposal is pending", async () => {
+    vi.useFakeTimers();
+    const { lastFrame, unmount, dispatch } = renderLive();
+    dispatch({ type: "SPINNER_START", label: "Working" });
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(lastFrame()).toContain("2.0s");
+
+    dispatch({
+      type: "STAGED_DIFFS_PROPOSED",
+      approvalId: "a1",
+      runId: "r1",
+      files: [{ path: "src/foo.ts", findReplace: "--- FIND ---\nold\n--- REPLACE ---\nnew", added: 1, removed: 1 }],
+      verificationSummary: "tsc ✓",
+      trigger: "natural_completion",
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(lastFrame()).toContain("2.0s");
+    unmount();
+  });
+
+  it("freezes while a command/edit/trust approval is pending", async () => {
+    vi.useFakeTimers();
+    const { lastFrame, unmount, dispatch } = renderLive();
+    dispatch({ type: "SPINNER_START", label: "Working" });
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(lastFrame()).toContain("2.0s");
+
+    dispatch({ type: "PENDING_APPROVAL_SET", approvalId: "a1", runId: "r1", command: "npm test" });
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(lastFrame()).toContain("2.0s");
+    unmount();
+  });
+
+  it("resumes ticking once the pending proposal resolves — not frozen forever", async () => {
+    vi.useFakeTimers();
+    const { lastFrame, unmount, dispatch } = renderLive();
+    dispatch({ type: "SPINNER_START", label: "Working" });
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(lastFrame()).toContain("2.0s");
+
+    dispatch({
+      type: "PLAN_READY_PROPOSED",
+      planId: "p1",
+      runId: "r1",
+      objective: "x",
+      steps: [],
+      riskHints: [],
+      scopeSummary: "",
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(lastFrame()).toContain("2.0s"); // frozen at 5000ms virtual time
+
+    dispatch({ type: "PLAN_READY_RESOLVED" });
+    // Stepped advances, not one big jump — Ink's own write buffering needs a
+    // flush opportunity between each tick to catch up to the latest render; a
+    // single large advance can coalesce past intermediate frames.
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(1000);
+    await vi.advanceTimersByTimeAsync(1000);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(lastFrame()).toContain("8.0s"); // 2000 (pre) + 3000 (frozen) + 3000 (resumed)
+    unmount();
+  });
 });
