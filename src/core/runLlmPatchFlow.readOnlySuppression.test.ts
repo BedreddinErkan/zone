@@ -139,6 +139,11 @@ describe("read-only pipeline suppression when an approved plan justifies writing
 
     expect(call?.capabilityFilter).toBeUndefined();
     expect(call?.readOnlyPipelineSuppressed).toBe(true);
+    // Contrast partner to the stepless case below: 1 step and 0 steps both land on
+    // WORKER_ITER_FLOOR, so the budget cannot distinguish "one thing to do" from
+    // "nothing to do" (computeWorkerMaxIterations coerces 0 via `|| 1`, subagents.ts:46).
+    expect(call?.planApproved).toBe(true);
+    expect(call?.maxIterations).toBe(6);
   });
 
   it("question + approved plan with steps → capabilityFilter suppressed, readOnlyPipelineSuppressed threaded", async () => {
@@ -153,6 +158,13 @@ describe("read-only pipeline suppression when an approved plan justifies writing
 
     expect(call?.capabilityFilter).toBeDefined();
     expect(call?.readOnlyPipelineSuppressed).not.toBe(true);
+    // hasApprovedSteps (runLlmPatchFlow.ts:5917) is a local const with no observable
+    // value; these two fields are the only places its `false` surfaces. Asserting both
+    // is what makes the stepless branch measured rather than read.
+    expect(call?.planApproved).toBe(false);
+    // 0 steps → WORKER_ITER_FLOOR, not 0: `planStepsCount || 1` (subagents.ts:46) coerces
+    // 0 to 1 before the floor applies, so a plan declaring nothing to do still budgets 6.
+    expect(call?.maxIterations).toBe(6);
   });
 
   it("investigation + no approved plan → unchanged, stays read-only, readOnlyPipelineSuppressed not set", async () => {
