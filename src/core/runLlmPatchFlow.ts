@@ -113,6 +113,7 @@ import {
   buildPipelineConfig,
   readArchetypeFlagsFromEnv,
   buildDispatcherCapabilityFilter,
+  INVESTIGATION_PIPELINE,
   type PipelineConfig,
 } from "../llm/archetypeDispatcher.js";
 import { type CapabilityFilter } from "../tools/capabilities.js";
@@ -5941,6 +5942,37 @@ const initializeTodosFromPlan = (): void => {
       _dispatcherCapabilityFilter = undefined;
     }
 
+    // R4: the approved plan's shape is authoritative over a re-classification that
+    // never saw it. classifyTask above (:5889-5902) is handed input.task ONLY, so an
+    // approved answer-only plan gets its read-only posture from a fresh reading of the
+    // task string — measured landing on archetype "debug", whose null pipeline config
+    // yields no capability filter at all, leaving the medium-tier subset (9 tools,
+    // write_file/apply_patch/multi_edit included) and scopeGuard as the single enforced
+    // layer. Same defect class as the bug this shape exists to fix, one layer down:
+    // classification running where it cannot see the artifact it is classifying for.
+    //
+    // The filter only — never pipelineCfg, and never the archetype. Overriding the
+    // archetype would move 12+ downstream consumers in agentLoop.ts (telemetry, the
+    // forced-tier mismatch detector, prompt assembly, chain-saturation, promotion);
+    // overriding pipelineCfg would flip pipelineApplied:true and arm L5.1b-2 promotion,
+    // plus move coachingBudgetOverride/originalArchetype/skipPlan. This changes exactly
+    // the read-only posture.
+    //
+    // INVESTIGATION_PIPELINE, not a hand-rolled {allow: READ_ONLY_CAPABILITIES}: three
+    // definitions of "read-only" already coexist unreconciled in this tree and a fourth
+    // would be worse than reusing the builder. Investigation over QUESTION because
+    // allowExploration:true keeps list_files/search_in_files/find_references — an
+    // answer-only run still explores to compose its answer. Only the FILTER is taken, so
+    // QUESTION-vs-INVESTIGATION iterCap is irrelevant here and C6's clamp below still
+    // reads the real pipelineCfg?.iterCap (null for debug ⇒ budget stays 8).
+    //
+    // Ordered after the suppression block above rather than before it: suppression
+    // cannot fire for this shape today (it needs hasApprovedSteps, false when steps:[]),
+    // but depending on that distant invariant is exactly how a guard goes quietly inert.
+    if (isAnswerOnlyRun) {
+      _dispatcherCapabilityFilter = buildDispatcherCapabilityFilter(INVESTIGATION_PIPELINE);
+    }
+
     const agentLoopBaseInput = {
       task: input.task,
       repoPath: input.repoPath,
@@ -6049,6 +6081,14 @@ const initializeTodosFromPlan = (): void => {
           iterBudgetComputed,
           (pipelineCfg as PipelineConfig | null)?.iterCap ?? Number.POSITIVE_INFINITY,
         ),
+        // R4: MUST be spread here, outside the `pipelineCfg &&` block above — that
+        // block's capabilityFilter is gated on pipelineCfg FIRST and the filter's own
+        // truthiness only second, so for a null pipelineCfg (archetype "debug", the
+        // measured case) it is skipped entirely and the filter never reaches agentLoop
+        // no matter what the variable holds. Setting _dispatcherCapabilityFilter alone
+        // would be an inert field, the same shape ANSWER_ONLY_ITER_BUDGET had before it
+        // was routed onto a field that actually binds.
+        ...(_dispatcherCapabilityFilter && { capabilityFilter: _dispatcherCapabilityFilter }),
       }),
     };
 

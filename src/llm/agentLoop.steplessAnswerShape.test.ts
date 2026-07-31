@@ -13,6 +13,22 @@
  * OFF (scopeGuard.ts:42-44 returns null for zero steps), so read-only-ness rests
  * entirely on the capability filter surviving. Those two facts are only meaningful
  * together, so they are observed in one probe, from one run.
+ *
+ * R5 CORRECTION (2026-08-01) — READ THIS BEFORE TRUSTING THE CAPABILITY HALF.
+ * The capability assertions below exercise buildPipelineConfig /
+ * buildDispatcherCapabilityFilter **as builders, against a hand-set archetype**. They do
+ * NOT establish that a real run reaches a read-only tool set, because they supply
+ * archetype "investigation" and production does not produce that value for this shape:
+ * the execution phase re-classifies from task text alone and was measured returning
+ * "debug", whose null pipeline config yields no capability filter at all. Mutation 5
+ * proved the builders are really called; it could not prove the INPUT matches production
+ * — the builders were real, the input was a fixture, one level above a shielded mutation.
+ *
+ * The production path is covered instead by
+ * runLlmPatchFlow.terminationReasonProbe.test.ts's R4 case, which classifies as "debug"
+ * and asserts on the tool list actually sent to the API. Keep this file for what it
+ * genuinely pins — the prompt branch, and the builders' own behavior — and do not read
+ * its tool-set assertions as evidence about the real dispatch path.
  */
 
 import fs from "node:fs";
@@ -163,7 +179,7 @@ describe("stepless plan → answer shape survives in the assembled prompt", () =
   });
 });
 
-describe("stepless plan → scope enforcement is off, and only the capability set stands in for it", () => {
+describe("BUILDERS (forced archetype, NOT the production path — see R5 note at top): stepless plan → scope enforcement off, capability set stands in for it", () => {
   it("checkWriteScope permits every path while the offered tools contain no way to write", async () => {
     const { toolNames } = await runStepless();
 
@@ -186,7 +202,7 @@ describe("stepless plan → scope enforcement is off, and only the capability se
   });
 });
 
-describe("answer-only plan → scope enforcement is ON, independent of the capability set (C5)", () => {
+describe("BUILDERS (forced archetype, NOT the production path — see R5 note at top): answer-only plan → scope enforcement is ON, independent of the capability set (C5)", () => {
   it("checkWriteScope blocks every path while the offered tools remain the same read-only set", async () => {
     const { toolNames } = await runStepless(ANSWER_ONLY_PLAN);
 

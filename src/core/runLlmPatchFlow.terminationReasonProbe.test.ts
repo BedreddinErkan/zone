@@ -217,3 +217,67 @@ describe("PROBE: an answer-only run's real exhaustion, through the production ca
     expect(loop.terminationReason).toBe("max_iterations");
   });
 });
+
+/**
+ * R4 — the read-only posture of an approved answer-only plan, pinned THROUGH the
+ * production archetype seam.
+ *
+ * R5 is the standing counter-example this test exists to avoid repeating:
+ * agentLoop.steplessAnswerShape.test.ts asserts a read-only tool set while forcing
+ * archetype "investigation", a value production does not produce for this shape. The
+ * builders it exercises are real; the input is a fixture.
+ *
+ * So this classifies as **"debug"** — the archetype a real run measurably produced for
+ * "Why does the loop detector fire on 4 identical tool+args hashes?" — which makes
+ * buildPipelineConfig return null, buildDispatcherCapabilityFilter return undefined, and
+ * runLlmPatchFlow.ts's `pipelineCfg &&` spread skip its nested capabilityFilter entirely.
+ * That is the exact path that left the measured run on the medium-tier subset (9 tools,
+ * writes included) with scopeGuard as the only enforced layer.
+ */
+function classificationDebug(): TaskClassification {
+  return { ...classification(), archetype: "debug", archetypeConfidence: 0.8 };
+}
+
+describe("R4: an answer-only plan gets a read-only tool set through the real archetype seam", () => {
+  it("offers no write tool even when the fresh classification yields a null pipeline config", async () => {
+    classifyTaskMock.mockResolvedValue(classificationDebug());
+
+    let toolNames: string[] = [];
+    mocks.createChatCompletion.mockImplementation(
+      async (params: { tools?: Array<{ function?: { name?: string } }> }) => {
+        if (toolNames.length === 0 && params.tools) {
+          toolNames = params.tools.map((t) => t.function?.name ?? "");
+        }
+        return {
+          choices: [{ message: { content: "Answered.", tool_calls: null }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+        };
+      },
+    );
+
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    await runLlmPatchFlow({
+      task: "Why does the loop detector fire on 4 identical tool+args hashes?",
+      repoPath: "/tmp/fake-repo",
+      runId: "run-r4-debug-archetype",
+      onProgress: () => undefined,
+      abortSignal: new AbortController().signal,
+      userApiKey: "sk-fake",
+      provider: "anthropic",
+      mode: "patch",
+      preGeneratedPlan: ANSWER_ONLY_PLAN,
+    });
+
+    // Positive control FIRST: "contains no write tool" is vacuously true of an empty or
+    // never-populated list, so the absence checks below mean nothing until the tool set
+    // is shown to be real and read-capable.
+    expect(toolNames.length).toBeGreaterThan(0);
+    expect(toolNames).toContain("read_file");
+
+    // The fix itself. Before it, this run reached the medium-tier subset and all three
+    // of these were present.
+    expect(toolNames).not.toContain("apply_patch");
+    expect(toolNames).not.toContain("write_file");
+    expect(toolNames).not.toContain("multi_edit");
+  });
+});
