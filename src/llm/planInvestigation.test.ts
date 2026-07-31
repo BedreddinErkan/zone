@@ -179,6 +179,18 @@ describe("E3/S4: buildPrompt — reproduce-first + noChangeReason + cannotVerify
 
     const withoutAnswerOnly = buildPrompt("fix the build error", ["src/index.ts"], false);
     expect(withoutAnswerOnly).not.toContain("answerOnlyReason");
+
+    // The criterion is what the investigation CONCLUDED, not the task's surface form.
+    // Five consecutive real-model draws set answerOnlyReason on tasks with real defects,
+    // and every one of their reason fields quoted the old prompt's first conjunct back
+    // ("a question, not a change request") while ignoring its second. A control draw with
+    // allowAnswerOnly=false produced concrete steps for a byte-identical task, which is
+    // what identified the wording rather than the model as the cause.
+    expect(withAnswerOnly).toContain("correct and deliberate");
+    // The n=38 corpus found no surface-form rule separates "wants an answer" from "wants
+    // a fix", so a NARROWER surface-form rule would be the same defect with a smaller
+    // blast radius. This pins that the phrasing-keyed criterion stays gone.
+    expect(withAnswerOnly).not.toContain("TASK itself is a question");
   });
 
   it("no-change plan from tryParseExecutionPlan skips fallback generateExecutionPlan", async () => {

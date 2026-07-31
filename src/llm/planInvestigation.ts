@@ -80,9 +80,11 @@ There is no pre-existing problem to reproduce.
    OR directly when the TASK does not assert a runtime problem (nothing to reproduce).
 1. Use read_file to examine each listed file.
 2. Note what is already implemented or clearly out of scope for this task.${allowAnswerOnly ? `
-If the TASK itself is a question — not a request to change anything — and steps 1-2
-found nothing that needs to change, set answerOnlyReason and use steps:[] instead of
-fabricating a change nobody asked for.` : ""}
+If steps 1-2 concluded the current behavior is correct and deliberate — nothing is broken
+and no code change is warranted — set answerOnlyReason and use steps:[] instead of
+fabricating a change nobody needs. Judge this on what you FOUND, not on how the TASK was
+phrased: a question can still need real steps, and if you found something that should
+change, produce steps regardless of phrasing.` : ""}
 3. Produce the ExecutionPlan JSON in a \`\`\`json block as your FINAL message.
 
 JSON shape:
@@ -102,7 +104,7 @@ JSON shape:
   "scopeNotes": "string (optional, ≤200 chars — what is already done / out of scope)",
   "noChangeReason": "string (optional — set when reproduce command ran and exited 0; steps MUST be [])",
   "cannotVerifyReason": "string (optional — set when reproduce command did NOT run; steps MUST be [])"${allowAnswerOnly ? `,
-  "answerOnlyReason": "string (optional — set when the task is a question and the investigation found nothing that needs to change; steps MUST be [])"` : ""}
+  "answerOnlyReason": "string (optional — set when the investigation concluded the current behavior is correct and deliberate and no code change is warranted; steps MUST be [])"` : ""}
 }
 
 Rules:
@@ -110,7 +112,7 @@ Rules:
 - scopeNotes: populate if you observed already-implemented or out-of-scope work; omit if nothing notable.
 - noChangeReason: if you ran the reproduce step and exit_code=0, set this and use steps:[]. Never fabricate steps for a problem that did not reproduce.
 - cannotVerifyReason: mutually exclusive with noChangeReason. Set only when the reproduce command did not run even bare. Do NOT set this to avoid investigation — only for genuine infrastructure blocks.${allowAnswerOnly ? `
-- answerOnlyReason: mutually exclusive with the other two. Set only when the TASK asked a question and the investigation found nothing requiring a code change — not for a claimed bug that didn't reproduce (that's noChangeReason) and not for a blocked reproduce attempt (that's cannotVerifyReason).` : ""}
+- answerOnlyReason: mutually exclusive with the other two. Set ONLY when the investigation concluded the existing behavior is correct and deliberate and no code change is warranted — judged on findings, never on the task's phrasing. If the investigation found a real defect, produce steps even if the task was phrased as a question. Not for a claimed bug that didn't reproduce (that's noChangeReason) and not for a blocked reproduce attempt (that's cannotVerifyReason).` : ""}
 - Terminate as soon as you have enough information to write the plan — do not over-investigate.
 - Your final turn MUST contain the \`\`\`json block.`.trim();
 }
