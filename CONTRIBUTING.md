@@ -8,7 +8,7 @@ File an issue at [github.com/BedreddinErkan/zone/issues](https://github.com/Bedr
 
 - What you ran (task prompt, repo type, tier)
 - What you expected vs. what happened
-- Output from `ZONE_VERBOSE_LOGS=1 npm run serve` if relevant
+- Output from `ZONE_VERBOSE_LOGS=1 node dist/cli/index.js` if relevant
 
 ## Pull requests
 
@@ -24,17 +24,17 @@ git clone https://github.com/BedreddinErkan/zone.git
 cd zone
 npm install
 cp .env.example .env   # add at least one provider key
-npm run build && npm run serve
+npm run build && node dist/cli/index.js
 ```
 
 Source layout:
 
-- `src/api/` — Express server + route handlers
-- `src/llm/` — Agent loop, tool executor, LLM adapters (OpenAI + Anthropic)
-- `src/core/` — Patch flow, validators, decision pipeline
-- `src/tools/` — Tool implementations (read_file, write_file, apply_patch, …)
-- `src/ui/index.html` — Single-page frontend (vanilla TS)
-- `src/visual/` — Playwright-driven visual verification
+- `src/cli/` — CLI entry point and the Ink-based terminal UI (`src/cli/tui/`)
+- `src/llm/` — Agent loop, provider adapters (OpenAI + Anthropic), task classification
+- `src/core/` — Atomic patch flow, decision pipeline
+- `src/tools/` — Tool implementations and definitions (read_file, write_file, apply_patch, …)
+- `src/api/` — Disk-persisted config and approvals (BYOK keys, sessions, trust) — no HTTP server
+- `src/audit/` — Scope-audit pipeline
 
 ### A note on framework dev
 
