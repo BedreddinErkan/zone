@@ -1,0 +1,163 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+/**
+ * The safety net at dispatch.ts:410 (`if (preGeneratedPlan.steps.length === 0 &&
+ * !isAnswerOnlyPlan(preGeneratedPlan))`) is the one dispatch.ts control-flow site
+ * that converts a stepless plan before the modal — E8a/E8b gate on
+ * isCannotVerifyPlan/isNoChangePlan specifically, which are false-by-construction
+ * for an answer-shaped plan, so neither needs a change. This file proves the
+ * central claim directly: an answer-shaped plan from the INITIAL (non-replan)
+ * plan-gen call reaches the approval modal unconverted, rather than being
+ * force-stepped or replaced by synthesizeMinimalPlan.
+ *
+ * Harness copied from dispatch.steplessReplan.test.ts's mock set — this file is
+ * deliberately separate from it: that file's own docstring scopes it to the replan
+ * arms specifically, and this scenario (the INITIAL plan already being answer-shaped)
+ * is a different code path through the same function.
+ */
+
+const mockRunLlmPatchFlow = vi.hoisted(() => vi.fn());
+const mockRejectPendingApprovalsForRun = vi.hoisted(() => vi.fn().mockReturnValue(0));
+const mockRejectPendingRevisionsForRun = vi.hoisted(() => vi.fn().mockReturnValue(0));
+const mockRejectPendingPlansForRun = vi.hoisted(() => vi.fn().mockReturnValue(0));
+const mockRejectPendingEditsForRun = vi.hoisted(() => vi.fn().mockReturnValue(0));
+const mockRejectPendingTrustForRun = vi.hoisted(() => vi.fn().mockReturnValue(0));
+const mockRequestPlanApproval = vi.hoisted(() => vi.fn());
+const mockEmitPlanEmptyApproval = vi.hoisted(() => vi.fn());
+const mockClearTrustedCommandsForRun = vi.hoisted(() => vi.fn().mockReturnValue(0));
+const mockSetTrustAllForRun = vi.hoisted(() => vi.fn());
+const mockBuildCliSink = vi.hoisted(() => vi.fn(() => ({ onProgress: vi.fn() })));
+const mockCreateSpinner = vi.hoisted(() => vi.fn(() => ({ stop: vi.fn() })));
+const mockRunAuditPipeline = vi.hoisted(() => vi.fn());
+const mockPreparePlanContext = vi.hoisted(() => vi.fn());
+const mockGenerateExecutionPlan = vi.hoisted(() => vi.fn());
+const mockReadAuditModeSetting = vi.hoisted(() => vi.fn(() => "auto"));
+const mockLoadDiskModelSync = vi.hoisted(() => vi.fn(() => null));
+const mockRunPlanInvestigation = vi.hoisted(() => vi.fn());
+const mockIsNoChangePlan = vi.hoisted(() => vi.fn());
+const mockIsCannotVerifyPlan = vi.hoisted(() => vi.fn());
+const mockDebugLog = vi.hoisted(() => vi.fn());
+const mockLog = vi.hoisted(() => vi.fn());
+
+vi.mock("../core/runLlmPatchFlow.js", () => ({ runLlmPatchFlow: mockRunLlmPatchFlow, isChitchat: () => false, isVagueDeveloperTask: () => false }));
+vi.mock("../api/commandApprovals.js", () => ({
+  rejectPendingApprovalsForRun: mockRejectPendingApprovalsForRun,
+  clearTrustedCommandsForRun: mockClearTrustedCommandsForRun,
+  setTrustAllForRun: mockSetTrustAllForRun,
+}));
+vi.mock("../llm/revisionApprovals.js", () => ({
+  rejectPendingRevisionsForRun: mockRejectPendingRevisionsForRun,
+}));
+vi.mock("../llm/planApprovals.js", () => ({
+  requestPlanApproval: mockRequestPlanApproval,
+  rejectPendingPlansForRun: mockRejectPendingPlansForRun,
+  emitPlanEmptyApproval: mockEmitPlanEmptyApproval,
+}));
+vi.mock("../api/editApprovals.js", () => ({
+  rejectPendingEditsForRun: mockRejectPendingEditsForRun,
+}));
+vi.mock("../api/trustApprovals.js", () => ({
+  requestTrustApproval: vi.fn().mockResolvedValue(true),
+  rejectPendingTrustForRun: mockRejectPendingTrustForRun,
+}));
+vi.mock("./sink.js", () => ({
+  buildCliSink: mockBuildCliSink,
+  createSpinner: mockCreateSpinner,
+}));
+vi.mock("../llm/auditPipeline.js", () => ({ runAuditPipeline: mockRunAuditPipeline }));
+vi.mock("../core/preparePlanContext.js", () => ({ preparePlanContext: mockPreparePlanContext }));
+// Real synthesizeMinimalPlan and planTerminalShape/isAnswerOnlyPlan, not stand-ins —
+// the whole point of this file is proving the safety net's REAL guard behaves
+// correctly, which requires the real predicate, not a hand-copied duplicate of it.
+vi.mock("../llm/executionPlan.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../llm/executionPlan.js")>();
+  return {
+    planTerminalShape: actual.planTerminalShape,
+    isAnswerOnlyPlan: actual.isAnswerOnlyPlan,
+    synthesizeMinimalPlan: vi.fn(actual.synthesizeMinimalPlan),
+    generateExecutionPlan: mockGenerateExecutionPlan,
+    isNoChangePlan: mockIsNoChangePlan,
+    isCannotVerifyPlan: mockIsCannotVerifyPlan,
+  };
+});
+vi.mock("../visual/tierSettings.js", () => ({ readAuditModeSetting: mockReadAuditModeSetting, readDailyUsdCapOverride: vi.fn() }));
+vi.mock("../api/diskModel.js", () => ({ loadDiskModelSync: mockLoadDiskModelSync }));
+vi.mock("../llm/planInvestigation.js", () => ({ runPlanInvestigation: mockRunPlanInvestigation }));
+vi.mock("../utils/logger.js", () => ({ debugLog: mockDebugLog, log: mockLog }));
+
+import { runOneShotInner } from "./dispatch.js";
+import { synthesizeMinimalPlan } from "../llm/executionPlan.js";
+
+const BASE_CONFIG = {
+  model: "claude-sonnet-4-6",
+  provider: "anthropic" as const,
+  anthropicApiKey: "sk-ant-test",
+  openaiApiKey: undefined,
+  dailyUsdCap: 10,
+  repoPath: "/tmp/test-repo",
+  forceTier: undefined,
+  autoApprove: false,
+  noRevision: false,
+  verbose: false,
+  quiet: true,
+  noColor: true,
+};
+
+/** The INITIAL plan-gen call (not a replan) resolves directly to this. */
+const ANSWER_ONLY_PLAN = {
+  objective: "Explain the marker sink",
+  steps: [] as Array<{ title: string; description: string; filesLikely: string[] }>,
+  riskHints: [],
+  scopeSummary: "Explain the marker sink",
+  answerOnlyReason: "The task is a question; nothing needs to change.",
+};
+
+/** Additive lead verb — real (unmocked) taskAssertsProblem returns false, so E8a/E8b
+ *  are gated off regardless; the safety net at :410 is the only remaining gate. */
+const ADDITIVE_TASK = "Add a helper function to src/utils/dates.ts";
+
+beforeEach(() => {
+  mockRunLlmPatchFlow.mockReset();
+  mockRequestPlanApproval.mockReset();
+  mockGenerateExecutionPlan.mockReset();
+  mockEmitPlanEmptyApproval.mockReset();
+  (synthesizeMinimalPlan as ReturnType<typeof vi.fn>).mockClear();
+  mockDebugLog.mockClear();
+  mockLog.mockClear();
+  // Single resolution: the INITIAL plan-gen call is the only one this scenario
+  // should ever make — a second call would mean the forceSteps regeneration fired.
+  mockGenerateExecutionPlan.mockResolvedValue(ANSWER_ONLY_PLAN);
+  mockBuildCliSink.mockReturnValue({ onProgress: vi.fn() });
+  mockCreateSpinner.mockReturnValue({ stop: vi.fn() });
+  mockRunAuditPipeline.mockResolvedValue({ auditFindings: undefined, revisionDecision: undefined, earlyExit: null });
+  mockPreparePlanContext.mockResolvedValue({ projectSummary: "A TS project", relevantFilePaths: [] });
+  mockReadAuditModeSetting.mockReturnValue("auto");
+  mockLoadDiskModelSync.mockReturnValue({ planDepth: "quick" });
+  mockIsNoChangePlan.mockReturnValue(false);
+  mockIsCannotVerifyPlan.mockReturnValue(false);
+  // Reject immediately — this test only cares that the modal was reached with the
+  // right (unconverted) plan, not about anything past that.
+  mockRequestPlanApproval.mockResolvedValue({ planId: "plan-1", decision: "reject", modalEmitted: true });
+  vi.spyOn(process.stdout, "write").mockReturnValue(true);
+  vi.spyOn(process.stderr, "write").mockReturnValue(true);
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+describe("safety net excludes the answer-only shape (dispatch.ts:410)", () => {
+  it("an answer-shaped initial plan reaches the modal unconverted — no forceSteps regen, no synthesis", async () => {
+    await runOneShotInner(ADDITIVE_TASK, BASE_CONFIG, "run-answer-initial", { mode: "plan" });
+
+    // The modal was reached.
+    expect(mockRequestPlanApproval).toHaveBeenCalledTimes(1);
+
+    // No forceSteps regeneration: exactly one generateExecutionPlan call (the
+    // initial one) — a second call would be the safety net's own regen attempt.
+    expect(mockGenerateExecutionPlan).toHaveBeenCalledTimes(1);
+
+    // No synthesis: synthesizeMinimalPlan never ran.
+    expect(synthesizeMinimalPlan).not.toHaveBeenCalled();
+  });
+});

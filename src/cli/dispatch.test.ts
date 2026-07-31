@@ -47,6 +47,7 @@ vi.mock("../llm/executionPlan.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../llm/executionPlan.js")>();
   return {
     planTerminalShape: actual.planTerminalShape,
+    isAnswerOnlyPlan: actual.isAnswerOnlyPlan,
     generateExecutionPlan: mockGenerateExecutionPlan,
     isNoChangePlan: mockIsNoChangePlan,
     isCannotVerifyPlan: mockIsCannotVerifyPlan,

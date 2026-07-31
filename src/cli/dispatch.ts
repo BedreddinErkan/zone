@@ -15,7 +15,7 @@ import { runPlanInvestigation } from "../llm/planInvestigation.js";
 import { createSpinner, buildCliSink } from "./sink.js";
 import type { LlmPatchProgressUpdate, ZoneStructuredProgressEvent } from "../core/agentLifecycleEvents.js";
 import { preparePlanContext } from "../core/preparePlanContext.js";
-import { generateExecutionPlan, isNoChangePlan, isCannotVerifyPlan, synthesizeMinimalPlan, planTerminalShape } from "../llm/executionPlan.js";
+import { generateExecutionPlan, isNoChangePlan, isCannotVerifyPlan, isAnswerOnlyPlan, synthesizeMinimalPlan, planTerminalShape } from "../llm/executionPlan.js";
 import { taskAssertsProblem, isPureAddition, matchedLeadVerb } from "../llm/taskShape.js";
 import { rejectPendingEditsForRun } from "../api/editApprovals.js";
 import { rejectPendingStagedForRun } from "../api/stagedApprovals.js";
@@ -407,7 +407,9 @@ export async function runOneShotInner(
       }
 
       // Safety net: a non-problem task whose plan returned empty steps must still reach the modal.
-      if (preGeneratedPlan.steps.length === 0) {
+      // Answer-only plans are excluded — that shape must survive to the modal
+      // unconverted, not get force-stepped into concrete work nobody asked for.
+      if (preGeneratedPlan.steps.length === 0 && !isAnswerOnlyPlan(preGeneratedPlan)) {
         // Hoisted purely so the synthesis marker can name what failed just before
         // it: `e` is scoped to the catch below and out of scope at the fallback.
         let forceStepsFailReason: string | undefined;
