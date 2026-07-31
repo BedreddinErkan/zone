@@ -53,4 +53,17 @@ describe("ToolCallGroup — count header + per-call detail lines", () => {
       expect(frame).toContain(`file${i}.ts`);
     }
   });
+
+  it("a call with an empty identifying arg renders no detail line at all — not a blank one", () => {
+    const calls: ToolCallGroupProps["calls"] = [
+      { toolName: "search_in_files", arg: "" }, // model omitted pattern — the real, observed shape
+      { toolName: "read_file", arg: "a.ts" },
+      { toolName: "read_file", arg: "b.ts" },
+    ];
+    const frame = render(<ToolCallGroup calls={calls} />).lastFrame() ?? "";
+    const detailLines = frame.split("\n").filter((l) => l.includes("└"));
+    expect(detailLines).toHaveLength(2);
+    expect(frame).toContain("a.ts");
+    expect(frame).toContain("b.ts");
+  });
 });

@@ -135,6 +135,7 @@ import {
   type RevisionDecision,
 } from "../llm/revisionApprovals.js";
 import { buildToolCallPatch } from "./toolCallPatch.js";
+import { toolCallIdentifyingArg } from "./toolCallIdentifyingArg.js";
 
 const MAX_FINAL_ANSWER_CHARS = 100_000;
 
@@ -5780,39 +5781,7 @@ const initializeTodosFromPlan = (): void => {
           if (snapPath && !_planOrchestrationEnabled) startTodoForFile(snapPath);
           return;
         }
-        const cmd = (() => {
-          switch (name) {
-            case "run_command":
-            case "run_command_background":
-            case "run_command_readonly":
-              return String(args.command ?? "");
-            case "read_file":
-            case "apply_patch":
-            case "write_file":
-              return String(args.filePath ?? "");
-            case "list_files":
-              return String(args.dirPath ?? "");
-            case "search_in_files":
-              return String(args.pattern ?? "");
-            case "find_references":
-              return String(args.symbolName ?? args.sourceFile ?? "");
-            case "Task":
-              return String(args.description ?? "").slice(0, 50);
-            case "suggest_scope_change":
-              return String(args.reason ?? "").slice(0, 50);
-            case "kill_background":
-            case "read_background_output":
-              return String(args.handle ?? "");
-            case "multi_edit": {
-              const files = (args.files as string[]) ?? [];
-              const find = String(args.find ?? "").slice(0, 40);
-              const fileList = files.slice(0, 2).join(", ") + (files.length > 2 ? ` +${files.length - 2}` : "");
-              return `${files.length} files · find="${find}"${fileList ? ` · ${fileList}` : ""}`;
-            }
-            default:
-              return "";
-          }
-        })();
+        const cmd = toolCallIdentifyingArg(name, args);
         const patchForEvent = buildToolCallPatch(name, args, beforeByFile.get(snapPath));
         emitStructuredProgress({
           type: "tool_call",

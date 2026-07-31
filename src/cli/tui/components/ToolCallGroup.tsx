@@ -14,11 +14,16 @@ export interface ToolCallGroupProps {
  * it flushes and commits that call individually instead), so there is no
  * success/failure branching to do for either line.
  *
- * All N calls render, never a truncated "first few" — the batch is already
- * capped at READ_ONLY_BATCH_MAX_SIZE (store-core.ts) by construction, so N is
- * always small; a truncation branch would be complexity with nothing to
- * truncate. Detail lines stay in call order, not regrouped by tool: that's
- * what happened, and it needs no extra sort step.
+ * A call with an empty identifying argument (toolCallIdentifyingArg.ts) renders
+ * no line at all rather than a blank one — an empty "└" would claim there was
+ * nothing to show when the truth is just that this particular call had no
+ * identifying content (e.g. search_in_files with an omitted pattern).
+ *
+ * All N calls are otherwise considered, never a truncated "first few" — the
+ * batch is already capped at READ_ONLY_BATCH_MAX_SIZE (store-core.ts) by
+ * construction, so N is always small; a truncation branch would be
+ * complexity with nothing to truncate. Detail lines stay in call order, not
+ * regrouped by tool: that's what happened, and it needs no extra sort step.
  */
 export function ToolCallGroup({ calls }: ToolCallGroupProps): React.ReactElement {
   const counts = new Map<string, number>();
@@ -34,11 +39,13 @@ export function ToolCallGroup({ calls }: ToolCallGroupProps): React.ReactElement
         <Text>{"● "}</Text>
         <Text dimColor>{parts.join(", ")}</Text>
       </Box>
-      {calls.map((call, i) => (
-        <Box key={i} paddingLeft={2}>
-          <Text dimColor>{"└ "}{formatToolArgs(call.toolName, call.arg)}</Text>
-        </Box>
-      ))}
+      {calls.map((call, i) =>
+        call.arg === "" ? null : (
+          <Box key={i} paddingLeft={2}>
+            <Text dimColor>{"└ "}{formatToolArgs(call.toolName, call.arg)}</Text>
+          </Box>
+        )
+      )}
     </Box>
   );
 }
