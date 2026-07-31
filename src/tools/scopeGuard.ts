@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import * as path from "node:path";
 import { promisify } from "node:util";
-import type { ExecutionPlan } from "../llm/executionPlan.js";
+import { isAnswerOnlyPlan, type ExecutionPlan } from "../llm/executionPlan.js";
 import type { VerifyDiagnostic } from "../core/buildVerifyDiagnostic.js";
 
 const execFileAsync = promisify(execFile);
@@ -39,7 +39,16 @@ export function checkWriteScope(
     if (absFile === absZone || absFile.startsWith(absZone + path.sep)) return null;
   }
 
-  if (!executionPlan || !Array.isArray(executionPlan.steps) || executionPlan.steps.length === 0) {
+  if (!executionPlan || !Array.isArray(executionPlan.steps)) {
+    return null;
+  }
+  if (executionPlan.steps.length === 0) {
+    if (isAnswerOnlyPlan(executionPlan)) {
+      return (
+        `Write blocked: this plan is answer-only (${executionPlan.answerOnlyReason}). ` +
+        `No file changes were approved for this run.`
+      );
+    }
     return null;
   }
 

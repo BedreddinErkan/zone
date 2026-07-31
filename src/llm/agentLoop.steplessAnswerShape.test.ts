@@ -89,6 +89,16 @@ const STEPLESS_PLAN: ExecutionPlan = {
   noChangeReason: "Build already exits 0 — the asserted bug does not reproduce.",
 };
 
+/** Same steps:[] shape as STEPLESS_PLAN, but answer-shaped (C5) — scopeGuard now
+ *  blocks explicitly for this fixture instead of returning null. */
+const ANSWER_ONLY_PLAN: ExecutionPlan = {
+  objective: "Explain the marker sink",
+  steps: [],
+  riskHints: [],
+  scopeSummary: "Explain the marker sink",
+  answerOnlyReason: "The task is a question; nothing needs to change.",
+};
+
 const WRITE_CAPABLE_TOOLS = ["apply_patch", "write_file", "multi_edit"];
 
 let repoPath: string;
@@ -110,7 +120,7 @@ afterEach(() => {
  * Mutation 5 (archetypeDispatcher.ts:107) exists to prove this reconstruction
  * tracks production rather than having drifted into a fixture of its own.
  */
-async function runStepless(): Promise<{ systemText: string; toolNames: string[] }> {
+async function runStepless(plan: ExecutionPlan = STEPLESS_PLAN): Promise<{ systemText: string; toolNames: string[] }> {
   let messages: CapturedMessage[] = [];
   let tools: CapturedTool[] = [];
   mocks.createChatCompletion.mockImplementationOnce(
@@ -128,7 +138,7 @@ async function runStepless(): Promise<{ systemText: string; toolNames: string[] 
     task: "why does the marker sink write where it does",
     repoPath,
     taskClassification: classification("investigation"),
-    executionPlan: STEPLESS_PLAN,
+    executionPlan: plan,
     planApproved: false,
     ...(capabilityFilter ? { capabilityFilter } : {}),
     maxIterationsOverride: 3,
@@ -170,6 +180,28 @@ describe("stepless plan → scope enforcement is off, and only the capability se
 
     // Half 2 — observed in the same run, from the same request: the only thing
     // actually preventing a write is that no write tool was offered.
+    for (const name of WRITE_CAPABLE_TOOLS) {
+      expect(toolNames).not.toContain(name);
+    }
+  });
+});
+
+describe("answer-only plan → scope enforcement is ON, independent of the capability set (C5)", () => {
+  it("checkWriteScope blocks every path while the offered tools remain the same read-only set", async () => {
+    const { toolNames } = await runStepless(ANSWER_ONLY_PLAN);
+
+    // Positive control FIRST, same reasoning as the noChangeReason case above.
+    expect(toolNames.length).toBeGreaterThan(0);
+    expect(toolNames).toContain("read_file");
+    expect(toolNames).toContain("search_in_files");
+
+    // The scopeGuard deny-all for this shape — independent of the capability
+    // filter: the tool set offered is the same read-only set as the
+    // noChangeReason case, but scopeGuard now blocks explicitly for THIS
+    // shape rather than returning null, proving the two are separate layers
+    // rather than accidentally coupled through the same steps.length===0 test.
+    expect(checkWriteScope("src/anything.ts", ANSWER_ONLY_PLAN)).not.toBeNull();
+
     for (const name of WRITE_CAPABLE_TOOLS) {
       expect(toolNames).not.toContain(name);
     }
