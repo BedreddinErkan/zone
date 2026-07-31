@@ -146,18 +146,34 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-describe("safety net excludes the answer-only shape (dispatch.ts:410)", () => {
-  it("an answer-shaped initial plan reaches the modal unconverted — no forceSteps regen, no synthesis", async () => {
+/**
+ * Two `it` blocks, not one, because the guard makes two separable claims and a single
+ * test can only ever prove the first of them. Vitest aborts a test at its first failing
+ * `expect`, so when this was one block the mutation (dropping `&& !isAnswerOnlyPlan`)
+ * failed on the generateExecutionPlan count and never evaluated the synthesis
+ * assertion — that claim was asserted but unproven. Split, the same mutation must
+ * redden both, and each failure names its own claim.
+ *
+ * The second claim is genuinely reachable rather than vacuous: dispatch.ts:431 re-tests
+ * `steps.length === 0` AFTER the regen and independently of whether it threw, and this
+ * file's `mockResolvedValue` (not `...Once`) hands the regen the same stepless plan —
+ * so with the guard removed, synthesizeMinimalPlan really does run.
+ */
+describe("safety net excludes the answer-only shape (dispatch.ts:412)", () => {
+  it("reaches the modal without a forceSteps regeneration", async () => {
     await runOneShotInner(ADDITIVE_TASK, BASE_CONFIG, "run-answer-initial", { mode: "plan" });
 
     // The modal was reached.
     expect(mockRequestPlanApproval).toHaveBeenCalledTimes(1);
 
-    // No forceSteps regeneration: exactly one generateExecutionPlan call (the
-    // initial one) — a second call would be the safety net's own regen attempt.
+    // Exactly one generateExecutionPlan call (the initial one) — a second would be
+    // the safety net's own forceSteps regen attempt.
     expect(mockGenerateExecutionPlan).toHaveBeenCalledTimes(1);
+  });
 
-    // No synthesis: synthesizeMinimalPlan never ran.
+  it("is not replaced by a synthesized minimal plan", async () => {
+    await runOneShotInner(ADDITIVE_TASK, BASE_CONFIG, "run-answer-initial", { mode: "plan" });
+
     expect(synthesizeMinimalPlan).not.toHaveBeenCalled();
   });
 });
