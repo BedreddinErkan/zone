@@ -67,69 +67,17 @@ describe("Spinner", () => {
   });
 });
 
-describe("Spinner — context segment (elapsed / tokens / effort)", () => {
+describe("Spinner — no context parenthetical (b045f350 reverted)", () => {
   afterEach(() => { vi.useRealTimers(); });
 
-  it("shows elapsed context once the run starts, absent before", async () => {
-    const bus = createEventBus();
-    const { lastFrame, unmount } = render(<App bus={bus} />);
-    expect(lastFrame() ?? "").not.toMatch(/\(\d+\.\ds/);
-    bus.emit("agent_loop_start", makeEvt("agent_loop_start"));
-    await wait(50);
-    expect(lastFrame() ?? "").toMatch(/\(\d+\.\ds/);
-    unmount();
-  });
-
-  it("shows a token count once cumulativeTokens is nonzero, absent before", async () => {
+  it("while running, the spinner line contains the gerund and no parenthetical", async () => {
     const bus = createEventBus();
     const { lastFrame, unmount } = render(<App bus={bus} />);
     bus.emit("agent_loop_start", makeEvt("agent_loop_start"));
     await wait(50);
-    expect(lastFrame() ?? "").not.toContain("tokens");
-
-    bus.emit("token_budget_status", {
-      runId: "test-run",
-      ts: Date.now(),
-      type: "token_budget_status",
-      title: "token_budget_status",
-      tokenBudgetRatio: 0.1,
-      cumulativeTokens: 1234,
-    } as ZoneStructuredProgressEvent);
-    await wait(50);
-    expect(lastFrame() ?? "").toContain("1.2k tokens");
-    unmount();
-  });
-
-  it("shows effort once modelSettings.effort is set — on the spinner's own line, not StatusBar's independent copy", async () => {
-    // StatusBar (b0c4d637) renders the identical "effort: high" phrase in its own
-    // footer line whenever modelSettings.effort is set — a whole-frame substring
-    // check would pass from that alone regardless of what Spinner itself renders.
-    // Isolating to the glyph's own line is what actually exercises this commit.
-    const bus = createEventBus();
-    const { lastFrame, unmount } = render(
-      <App
-        bus={bus}
-        initialModelSettings={{
-          version: 2,
-          model: "test-model",
-          provider: "anthropic",
-          effort: "high",
-          updatedAt: new Date().toISOString(),
-        }}
-      />
-    );
-    bus.emit("agent_loop_start", makeEvt("agent_loop_start"));
-    await wait(50);
-    expect(spinnerLine(lastFrame() ?? "")).toContain("effort: high");
-    unmount();
-  });
-
-  it("omits effort when modelSettings.effort is not set", async () => {
-    const bus = createEventBus();
-    const { lastFrame, unmount } = render(<App bus={bus} />);
-    bus.emit("agent_loop_start", makeEvt("agent_loop_start"));
-    await wait(50);
-    expect(spinnerLine(lastFrame() ?? "")).not.toContain("effort:");
+    const line = spinnerLine(lastFrame() ?? "");
+    expect(line).toContain(RUNNING_WORDS[0]); // "Starting…"
+    expect(line).not.toContain("(");
     unmount();
   });
 });
