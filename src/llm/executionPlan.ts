@@ -31,6 +31,13 @@ export type ExecutionPlan = {
    *  infrastructure error) so the premise could not be verified. steps MUST be [].
    *  Mutually exclusive with noChangeReason. */
   cannotVerifyReason?: string;
+  /** Set when the investigation found nothing to change AND the task itself was a
+   *  question — not a verified-false bug report (noChangeReason) and not a blocked
+   *  reproduce attempt (cannotVerifyReason). steps MUST be []. Declares SHAPE ONLY:
+   *  this is not the answer, which remains loop.summary -> ASSISTANT_FINAL, produced
+   *  post-execution by the read-only loop this shape permits. Mutually exclusive
+   *  with the other two. */
+  answerOnlyReason?: string;
 };
 
 /** True when the investigation verified the asserted problem does not exist.
@@ -43,6 +50,36 @@ export function isNoChangePlan(plan: ExecutionPlan): boolean {
  *  steps is empty and cannotVerifyReason explains the blockage. */
 export function isCannotVerifyPlan(plan: ExecutionPlan): boolean {
   return plan.steps.length === 0 && !!plan.cannotVerifyReason;
+}
+
+/** True when the task was a question and the investigation found nothing to change —
+ *  not a verified-false bug report (isNoChangePlan) and not a blocked reproduce
+ *  attempt (isCannotVerifyPlan). steps is empty and answerOnlyReason names what will
+ *  be answered read-only, not the answer itself. */
+export function isAnswerOnlyPlan(plan: ExecutionPlan): boolean {
+  return plan.steps.length === 0 && !!plan.answerOnlyReason;
+}
+
+export type PlanTerminalShape = "steps" | "no_change" | "cannot_verify" | "answer" | "unknown";
+
+/** The single discriminator every consumer branches on instead of a hand-rolled
+ *  ternary over the (now three) mutually-exclusive reason fields. "unknown" — steps
+ *  empty, no reason field at all — stays schema-REJECTED (superRefine below is
+ *  unchanged in that respect), so this arm is an unreachable tripwire for any
+ *  schema-validated plan: it can only fire if something built an ExecutionPlan-
+ *  shaped object without going through executionPlanSchema.parse. House rule 1 says
+ *  an unmatched case must be loud, not silently absorbed by whichever consumer runs
+ *  next — if this ever fires, that is itself the finding. Emits inline: a plan
+ *  classified "unknown" more than once (multiple consumers calling this on the same
+ *  plan) emits more than once — acceptable given this arm should never fire at all
+ *  under normal operation; not engineered around for that reason. */
+export function planTerminalShape(plan: ExecutionPlan): PlanTerminalShape {
+  if (plan.steps.length > 0) return "steps";
+  if (plan.noChangeReason) return "no_change";
+  if (plan.cannotVerifyReason) return "cannot_verify";
+  if (plan.answerOnlyReason) return "answer";
+  log("[zone-plan-unknown-terminal-shape]", JSON.stringify({ objective: plan.objective.slice(0, 80) }));
+  return "unknown";
 }
 
 const executionPlanSchema = z
@@ -65,23 +102,29 @@ const executionPlanSchema = z
     scopeNotes: z.string().optional(),
     noChangeReason: z.string().optional(),
     cannotVerifyReason: z.string().optional(),
+    answerOnlyReason: z.string().optional(),
   })
   .superRefine((data, ctx) => {
     const hasNoChange = !!data.noChangeReason;
     const hasCantVerify = !!data.cannotVerifyReason;
+    const hasAnswerOnly = !!data.answerOnlyReason;
+    const reasonsSet = [hasNoChange, hasCantVerify, hasAnswerOnly].filter(Boolean).length;
     if (data.steps.length === 0) {
-      // When steps is empty, exactly one of noChangeReason / cannotVerifyReason must be set.
-      if (!hasNoChange && !hasCantVerify) {
+      // When steps is empty, exactly one of noChangeReason / cannotVerifyReason /
+      // answerOnlyReason must be set — zero stays rejected, same as before this
+      // field existed; a hard rejection is the loudest response to a genuinely
+      // malformed model output.
+      if (reasonsSet === 0) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: "steps must be non-empty unless noChangeReason or cannotVerifyReason is set",
+          message: "steps must be non-empty unless noChangeReason, cannotVerifyReason, or answerOnlyReason is set",
           path: ["steps"],
         });
       }
-      if (hasNoChange && hasCantVerify) {
+      if (reasonsSet >= 2) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: "only one of noChangeReason / cannotVerifyReason may be set",
+          message: "at most one of noChangeReason / cannotVerifyReason / answerOnlyReason may be set",
           path: ["noChangeReason"],
         });
       }
@@ -91,11 +134,12 @@ const executionPlanSchema = z
   .transform((data): typeof data => {
     if (
       data.steps.length > 0 &&
-      (data.noChangeReason !== undefined || data.cannotVerifyReason !== undefined)
+      (data.noChangeReason !== undefined || data.cannotVerifyReason !== undefined || data.answerOnlyReason !== undefined)
     ) {
       const dropped = [
         data.noChangeReason !== undefined ? "noChangeReason" : null,
         data.cannotVerifyReason !== undefined ? "cannotVerifyReason" : null,
+        data.answerOnlyReason !== undefined ? "answerOnlyReason" : null,
       ]
         .filter((f): f is string => f !== null)
         .join(", ");
@@ -104,7 +148,7 @@ const executionPlanSchema = z
       // marker sink to intercept — the same defect 19c98c6a fixed for
       // [zone-plan-mode].
       log(`[zone-plan-salvaged] dropped ${dropped} (steps=${data.steps.length})`);
-      return { ...data, noChangeReason: undefined, cannotVerifyReason: undefined };
+      return { ...data, noChangeReason: undefined, cannotVerifyReason: undefined, answerOnlyReason: undefined };
     }
     return data;
   });
@@ -172,6 +216,7 @@ export function tryParseExecutionPlan(text: string): ExecutionPlan | null {
       ...(plan.scopeNotes ? { scopeNotes: plan.scopeNotes } : {}),
       ...(plan.noChangeReason ? { noChangeReason: plan.noChangeReason } : {}),
       ...(plan.cannotVerifyReason ? { cannotVerifyReason: plan.cannotVerifyReason } : {}),
+      ...(plan.answerOnlyReason ? { answerOnlyReason: plan.answerOnlyReason } : {}),
     };
   } catch {
     return null;
@@ -395,6 +440,7 @@ ${input.forceSteps
     ...(plan.scopeNotes ? { scopeNotes: plan.scopeNotes } : {}),
     ...(plan.noChangeReason ? { noChangeReason: plan.noChangeReason } : {}),
     ...(plan.cannotVerifyReason ? { cannotVerifyReason: plan.cannotVerifyReason } : {}),
+    ...(plan.answerOnlyReason ? { answerOnlyReason: plan.answerOnlyReason } : {}),
   };
 }
 

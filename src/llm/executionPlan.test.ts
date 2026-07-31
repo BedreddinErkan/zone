@@ -20,7 +20,7 @@ vi.mock("../utils/logger.js", () => ({
   log: mocks.log,
 }));
 
-import { generateExecutionPlan, tryParseExecutionPlan, isNoChangePlan, isCannotVerifyPlan, formatExecutionPlanForPrompt, buildApprovedPlanBlock, formatPlanRevisedNote, synthesizeMinimalPlan } from "./executionPlan.js";
+import { generateExecutionPlan, tryParseExecutionPlan, isNoChangePlan, isCannotVerifyPlan, isAnswerOnlyPlan, planTerminalShape, formatExecutionPlanForPrompt, buildApprovedPlanBlock, formatPlanRevisedNote, synthesizeMinimalPlan } from "./executionPlan.js";
 import type { ExecutionPlan } from "./executionPlan.js";
 
 function mockPlanResponse(plan: unknown) {
@@ -538,6 +538,59 @@ describe("S3: cannotVerifyReason / isCannotVerifyPlan", () => {
   });
 });
 
+describe("isAnswerOnlyPlan", () => {
+  it("returns true for empty-steps plan with answerOnlyReason", () => {
+    const plan = {
+      objective: "Explain X",
+      steps: [],
+      riskHints: [],
+      scopeSummary: "Answer only.",
+      answerOnlyReason: "The task is a question; nothing needs to change.",
+    };
+    expect(isAnswerOnlyPlan(plan)).toBe(true);
+  });
+
+  it("returns false for normal plan with steps", () => {
+    const plan = {
+      objective: "Add feature",
+      steps: [{ title: "Step 1", description: "Do it", filesLikely: ["src/x.ts"] }],
+      riskHints: [],
+      scopeSummary: "Feature.",
+    };
+    expect(isAnswerOnlyPlan(plan)).toBe(false);
+  });
+});
+
+describe("planTerminalShape", () => {
+  const STEP = { title: "Step", description: "Do the thing", filesLikely: ["src/x.ts"] };
+  const BASE = { objective: "X", riskHints: [], scopeSummary: "S" };
+
+  it('returns "steps" for a plan with real steps', () => {
+    expect(planTerminalShape({ ...BASE, steps: [STEP] })).toBe("steps");
+  });
+
+  it('returns "no_change" for an empty-steps plan with noChangeReason', () => {
+    expect(planTerminalShape({ ...BASE, steps: [], noChangeReason: "exits 0" })).toBe("no_change");
+  });
+
+  it('returns "cannot_verify" for an empty-steps plan with cannotVerifyReason', () => {
+    expect(planTerminalShape({ ...BASE, steps: [], cannotVerifyReason: "did not run" })).toBe("cannot_verify");
+  });
+
+  it('returns "answer" for an empty-steps plan with answerOnlyReason', () => {
+    expect(planTerminalShape({ ...BASE, steps: [], answerOnlyReason: "it's a question" })).toBe("answer");
+  });
+
+  it('returns "unknown" and emits [zone-plan-unknown-terminal-shape] for an empty-steps plan with no reason field at all', () => {
+    // Only reachable via a hand-constructed object bypassing executionPlanSchema.parse —
+    // the schema itself still rejects this combination (superRefine, unchanged).
+    const result = planTerminalShape({ ...BASE, steps: [] });
+    expect(result).toBe("unknown");
+    const calls = mocks.log.mock.calls.map((c: unknown[]) => String(c[0]));
+    expect(calls.some((s: string) => s.includes("[zone-plan-unknown-terminal-shape]"))).toBe(true);
+  });
+});
+
 // Schema salvage — superRefine branch 3 dropped, transform strips reason fields
 describe("executionPlanSchema salvage — steps + reason", () => {
   const STEP = { title: "Step", description: "Do the thing", filesLikely: ["src/x.ts"] };
@@ -603,6 +656,34 @@ describe("executionPlanSchema salvage — steps + reason", () => {
 
   it("regression: empty steps + both reasons → still null (branch 2 preserved)", () => {
     expect(tryParseExecutionPlan(wrapJson({ objective: "X", steps: [], riskHints: [], scopeSummary: "S", noChangeReason: "ok", cannotVerifyReason: "blocked" }))).toBeNull();
+  });
+
+  it("empty steps + noChangeReason AND answerOnlyReason together → still null (2-of-3 rejected)", () => {
+    expect(tryParseExecutionPlan(wrapJson({ objective: "X", steps: [], riskHints: [], scopeSummary: "S", noChangeReason: "ok", answerOnlyReason: "it's a question" }))).toBeNull();
+  });
+
+  it("generateExecutionPlan: steps + answerOnlyReason → parses without throw, field stripped", async () => {
+    mockPlanResponse({
+      objective: "Explain X",
+      steps: [STEP],
+      riskHints: [],
+      scopeSummary: "Explain.",
+      answerOnlyReason: "The task is a question.",
+    });
+
+    const plan = await generateExecutionPlan({ task: "explain", repoSummary: "", relevantFiles: [] });
+
+    expect(plan.steps).toHaveLength(1);
+    expect(plan.answerOnlyReason).toBeUndefined();
+  });
+
+  it("tryParseExecutionPlan: steps + answerOnlyReason → salvaged plan (not null)", () => {
+    const result = tryParseExecutionPlan(
+      wrapJson({ objective: "Explain", steps: [STEP], riskHints: [], scopeSummary: "S.", answerOnlyReason: "it's a question" })
+    );
+    expect(result).not.toBeNull();
+    expect(result!.answerOnlyReason).toBeUndefined();
+    expect(result!.steps).toHaveLength(1);
   });
 
   it("regression: clean plan → unchanged, no salvage marker emitted", () => {
