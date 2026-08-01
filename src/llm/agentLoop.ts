@@ -5361,6 +5361,10 @@ Example:
     }
     return "";
   })();
+  // Mirrors the derivation at the system-prompt call site (input.executionPlan ?
+  // isAnswerOnlyPlan(...) : false) — not hoisted, since that site is the only other
+  // place this run shape's answerOnly is needed before now.
+  const answerOnly = input.executionPlan ? isAnswerOnlyPlan(input.executionPlan) : false;
   try {
     const finalAssessmentModel = escalatedModel ?? getModelName("high", client.provider, requestCtx?.modelOverride);
     const assessmentResponse = await client.createChatCompletion({
@@ -5371,16 +5375,21 @@ Example:
           role: "user",
           content:
             `You have reached the maximum number of iterations${grantedBonus}. ` +
-            // P3: output reduction - cap the fallback assessment summary too.
-            "Provide a 60-80 word final summary and include exactly one " +
-            "[ZONE_VERIFICATION: <reason>] tag. " +
-            "Do not use tables or recap details already visible in the diff. " +
-            "Choose: tests_passed, tests_skipped_no_infra, tests_inconclusive, " +
-            "tests_failed_unrelated, tests_failed_by_patch, or no_verification_attempted. " +
-            "Use tests_inconclusive if tests failed due to environment issues " +
-            "(spawn errors, ENOENT, missing script, missing deps). " +
-            "Use tests_failed_by_patch ONLY if your patch caused the failure." +
-            fwHint,
+            (answerOnly
+              ? "Provide a 60-80 word final answer to the user's question, from what you found " +
+                "before running out of iterations. Do not use tables or recap details already " +
+                "visible above. Do NOT include a [ZONE_VERIFICATION] tag — this run answers a " +
+                "question and changed nothing, so there is nothing to verify."
+              : // P3: output reduction - cap the fallback assessment summary too.
+                "Provide a 60-80 word final summary and include exactly one " +
+                "[ZONE_VERIFICATION: <reason>] tag. " +
+                "Do not use tables or recap details already visible in the diff. " +
+                "Choose: tests_passed, tests_skipped_no_infra, tests_inconclusive, " +
+                "tests_failed_unrelated, tests_failed_by_patch, or no_verification_attempted. " +
+                "Use tests_inconclusive if tests failed due to environment issues " +
+                "(spawn errors, ENOENT, missing script, missing deps). " +
+                "Use tests_failed_by_patch ONLY if your patch caused the failure." +
+                fwHint),
         },
       ],
       max_tokens: getMaxOutputTokens(finalAssessmentModel),

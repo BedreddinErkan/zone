@@ -81,6 +81,18 @@ const ANSWER_ONLY_PLAN = {
   answerOnlyReason: "The task is a question; nothing needs to change.",
 };
 
+/** Non-empty steps, no answerOnlyReason — the CONTRAST fixture for 2a: a normal plan driven
+ *  to the same exhaustion tail, so the assessment call's content can be compared directly
+ *  against ANSWER_ONLY_PLAN's with nothing else differing. */
+const NORMAL_PLAN = {
+  objective: "Fix the marker sink",
+  steps: [{ title: "Fix it", description: "Patch the sink.", filesLikely: ["src/index.ts"] }],
+  scopeSummary: "Fix the marker sink",
+  riskHints: [],
+};
+
+type CapturedMessage = { role: string; content: unknown };
+
 /** Distinct filePath per call: four identical tool+args hashes trip the loop detector
  *  (TERMINATE_THRESHOLD=4) and would end the run as "loop_detected" long before the
  *  budget is reached — a different tail than the one under test. */
@@ -129,6 +141,20 @@ function markerPayload(name: string): Record<string, unknown> | undefined {
 const exhaustionMarker = () => markerPayload("[zone-answer-only-budget-exhausted]");
 const promotionMarker = () => markerPayload("[zone-archetype-promoted]");
 
+/** Overwritten on every createChatCompletion call, so once the run has finished this holds
+ *  the LAST call made — the assessment call, since it fires exactly once after the
+ *  iteration loop exhausts and nothing calls createChatCompletion after it (traced through
+ *  agentLoop.ts's post-loop finalizeRun and runLlmPatchFlow's post-loop handling of
+ *  terminationReason "token_budget_exceeded": both are pure/local from there, neither
+ *  issues another completion). ASSESSMENT_CALL_PREFIX is the positive control that proves
+ *  this — asserted in both 2a tests before the tag-instruction assertion, so an absent tag
+ *  means "gated", not "captured the wrong call".
+ */
+let lastMessages: CapturedMessage[] = [];
+const ASSESSMENT_CALL_PREFIX = "You have reached the maximum number of iterations";
+const lastCallContent = () =>
+  String((lastMessages[lastMessages.length - 1] as CapturedMessage | undefined)?.content ?? "");
+
 beforeEach(() => {
   delete process.env["ZONE_FORCE_FLOW"];
   vi.clearAllMocks();
@@ -144,11 +170,13 @@ beforeEach(() => {
   planPatchPreviewWithLlmMock.mockResolvedValue({ patches: [] });
   classifyTaskMock.mockResolvedValue(classification());
 
+  lastMessages = [];
   // mockImplementation, not ...Once: the loop must never complete naturally, so it
   // falls through to the max-iterations tail rather than the natural_completion one.
   let call = 0;
-  mocks.createChatCompletion.mockImplementation(async () => {
+  mocks.createChatCompletion.mockImplementation(async (params: { messages: CapturedMessage[] }) => {
     call += 1;
+    lastMessages = params.messages;
     return makeReadFileResponse(`src/probe-${call}.ts`);
   });
 
@@ -196,6 +224,43 @@ describe("PROBE: an answer-only run's real exhaustion, through the production ca
     // a general mechanism and belongs in its own pass. Asserted so the gap between the
     // nominal budget and the real ceiling is pinned rather than assumed away.
     expect(marker?.["observedIterCount"]).toBe(15);
+
+    // Positive control FIRST: proves lastMessages captured the assessment call specifically
+    // — not some other completion that might fire after it — before the tag assertion below
+    // is allowed to mean anything. Without this, a wiring change that made lastMessages hold
+    // a DIFFERENT call would make not.toContain("[ZONE_VERIFICATION") pass vacuously.
+    expect(lastCallContent()).toContain(ASSESSMENT_CALL_PREFIX);
+
+    // 2a's actual target: the max-iterations wrapup must not ask an answer-only run to
+    // verify tests it never ran. "[ZONE_VERIFICATION: <reason>]" (with the colon+reason),
+    // not the bare "[ZONE_VERIFICATION" prefix: the answer-only branch's own prohibition
+    // text ("Do NOT include a [ZONE_VERIFICATION] tag") contains the bare prefix, so
+    // asserting on that would match this test's own production text against itself — the
+    // same collision Task 3 hit with "## What changed" in ANSWER_SUMMARY's FORBIDDEN list.
+    expect(lastCallContent()).not.toContain("[ZONE_VERIFICATION: <reason>]");
+  });
+
+  it("CONTRAST: a normal exhausted run still gets the verification tag instruction", async () => {
+    // Same harness, same never-completing mock, only the plan's shape differs — isolating
+    // the assertion to the plan rather than to anything else about this run.
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    await runLlmPatchFlow({
+      task: "why does the marker sink write where it does",
+      repoPath: "/tmp/fake-repo",
+      runId: "run-normal-probe",
+      onProgress: () => undefined,
+      abortSignal: new AbortController().signal,
+      userApiKey: "sk-fake",
+      provider: "anthropic",
+      mode: "patch",
+      preGeneratedPlan: NORMAL_PLAN,
+    });
+
+    // Same positive control as above, for the same reason: prove the captured call is the
+    // assessment call before trusting what it does or doesn't contain.
+    expect(lastCallContent()).toContain(ASSESSMENT_CALL_PREFIX);
+    // Same discriminator as the answer-only test's not.toContain, for a direct comparison.
+    expect(lastCallContent()).toContain("[ZONE_VERIFICATION: <reason>]");
   });
 
   it("CONTRAST: the readonly tail yields max_iterations, and only a mode this path never has reaches it", async () => {
