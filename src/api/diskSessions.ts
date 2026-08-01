@@ -1,4 +1,5 @@
 import { promises as fs } from "node:fs";
+import nodeFs from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -37,6 +38,39 @@ function sessionFilePath(filename: string): string {
 function makeFilename(sessionId: string): string {
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
   return `${ts}-${sessionId.slice(0, 8)}.json`;
+}
+
+/**
+ * Synchronous sibling of saveSession, for the signal path ONLY.
+ *
+ * Why sync exists: Ink installs signal-exit (ink.js:238), whose listener force-kills the
+ * process when `process.listeners(sig).length === emitter.count` (signal-exit/index.js:121)
+ * — a comparison against a count of foreign subscribers we do not control, one of which
+ * (restore-cursor) subscribes lazily when the cursor is hidden. When that guard matches,
+ * `process.kill(pid, sig)` fires and any in-flight async write dies with the process. Four
+ * consecutive dogfood runs lost their session that way; SIGINT survived only when the count
+ * happened not to match. Durability at process death cannot depend on that.
+ *
+ * `import nodeFs from "node:fs"` deliberately, not named imports: the test-home guard
+ * intercepts the fs write surface by property assignment, and a named import snapshots the
+ * binding and makes the guard silently inert (src/test/homeWriterImportStyle.test.ts fails
+ * the suite when that happens).
+ *
+ * The normal exit path keeps the async saveSession — it awaits waitUntilExit() with nothing
+ * terminating underneath it, so blocking the event loop there would buy nothing.
+ */
+export function saveSessionSync(_cwd: string, session: DiskSession): string {
+  const dir = sessionsDir();
+  nodeFs.mkdirSync(dir, { recursive: true });
+  const filename = makeFilename(session.sessionId);
+  const p = sessionFilePath(filename);
+  const tmp = `${p}.tmp`;
+  // writeFile + rename is the whole of durability here; mkdir is idempotent and chmod is
+  // cosmetic, so only these two must complete before the handler returns.
+  nodeFs.writeFileSync(tmp, JSON.stringify(session, null, 2), "utf-8");
+  nodeFs.renameSync(tmp, p);
+  try { nodeFs.chmodSync(p, 0o600); } catch { /* best effort */ }
+  return filename;
 }
 
 export async function saveSession(_cwd: string, session: DiskSession): Promise<string> {

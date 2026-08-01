@@ -19,7 +19,7 @@ import { createEventBus } from "../eventBus.js";
 import { applyStdoutInterception, applyStderrInterception } from "./stdoutShield.js";
 import type { LlmPatchProgressUpdate } from "../../core/agentLifecycleEvents.js";
 import { loadDiskTrust, diskTrustPrefixes } from "../../api/diskTrust.js";
-import { saveSession, pruneOldSessions, loadLastSession, type DiskSession } from "../../api/diskSessions.js";
+import { saveSession, saveSessionSync, pruneOldSessions, loadLastSession, type DiskSession } from "../../api/diskSessions.js";
 import { latestResumableEnvelope, listResumableEnvelopes, stampEnvelopeStatus, buildResumeContextBlock, reconcileEnvelopeStaging, envelopeKeyFor } from "../../api/diskRunEnvelope.js";
 import { emitAskUserRefused } from "../../llm/loopTelemetry.js";
 import { buildResumeFlowInput } from "../dispatch.js";
@@ -556,14 +556,18 @@ export interface FatalSignalDeps {
   /** Read at signal time, not registration time — state is null until React mounts. */
   getState: () => { transcript: unknown[]; armedMcpManager?: { killAllSync(): void } } | null;
   buildSession: (state: never) => unknown;
-  saveSession: (cwd: string, session: never) => Promise<unknown>;
-  pruneOldSessions: (cwd: string) => Promise<unknown>;
+  /** SYNC by design — see saveSessionSync's comment and the guard note below. */
+  saveSessionSync: (cwd: string, session: never) => unknown;
   stopRemoteControlServer: (v: boolean) => unknown;
   unmount: () => void;
   stampEnvelopeOnExit: () => void;
   exit: (code: number) => void;
   on?: (signal: string, handler: () => void) => void;
   cwd?: () => string;
+  /** Injectable for test; defaults to the real marker sink. */
+  log?: (name: string, payload: string) => void;
+  /** Injectable for test; defaults to reading the live process. */
+  readGuard?: (signal: string) => { listeners: number; subscriberCount: number | null };
 }
 
 /**
@@ -579,13 +583,47 @@ export interface FatalSignalDeps {
  * skipped the save entirely — the exact failure this exists to fix. Wrapping it changes
  * SIGINT and SIGTERM too, deliberately: today a throw there loses the session the same
  * way, on every signal rather than only this one.
+ *
+ * The save is SYNCHRONOUS and pruneOldSessions is NOT on this path. Ink installs
+ * signal-exit (ink.js:238), whose listener force-kills via process.kill(pid, sig) when
+ * `process.listeners(sig).length === emitter.count` (signal-exit/index.js:121) — a
+ * comparison against a count of foreign subscribers, one of which (restore-cursor)
+ * subscribes lazily when the cursor is hidden. When it matches, any in-flight async write
+ * dies with the process. Prune is maintenance, not durability; it stays on the normal exit
+ * path (below, after waitUntilExit) where the cap is still enforced, and is dropped from
+ * here so no I/O sits between the write and the exit.
+ *
+ * [zone-signal-exit-guard] records both sides of that comparison at signal time, because
+ * without it a passing run cannot be told apart from a lucky one: a run where the guard
+ * did NOT match would have survived on the old async path too and verifies nothing.
  */
 export function registerFatalSignalHandlers(deps: FatalSignalDeps): void {
   const on = deps.on ?? ((sig, h) => { process.on(sig as NodeJS.Signals, h); });
   const cwd = deps.cwd ?? (() => process.cwd());
+  const emitLog = deps.log ?? log;
+  const readGuard = deps.readGuard ?? ((sig: string) => ({
+    listeners: process.listeners(sig as NodeJS.Signals).length,
+    // signal-exit stashes its emitter on this process global (signal-exit/index.js:36-42),
+    // so the real subscriber count is readable rather than inferred.
+    subscriberCount:
+      (process as unknown as { __signal_exit_emitter__?: { count?: number } })
+        .__signal_exit_emitter__?.count ?? null,
+  }));
 
   for (const [signal, code] of Object.entries(FATAL_SIGNAL_EXIT_CODES)) {
     on(signal, () => {
+      const guard = readGuard(signal);
+      emitLog("[zone-signal-exit-guard]", JSON.stringify({
+        signal,
+        listeners: guard.listeners,
+        subscriberCount: guard.subscriberCount,
+        // The branch of signal-exit's guard this run actually exercised. "kills" is the
+        // one that proves the sync write mattered; "stands_down" would have survived the
+        // old async path too.
+        branch: guard.subscriberCount !== null && guard.listeners === guard.subscriberCount
+          ? "kills"
+          : "stands_down",
+      }));
       deps.getState()?.armedMcpManager?.killAllSync();
       void deps.stopRemoteControlServer(false);
       try {
@@ -594,13 +632,11 @@ export function registerFatalSignalHandlers(deps: FatalSignalDeps): void {
       deps.stampEnvelopeOnExit();
       const s = deps.getState();
       if (s && s.transcript.length > 0) {
-        void deps.saveSession(cwd(), deps.buildSession(s as never) as never)
-          .then(() => deps.pruneOldSessions(cwd()))
-          .catch(() => {})
-          .finally(() => deps.exit(code));
-      } else {
-        deps.exit(code);
+        try {
+          deps.saveSessionSync(cwd(), deps.buildSession(s as never) as never);
+        } catch { /* best effort — an exit must still happen */ }
       }
+      deps.exit(code);
     });
   }
 }
@@ -837,8 +873,7 @@ export async function runTui(
   registerFatalSignalHandlers({
     getState: () => storeCapture.state as never,
     buildSession: (s) => buildDiskSession(s),
-    saveSession: (cwd, session) => saveSession(cwd, session),
-    pruneOldSessions: (cwd) => pruneOldSessions(cwd),
+    saveSessionSync: (cwd, session) => saveSessionSync(cwd, session),
     stopRemoteControlServer,
     unmount: () => instance?.unmount(),
     stampEnvelopeOnExit,
