@@ -292,6 +292,38 @@ export function emitReadOnlySuppressionMismatch(data: ReadOnlyPipelineSuppressed
 }
 
 // ---------------------------------------------------------------------------
+// emitPromptBranch — [zone-prompt-branch]
+// Which arm of the archetype ternary actually assembled, for EVERY run.
+//
+// Deliberately a separate marker rather than widening the gate on
+// [zone-readonly-pipeline-suppressed] above, which would have been the smaller
+// diff: that marker means "suppression happened", promptBranch is a field ON
+// that event, and its sibling [zone-readonly-suppression-mismatch] fires
+// whenever promptBranch !== "default" INSIDE that gate — as a drift detector
+// on the invariant suppression ⇒ planApproved ⇒ default branch. Widening the
+// gate to runs that never suppressed would make the mismatch marker fire on
+// every one of them: a false positive by construction, in the one detector
+// built to catch this exact class of drift.
+//
+// Motivating gap: an answer-only plan (steps:[]) leaves hasApprovedSteps false,
+// so readOnlyPipelineSuppressed is false, so NO prompt-branch telemetry existed
+// for that shape at all — which is how it ran three measured passes against a
+// patch contract before anyone noticed. Ungated here for the same reason: a
+// branch decision that only reports for some shapes is how the next one hides.
+// ---------------------------------------------------------------------------
+
+export interface PromptBranchData {
+  runId: string | null | undefined;
+  archetype: string | null;
+  planApproved: boolean;
+  promptBranch: PromptBranch;
+}
+
+export function emitPromptBranch(data: PromptBranchData): void {
+  log("[zone-prompt-branch]", JSON.stringify(data));
+}
+
+// ---------------------------------------------------------------------------
 // emitCoachingRule — [zone-coaching-rule]
 // Emitted when the test-failure scope-check coaching rule fires.
 // ---------------------------------------------------------------------------

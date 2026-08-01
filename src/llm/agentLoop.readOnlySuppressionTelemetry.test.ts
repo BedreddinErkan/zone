@@ -173,4 +173,47 @@ describe("read-only suppression telemetry — outcome, not intent", () => {
     expect(mismatch).toBeDefined();
     expect(mismatch!.promptBranch).toBe("investigation");
   });
+
+  /**
+   * [zone-prompt-branch] — the branch decision, reported for EVERY run.
+   *
+   * The gap this closes: readOnlyPipelineSuppressed requires hasApprovedSteps, which
+   * is false for an answer-only plan (steps:[]), so that shape emitted no
+   * prompt-branch telemetry at all — which is how it ran three measured passes
+   * against a patch contract unnoticed. Deliberately NOT a widening of the
+   * suppression gate: its sibling mismatch marker fires on promptBranch !==
+   * "default" inside that gate, so widening would make it a false positive on every
+   * such run.
+   */
+  it("fires for a run that never suppressed — the case the suppression gate cannot see", async () => {
+    mocks.createChatCompletion.mockImplementationOnce(async () => makeDoneResponse());
+
+    const ANSWER_ONLY_PLAN: ExecutionPlan = {
+      objective: "Explain the loop detector",
+      steps: [],
+      riskHints: [],
+      scopeSummary: "Explain the loop detector",
+      answerOnlyReason: "Deliberate, documented behavior; nothing to change.",
+    };
+
+    await runAgentLoop({
+      task: "why does the loop detector fire on 4 identical hashes",
+      repoPath,
+      // "debug" is production's MEASURED archetype for this shape, not a forced
+      // "investigation" — the fixture R5 disqualified.
+      taskClassification: { ...classification("investigation"), archetype: "debug" },
+      executionPlan: ANSWER_ONLY_PLAN,
+      planApproved: false,
+      maxIterationsOverride: 3,
+    });
+
+    const [evt] = markerCalls("[zone-prompt-branch]");
+    expect(evt).toBeDefined();
+    // Pre-Task-2 baseline: archetype "debug" matches neither ternary arm.
+    expect(evt!.promptBranch).toBe("default");
+
+    // The suppression pair stays silent — this run never suppressed, and the new
+    // marker must not have been wired by relaxing their gate.
+    expect(markerCalls("[zone-readonly-pipeline-suppressed]")).toHaveLength(0);
+  });
 });

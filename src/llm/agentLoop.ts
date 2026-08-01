@@ -36,6 +36,7 @@ import {
   emitTerminalCallFailed as emitTerminalCallFailedTelemetry,
   emitReadOnlyPipelineSuppressed,
   emitReadOnlySuppressionMismatch,
+  emitPromptBranch,
   type PromptBranch,
 } from "./loopTelemetry.js";
 import { getAndClearToolResultSummary } from "./toolResultSizeTracker.js";
@@ -2897,12 +2898,25 @@ Example:
   // by checking for the same QA_HEADER/INVESTIGATION_HEADER constants the ternary
   // itself builds from — not a re-evaluation of the planApproved/archetype
   // condition that chose it.
+  // Derived once, above the suppression gate, and shared by both markers: the two
+  // must never disagree about which branch fired, and a second derivation is how
+  // they would. Scans the same exported header constants the ternary builds from.
+  const promptBranch: PromptBranch = systemContent.includes(QA_HEADER)
+    ? "question"
+    : systemContent.includes(INVESTIGATION_HEADER)
+      ? "investigation"
+      : "default";
+
+  // Ungated — every run reports its branch. See emitPromptBranch's own comment for
+  // why this is a separate marker rather than a widened gate below.
+  emitPromptBranch({
+    runId: input.runId ?? null,
+    archetype: input.taskClassification?.archetype ?? null,
+    planApproved: input.planApproved === true,
+    promptBranch,
+  });
+
   if (input.readOnlyPipelineSuppressed) {
-    const promptBranch: PromptBranch = systemContent.includes(QA_HEADER)
-      ? "question"
-      : systemContent.includes(INVESTIGATION_HEADER)
-        ? "investigation"
-        : "default";
     const telemetryData = {
       runId: input.runId ?? null,
       archetype: input.taskClassification?.archetype ?? null,
