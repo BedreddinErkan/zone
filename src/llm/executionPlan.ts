@@ -200,6 +200,40 @@ function normalizeExecutionPlanSteps(
 
 /** Parse the last ```json block in `text` as an ExecutionPlan.
  *  Returns null if no block found, JSON is invalid, or schema validation fails. */
+/** Advisory caps stated to the model in BOTH plan prompts — planInvestigation.ts:101-102
+ *  and this file's own :320/:340 — and enforced in NEITHER schema (scopeSummary and
+ *  scopeNotes are bare z.string()). Deliberately not turned into z.max(): these are the
+ *  only uncapped prose carriers a plan has, and truncating one would clamp an answer
+ *  rather than measure it. The marker below records the divergence instead. */
+const SCOPE_SUMMARY_ADVISORY_CAP = 160;
+const SCOPE_NOTES_ADVISORY_CAP = 200;
+
+/**
+ * Emits one marker per field that overran the cap its prompt asked for. Called from both
+ * sites that build a plan out of model output; synthesizeMinimalPlan is exempt by
+ * construction (it hard-slices scopeSummary to 160 and never sets scopeNotes).
+ *
+ * Observed motivating case: a real answer-only run produced ~1,050 chars of scopeNotes
+ * against a stated 200 — >5x — while the model followed every other instruction in the
+ * same prompt. Whether that is the model ignoring the cap or the cap being wrong for the
+ * job scopeNotes actually does is the question this measures.
+ */
+function emitAdvisoryCapOverruns(plan: ExecutionPlan): void {
+  const checks: Array<{ field: string; value: string | undefined; cap: number }> = [
+    { field: "scopeSummary", value: plan.scopeSummary, cap: SCOPE_SUMMARY_ADVISORY_CAP },
+    { field: "scopeNotes", value: plan.scopeNotes, cap: SCOPE_NOTES_ADVISORY_CAP },
+  ];
+  for (const { field, value, cap } of checks) {
+    if (typeof value === "string" && value.length > cap) {
+      log("[zone-plan-field-over-advisory-cap]", JSON.stringify({
+        field,
+        length: value.length,
+        cap,
+      }));
+    }
+  }
+}
+
 export function tryParseExecutionPlan(text: string): ExecutionPlan | null {
   try {
     const blocks = [...text.matchAll(/```json\s*([\s\S]*?)\s*```/g)];
@@ -208,7 +242,7 @@ export function tryParseExecutionPlan(text: string): ExecutionPlan | null {
     const parsed: unknown = JSON.parse(inner);
     const plan = executionPlanSchema.parse(parsed);
     const steps = normalizeExecutionPlanSteps(plan.steps);
-    return {
+    const result: ExecutionPlan = {
       objective: plan.objective,
       steps,
       riskHints: plan.riskHints,
@@ -218,6 +252,8 @@ export function tryParseExecutionPlan(text: string): ExecutionPlan | null {
       ...(plan.cannotVerifyReason ? { cannotVerifyReason: plan.cannotVerifyReason } : {}),
       ...(plan.answerOnlyReason ? { answerOnlyReason: plan.answerOnlyReason } : {}),
     };
+    emitAdvisoryCapOverruns(result);
+    return result;
   } catch {
     return null;
   }
@@ -433,7 +469,7 @@ ${input.forceSteps
 
   const normalizedSteps = normalizeExecutionPlanSteps(plan.steps);
 
-  return {
+  const result: ExecutionPlan = {
     objective: plan.objective,
     steps: normalizedSteps,
     riskHints: plan.riskHints,
@@ -443,6 +479,8 @@ ${input.forceSteps
     ...(plan.cannotVerifyReason ? { cannotVerifyReason: plan.cannotVerifyReason } : {}),
     ...(plan.answerOnlyReason ? { answerOnlyReason: plan.answerOnlyReason } : {}),
   };
+  emitAdvisoryCapOverruns(result);
+  return result;
 }
 
 /**

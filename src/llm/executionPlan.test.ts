@@ -717,6 +717,46 @@ describe("executionPlanSchema salvage — steps + reason", () => {
   });
 });
 
+describe("[zone-plan-field-over-advisory-cap]", () => {
+  // Local copies — the sibling describes each scope their own; none is module-level.
+  const STEP = { title: "Step", description: "Do the thing", filesLikely: ["src/x.ts"] };
+  function wrapJson(obj: unknown): string {
+    return "```json\n" + JSON.stringify(obj) + "\n```";
+  }
+
+  function overrunCalls(): Array<Record<string, unknown>> {
+    return mocks.log.mock.calls
+      .filter((c: unknown[]) => c[0] === "[zone-plan-field-over-advisory-cap]")
+      .map((c: unknown[]) => JSON.parse(c[1] as string) as Record<string, unknown>);
+  }
+
+  it("fires for scopeNotes past its 200-char advisory cap, carrying field/length/cap", () => {
+    const notes = "n".repeat(1050); // the length a real answer-only run actually produced
+    tryParseExecutionPlan(
+      wrapJson({ objective: "X", steps: [STEP], riskHints: [], scopeSummary: "S", scopeNotes: notes })
+    );
+    expect(overrunCalls()).toHaveLength(1);
+    expect(overrunCalls()[0]).toMatchObject({ field: "scopeNotes", length: 1050, cap: 200 });
+  });
+
+  it("fires for scopeSummary past its own 160-char cap", () => {
+    tryParseExecutionPlan(
+      wrapJson({ objective: "X", steps: [STEP], riskHints: [], scopeSummary: "s".repeat(161) })
+    );
+    expect(overrunCalls()[0]).toMatchObject({ field: "scopeSummary", length: 161, cap: 160 });
+  });
+
+  it("stays silent when both fields are within their caps — the cap is the trigger, not the field's presence", () => {
+    tryParseExecutionPlan(
+      wrapJson({
+        objective: "X", steps: [STEP], riskHints: [],
+        scopeSummary: "s".repeat(160), scopeNotes: "n".repeat(200), // exactly at cap, not over
+      })
+    );
+    expect(overrunCalls()).toHaveLength(0);
+  });
+});
+
 describe("synthesizeMinimalPlan — [zone-plan-synthesized]", () => {
   function synthesizedCalls(): Array<Record<string, unknown>> {
     return mocks.log.mock.calls
