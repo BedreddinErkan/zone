@@ -2962,7 +2962,17 @@ export async function executeTool(
             const abs = path.join(repoPath, rel);
             const staged = stagedRead(input?.stagingFiles, abs);
             text = staged !== null ? staged : fs.readFileSync(abs, "utf8");
-          } catch { continue; }
+          } catch (err) {
+            const code = (err as NodeJS.ErrnoException).code;
+            const message = (err as NodeJS.ErrnoException).message || `${code ?? "unknown error"}`;
+            log("[zone-search-in-files-read-error]", JSON.stringify({
+              filePath: rel,
+              code: code ?? null,
+              message,
+              outputMode,
+            }));
+            continue;
+          }
           if (text.split(/\r?\n/).some((l) => matcher(l))) matchedFiles.push(rel);
         }
         const body = matchedFiles.length === 0 ? "(no matches)" : matchedFiles.join("\n");
@@ -2984,7 +2994,17 @@ export async function executeTool(
           const searchAbs = path.join(repoPath, rel);
           const stagedSearch = stagedRead(input?.stagingFiles, searchAbs);
           text = stagedSearch !== null ? stagedSearch : fs.readFileSync(searchAbs, "utf8");
-        } catch { continue; }
+        } catch (err) {
+          const code = (err as NodeJS.ErrnoException).code;
+          const message = (err as NodeJS.ErrnoException).message || `${code ?? "unknown error"}`;
+          log("[zone-search-in-files-read-error]", JSON.stringify({
+            filePath: rel,
+            code: code ?? null,
+            message,
+            outputMode,
+          }));
+          continue;
+        }
 
         const lines = text.split(/\r?\n/);
         const fileMatchLines: number[] = [];
