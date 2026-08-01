@@ -259,7 +259,7 @@ export function emitWriteCapabilityAbsent(data: WriteCapabilityAbsentData): void
 // that chose it.
 // ---------------------------------------------------------------------------
 
-export type PromptBranch = "question" | "investigation" | "default";
+export type PromptBranch = "question" | "investigation" | "answer_only" | "default";
 
 export interface ReadOnlyPipelineSuppressedData {
   runId: string | null | undefined;

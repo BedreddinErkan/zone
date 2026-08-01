@@ -209,11 +209,72 @@ describe("read-only suppression telemetry — outcome, not intent", () => {
 
     const [evt] = markerCalls("[zone-prompt-branch]");
     expect(evt).toBeDefined();
-    // Pre-Task-2 baseline: archetype "debug" matches neither ternary arm.
-    expect(evt!.promptBranch).toBe("default");
+    expect(evt!.promptBranch).toBe("answer_only");
 
     // The suppression pair stays silent — this run never suppressed, and the new
     // marker must not have been wired by relaxing their gate.
     expect(markerCalls("[zone-readonly-pipeline-suppressed]")).toHaveLength(0);
+  });
+
+  /**
+   * The branch is chosen from the approved PLAN's shape, not from a re-classification
+   * of the task string. Keyed on archetype "debug" throughout — production's measured
+   * value for this shape. A forced "investigation" would be R5's disqualified fixture:
+   * it would pass against a branch production never selects.
+   */
+  it("an answer-only plan gets the answer branch even though the archetype is 'debug'", async () => {
+    let messages: CapturedMessage[] = [];
+    mocks.createChatCompletion.mockImplementationOnce(async (params: { messages: CapturedMessage[] }) => {
+      messages = params.messages;
+      return makeDoneResponse();
+    });
+
+    await runAgentLoop({
+      task: "why does the loop detector fire on 4 identical hashes",
+      repoPath,
+      taskClassification: { ...classification("investigation"), archetype: "debug" },
+      executionPlan: {
+        objective: "Explain the loop detector",
+        steps: [],
+        riskHints: [],
+        scopeSummary: "Explain the loop detector",
+        answerOnlyReason: "Deliberate, documented behavior; nothing to change.",
+      },
+      planApproved: false,
+      maxIterationsOverride: 3,
+    });
+
+    const systemText = String(messages.find((m) => m.role === "system")!.content);
+    expect(systemText).toContain("ANSWER MODE (read-only, plan approved)");
+    // The two else-arm blocks this shape was measured running against, now absent.
+    expect(systemText).not.toContain("BREVITY RULES");
+    expect(systemText).not.toContain("EFFICIENCY CONTRACT");
+    // NOT asserted, and deliberately so: `PATCH RULES` is appended OUTSIDE the archetype
+    // ternary (it follows the ternary's close), so it reaches every branch — the existing
+    // question and investigation arms included. Switching the branch cannot remove it, and
+    // gating it here would change those two shapes, which this pass does not measure.
+    // Recorded as an open item instead.
+  });
+
+  it("CONTRAST: a 'debug' run with a normal stepped plan still gets the patch branch", async () => {
+    let messages: CapturedMessage[] = [];
+    mocks.createChatCompletion.mockImplementationOnce(async (params: { messages: CapturedMessage[] }) => {
+      messages = params.messages;
+      return makeDoneResponse();
+    });
+
+    // Same archetype, same planApproved — only the plan's shape differs. That is what
+    // makes the assertion above about the PLAN rather than about "debug".
+    await runAgentLoop({
+      task: "fix the thing",
+      repoPath,
+      taskClassification: { ...classification("investigation"), archetype: "debug" },
+      executionPlan: FIXTURE_PLAN,
+      planApproved: false,
+      maxIterationsOverride: 3,
+    });
+
+    const systemText = String(messages.find((m) => m.role === "system")!.content);
+    expect(systemText).toContain("BREVITY RULES");
   });
 });

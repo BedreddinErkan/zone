@@ -50,7 +50,7 @@ import { readDailyUsdCapOverride } from "../visual/tierSettings.js";
 import { cacheHitRatio } from "../usage/iterCostMeter.js";
 import { webSearchFee } from "../usage/pricing.js";
 import { parseTodoProgressMarkers, executionPlanToTodos, type RunTodo } from "../core/todoLifecycle.js";
-import { generateExecutionPlan, buildApprovedPlanBlock, formatPlanRevisedNote } from "./executionPlan.js";
+import { generateExecutionPlan, buildApprovedPlanBlock, formatPlanRevisedNote, isAnswerOnlyPlan } from "./executionPlan.js";
 import {
   saveRunEnvelope,
   currentEnvelopesDir,
@@ -612,6 +612,9 @@ export const NARRATION_CAP_DIRECTIVE =
 // drift a `slice`/comparison pair duplicates elsewhere in this codebase. Edit here only.
 export const QA_HEADER = "Q&A / LISTING MODE:";
 export const INVESTIGATION_HEADER = "INVESTIGATION GUIDE:";
+/** Third branch header, same single-source-of-truth rule as the two above — the
+ *  prompt-branch telemetry scans for this exact constant. */
+export const ANSWER_ONLY_HEADER = "ANSWER MODE (read-only, plan approved):";
 
 export function assembleAgentSystemPrompt(input: {
   agentIntro: string;
@@ -638,6 +641,15 @@ export function assembleAgentSystemPrompt(input: {
    *  "investigation" and the user consented to the plan's steps regardless of which
    *  archetype classification produced it. */
   planApproved?: boolean;
+  /** True when the approved plan is answer-only (steps:[] + answerOnlyReason). Keyed on
+   *  the PLAN, never on a re-classification of the task string: the execution phase
+   *  re-classifies from task text alone and was measured returning "debug" for this
+   *  shape, so the archetype ternary fell to its patch branch and a run that cannot
+   *  write anything was handed BREVITY RULES and PATCH RULES. Same fix R4 applied to the
+   *  capability filter — the approved plan is authoritative over a derivation that never
+   *  saw it. Takes precedence over `archetype` for the branch choice, and over
+   *  planApproved's override (which is about steps the user consented to; there are none). */
+  answerOnly?: boolean;
   /** "compact" = terse 900-char default; "detailed" = richer ~2500-char report. Default: compact. */
   summaryFormat?: "compact" | "detailed";
 }): string {
@@ -718,7 +730,15 @@ export function assembleAgentSystemPrompt(input: {
 
   return (
     `${input.agentIntro}\n\n` +
-    (effectiveArchetype === "question"
+    (input.answerOnly
+      ? `${ANSWER_ONLY_HEADER}\n` +
+        `- The plan for this run is answer-only: the investigation already concluded that nothing needs to change, and the user approved that. There is no work to do beyond answering.\n` +
+        `- You have NO write tools. Do not propose edits, do not describe a fix you would make, do not treat this as a defect to diagnose.\n` +
+        `- Goal: answer the user's question directly and completely, from the code as it actually is.\n` +
+        `- Re-read or search only what you need to state something precisely. Prefer citing what you already know over re-deriving it.\n` +
+        `- CITE AS YOU GO: every claim about behavior names its source — \`path/file.ts:LINE\` or \`path/file.ts\` plus the symbol (function, constant, test name). A claim with no citation is the one the reader cannot check.\n\n` +
+        WEB_SEARCH_DIRECTIVE
+      : effectiveArchetype === "question"
       ? `${QA_HEADER}\n` +
         `- Use ONE shell command via run_command (e.g. find . -name "*.ts" -type f | sort, ls -la, grep -rn pattern src/) to answer the query.\n` +
         `- For enumeration: PREFER find ... -type f | sort — returns the FULL accurate listing. Do NOT use list_files (truncates) or search_in_files (paginates).\n` +
@@ -2885,6 +2905,11 @@ Example:
         auditFindings: input.auditFindings,
         archetype: input.taskClassification?.archetype,
         planApproved: input.planApproved,
+        // Derived here rather than threaded as a new AgentLoopInput field: executionPlan
+        // is already in scope (used two lines up), so the plan's shape reaches the branch
+        // without a new input, without touching runLlmPatchFlow, and without overriding
+        // the archetype — which R4 rejected because 12+ consumers read it.
+        answerOnly: input.executionPlan ? isAnswerOnlyPlan(input.executionPlan) : false,
         summaryFormat: input.summaryFormat,
       });
   // X.0.1: mode prefix relocated out of system head to keep the system prompt
@@ -2901,11 +2926,13 @@ Example:
   // Derived once, above the suppression gate, and shared by both markers: the two
   // must never disagree about which branch fired, and a second derivation is how
   // they would. Scans the same exported header constants the ternary builds from.
-  const promptBranch: PromptBranch = systemContent.includes(QA_HEADER)
-    ? "question"
-    : systemContent.includes(INVESTIGATION_HEADER)
-      ? "investigation"
-      : "default";
+  const promptBranch: PromptBranch = systemContent.includes(ANSWER_ONLY_HEADER)
+    ? "answer_only"
+    : systemContent.includes(QA_HEADER)
+      ? "question"
+      : systemContent.includes(INVESTIGATION_HEADER)
+        ? "investigation"
+        : "default";
 
   // Ungated — every run reports its branch. See emitPromptBranch's own comment for
   // why this is a separate marker rather than a widened gate below.
