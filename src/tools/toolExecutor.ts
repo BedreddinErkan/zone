@@ -1833,10 +1833,26 @@ export async function executeTool(
           `<replacement for second region>\n\n` +
           `Each block does ONE local substitution. Do not collapse two unrelated edits into one block.`;
 
+        // Line-anchored counts distinguish ONE class of false positive, not all of them: a
+        // marker-looking string that is quoted or sits mid-line (e.g. "--- FIND ---" inside a
+        // comment or string literal) inflates the substring count but not this one, so the two
+        // pairs disagree and the record is identifiable. An embedded marker that is genuinely
+        // alone on its own line (e.g. a doc/example block showing the apply_patch syntax)
+        // satisfies this count exactly as readily as a real marker — both pairs agree, and
+        // that class stays indistinguishable from a genuine model formatting error. Four count
+        // fields here do not mean the false-positive question is settled.
+        const patchNormalized = patch.replace(/\r\n/g, "\n");
+        const findMarkerCountLineAnchored =
+          (patchNormalized.match(/^[ \t]*--- FIND ---[ \t]*$/gm) || []).length;
+        const replaceMarkerCountLineAnchored =
+          (patchNormalized.match(/^[ \t]*--- REPLACE ---[ \t]*$/gm) || []).length;
+
         log("[zone-apply-patch-marker-imbalance]", JSON.stringify({
           filePath,
           findMarkerCount,
           replaceMarkerCount,
+          findMarkerCountLineAnchored,
+          replaceMarkerCountLineAnchored,
           patchBytes: Buffer.byteLength(patch, "utf8"),
           rejected: true,
         }));
@@ -1877,6 +1893,17 @@ export async function executeTool(
         }
       }
 
+      // KNOWN DEFECT, NOT FIXED HERE: this walk uses the same substring-anywhere marker
+      // matching as the imbalance check above it, so an embedded, own-line, MATCHED
+      // FIND/REPLACE pair inside what should be one block's REPLACE content (e.g. a doc
+      // example showing the apply_patch syntax) makes this loop split there — truncating the
+      // real block's replacement short and fabricating a second, unintended block from the
+      // example text. The imbalance check above cannot catch this shape: a matched embedded
+      // pair raises both findMarkerCount and replaceMarkerCount together, so they stay equal,
+      // the rejection branch never fires, and no [zone-apply-patch-marker-imbalance] record of
+      // this can exist. Silent wrong-content write, not a rejection — worse than the false
+      // positive this pass addresses. Deliberately unfixed pending its own pass: fixing it
+      // changes which patches get *accepted*, not just which get rejected more legibly.
       let remaining = patch;
       let sqFindTotal = 0;
       let sqReplaceTotal = 0;
