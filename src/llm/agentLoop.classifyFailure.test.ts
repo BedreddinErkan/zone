@@ -40,3 +40,16 @@ describe("buildCoachingPrompt — read_file_nonexistent (CE.4.1.e)", () => {
     expect(text).toMatch(/FINAL SUMMARY|exit/i);
   });
 });
+
+describe("buildCoachingPrompt — apply_patch_marker_imbalance", () => {
+  it("states the generic mismatch, not a specific false direction", () => {
+    // Zone cannot see which direction the imbalance ran from this call site (errorPreview
+    // carries the real counts only as prose inside result.output, not as structured data —
+    // see toolExecutor.ts:1823). A specific "WRONG (one FIND, two REPLACE)" example is false
+    // whenever the real submission ran the other direction; the fix is a true generic claim,
+    // not a corrected specific one.
+    const text = buildCoachingPrompt("apply_patch_marker_imbalance", "", []);
+    expect(text).not.toContain("one FIND, two REPLACE - what you submitted");
+    expect(text).toContain("did not match");
+  });
+});

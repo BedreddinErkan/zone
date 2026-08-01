@@ -1605,11 +1605,9 @@ export function buildCoachingPrompt(
       );
     case "apply_patch_marker_imbalance":
       return (
-        `Your last apply_patch had unbalanced --- FIND --- / --- REPLACE --- markers.\n\n` +
+        `The FIND and REPLACE marker counts in your last patch did not match.\n\n` +
         `Required structure: each \`--- FIND ---\` MUST be followed by exactly one \`--- REPLACE ---\`. ` +
         `For multiple edits in one file, use multiple block pairs.\n\n` +
-        `WRONG (one FIND, two REPLACE - what you submitted):\n` +
-        `  --- FIND ---\n  <region A>\n  --- REPLACE ---\n  <new A>\n  <new B>\n  --- REPLACE ---\n  <new B alt>\n\n` +
         `RIGHT (two FIND, two REPLACE - multi-block):\n` +
         `  --- FIND ---\n  <region A>\n  --- REPLACE ---\n  <new A>\n  --- FIND ---\n  <region B>\n  --- REPLACE ---\n  <new B>\n\n` +
         `Next action: re-issue apply_patch with balanced markers. If only one edit is needed, use exactly one FIND/REPLACE pair.`
