@@ -249,11 +249,11 @@ describe("read-only suppression telemetry — outcome, not intent", () => {
     // The two else-arm blocks this shape was measured running against, now absent.
     expect(systemText).not.toContain("BREVITY RULES");
     expect(systemText).not.toContain("EFFICIENCY CONTRACT");
-    // NOT asserted, and deliberately so: `PATCH RULES` is appended OUTSIDE the archetype
-    // ternary (it follows the ternary's close), so it reaches every branch — the existing
-    // question and investigation arms included. Switching the branch cannot remove it, and
-    // gating it here would change those two shapes, which this pass does not measure.
-    // Recorded as an open item instead.
+    // PATCH RULES is appended OUTSIDE the archetype ternary (it follows the ternary's
+    // close), so switching branches alone cannot remove it — it needed its own gate on
+    // input.answerOnly, asserted below (not here — see "an answer-only run gets the answer
+    // contract" for the positive/negative pair). question and investigation still reach it
+    // unconditionally; that half of the gap remains a recorded open item.
   });
 
   /**
@@ -295,6 +295,9 @@ describe("read-only suppression telemetry — outcome, not intent", () => {
     // list, so asserting its absence would match this text against itself.
     expect(systemText).not.toContain("FINAL SUMMARY (required");
     expect(systemText).not.toContain("[ZONE_VERIFICATION: tests_passed]");
+    // PATCH RULES describes apply_patch/write_file — tools this run shape has had none of
+    // since R4. Closes the gap the sibling test above (:225) named as an open item.
+    expect(systemText).not.toContain("PATCH RULES:");
   });
 
   it("CONTRAST: a 'debug' run with a normal stepped plan still gets the patch branch", async () => {
@@ -320,5 +323,7 @@ describe("read-only suppression telemetry — outcome, not intent", () => {
     // The patch contract is untouched for every other shape — the answer arm is additive,
     // not a replacement of the default. Same discriminator as the assertion above.
     expect(systemText).toContain("FINAL SUMMARY (required");
+    // Same discriminator as the answer-only test's not.toContain, for a direct comparison.
+    expect(systemText).toContain("PATCH RULES:");
   });
 });

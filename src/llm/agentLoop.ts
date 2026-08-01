@@ -803,6 +803,10 @@ export function assembleAgentSystemPrompt(input: {
       : "") +
     (input.planProgressBlock ? `${input.planProgressBlock}\n\n` : "") +
     (input.planAnnotationsBlock ? `${input.planAnnotationsBlock}\n\n` : "") +
+    // answerOnly has had no write tools since R4 — apply_patch/write_file rules describe
+    // tools this run shape is never offered. Gated here rather than removed: question and
+    // investigation still reach this block unconditionally (open item, not this pass).
+    (input.answerOnly ? "" :
     `PATCH RULES:\n` +
     `- apply_patch for EXISTING files; write_file ONLY for new files.\n` +
     `- FIND: copy verbatim from read_file output, 1-5 lines, unique in the file.\n` +
@@ -812,7 +816,7 @@ export function assembleAgentSystemPrompt(input: {
     `- intent='add' (default, REPLACE = FIND + additions). To add lines ABOVE/BELOW existing code (JSDoc, imports, decorators): FIND the anchor line(s); include added lines together with the anchor in REPLACE. Nothing may precede \`--- FIND ---\`. 'modify' (REPLACE = edited FIND), 'delete' (REPLACE shorter than FIND, may be empty).\n` +
     `- MINIMUM CHANGE: preserve every existing line the user didn't ask to change.\n` +
     `- scope: OMIT by default. Only set when FIND occurs multiple times AND the target is inside a NAMED function/class. Never for arrow-const, default exports, or React components.\n` +
-    `- After a successful apply_patch, do NOT re-read the same file — the patch is already written.\n\n` +
+    `- After a successful apply_patch, do NOT re-read the same file — the patch is already written.\n\n`) +
     `PRE-EXISTING BROKEN FILE — when apply_patch returns rejectionReason 'file_already_broken_pre_patch':\n` +
     `The file had a syntax error before your patch. Read it, locate the line/col in the rejection, then write ONE apply_patch that fixes the pre-existing error AND makes your change (pass scope: null — scope resolution cannot work on an unparseable file).\n\n` +
     `APPLY_ROLLED_BACK — when apply_patch returns a result beginning with "APPLY_ROLLED_BACK":\n` +
