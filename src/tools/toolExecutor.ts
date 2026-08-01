@@ -3183,7 +3183,7 @@ export async function executeTool(
       const escaped = escapeRegex(normalizedFind);
       const pattern = new RegExp(wholeWord ? `\\b${escaped}\\b` : escaped, "g");
 
-      const perFile: Array<{ path: string; count: number }> = [];
+      const perFile: Array<{ path: string; count: number; code?: string | null }> = [];
       const filesStaged: string[] = [];
       let totalReplacements = 0;
 
@@ -3194,8 +3194,15 @@ export async function executeTool(
         let content: string;
         try {
           content = stagedRead(input?.stagingFiles, abs) ?? fs.readFileSync(abs, "utf8");
-        } catch {
-          perFile.push({ path: filePath, count: -1 });
+        } catch (err) {
+          const code = (err as NodeJS.ErrnoException).code;
+          const message = (err as NodeJS.ErrnoException).message || `${code ?? "unknown error"}`;
+          log("[zone-multi-edit-read-error]", JSON.stringify({
+            filePath,
+            code: code ?? null,
+            message,
+          }));
+          perFile.push({ path: filePath, count: -1, code: code ?? null });
           continue;
         }
 
@@ -3231,7 +3238,9 @@ export async function executeTool(
           perFile
             .map((f) =>
               f.count === -1
-                ? `  [NOT FOUND] ${f.path}`
+                ? (f.code === "ENOENT"
+                    ? `  [NOT FOUND] ${f.path}`
+                    : `  [READ ERROR: ${f.code ?? "unknown"}] ${f.path}`)
                 : `  ${f.path}: ${f.count} replacement(s)`
             )
             .join("\n") +
