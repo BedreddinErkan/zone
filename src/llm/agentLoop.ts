@@ -684,6 +684,33 @@ export function assembleAgentSystemPrompt(input: {
     // Low fire-rate (≤5% each). Reference only; full text in .zone/audits/final-summary-recovery-examples.md
     `[Recovery-mode examples (APPLY_ROLLED_BACK, max_iterations) → .zone/audits/final-summary-recovery-examples.md]\n\n`;
 
+  // The answer shape's output contract. The four-section templates below are patch-shaped
+  // by their section names — "## What changed", "## Tests", "## Files" all presuppose
+  // changes — and an approved answer-only run makes none. The measured baseline produced
+  // exactly the degenerate form that forces: "## What changed / (none) — this was an
+  // explanatory question", with the actual answer written outside the mandated structure,
+  // which those templates forbid.
+  //
+  // Citations are stated as REQUIRED and explicitly carved out of the FORBIDDEN list,
+  // because the sibling templates forbid "file contents" and discourage enumeration, and
+  // the measured casualty was provenance: recordAndDetect's line range, hashToolCall plus
+  // its lines, hashStagingState by name, the header comment lines, and three test names
+  // were all present at plan time and absent from the final answer. Leaving the two texts
+  // to disagree on this point is the :733-vs-COMPACT_SUMMARY defect reproduced for a new
+  // shape — so the carve-out is spelled out rather than implied.
+  const ANSWER_SUMMARY =
+    `FINAL ANSWER (required — write this as your last response):\n` +
+    `Answer the question directly, in prose. Use whatever structure the answer needs; there is no fixed section list, and "what changed" is not a section because nothing changed.\n\n` +
+    `REQUIRED — provenance on every claim:\n` +
+    `- Name the source of each behavioral claim inline: \`path/file.ts:LINE\` where you know the line, otherwise \`path/file.ts\` plus the symbol (function, constant, or test name).\n` +
+    `- Constants: give the name AND the value, e.g. \`TERMINATE_THRESHOLD\` = 4.\n` +
+    `- If a test or a comment is what establishes a claim, name it — that is the evidence, not decoration.\n` +
+    `- A citation is NOT "file contents" and is NOT forbidden. Quoting a path, a line number, or a symbol is required; pasting the body of a file is what is not wanted.\n\n` +
+    `FORBIDDEN in the answer:\n` +
+    `- Triple-backtick code fences containing file bodies, patches, or diffs\n` +
+    `- Proposing edits, or describing a fix you would make — this run was approved as answer-only\n` +
+    `- A "## Tests" or "## What changed" section — there are no changes to report\n`;
+
   const DETAILED_SUMMARY =
     `FINAL SUMMARY (required — write this as your last response):\n` +
     `Structure your final response as five sections; the first four are required, ## Files is optional. Do not add any other headings.\n\n` +
@@ -846,14 +873,26 @@ export function assembleAgentSystemPrompt(input: {
     `[Example B — real test failure, not pipe noise]\n` +
     `[shell] npx vitest run path/to/changed.test.ts 2>&1 → exitCode=1, "Tests 2 failed | 3 passed"\n` +
     `[agent] Real failure in target. Inspect output for cause, then retry the fix.\n\n` +
-    (input.summaryFormat === "detailed" ? DETAILED_SUMMARY : COMPACT_SUMMARY) +
+    // Answer shape takes precedence over the compact/detailed choice, not just over
+    // COMPACT_SUMMARY: a user with /summary detailed would otherwise get DETAILED_SUMMARY,
+    // which is the same four-section patch template plus a ## Files list.
+    (input.answerOnly
+      ? ANSWER_SUMMARY
+      : input.summaryFormat === "detailed" ? DETAILED_SUMMARY : COMPACT_SUMMARY) +
     `TRUNCATED FILE SECTIONS: if you see a ZONE_CONTEXT_TRUNCATED marker, part of the file was omitted. Do NOT include the marker line in any apply_patch FIND block; use read_file with lineRange on the same path to fetch the hidden section. Only generate FIND blocks from lines you have fully read.\n\n` +
-    `FINAL ASSESSMENT (required) — include exactly one tag on its own line in your final response:\n` +
-    `  [ZONE_VERIFICATION: tests_passed]           — suite ran, all passed\n` +
-    `  [ZONE_VERIFICATION: tests_skipped_no_infra] — no test script/framework found\n` +
-    `  [ZONE_VERIFICATION: tests_inconclusive]     — environment/infra issue prevented tests (missing script, command not found, ENOENT, port conflict); patch likely correct\n` +
-    `  [ZONE_VERIFICATION: tests_failed_unrelated] — tests failed but failure is pre-existing\n` +
-    `  [ZONE_VERIFICATION: tests_failed_by_patch]  — tests failed because of your patch (you MUST attempt to fix before marking complete)\n\n` +
+    // Also gated: this block requires a test-verification tag of a run that cannot run a
+    // patch to verify. The measured answer-only run emitted
+    // [ZONE_VERIFICATION: tests_skipped_no_infra] for a run that changed nothing.
+    // deriveVerdict.ts:19-23 falls back to inferVerificationFromLog when the tag is
+    // absent, so removing it here degrades to inference rather than breaking the verdict.
+    (input.answerOnly
+      ? ""
+      : `FINAL ASSESSMENT (required) — include exactly one tag on its own line in your final response:\n` +
+        `  [ZONE_VERIFICATION: tests_passed]           — suite ran, all passed\n` +
+        `  [ZONE_VERIFICATION: tests_skipped_no_infra] — no test script/framework found\n` +
+        `  [ZONE_VERIFICATION: tests_inconclusive]     — environment/infra issue prevented tests (missing script, command not found, ENOENT, port conflict); patch likely correct\n` +
+        `  [ZONE_VERIFICATION: tests_failed_unrelated] — tests failed but failure is pre-existing\n` +
+        `  [ZONE_VERIFICATION: tests_failed_by_patch]  — tests failed because of your patch (you MUST attempt to fix before marking complete)\n\n`) +
     (input.hasFramework && input.canRunCommand
       ? `When running commands, use the correct package manager and commands above.\n`
       : "") +

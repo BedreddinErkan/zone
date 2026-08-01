@@ -256,6 +256,47 @@ describe("read-only suppression telemetry — outcome, not intent", () => {
     // Recorded as an open item instead.
   });
 
+  /**
+   * The output contract, not just the preamble. The baseline run's answer was written
+   * against the four-section patch template — it produced "## What changed / (none) — this
+   * was an explanatory question" and a [ZONE_VERIFICATION] tag for a run that changed
+   * nothing — with the real answer outside the mandated structure the template forbids.
+   */
+  it("an answer-only run gets the answer contract, and neither patch-summary template nor the verification tag", async () => {
+    let messages: CapturedMessage[] = [];
+    mocks.createChatCompletion.mockImplementationOnce(async (params: { messages: CapturedMessage[] }) => {
+      messages = params.messages;
+      return makeDoneResponse();
+    });
+
+    await runAgentLoop({
+      task: "why does the loop detector fire on 4 identical hashes",
+      repoPath,
+      taskClassification: { ...classification("investigation"), archetype: "debug" },
+      executionPlan: {
+        objective: "Explain the loop detector",
+        steps: [],
+        riskHints: [],
+        scopeSummary: "Explain the loop detector",
+        answerOnlyReason: "Deliberate, documented behavior; nothing to change.",
+      },
+      planApproved: false,
+      // "detailed" specifically: the answer arm must displace whichever of the two
+      // patch templates is selected, not only COMPACT_SUMMARY.
+      summaryFormat: "detailed",
+      maxIterationsOverride: 3,
+    });
+
+    const systemText = String(messages.find((m) => m.role === "system")!.content);
+    expect(systemText).toContain("FINAL ANSWER (required");
+    // "FINAL SUMMARY (required" heads BOTH patch templates and appears in neither the
+    // answer contract nor anywhere else — the discriminator between the two. Not
+    // "## What changed": the answer contract names that section in its own FORBIDDEN
+    // list, so asserting its absence would match this text against itself.
+    expect(systemText).not.toContain("FINAL SUMMARY (required");
+    expect(systemText).not.toContain("[ZONE_VERIFICATION: tests_passed]");
+  });
+
   it("CONTRAST: a 'debug' run with a normal stepped plan still gets the patch branch", async () => {
     let messages: CapturedMessage[] = [];
     mocks.createChatCompletion.mockImplementationOnce(async (params: { messages: CapturedMessage[] }) => {
@@ -276,5 +317,8 @@ describe("read-only suppression telemetry — outcome, not intent", () => {
 
     const systemText = String(messages.find((m) => m.role === "system")!.content);
     expect(systemText).toContain("BREVITY RULES");
+    // The patch contract is untouched for every other shape — the answer arm is additive,
+    // not a replacement of the default. Same discriminator as the assertion above.
+    expect(systemText).toContain("FINAL SUMMARY (required");
   });
 });
