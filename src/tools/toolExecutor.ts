@@ -2656,8 +2656,22 @@ export async function executeTool(
         originalContent = stagedPrev !== null ? stagedPrev : fs.readFileSync(abs, "utf8");
         originalSize = originalContent.length;
         fileExists = true;
-      } catch {
-        // New file — no guard needed
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code !== "ENOENT") {
+          const message = (err as NodeJS.ErrnoException).message || `${code ?? "unknown error"}`;
+          log("[zone-write-file-preread-error]", JSON.stringify({
+            filePath,
+            code: code ?? null,
+            message,
+          }));
+          const raw = `write_file could not read the existing ${filePath} to check the shrink guard: ${message}`;
+          return {
+            success: false,
+            output: raw.length > 300 ? `${raw.slice(0, 300)}…` : raw,
+          };
+        }
+        // ENOENT — new file, no guard needed (unchanged)
       }
       const newSize = content.length;
       const shrinkRatio = fileExists && originalSize > 0 ? newSize / originalSize : 1;
