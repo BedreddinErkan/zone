@@ -541,6 +541,70 @@ export async function _runPromptImpl(
   } catch { /* best-effort */ }
 }
 
+/** Signals that mean "this process is going away, persist what you have and exit."
+ *  Codes are the conventional 128+signum. SIGHUP was missing until 2026-08-01: four
+ *  consecutive dogfood runs left no session file because `tmux kill-session` sends
+ *  SIGHUP, whose default action terminates immediately with no JS handler run. It is
+ *  a real user-facing gap too — closing a terminal window SIGHUPs identically. */
+export const FATAL_SIGNAL_EXIT_CODES = {
+  SIGINT: 130,
+  SIGTERM: 143,
+  SIGHUP: 129,
+} as const;
+
+export interface FatalSignalDeps {
+  /** Read at signal time, not registration time — state is null until React mounts. */
+  getState: () => { transcript: unknown[]; armedMcpManager?: { killAllSync(): void } } | null;
+  buildSession: (state: never) => unknown;
+  saveSession: (cwd: string, session: never) => Promise<unknown>;
+  pruneOldSessions: (cwd: string) => Promise<unknown>;
+  stopRemoteControlServer: (v: boolean) => unknown;
+  unmount: () => void;
+  stampEnvelopeOnExit: () => void;
+  exit: (code: number) => void;
+  on?: (signal: string, handler: () => void) => void;
+  cwd?: () => string;
+}
+
+/**
+ * Registers one handler per fatal signal. Extracted from three near-identical inline
+ * blocks (SIGINT/SIGTERM differed only in exit code) for two reasons, in this order:
+ * a fourth copy would have left the new handler as untested as the two it copied —
+ * nothing in the suite covered them, because they were registered inside runTui, which
+ * renders Ink and awaits waitUntilExit() — and three copies of a persist-then-exit
+ * sequence is three places for it to drift.
+ *
+ * unmount() is wrapped: it runs BEFORE the save and writes escape sequences to stdout,
+ * which under SIGHUP is a terminal that has already gone away. An unhandled throw there
+ * skipped the save entirely — the exact failure this exists to fix. Wrapping it changes
+ * SIGINT and SIGTERM too, deliberately: today a throw there loses the session the same
+ * way, on every signal rather than only this one.
+ */
+export function registerFatalSignalHandlers(deps: FatalSignalDeps): void {
+  const on = deps.on ?? ((sig, h) => { process.on(sig as NodeJS.Signals, h); });
+  const cwd = deps.cwd ?? (() => process.cwd());
+
+  for (const [signal, code] of Object.entries(FATAL_SIGNAL_EXIT_CODES)) {
+    on(signal, () => {
+      deps.getState()?.armedMcpManager?.killAllSync();
+      void deps.stopRemoteControlServer(false);
+      try {
+        deps.unmount();
+      } catch { /* terminal may already be gone — must not prevent the save below */ }
+      deps.stampEnvelopeOnExit();
+      const s = deps.getState();
+      if (s && s.transcript.length > 0) {
+        void deps.saveSession(cwd(), deps.buildSession(s as never) as never)
+          .then(() => deps.pruneOldSessions(cwd()))
+          .catch(() => {})
+          .finally(() => deps.exit(code));
+      } else {
+        deps.exit(code);
+      }
+    });
+  }
+}
+
 export async function runTui(
   initialPrompt: string | undefined,
   opts: CliFlags
@@ -770,35 +834,15 @@ export async function runTui(
     }
   }
 
-  process.on("SIGINT", () => {
-    storeCapture.state?.armedMcpManager?.killAllSync();
-    void stopRemoteControlServer(false);
-    instance?.unmount();
-    stampEnvelopeOnExit();
-    const s = storeCapture.state;
-    if (s && s.transcript.length > 0) {
-      void saveSession(process.cwd(), buildDiskSession(s))
-        .then(() => pruneOldSessions(process.cwd()))
-        .catch(() => {})
-        .finally(() => process.exit(130));
-    } else {
-      process.exit(130);
-    }
-  });
-  process.on("SIGTERM", () => {
-    storeCapture.state?.armedMcpManager?.killAllSync();
-    void stopRemoteControlServer(false);
-    instance?.unmount();
-    stampEnvelopeOnExit();
-    const s = storeCapture.state;
-    if (s && s.transcript.length > 0) {
-      void saveSession(process.cwd(), buildDiskSession(s))
-        .then(() => pruneOldSessions(process.cwd()))
-        .catch(() => {})
-        .finally(() => process.exit(143));
-    } else {
-      process.exit(143);
-    }
+  registerFatalSignalHandlers({
+    getState: () => storeCapture.state as never,
+    buildSession: (s) => buildDiskSession(s),
+    saveSession: (cwd, session) => saveSession(cwd, session),
+    pruneOldSessions: (cwd) => pruneOldSessions(cwd),
+    stopRemoteControlServer,
+    unmount: () => instance?.unmount(),
+    stampEnvelopeOnExit,
+    exit: (code) => process.exit(code),
   });
   process.on("uncaughtException", (err) => {
     storeCapture.state?.armedMcpManager?.killAllSync();
