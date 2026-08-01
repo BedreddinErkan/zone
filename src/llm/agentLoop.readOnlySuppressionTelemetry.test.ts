@@ -298,6 +298,23 @@ describe("read-only suppression telemetry — outcome, not intent", () => {
     // PATCH RULES describes apply_patch/write_file — tools this run shape has had none of
     // since R4. Closes the gap the sibling test above (:225) named as an open item.
     expect(systemText).not.toContain("PATCH RULES:");
+    // Gate A: four blocks, all keyed on apply_patch/write_file returning something —
+    // unreachable triggers for a run with neither tool. Full header lines for the two
+    // whose bare phrase also appears in PRIOR RUN CONTEXT (:843, unconditional, references
+    // both by name) — asserting the bare phrase would match that unrelated sentence and
+    // pass regardless of whether this gate works.
+    expect(systemText).not.toContain("PRE-EXISTING BROKEN FILE");
+    expect(systemText).not.toContain(
+      `APPLY_ROLLED_BACK — when apply_patch returns a result beginning with "APPLY_ROLLED_BACK":`
+    );
+    expect(systemText).not.toContain(
+      `VERIFICATION WARNINGS — when a run summary contains a "VERIFICATION WARNINGS" block:`
+    );
+    expect(systemText).not.toContain("USER EDIT REJECTION");
+    // Gate B: trigger reachable (run_command_readonly can run tests) but every prescribed
+    // action requires a change to have been made or a write tool to fix with — neither
+    // holds here. Own gate, own assertion, not folded into Gate A above.
+    expect(systemText).not.toContain("TEST FAILURES");
   });
 
   it("CONTRAST: a 'debug' run with a normal stepped plan still gets the patch branch", async () => {
@@ -325,5 +342,16 @@ describe("read-only suppression telemetry — outcome, not intent", () => {
     expect(systemText).toContain("FINAL SUMMARY (required");
     // Same discriminator as the answer-only test's not.toContain, for a direct comparison.
     expect(systemText).toContain("PATCH RULES:");
+    // Same five discriminators as the answer-only test above, inverted — present for every
+    // other shape, since the answer arm is additive, not a replacement of the default.
+    expect(systemText).toContain("PRE-EXISTING BROKEN FILE");
+    expect(systemText).toContain(
+      `APPLY_ROLLED_BACK — when apply_patch returns a result beginning with "APPLY_ROLLED_BACK":`
+    );
+    expect(systemText).toContain(
+      `VERIFICATION WARNINGS — when a run summary contains a "VERIFICATION WARNINGS" block:`
+    );
+    expect(systemText).toContain("USER EDIT REJECTION");
+    expect(systemText).toContain("TEST FAILURES");
   });
 });

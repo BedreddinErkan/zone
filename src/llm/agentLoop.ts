@@ -826,6 +826,12 @@ export function assembleAgentSystemPrompt(input: {
     `- MINIMUM CHANGE: preserve every existing line the user didn't ask to change.\n` +
     `- scope: OMIT by default. Only set when FIND occurs multiple times AND the target is inside a NAMED function/class. Never for arrow-const, default exports, or React components.\n` +
     `- After a successful apply_patch, do NOT re-read the same file — the patch is already written.\n\n`) +
+    // Four blocks, all keyed on apply_patch/write_file returning something — unreachable
+    // triggers for answer_only, which offers neither tool since R4. Gated together because
+    // they're contiguous and share the same "unconditionally inapplicable" reasoning;
+    // PRIOR RUN CONTEXT/SESSION MEMORY below stay unconditional, so this cannot become a
+    // range gate without moving them too.
+    (input.answerOnly ? "" :
     `PRE-EXISTING BROKEN FILE — when apply_patch returns rejectionReason 'file_already_broken_pre_patch':\n` +
     `The file had a syntax error before your patch. Read it, locate the line/col in the rejection, then write ONE apply_patch that fixes the pre-existing error AND makes your change (pass scope: null — scope resolution cannot work on an unparseable file).\n\n` +
     `APPLY_ROLLED_BACK — when apply_patch returns a result beginning with "APPLY_ROLLED_BACK":\n` +
@@ -837,7 +843,7 @@ export function assembleAgentSystemPrompt(input: {
     `- Options: (a) read error locations and patch to fix; (b) call revert_patch({path}) to undo specific files; (c) accept if errors are pre-existing or out-of-scope.\n` +
     `- revert_patch({path: "<rel-path>"}) restores a file to its pre-run state without deleting other changes.\n\n` +
     `USER EDIT REJECTION — when write_file or apply_patch returns "edit_rejected_by_user":\n` +
-    `The user deliberately declined this edit. This is NOT a permissions error — do not attempt the same change via shell commands (cat >, tee, echo >, sed -i), run_command redirects, or any workaround. Stop the affected change and explain what was rejected.\n\n` +
+    `The user deliberately declined this edit. This is NOT a permissions error — do not attempt the same change via shell commands (cat >, tee, echo >, sed -i), run_command redirects, or any workaround. Stop the affected change and explain what was rejected.\n\n`) +
     `PRIOR RUN CONTEXT — if the user message begins with "PRIOR RUN CONTEXT — your last attempt in this thread produced this result:":\n` +
     `- This thread had a previous run; its final summary is between that header and "END PRIOR RUN CONTEXT.".\n` +
     `- If the block contains APPLY_ROLLED_BACK or VERIFICATION WARNINGS, start from those errors — re-investigate from those specific locations.\n` +
@@ -849,11 +855,17 @@ export function assembleAgentSystemPrompt(input: {
     `- It describes COMPLETED work — do not re-investigate or re-apply these changes.\n` +
     `- The user's current task follows END SESSION MEMORY.\n\n` +
     MISSING_REFERENCED_CONTENT_DIRECTIVE +
+    // Trigger IS reachable for answer_only (run_command_readonly can run tests), but every
+    // prescribed action presupposes a change that was made ("caused by your change", "your
+    // mistake") or a write tool to fix with ("apply_patch... re-run tests") — neither holds
+    // for this shape. Separate gate from the cluster above: not contiguous with it, and the
+    // reasoning is content-inapplicability, not an unreachable trigger.
+    (input.answerOnly ? "" :
     `TEST FAILURES — investigate, don't summarize:\n` +
     `- Read the file/line in the error. Decide: caused by your change, or pre-existing?\n` +
     `- Pre-existing: fix if simple, else note as out-of-scope in your final summary.\n` +
     `- Your mistake: fix with apply_patch (intent='modify' or 'delete'), re-run tests.\n` +
-    `- Only give up after a self-correction attempt.\n\n` +
+    `- Only give up after a self-correction attempt.\n\n`) +
     `TASK SUBAGENTS (Task) — dispatch cap: 2/run (WORKER_MAX_ITER=6).\n` +
     `GOOD signals: step marked \`subagentEligible: true\` (check plan-annotations block); same change across 5+ files (multi_file_fanout: rename, codemod, Worker); step requiring 10+ parent iterations (long_isolated_step: complex extraction/migration).\n` +
     `BAD signals (stay single-thread): 1-2 file edits, line-edit task, shared mutation state, uncertain scope, patch-then-verify cycles.\n` +
