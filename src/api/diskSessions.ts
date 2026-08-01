@@ -51,6 +51,21 @@ function makeFilename(sessionId: string): string {
  * consecutive dogfood runs lost their session that way; SIGINT survived only when the count
  * happened not to match. Durability at process death cannot depend on that.
  *
+ * CORRECTION (2026-08-01): the paragraph above states the guard correctly but is incomplete
+ * read alone. Once ANY handler is registered for a signal — including the one in
+ * registerFatalSignalHandlers (src/cli/tui/index.tsx) that this function backs — the guard
+ * can never match again: emitter.count does not count subscribers, it counts loaded
+ * signal-exit module instances (load(), signal-exit/index.js:154, behind the module-local
+ * `loaded` guard at :145-147), and load() also installs exactly one process listener per
+ * signal (:158). Every instance adds one listener AND one count together, so
+ * listeners.length === emitter.count only holds at zero foreign listeners — a state that
+ * handler's own presence rules out, independent of restore-cursor or any other subscriber.
+ * This function is therefore real insurance against async-loss modes in general; it has NOT
+ * been shown necessary against signal-exit specifically, and by this proof cannot be. One
+ * data point stays unexplained under it: a direct kill -HUP after that handler existed
+ * (async write, pre-sync-write) produced no session file, which this proof says should have
+ * stood down and saved instead. Recorded rather than resolved.
+ *
  * `import nodeFs from "node:fs"` deliberately, not named imports: the test-home guard
  * intercepts the fs write surface by property assignment, and a named import snapshots the
  * binding and makes the guard silently inert (src/test/homeWriterImportStyle.test.ts fails

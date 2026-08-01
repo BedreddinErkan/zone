@@ -596,6 +596,20 @@ export interface FatalSignalDeps {
  * [zone-signal-exit-guard] records both sides of that comparison at signal time, because
  * without it a passing run cannot be told apart from a lucky one: a run where the guard
  * did NOT match would have survived on the old async path too and verifies nothing.
+ *
+ * CORRECTION (2026-08-01): the paragraph above states the guard correctly but is incomplete
+ * read alone. Once ANY handler is registered for a signal — this one included — the guard
+ * can never match again: emitter.count does not count subscribers, it counts loaded
+ * signal-exit module instances (load(), signal-exit/index.js:154, behind the module-local
+ * `loaded` guard at :145-147), and load() also installs exactly one process listener per
+ * signal (:158). Every instance adds one listener AND one count together, so
+ * listeners.length === emitter.count only holds at zero foreign listeners — a state this
+ * handler's own presence rules out, independent of restore-cursor or any other subscriber.
+ * The sync write above is real insurance against async-loss modes in general; it has NOT
+ * been shown necessary against signal-exit specifically, and by this proof cannot be. One
+ * data point stays unexplained under it: a direct kill -HUP after this handler existed
+ * (async write, pre-sync-write) produced no session file, which this proof says should have
+ * stood down and saved instead. Recorded rather than resolved.
  */
 export function registerFatalSignalHandlers(deps: FatalSignalDeps): void {
   const on = deps.on ?? ((sig, h) => { process.on(sig as NodeJS.Signals, h); });
