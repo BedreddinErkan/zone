@@ -1833,10 +1833,11 @@ export async function executeTool(
           `<replacement for second region>\n\n` +
           `Each block does ONE local substitution. Do not collapse two unrelated edits into one block.`;
 
-        debugLog("[zone-apply-patch-marker-imbalance]", JSON.stringify({
+        log("[zone-apply-patch-marker-imbalance]", JSON.stringify({
           filePath,
           findMarkerCount,
           replaceMarkerCount,
+          patchBytes: Buffer.byteLength(patch, "utf8"),
           rejected: true,
         }));
 

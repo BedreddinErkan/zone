@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { executeTool } from "./toolExecutor.js";
 
 let repoPath: string;
+let logSpy: ReturnType<typeof vi.spyOn>;
 
 function writeRepoFile(filePath: string, content: string): void {
   const abs = path.join(repoPath, filePath);
@@ -28,6 +29,7 @@ async function applyPatch(filePath: string, patch: string) {
 
 beforeEach(() => {
   repoPath = fs.mkdtempSync(path.join(os.tmpdir(), "zone-marker-balance-"));
+  logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
 });
 
 afterEach(() => {
@@ -57,6 +59,21 @@ describe("apply_patch marker balance pre-flight", () => {
     expect(result.output).toContain("balanced");
     expect(result.output).toContain("<second region from file>");
     expect(readRepoFile(filePath)).toBe(original);
+
+    // Found by exact tag match, not a substring scan — the tag is confirmed unique in the
+    // codebase, so only this call site can produce it.
+    const call = logSpy.mock.calls.find((c) => c[0] === "[zone-apply-patch-marker-imbalance]");
+    // The marker firing at all IS the debugLog->log assertion: production only reaches
+    // console.log via the unconditional log() path now. A revert to debugLog leaves this
+    // undefined, since VERBOSE is unset in the test environment.
+    expect(call).toBeDefined();
+    const payload = JSON.parse(call![1] as string) as Record<string, unknown>;
+    expect(payload.findMarkerCount).toBe(1);
+    expect(payload.replaceMarkerCount).toBe(2);
+    expect(payload.filePath).toBe(filePath);
+    // Computed independently from the same literal patch, not hardcoded — a future edit to
+    // the fixture can't silently desync this assertion from what it's actually checking.
+    expect(payload.patchBytes).toBe(Buffer.byteLength(patch, "utf8"));
   });
 
   it("accepts balanced 2 FIND / 2 REPLACE multi-block patch", async () => {
