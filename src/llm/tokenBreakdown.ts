@@ -35,6 +35,41 @@ export interface BucketStats {
   chars: number;
   estTokens: number;
   blockCount: number;
+  /** Which chars-per-token divisor produced estTokens for this bucket. Recorded rather
+   *  than assumed: only ONE of the two values below is measured, so a reader needs to
+   *  know which basis they are looking at before comparing buckets to each other. */
+  divisor: number;
+}
+
+/** Measured for JSON-escaped source — the form tool results take on the wire. */
+const CHARS_PER_TOKEN_SOURCE = 2.4;
+/** The long-standing prose heuristic. NOT measured; kept as the default and now
+ *  recorded explicitly so it reads as an assumption rather than a fact. */
+const CHARS_PER_TOKEN_PROSE = 4;
+
+/**
+ * Buckets whose content is JSON-escaped tool output — file bodies, search hits, command
+ * output. These are exactly where CHARS_PER_TOKEN_SOURCE was measured, so they are the
+ * only ones moved off the prose default.
+ *
+ * Deliberately NOT included, and left on the prose divisor as open questions rather than
+ * quietly folded in: `tool_descriptions` (JSON schema), `assistant_tool_use` (JSON args),
+ * `repo_manifest` (bare paths), `import_context` (source excerpts). Each is plausibly
+ * closer to 2.4 than to 4, but none has been measured, and assigning them a divisor on
+ * the strength of the argument would re-create the defect this change exists to fix — an
+ * unlabelled basis. The recorded `divisor` field makes their assumption visible so a
+ * later measurement can move them on evidence.
+ */
+const SOURCE_BEARING_BUCKETS = new Set<TokenBucket>([
+  "tool_result_read",
+  "tool_result_command",
+  "tool_result_search",
+  "tool_result_task",
+  "tool_result_other",
+]);
+
+function divisorFor(bucket: TokenBucket): number {
+  return SOURCE_BEARING_BUCKETS.has(bucket) ? CHARS_PER_TOKEN_SOURCE : CHARS_PER_TOKEN_PROSE;
 }
 
 export type BucketMap = Record<TokenBucket, BucketStats>;
@@ -91,7 +126,7 @@ const ALL_BUCKETS: TokenBucket[] = [
 function emptyBucketMap(): BucketMap {
   const map = {} as BucketMap;
   for (const b of ALL_BUCKETS) {
-    map[b] = { chars: 0, estTokens: 0, blockCount: 0 };
+    map[b] = { chars: 0, estTokens: 0, blockCount: 0, divisor: divisorFor(b) };
   }
   return map;
 }
@@ -116,13 +151,13 @@ function charCount(value: unknown): number {
   return 0;
 }
 
-function estTokens(chars: number): number {
-  return Math.ceil(chars / 4);
+function estTokens(chars: number, divisor: number = CHARS_PER_TOKEN_PROSE): number {
+  return Math.ceil(chars / divisor);
 }
 
 function addTo(map: BucketMap, bucket: TokenBucket, chars: number): void {
   map[bucket].chars += chars;
-  map[bucket].estTokens = estTokens(map[bucket].chars);
+  map[bucket].estTokens = estTokens(map[bucket].chars, map[bucket].divisor);
   map[bucket].blockCount += 1;
 }
 
@@ -389,8 +424,13 @@ export function emitTokenBreakdown(opts: {
   });
 
   let totalChars = 0;
+  // Sum of per-bucket estimates, NOT estTokens(totalChars): once divisors differ per
+  // bucket, a single division over the summed chars silently applies one bucket's basis
+  // to every bucket's content and no longer equals the parts it is a total of.
+  let totalEstTokens = 0;
   for (const b of ALL_BUCKETS) {
     totalChars += buckets[b].chars;
+    totalEstTokens += buckets[b].estTokens;
   }
 
   const event: BreakdownEvent = {
@@ -400,7 +440,7 @@ export function emitTokenBreakdown(opts: {
     ...(opts.subagentId ? { subagentId: opts.subagentId } : {}),
     iter: opts.iter,
     buckets,
-    totals: { chars: totalChars, estTokens: estTokens(totalChars) },
+    totals: { chars: totalChars, estTokens: totalEstTokens },
     model: opts.model,
     ts: new Date().toISOString(),
   };
@@ -418,10 +458,13 @@ export function emitBreakdownSummary(opts: {
   const totalCalls = events.length;
 
   let totalChars = 0;
+  let totalEstTokens = 0;
   for (const ev of events) {
     totalChars += ev.totals.chars;
+    // Same reason as the per-call site: each event's total is already a mixed-divisor
+    // sum, so re-deriving from chars here would discard the per-bucket bases.
+    totalEstTokens += ev.totals.estTokens;
   }
-  const totalEstTokens = estTokens(totalChars);
 
   // Aggregate per-bucket across all calls
   const byBucket = {} as BreakdownSummary["byBucket"];

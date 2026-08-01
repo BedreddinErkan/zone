@@ -237,6 +237,47 @@ describe("categorizeMessages — tool_descriptions bucket", () => {
   });
 });
 
+describe("per-bucket chars-per-token divisor", () => {
+  const SOURCE_CONTENT = "const x = 1;\n".repeat(20);
+
+  function bucketsWithReadResult() {
+    return categorizeMessages(
+      [
+        makeSystemMsg("sys"),
+        makeUserMsg("task"),
+        makeAssistantMsg("", "call-1", "read_file"),
+        makeToolMsg("call-1", SOURCE_CONTENT),
+      ],
+      undefined,
+      { runId: "r1", iter: 0 }
+    );
+  }
+
+  it("every bucket records the divisor it used, so no bucket's basis is unlabelled", () => {
+    // Deliberately asserts PRESENCE across all buckets rather than any one value: only
+    // one divisor is measured, so an unlabelled estTokens cannot be compared across
+    // buckets at all. Kept independent of the 2.4-vs-4 assignment below so the two
+    // failures stay distinguishable — an earlier version checked a source bucket's
+    // value here and collapsed into a duplicate of the next test.
+    const buckets = bucketsWithReadResult();
+    for (const stats of Object.values(buckets)) {
+      expect(typeof stats.divisor).toBe("number");
+    }
+  });
+
+  it("a source-bearing bucket estimates at the MEASURED 2.4, not the prose 4", () => {
+    const buckets = bucketsWithReadResult();
+    expect(buckets.tool_result_read.estTokens).toBe(
+      Math.ceil(buckets.tool_result_read.chars / 2.4)
+    );
+  });
+
+  it("a prose bucket stays on 4 — unmeasured, and deliberately not moved on argument alone", () => {
+    const buckets = bucketsWithReadResult();
+    expect(buckets.system_prompt.divisor).toBe(4);
+  });
+});
+
 describe("estTokens approximation", () => {
   it("estTokens is ceil(chars / 4)", () => {
     const msgs = [makeSystemMsg("1234"), makeUserMsg("go")]; // 4 chars system + 2 user
