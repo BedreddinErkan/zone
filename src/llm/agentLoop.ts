@@ -616,6 +616,15 @@ export const INVESTIGATION_HEADER = "INVESTIGATION GUIDE:";
  *  prompt-branch telemetry scans for this exact constant. */
 export const ANSWER_ONLY_HEADER = "ANSWER MODE (read-only, plan approved):";
 
+/**
+ * The execution-phase system prompt. One call site — agentLoop.ts:2936, inside
+ * runAgentLoop. generateExecutionPlan (executionPlan.ts:309) builds a SEPARATE prompt for
+ * the plan-generation phase and never calls this function; that prompt has no system/user
+ * split at all (a single role:"user" message, executionPlan.ts:445) — a different message
+ * shape, not just a smaller one. A cost, token, or char figure read from one phase is not
+ * comparable to the other: five passes of prior work compared an execution-phase change
+ * against a plan-phase cost baseline before this was written down anywhere.
+ */
 export function assembleAgentSystemPrompt(input: {
   agentIntro: string;
   frameworkLines: string[];

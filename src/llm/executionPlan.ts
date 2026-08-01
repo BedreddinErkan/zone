@@ -306,6 +306,13 @@ export function formatPlanRevisedNote(plan: ExecutionPlan): string {
   return `Plan revised — ${plan.steps.length} steps.\n\n${formatExecutionPlanForPrompt(plan)}`;
 }
 
+/**
+ * The plan-generation-phase prompt, built below as a single role:"user" message
+ * (template :359-440, sent :445) — no system/user split at all. This is a SEPARATE prompt
+ * from the execution phase's (assembleAgentSystemPrompt, agentLoop.ts:619, one call site
+ * at agentLoop.ts:2936) — structurally distinct, not just differently sized. A cost,
+ * token, or char figure read from one phase is not comparable to the other.
+ */
 export async function generateExecutionPlan(input: {
   task: string;
   repoSummary: string;
