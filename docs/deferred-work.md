@@ -2,7 +2,8 @@
 
 This document is written to be read cold, without the conversation that produced it. Every
 entry stands alone: what it is, why it's deferred, what would close it, and where the code
-lives — referenced by shape (function name, branch condition, marker tag, symbol), never by
+lives (a few entries are marked closed instead, recorded for completeness rather than as open
+work) — referenced by shape (function name, branch condition, marker tag, symbol), never by
 line number. Four stale line-number references were found in this exact area in one session
 (see the closing section); this document is deliberately built to not become a fifth.
 
@@ -142,29 +143,78 @@ unreachability as a silent-failure signal.
 both in `search_in_files`'s handler in `toolExecutor.ts`; the cache variable is set once in the
 function that shells out to check for `rg`'s presence.
 
-## 6. `rehydrateFileAccess` hardcodes success on warm resume — the other half of a fixed defect
+## 6. Closed — `rehydrateFileAccess`'s hardcoded `success: true` is deliberate, not a defect
 
 **What it is:** the warm-resume path that rebuilds `toolCallLog` entries from a reconnected
 conversation (`rehydrateFileAccess` in `agentLoop.ts`) synthesizes an entry with
 `success: true` hardcoded, for a fixed set of tool names (`read_file`, `write_file`,
-`apply_patch`) — it never actually re-checks whether those prior calls really succeeded.
+`apply_patch`) — it never re-checks whether those prior calls really succeeded.
 
-**Why this matters, and how it connects to work already landed:** the chain-saturation nudge
-(the pre-iteration hook that warns when many iterations have passed without a successful
-write) originally couldn't tell a no-op `multi_edit` from a real one. That was fixed by
-threading `filesStaged` through and reading it instead of trusting `success` alone. This is
-the *other* half of the same defect: a pre-interruption `apply_patch` rehydrated on warm
-resume always counts as a successful write, regardless of what actually happened, and will
-suppress the nudge for the entire resumed run.
+**Why this is closed, not fixed:** the function's own header comment already states a
+tradeoff as deliberate for the consumer it names: a rehydrated tool call proves the call was
+*issued*, not that it succeeded, and the alternative — rehydrating failure accurately — blocks
+every warm resume's first patch. That comment is correct as far as it reasons. Closing this
+item meant checking whether its reasoning covers every consumer of the field it defends. It
+doesn't: a second consumer, below, is separately fixable, and closed for a different reason —
+value, not feasibility.
 
-**What would close it:** either re-verifying the rehydrated tool calls' real outcomes
-(expensive — would need to re-read files or re-derive state), or, more cheaply, not counting
-rehydrated entries toward chain-saturation at all and accepting a cold nudge state on resume.
-Not decided; recorded as open.
+**The correct-vs-loses split:** the hardcoded `success: true` feeds two consumers with
+different correctness requirements. The read-before-patch gate (`wasFileReadOrWritten`)
+accepts `read_file`/`write_file` entries unless `success === false` and requires `apply_patch`
+entries to be exactly `success === true`. For the chain-saturation nudge, the same field is
+sometimes right and sometimes wrong: right when the prior `apply_patch` really did succeed
+before interruption (the nudge's premise — many iterations without a successful write — is
+genuinely false, so suppressing it is correct), wrong when it failed right before interruption
+(the premise is true, but the nudge is suppressed anyway).
+
+**Why the shared field itself can't be fixed:** making rehydrated `success` accurate would
+require knowing which prior calls really succeeded, and rehydration has no cheap way to know
+that — real verification means re-reading files or re-deriving state, and the only other
+source of real outcome data in the resume conversation is prose result text, the same fragile
+classification shape this document rejects elsewhere (see item 12). The read gate needs
+`success: true` hardcoded unconditionally: the alternative is treating every rehydrated entry
+pessimistically, which blocks the first patch of every warm resume, not just the rare genuine
+failure. That's the header comment's actual claim, and it stands.
+
+**Chain saturation is a separate question, and is cheaply fixable — closed anyway on value:**
+the read-gate argument above does not extend to it. The chain-saturation filter doesn't need a
+per-call `success` at all — it only needs to know whether the prior run staged real work, and
+a cheap, already-existing signal answers exactly that (two concrete options below, under "If
+this is ever revisited"). So this consumer is not stuck the way the read gate is — it just
+isn't fixed. It's closed rather than left open because the miss is small: the nudge fires at
+most once per run, and only misses in the minority case where the immediately-pre-interruption
+`apply_patch` genuinely failed. When it succeeded — the ordinary case — suppressing the nudge
+is already correct, since the nudge's own premise would be false. One suppressed advisory
+message, once, in an uncommon case, isn't worth building either option for today.
+
+**What the header comment's reasoning does and doesn't cover:** it reasons all the way through
+the read-before-patch gate and stops there — it never mentions chain saturation. Read on its
+own terms, its justification (blocking every warm resume's first patch) is specific to the
+read gate's strict/lenient `success` checks; it doesn't transfer to chain saturation, which has
+no such all-or-nothing failure mode. That's the actual gap — not that the tradeoff was
+reconsidered and accepted for this second consumer, but that the written argument never
+addresses it.
+
+**If this is ever revisited:** two options were identified, in preference order, for the
+chain-saturation consumer specifically — the read gate's `success: true` stays untouched
+either way. First, cheapest: read `resumeStagingFiles` directly in the chain-saturation
+filter — it's already seeded into `stagingFiles` on warm resume, and non-empty staging already
+means the prior run staged real work, independent of any per-entry outcome classification.
+Second: flag the entry rather than overload `success` — add a field marking a `toolCallLog`
+entry as rehydrated (provenance only, not an outcome claim), the same shape as the
+`filesStaged` field that fixed the sibling `multi_edit` defect, so
+`countsTowardChainSaturation` can discount flagged entries specifically. Neither option should
+classify from the resume conversation's `role:"tool"` prose result text:
+`reconcileDanglingToolCalls` proves that text is technically present and recoverable, but
+string-classifying an outcome from human-readable prose is the same fragile shape already
+rejected twice this session — once for marker-imbalance counts, and now again here. It's also
+the subject of a related, independent finding in the same log — see item 12.
 
 **Where the code lives:** the hardcoded `success: true` is in the entry-construction step
 inside `rehydrateFileAccess` in `agentLoop.ts`, gated on the tool-name allowlist described
-above.
+above; the header comment defending it sits directly above the function. The asymmetric gate
+it defends, `wasFileReadOrWritten`, sits later in the same file; `resumeStagingFiles` is seeded
+into `stagingFiles` nearby, in the same warm-resume wiring.
 
 ## 7. Sticky `failureDetected` suppresses durable-resume checkpoints across tools
 
@@ -255,6 +305,44 @@ unreachable below an interactive-run cost tier.
 a measured 4.4%-per-run trigger rate — a single forced run is closer to a lottery ticket than
 a measurement at that cost tier. Passive accumulation over ordinary use reaches the same
 records for free.
+
+## 12. `didApplyPatch` classifies by string-matching result text, never by reading `success`
+
+**What it is:** `didApplyPatch` (`src/llm/verification/logUtils.ts`) decides whether a run
+applied anything by scanning each `apply_patch`/`write_file` tool-call-log entry's `result`
+text for the substrings "error", "not found", and "fail" — it does not read the entry's
+`success` field at all.
+
+**How this was found:** unprompted, while establishing whether item 6 (above) was a real
+defect. Tracing every `toolCallLog` consumer to check what would change if rehydrated
+`success` were made accurate turned up this one — and it's immune to any such fix, by
+construction, because it never reads that field in the first place.
+
+**Three consequences:**
+- Any future fix to item 6's `success` field, if one is ever built, would not change this
+  function's behavior at all — it is a fully independent classification path over the same
+  log, not a downstream consumer of `success`.
+- The rehydration placeholder text (`"(restored from a previous run; content not retained)"`)
+  contains none of the three trigger substrings, so every rehydrated `apply_patch`/`write_file`
+  entry counts as applied here regardless of what really happened before interruption — the
+  same blind spot as item 6, reached by a completely different mechanism and unreachable by
+  item 6's proposed fixes.
+- It is consumed by `composer.ts` and `deriveVerdict.ts` (both in `src/llm/runCompletion/`) for
+  verdict derivation — so this affects the run's final reported verdict, not an internal nudge.
+
+**What would close it:** reading `success` instead of (or in addition to) string-matching
+`result` — the same category of fix as the bare-catch work already landed this session (making
+a `success` field trustworthy, or making a consumer stop trusting an untrustworthy proxy for
+it). Not attempted here: found during a documentation-only pass with explicit
+no-source-changes scope.
+
+**Same failure class as marker-imbalance's original problem:** classifying an outcome by
+pattern-matching human-readable text instead of reading a structured field meant to carry that
+outcome is the same shape of fragility that motivated the line-anchored marker recount (item
+1) — a different subsystem, the same lesson: prose is not a data model.
+
+**Where the code lives:** `didApplyPatch` in `src/llm/verification/logUtils.ts`; called from
+`composer.ts` and `deriveVerdict.ts` in `src/llm/runCompletion/`.
 
 ---
 
