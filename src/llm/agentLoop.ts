@@ -138,7 +138,7 @@ import {
 } from "./verification/index.js";
 import { finalizeRun } from "./runCompletion/index.js";
 import { TokenBudgetMeter } from "./tokenBudget/TokenBudgetMeter.js";
-import { handleToolResult, type ToolEventContext } from "./toolEventHandler/index.js";
+import { handleToolResult, type ToolEventContext, type ToolCallLogEntry } from "./toolEventHandler/index.js";
 import { CoachingController, type FailureContext } from "./coaching/index.js";
 import { warnWebSearchDegradationOnce } from "./webSearchWarning.js";
 
@@ -1478,6 +1478,36 @@ function getSemanticSmellSpecificGuidance(smellName: string): string {
   }
 }
 
+/**
+ * A multi_edit ToolCallLogEntry with success:true and filesStaged absent is a
+ * state handleToolResult.ts's threading should make unreachable. Marks the
+ * anomaly instead of silently treating it as either outcome, and reports
+ * "did not change anything" — the conservative direction for a nudge whose
+ * purpose is not to be suppressed by uncertainty.
+ */
+export function multiEditChangedSomething(entry: ToolCallLogEntry): boolean {
+  if (entry.filesStaged === undefined) {
+    log("[zone-multi-edit-log-missing-staged]", JSON.stringify({
+      id: entry.id,
+      tool: entry.tool,
+    }));
+    return false;
+  }
+  return entry.filesStaged.length > 0;
+}
+
+/** Whether a toolCallLog entry counts toward breaking a chain-saturation streak. */
+export function countsTowardChainSaturation(
+  entry: ToolCallLogEntry,
+  saturationCountMultiEdit: boolean
+): boolean {
+  if (entry.tool === "apply_patch") return entry.success === true;
+  if (saturationCountMultiEdit && entry.tool === "multi_edit") {
+    return entry.success === true && multiEditChangedSomething(entry);
+  }
+  return false;
+}
+
 /** Classify a tool failure into a coaching trigger. */
 export function classifyFailure(
   toolName: string,
@@ -2369,8 +2399,9 @@ async function runAgentLoopScoped(input: AgentLoopInput, stats: LoopRunStats): P
   let chainSaturationWarnInjected = false;
   // ZONE_SATURATION_COUNT_MULTIEDIT (default on): count multi_edit successes alongside apply_patch.
   // Set =0 to restore apply_patch-only counting (legacy behavior).
-  // Note: multi_edit returns success:true even with 0 replacements (toolExecutor.ts:3035);
-  // a no-op multi_edit will therefore suppress this nudge — documented edge case.
+  // multi_edit's terminal return sets success:true even with 0 replacements, so success alone
+  // can't tell a no-op multi_edit from a real one — countsTowardChainSaturation() below reads
+  // ToolCallLogEntry.filesStaged instead of trusting success for the multi_edit arm.
   const saturationCountMultiEdit = process.env["ZONE_SATURATION_COUNT_MULTIEDIT"] !== "0";
   if (tierLimits) {
     const effectiveSoftIterWarn = tierLimits.softIterWarn;
@@ -3608,10 +3639,7 @@ Example:
       input.taskClassification?.fallbackUsed !== true &&
       chainSaturationArchetype !== "question" &&
       chainSaturationArchetype !== "investigation" &&
-      toolCallLog.filter(e =>
-        (e.tool === "apply_patch" || (saturationCountMultiEdit && e.tool === "multi_edit")) &&
-        e.success === true
-      ).length === 0
+      toolCallLog.filter(e => countsTowardChainSaturation(e, saturationCountMultiEdit)).length === 0
     ),
     run: (ctx) => {
       chainSaturationWarnInjected = true;

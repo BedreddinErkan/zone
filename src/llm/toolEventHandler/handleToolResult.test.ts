@@ -263,6 +263,14 @@ describe("handleToolResult", () => {
       await handleToolResult("multi_edit", { files: ["src/x.ts"], find: "missing", replace: "y" }, "c1", meResult, ctx, deps);
       expect(ctx.filesModified.size).toBe(0);
     });
+
+    it("threads result.filesStaged onto the pushed toolCallLog entry for multi_edit", async () => {
+      const ctx = makeCtx();
+      const deps = makeDeps();
+      const meResult = { output: "multi_edit: 2 replacement(s)", success: true, filesStaged: ["src/a.ts", "src/b.ts"] };
+      await handleToolResult("multi_edit", { files: ["src/a.ts", "src/b.ts"], find: "x", replace: "y" }, "c1", meResult, ctx, deps);
+      expect(ctx.toolCallLog[0]?.filesStaged).toEqual(["src/a.ts", "src/b.ts"]);
+    });
   });
 
   describe("Task tool", () => {

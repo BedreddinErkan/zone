@@ -12,6 +12,7 @@ export interface ToolCallLogEntry {
   args: Record<string, unknown>;
   result: string;
   success?: boolean;
+  filesStaged?: string[];
 }
 
 export interface ToolEventContext {

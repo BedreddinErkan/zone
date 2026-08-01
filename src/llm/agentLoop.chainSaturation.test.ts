@@ -269,10 +269,14 @@ describe("CE.4.1.b: chain-saturation pre-iter hook", () => {
   });
 
   it("does NOT fire when multi_edit succeeded (ZONE_SATURATION_COUNT_MULTIEDIT default on)", async () => {
-    // multi_edit (success=true) at iter 0 → counted as a successful edit → hook suppressed
+    // multi_edit (success=true, filesStaged non-empty) at iter 0 → counted as a successful
+    // edit → hook suppressed. filesStaged mirrors what toolExecutor.ts's terminal return
+    // actually sets for a real replacement — countsTowardChainSaturation() reads it, not
+    // success alone.
     toolExecutorMock.executeTool.mockResolvedValueOnce({
       success: true,
       output: "multi_edit: 3 replacement(s) across 1 file(s).\n  src/a.ts: 3 replacement(s)",
+      filesStaged: ["src/a.ts"],
     });
     mocks.createChatCompletion.mockResolvedValueOnce({
       choices: [{
@@ -311,6 +315,7 @@ describe("CE.4.1.b: chain-saturation pre-iter hook", () => {
     toolExecutorMock.executeTool.mockResolvedValueOnce({
       success: true,
       output: "multi_edit: 3 replacement(s) across 1 file(s).\n  src/a.ts: 3 replacement(s)",
+      filesStaged: ["src/a.ts"],
     });
     mocks.createChatCompletion.mockResolvedValueOnce({
       choices: [{
@@ -348,14 +353,17 @@ describe("CE.4.1.b: chain-saturation pre-iter hook", () => {
     expect(logs.length).toBe(1);
   });
 
-  it("fires with zero-replacement multi_edit (success:true, 0 replacements — edge case documented)", async () => {
-    // multi_edit returns success:true even when totalReplacements===0 (toolExecutor.ts:3035).
-    // A no-op multi_edit therefore SUPPRESSES the nudge — this test documents that behavior.
-    // toolCallLog only stores {tool, success}; filtering by replacement count is not available
-    // without changing the log structure.
+  it("fires with zero-replacement multi_edit (success:true, 0 replacements — 2372 fix)", async () => {
+    // multi_edit returns success:true even when totalReplacements===0 (toolExecutor.ts's
+    // terminal return). A no-op multi_edit used to SUPPRESS the nudge — agentLoop.ts:2372's
+    // documented defect. countsTowardChainSaturation() now reads filesStaged instead of
+    // trusting success alone, so a zero-replacement call (filesStaged: []) does not count
+    // and the nudge fires. filesStaged mirrors toolExecutor.ts's real terminal return, which
+    // always sets it (possibly empty), never leaves it absent.
     toolExecutorMock.executeTool.mockResolvedValueOnce({
       success: true,
       output: "multi_edit: 0 replacement(s) across 1 file(s).\n  [NOT FOUND] src/a.ts",
+      filesStaged: [],
     });
     mocks.createChatCompletion.mockResolvedValueOnce({
       choices: [{
@@ -386,8 +394,8 @@ describe("CE.4.1.b: chain-saturation pre-iter hook", () => {
     const logs = mocks.log.mock.calls.filter(
       (c: unknown[]) => c[0] === "[zone-chain-saturation-warn]",
     );
-    // zero-replacement multi_edit currently counts as successful — nudge suppressed
-    expect(logs.length).toBe(0);
+    // fixed: a zero-replacement multi_edit no longer counts as a successful action
+    expect(logs.length).toBe(1);
   });
 });
 

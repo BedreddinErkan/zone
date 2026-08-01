@@ -3239,7 +3239,11 @@ export async function executeTool(
           }
           const wr = stagedWrite(input?.stagingFiles, abs, newContent, repoPath);
           if (wr === "escape") {
-            return { success: false, output: `multi_edit_blocked_path_escape: "${filePath}" would escape repo` };
+            return {
+              success: false,
+              output: `multi_edit_blocked_path_escape: "${filePath}" would escape repo`,
+              filesStaged,
+            };
           }
           filesStaged.push(filePath);
         }

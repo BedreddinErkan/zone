@@ -70,6 +70,7 @@ export async function handleToolResult(
     args: parsedArgs,
     result: result.output.slice(0, 4000),
     success: result.success,
+    filesStaged: result.filesStaged,
   });
 
   // Step 6: filesReadThisRun + filesReadCountThisRun
