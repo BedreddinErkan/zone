@@ -47,6 +47,14 @@ function normalizeSmartQuotes(s: string): { text: string; count: number } {
   return { text, count };
 }
 
+// Ledger item 18: shared by the match-time normalization below and the detection-only
+// telemetry pre-pass, so both read the same transformation instead of two hand-maintained
+// copies of a two-line regex chain.
+function normalizeEol(s: string): { text: string; changed: boolean } {
+  const text = s.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  return { text, changed: text !== s };
+}
+
 // Lever 4.A: outline memoization. Key = "filePath:contentHash" (first 16 hex chars of sha256).
 // Prevents regenerating 6-8KB outline on repeat reads of an unchanged large file.
 const outlineCache = new Map<string, {
@@ -1992,6 +2000,32 @@ export async function executeTool(
         }));
       }
 
+      // Detection-only telemetry (ledger item 18). Population: apply_patch calls that reached
+      // block-level normalization — survived every earlier rejection (missing filePath,
+      // read-before-patch, write-scope, escalated-file block, file-read failure, pre-existing
+      // syntax breakage, marker imbalance, content-before-FIND) and produced blocks.length > 0.
+      // NOT "all apply_patch calls": read_before_patch's own "approved" count is a looser upper
+      // bound (it fires earlier, before several of the rejections above can still happen).
+      // [zone-apply-patch-marker-split]'s population is exactly this record's blockCount > 1
+      // slice — use this record's own count as that marker's denominator, not read_before_patch's.
+      let normParityEolChangedBlocks = 0;
+      let normParityPrefixStrippedBlocks = 0;
+      for (const b of blocks) {
+        if (normalizeEol(b.find).changed || normalizeEol(b.replace).changed) {
+          normParityEolChangedBlocks += 1;
+        }
+        if (stripReadFilePrefix(b.find) !== b.find) {
+          normParityPrefixStrippedBlocks += 1;
+        }
+      }
+      log("[zone-apply-patch-normalization-parity]", JSON.stringify({
+        filePath,
+        blockCount: blocks.length,
+        smartQuoteChanged: sqFindTotal + sqReplaceTotal > 0,
+        eolChangedBlocks: normParityEolChangedBlocks,
+        prefixStrippedBlocks: normParityPrefixStrippedBlocks,
+      }));
+
       let currentNormalized = originalWithoutBom.replace(/\r\n/g, "\n");
 
       // ─── Step 3.5: Scope resolution (only when scope is present) ────────────
@@ -2165,12 +2199,8 @@ export async function executeTool(
           );
         }
 
-        const normalizedFind = stripReadFilePrefix(
-          block.find.replace(/\r\n/g, "\n").replace(/\r/g, "\n")
-        );
-        const normalizedReplace = block.replace
-          .replace(/\r\n/g, "\n")
-          .replace(/\r/g, "\n");
+        const normalizedFind = stripReadFilePrefix(normalizeEol(block.find).text);
+        const normalizedReplace = normalizeEol(block.replace).text;
         const findLineCount = normalizedFind.split("\n").length;
         const replaceLineCount = normalizedReplace.split("\n").length;
 
