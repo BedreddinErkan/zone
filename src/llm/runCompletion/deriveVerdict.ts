@@ -6,7 +6,6 @@ import {
   validateUnrelatedClaim,
   applyNoInfraVerificationOverride,
 } from "../verification/index.js";
-import { didApplyPatch } from "../verification/logUtils.js";
 import type { VerdictInput, VerdictResult } from "./types.js";
 
 export function deriveVerdict(input: VerdictInput): VerdictResult {

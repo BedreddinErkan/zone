@@ -136,6 +136,7 @@ import {
   validatePassedClaim,
   applyNoInfraVerificationOverride,
 } from "./verification/index.js";
+import { multiEditChangedSomething } from "./verification/logUtils.js";
 import { finalizeRun } from "./runCompletion/index.js";
 import { TokenBudgetMeter } from "./tokenBudget/TokenBudgetMeter.js";
 import { handleToolResult, type ToolEventContext, type ToolCallLogEntry } from "./toolEventHandler/index.js";
@@ -1478,23 +1479,10 @@ function getSemanticSmellSpecificGuidance(smellName: string): string {
   }
 }
 
-/**
- * A multi_edit ToolCallLogEntry with success:true and filesStaged absent is a
- * state handleToolResult.ts's threading should make unreachable. Marks the
- * anomaly instead of silently treating it as either outcome, and reports
- * "did not change anything" — the conservative direction for a nudge whose
- * purpose is not to be suppressed by uncertainty.
- */
-export function multiEditChangedSomething(entry: ToolCallLogEntry): boolean {
-  if (entry.filesStaged === undefined) {
-    log("[zone-multi-edit-log-missing-staged]", JSON.stringify({
-      id: entry.id,
-      tool: entry.tool,
-    }));
-    return false;
-  }
-  return entry.filesStaged.length > 0;
-}
+// multiEditChangedSomething moved to verification/logUtils.ts — shared with
+// didApplyPatch's multi_edit arm, avoids a second, independently-written copy
+// of the same predicate. Re-exported here for existing importers of this module.
+export { multiEditChangedSomething };
 
 /** Whether a toolCallLog entry counts toward breaking a chain-saturation streak. */
 export function countsTowardChainSaturation(
