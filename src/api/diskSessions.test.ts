@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdtemp, rm, mkdir, writeFile, readdir } from "node:fs/promises";
@@ -38,9 +38,9 @@ describe("diskSessions", () => {
   });
 
   it("listSessions returns newest first", async () => {
-    await saveSession(tmp, { ...baseSession, sessionId: "id-old" });
+    await saveSession(tmp, { ...baseSession, sessionId: "id-old", cwd: tmp });
     await new Promise(r => setTimeout(r, 15));
-    await saveSession(tmp, { ...baseSession, sessionId: "id-new" });
+    await saveSession(tmp, { ...baseSession, sessionId: "id-new", cwd: tmp });
     const list = await listSessions(tmp);
     expect(list).toHaveLength(2);
     const first = await loadSession(tmp, list[0]);
@@ -48,15 +48,15 @@ describe("diskSessions", () => {
   });
 
   it("loadLastSession returns most recent", async () => {
-    await saveSession(tmp, { ...baseSession, sessionId: "first" });
+    await saveSession(tmp, { ...baseSession, sessionId: "first", cwd: tmp });
     await new Promise(r => setTimeout(r, 15));
-    await saveSession(tmp, { ...baseSession, sessionId: "second" });
+    await saveSession(tmp, { ...baseSession, sessionId: "second", cwd: tmp });
     expect((await loadLastSession(tmp))?.sessionId).toBe("second");
   });
 
   it("pruneOldSessions removes beyond keep limit", async () => {
     for (let i = 0; i < 5; i++) {
-      await saveSession(tmp, { ...baseSession, sessionId: `id-${i}` });
+      await saveSession(tmp, { ...baseSession, sessionId: `id-${i}`, cwd: tmp });
       await new Promise(r => setTimeout(r, 10));
     }
     const removed = await pruneOldSessions(tmp, 3);
@@ -88,7 +88,7 @@ describe("diskSessions", () => {
       // envelope or a real transcript got deleted.
       const N = 3;
       for (let i = 0; i < N; i++) {
-        await saveSession(tmp, { ...baseSession, sessionId: `id-${i}` });
+        await saveSession(tmp, { ...baseSession, sessionId: `id-${i}`, cwd: tmp });
         await new Promise(r => setTimeout(r, 10));
       }
       // One sorting above the ISO transcripts, one below — the two failure modes.
@@ -103,7 +103,7 @@ describe("diskSessions", () => {
     });
 
     it("listSessions excludes envelopes entirely", async () => {
-      await saveSession(tmp, baseSession);
+      await saveSession(tmp, { ...baseSession, cwd: tmp });
       await writeEnvelopes(["e2e79f75-dead-4000-8000-000000000001"]);
       const list = await listSessions(tmp);
       expect(list).toHaveLength(1);
@@ -113,7 +113,7 @@ describe("diskSessions", () => {
     it("loadLastSession never returns an envelope, whatever it sorts as", async () => {
       // "e2…" sorts above every "2026-…" transcript, so before the fix this was the
       // file --resume loaded — and it parses as JSON, so the failure was silent.
-      await saveSession(tmp, baseSession);
+      await saveSession(tmp, { ...baseSession, cwd: tmp });
       await writeEnvelopes(["e2e79f75-dead-4000-8000-000000000001"]);
       const last = await loadLastSession(tmp);
       expect(last?.sessionId).toBe(baseSession.sessionId);
@@ -128,6 +128,7 @@ describe("diskSessions", () => {
     it("returns SessionMeta for each session, newest first", async () => {
       const s1: DiskSession = {
         ...baseSession,
+        cwd: tmp,
         sessionId: "id-older",
         transcript: [
           { kind: "user_prompt", text: "first task" },
@@ -138,6 +139,7 @@ describe("diskSessions", () => {
       };
       const s2: DiskSession = {
         ...baseSession,
+        cwd: tmp,
         sessionId: "id-newer",
         transcript: [{ kind: "user_prompt", text: "newer task" }],
         totalCostUsd: 0.07,
@@ -162,11 +164,69 @@ describe("diskSessions", () => {
       const dir = join(tmp, ".zone/sessions");
       await mkdir(dir, { recursive: true });
       await writeFile(join(dir, "2026-01-01T00-00-00-000Z-corrupt.json"), "not json", "utf-8");
-      await saveSession(tmp, { ...baseSession, sessionId: "id-valid" });
+      await saveSession(tmp, { ...baseSession, sessionId: "id-valid", cwd: tmp });
 
       const metas = await listSessionsMeta(tmp);
       expect(metas).toHaveLength(1);
       expect(metas[0].sessionId).toBe("id-valid");
+    });
+  });
+
+  describe("repo scoping", () => {
+    it("listSessions returns only the querying repo's sessions", async () => {
+      await saveSession(tmp, { ...baseSession, sessionId: "a-session", cwd: "/repo-a" });
+      await saveSession(tmp, { ...baseSession, sessionId: "b-session", cwd: "/repo-b" });
+
+      const list = await listSessions("/repo-a");
+      expect(list).toHaveLength(1);
+      const survivor = await loadSession(tmp, list[0]);
+      expect(survivor?.sessionId).toBe("a-session");
+    });
+
+    it("loadLastSession from a repo with no sessions returns null, even when other repos have newer sessions", async () => {
+      await saveSession(tmp, { ...baseSession, sessionId: "b-session", cwd: "/repo-b" });
+
+      expect(await loadLastSession("/repo-a")).toBeNull();
+    });
+
+    it("loadLastSession returns the most recent within the repo — a newer foreign session does not shadow an older local one", async () => {
+      await saveSession(tmp, { ...baseSession, sessionId: "a-session", cwd: "/repo-a" });
+      await new Promise(r => setTimeout(r, 15));
+      await saveSession(tmp, { ...baseSession, sessionId: "b-session", cwd: "/repo-b" });
+
+      const last = await loadLastSession("/repo-a");
+      expect(last?.sessionId).toBe("a-session");
+    });
+
+    it("pruneOldSessions stays global — a repo-scoped listing does not change eviction across repos", async () => {
+      for (let i = 0; i < 2; i++) {
+        await saveSession(tmp, { ...baseSession, sessionId: `a-${i}`, cwd: "/repo-a" });
+        await new Promise(r => setTimeout(r, 10));
+      }
+      for (let i = 0; i < 2; i++) {
+        await saveSession(tmp, { ...baseSession, sessionId: `b-${i}`, cwd: "/repo-b" });
+        await new Promise(r => setTimeout(r, 10));
+      }
+      // 4 sessions total, none of either repo's own 2 exceeds keep:3 — only a global cap
+      // sees anything to evict.
+      const removed = await pruneOldSessions("/repo-a", 3);
+      expect(removed).toBe(1);
+    });
+
+    it("a corrupt session file is skipped, not fatal, and the failure is logged", async () => {
+      const dir = join(tmp, ".zone/sessions");
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, "2026-01-01T00-00-00-000Z-corrupt.json"), "not json", "utf-8");
+      await saveSession(tmp, { ...baseSession, sessionId: "id-valid", cwd: tmp });
+
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+      const list = await listSessions(tmp);
+      const survivor = await loadSession(tmp, list[0]);
+      expect(survivor?.sessionId).toBe("id-valid");
+
+      const call = logSpy.mock.calls.find((c) => c[0] === "[zone-session-load-failed]");
+      expect(call?.[1]).toContain("2026-01-01T00-00-00-000Z-corrupt.json");
+      logSpy.mockRestore();
     });
   });
 });

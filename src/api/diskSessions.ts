@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
 import type { TranscriptEntry } from "../cli/tui/store.js";
+import { log } from "../utils/logger.js";
 
 export interface DiskSession {
   version: 1;
@@ -108,7 +109,11 @@ export async function saveSession(_cwd: string, session: DiskSession): Promise<s
  *  so it orders by a random UUID rather than by time. */
 const ENVELOPE_SUFFIX = ".envelope.json";
 
-export async function listSessions(_cwd: string): Promise<string[]> {
+/** Every session filename, newest first, regardless of which repo saved it. Unscoped
+ *  deliberately: pruneOldSessions uses this directly so its cap stays global across repos
+ *  even though listSessions (below) is repo-scoped — see diskSessions.test.ts's
+ *  "repo scoping" describe block for what would break if the two were merged. */
+async function listAllSessionFilenames(): Promise<string[]> {
   try {
     const files = await fs.readdir(sessionsDir());
     return files
@@ -119,6 +124,29 @@ export async function listSessions(_cwd: string): Promise<string[]> {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw err;
   }
+}
+
+export async function listSessions(cwd: string): Promise<string[]> {
+  const filenames = await listAllSessionFilenames();
+  const result: string[] = [];
+  for (const filename of filenames) {
+    let session: DiskSession | null;
+    try {
+      session = await loadSession(cwd, filename);
+    } catch (err) {
+      // loadSession already separates ENOENT (benign — file pruned between readdir and read,
+      // returns null, never reaches here) from everything else (re-thrown). Anything caught
+      // here is a real fault by loadSession's own distinction, not a race.
+      log("[zone-session-load-failed]", JSON.stringify({
+        filename,
+        queryingCwd: cwd,
+        reason: err instanceof Error ? err.message : String(err),
+      }));
+      continue;
+    }
+    if (session && session.cwd === cwd) result.push(filename);
+  }
+  return result;
 }
 
 export async function loadSession(_cwd: string, filename: string): Promise<DiskSession | null> {
@@ -139,8 +167,11 @@ export async function loadLastSession(cwd: string): Promise<DiskSession | null> 
   return loadSession(cwd, list[0]);
 }
 
-export async function pruneOldSessions(cwd: string, keep: number = MAX_SESSIONS): Promise<number> {
-  const list = await listSessions(cwd);
+export async function pruneOldSessions(_cwd: string, keep: number = MAX_SESSIONS): Promise<number> {
+  // Deliberately unscoped — see listAllSessionFilenames's own comment. The cap bounds total
+  // disk usage across every repo, not per repo; _cwd stays in the signature only so callers
+  // (and their existing call sites) don't need to change shape.
+  const list = await listAllSessionFilenames();
   if (list.length <= keep) return 0;
   const toRemove = list.slice(keep);
   await Promise.all(toRemove.map(f =>
