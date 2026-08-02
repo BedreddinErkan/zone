@@ -381,12 +381,12 @@ export function _buildExitResumeHint(
 const SAVE_FAILURE_CLAUSE = "It will not be available to resume.";
 
 /**
- * What to log and tell the user when the exit-time save fails. Takes `saved` as an explicit
- * input rather than assuming call-site ordering: by the time pruneOldSessions runs, `saved` is
- * already true (set immediately after saveSession returns), so a caught error with saved=true
- * can only be pruneOldSessions failing — the session itself is safe on disk, and a
- * maintenance-only failure doesn't warrant the same signal as losing the conversation. Returns
- * null in that case, deliberately: no marker, no message.
+ * What to log and tell the user when a save fails, on either the clean-exit or the signal path.
+ * Takes `saved` as an explicit input rather than assuming call-site ordering: by the time
+ * pruneOldSessions runs (clean-exit only — the signal path has no prune), `saved` is already
+ * true, so a caught error with saved=true can only be pruneOldSessions failing — the session
+ * itself is safe on disk, and a maintenance-only failure doesn't warrant the same signal as
+ * losing the conversation. Returns null in that case, deliberately: no marker, no message.
  *
  * `phase` distinguishes "the write itself failed" (phase: "write" — saveSession's own fs
  * errors) from "the session couldn't even be constructed" (phase: "build" — buildDiskSession
@@ -396,21 +396,31 @@ const SAVE_FAILURE_CLAUSE = "It will not be available to resume.";
  * implies. The marker payload carries phase too, so the two are distinguishable in records, not
  * just in the user-facing string.
  *
- * Calls log() directly for the marker, matching _composeResumeMessage's precedent for a marker
- * fired from inside an otherwise-pure decision function. process.stderr.write stays at the
- * call site, which isn't independently reachable, same split as _buildExitResumeHint's.
+ * `signal` distinguishes which path reported: null on the clean-exit path, the signal name
+ * (e.g. "SIGTERM") on the fatal-signal path — an explicit, visible field in every payload, not
+ * an absent key that could be misread as forgotten.
+ *
+ * `emitLog` has no default deliberately: a default would let a call site on the signal path
+ * silently fall back to the real log() instead of the handler's own injected, test-observable
+ * one — observationally identical in production (both eventually reach the same sink) but
+ * different in tests, where only the injected path is captured. Both clean-exit call sites pass
+ * the real log() explicitly instead; the signal handler passes its own emitLog. process.stderr
+ * .write for the user-facing text stays at the call site, which isn't independently reachable,
+ * same split as _buildExitResumeHint's.
  */
 export function _reportSaveFailure(
   err: unknown,
   saved: boolean,
   sessionId: string,
   phase: "build" | "write",
+  signal: string | null,
+  emitLog: (name: string, payload: string) => void,
 ): string | null {
   if (saved) return null;
   const isError = err instanceof Error;
   const code = isError ? ((err as NodeJS.ErrnoException).code ?? null) : null;
   const message = isError ? err.message : String(err);
-  log("[zone-session-save-failed]", JSON.stringify({ sessionId, phase, isError, code, message }));
+  emitLog("[zone-session-save-failed]", JSON.stringify({ sessionId, phase, signal, isError, code, message }));
   return phase === "build"
     ? `Could not prepare this session to save: ${message}. ${SAVE_FAILURE_CLAUSE}`
     : `Could not save this session: ${message}. ${SAVE_FAILURE_CLAUSE}`;
@@ -679,7 +689,7 @@ export const FATAL_SIGNAL_EXIT_CODES = {
 
 export interface FatalSignalDeps {
   /** Read at signal time, not registration time — state is null until React mounts. */
-  getState: () => { transcript: unknown[]; armedMcpManager?: { killAllSync(): void } } | null;
+  getState: () => { transcript: unknown[]; sessionId: string; armedMcpManager?: { killAllSync(): void } } | null;
   buildSession: (state: never) => unknown;
   /** SYNC by design — see saveSessionSync's comment and the guard note below. */
   saveSessionSync: (cwd: string, session: never) => unknown;
@@ -771,9 +781,23 @@ export function registerFatalSignalHandlers(deps: FatalSignalDeps): void {
       deps.stampEnvelopeOnExit();
       const s = deps.getState();
       if (s && s.transcript.length > 0) {
+        let session: unknown;
+        let built = false;
         try {
-          deps.saveSessionSync(cwd(), deps.buildSession(s as never) as never);
-        } catch { /* best effort — an exit must still happen */ }
+          session = deps.buildSession(s as never);
+          built = true;
+        } catch (err) {
+          try { _reportSaveFailure(err, false, s.sessionId, "build", signal, emitLog); }
+          catch { /* reporting itself must not block exit */ }
+        }
+        if (built) {
+          try {
+            deps.saveSessionSync(cwd(), session as never);
+          } catch (err) {
+            try { _reportSaveFailure(err, false, s.sessionId, "write", signal, emitLog); }
+            catch { /* reporting itself must not block exit */ }
+          }
+        }
       }
       deps.exit(code);
     });
@@ -1315,7 +1339,7 @@ export async function runTui(
     try {
       session = buildDiskSession(finalState);
     } catch (err) {
-      saveFailureMessage = _reportSaveFailure(err, saved, finalState.sessionId, "build");
+      saveFailureMessage = _reportSaveFailure(err, saved, finalState.sessionId, "build", null, log);
     }
     if (session) {
       try {
@@ -1323,7 +1347,7 @@ export async function runTui(
         saved = true;
         await pruneOldSessions(process.cwd());
       } catch (err) {
-        saveFailureMessage = _reportSaveFailure(err, saved, finalState.sessionId, "write");
+        saveFailureMessage = _reportSaveFailure(err, saved, finalState.sessionId, "write", null, log);
       }
     }
   }

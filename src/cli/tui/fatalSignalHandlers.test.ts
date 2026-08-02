@@ -132,6 +132,71 @@ describe("registerFatalSignalHandlers", () => {
     expect(() => handlers.get("SIGINT")!()).not.toThrow();
     expect(sessionFiles()).toHaveLength(1);
   });
+
+  it("a throwing saveSessionSync emits the marker with the real code and the firing signal", () => {
+    const err = new Error("no space left on device") as NodeJS.ErrnoException;
+    err.code = "ENOSPC";
+    const { handlers, logged } = makeDeps({
+      getState: () => ({ transcript: [{ kind: "user" }], sessionId: "sig-session-1" }) as never,
+      saveSessionSync: () => { throw err; },
+    });
+
+    handlers.get("SIGTERM")!();
+
+    const call = logged.find((l) => l.name === "[zone-session-save-failed]");
+    expect(call?.payload.code).toBe("ENOSPC");
+    expect(call?.payload.signal).toBe("SIGTERM");
+  });
+
+  it("exit still happens after saveSessionSync throws", () => {
+    const { handlers, exit } = makeDeps({
+      getState: () => ({ transcript: [{ kind: "user" }], sessionId: "sig-session-2" }) as never,
+      saveSessionSync: () => { throw new Error("disk full"); },
+    });
+
+    handlers.get("SIGTERM")!();
+
+    expect(exit).toHaveBeenCalledWith(143);
+  });
+
+  it("a successful sync save emits no failure marker", () => {
+    const { handlers, logged } = makeDeps();
+
+    handlers.get("SIGHUP")!();
+
+    expect(logged.find((l) => l.name === "[zone-session-save-failed]")).toBeUndefined();
+  });
+
+  it("a throwing injected log inside the reporting itself still allows exit", () => {
+    // The reporting call is wrapped in its own try/catch specifically so a secondary throw
+    // (here, the log sink itself) can't prevent deps.exit(code) from running.
+    const { handlers, exit } = makeDeps({
+      getState: () => ({ transcript: [{ kind: "user" }], sessionId: "sig-session-3" }) as never,
+      saveSessionSync: () => { throw new Error("disk full"); },
+      log: (name) => {
+        if (name === "[zone-session-save-failed]") throw new Error("log sink exploded");
+      },
+    });
+
+    handlers.get("SIGTERM")!();
+
+    expect(exit).toHaveBeenCalledWith(143);
+  });
+
+  it("buildSession throwing reports phase=build and never calls saveSessionSync", () => {
+    const saveSessionSyncSpy = vi.fn();
+    const { handlers, logged } = makeDeps({
+      getState: () => ({ transcript: [{ kind: "user" }], sessionId: "sig-session-4" }) as never,
+      buildSession: () => { throw new Error("ENOENT: no such file or directory, uv_cwd"); },
+      saveSessionSync: saveSessionSyncSpy,
+    });
+
+    handlers.get("SIGHUP")!();
+
+    const call = logged.find((l) => l.name === "[zone-session-save-failed]");
+    expect(call?.payload.phase).toBe("build");
+    expect(saveSessionSyncSpy).not.toHaveBeenCalled();
+  });
 });
 
 describe("FATAL_SIGNAL_EXIT_CODES", () => {

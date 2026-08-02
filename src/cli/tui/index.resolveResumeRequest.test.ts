@@ -25,6 +25,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdtemp, rm } from "node:fs/promises";
 import { saveSession, _setSessionsDirForTest, type DiskSession } from "../../api/diskSessions.js";
+import { log } from "../../utils/logger.js";
 import {
   _resolveResumeRequest, _composeResumeMessage, RESUME_MISS_SUFFIX,
   _buildExitResumeHint, _reportSaveFailure,
@@ -187,7 +188,7 @@ describe("_reportSaveFailure", () => {
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
     const err = makeFsError("ENOSPC", "no space left on device");
 
-    _reportSaveFailure(err, false, "session-abc", "write");
+    _reportSaveFailure(err, false, "session-abc", "write", null, log);
 
     const call = logSpy.mock.calls.find((c) => c[0] === "[zone-session-save-failed]");
     expect(JSON.parse(call?.[1] as string).code).toBe("ENOSPC");
@@ -202,7 +203,7 @@ describe("_reportSaveFailure", () => {
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
     const err = makeFsError("ENOSPC", "no space left on device");
 
-    const message = _reportSaveFailure(err, false, "session-abc", "write");
+    const message = _reportSaveFailure(err, false, "session-abc", "write", null, log);
 
     expect(message).toBe(
       "Could not save this session: no space left on device. It will not be available to resume."
@@ -213,7 +214,7 @@ describe("_reportSaveFailure", () => {
   it("write-phase failure: a non-Error throw is represented honestly, not coerced", () => {
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
 
-    _reportSaveFailure("disk gone", false, "session-abc", "write");
+    _reportSaveFailure("disk gone", false, "session-abc", "write", null, log);
 
     const call = logSpy.mock.calls.find((c) => c[0] === "[zone-session-save-failed]");
     const payload = JSON.parse(call?.[1] as string);
@@ -229,7 +230,7 @@ describe("_reportSaveFailure", () => {
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
     const err = makeFsError("EACCES", "permission denied");
 
-    const message = _reportSaveFailure(err, true, "session-abc", "write");
+    const message = _reportSaveFailure(err, true, "session-abc", "write", null, log);
 
     expect(message).toBeNull();
     expect(logSpy.mock.calls.find((c) => c[0] === "[zone-session-save-failed]")).toBeUndefined();
@@ -242,7 +243,7 @@ describe("_reportSaveFailure", () => {
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
     const err = new Error("ENOENT: no such file or directory, uv_cwd");
 
-    const message = _reportSaveFailure(err, false, "session-abc", "build");
+    const message = _reportSaveFailure(err, false, "session-abc", "build", null, log);
 
     expect(message).toBe(
       "Could not prepare this session to save: ENOENT: no such file or directory, uv_cwd. It will not be available to resume."
