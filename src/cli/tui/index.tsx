@@ -378,6 +378,44 @@ export function _buildExitResumeHint(
   return `Resume this session with: zone --resume ${sessionId.slice(0, RESUME_HINT_ID_LENGTH)}`;
 }
 
+const SAVE_FAILURE_CLAUSE = "It will not be available to resume.";
+
+/**
+ * What to log and tell the user when the exit-time save fails. Takes `saved` as an explicit
+ * input rather than assuming call-site ordering: by the time pruneOldSessions runs, `saved` is
+ * already true (set immediately after saveSession returns), so a caught error with saved=true
+ * can only be pruneOldSessions failing — the session itself is safe on disk, and a
+ * maintenance-only failure doesn't warrant the same signal as losing the conversation. Returns
+ * null in that case, deliberately: no marker, no message.
+ *
+ * `phase` distinguishes "the write itself failed" (phase: "write" — saveSession's own fs
+ * errors) from "the session couldn't even be constructed" (phase: "build" — buildDiskSession
+ * throwing, e.g. process.cwd() failing if the working directory was removed underneath the
+ * process). The same catch shape and the same "Could not save" wording would misreport the
+ * build case: nothing was ever attempted, so nothing "failed to save" in the way that phrase
+ * implies. The marker payload carries phase too, so the two are distinguishable in records, not
+ * just in the user-facing string.
+ *
+ * Calls log() directly for the marker, matching _composeResumeMessage's precedent for a marker
+ * fired from inside an otherwise-pure decision function. process.stderr.write stays at the
+ * call site, which isn't independently reachable, same split as _buildExitResumeHint's.
+ */
+export function _reportSaveFailure(
+  err: unknown,
+  saved: boolean,
+  sessionId: string,
+  phase: "build" | "write",
+): string | null {
+  if (saved) return null;
+  const isError = err instanceof Error;
+  const code = isError ? ((err as NodeJS.ErrnoException).code ?? null) : null;
+  const message = isError ? err.message : String(err);
+  log("[zone-session-save-failed]", JSON.stringify({ sessionId, phase, isError, code, message }));
+  return phase === "build"
+    ? `Could not prepare this session to save: ${message}. ${SAVE_FAILURE_CLAUSE}`
+    : `Could not save this session: ${message}. ${SAVE_FAILURE_CLAUSE}`;
+}
+
 /** The exact trailing text _resolveResumeRequest's miss messages end with — exported so a test
  *  can pin that they still do, rather than the two functions being coupled by an untested
  *  assumption. */
@@ -1271,16 +1309,29 @@ export async function runTui(
 
   const finalState = storeCapture.state;
   let saved = false;
+  let saveFailureMessage: string | null = null;
   if (finalState && finalState.transcript.length > 0) {
+    let session: DiskSession | null = null;
     try {
-      await saveSession(process.cwd(), buildDiskSession(finalState));
-      saved = true;
-      await pruneOldSessions(process.cwd());
-    } catch { /* non-critical */ }
+      session = buildDiskSession(finalState);
+    } catch (err) {
+      saveFailureMessage = _reportSaveFailure(err, saved, finalState.sessionId, "build");
+    }
+    if (session) {
+      try {
+        await saveSession(process.cwd(), session);
+        saved = true;
+        await pruneOldSessions(process.cwd());
+      } catch (err) {
+        saveFailureMessage = _reportSaveFailure(err, saved, finalState.sessionId, "write");
+      }
+    }
   }
 
   restoreStdout();
   restoreStderr();
+
+  if (saveFailureMessage) process.stderr.write(`${saveFailureMessage}\n`);
 
   if (finalState) {
     const hint = _buildExitResumeHint(finalState.transcript.length, saved, finalState.sessionId);

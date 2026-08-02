@@ -1,8 +1,11 @@
 /**
- * Tests for the three pieces of --resume's user-facing text: _resolveResumeRequest (what to
- * load at startup), _composeResumeMessage (reconciling its miss message against whether an
- * envelope resume was also found), and _buildExitResumeHint (what to tell the user on the way
- * out, so they know a resumable session exists and what to type).
+ * Tests for the clean-exit tail's user-facing text: _resolveResumeRequest (what to load at
+ * startup), _composeResumeMessage (reconciling its miss message against whether an envelope
+ * resume was also found), _buildExitResumeHint (what to tell the user on the way out, so they
+ * know a resumable session exists and what to type), and _reportSaveFailure (what to tell them
+ * when it couldn't be saved at all). The file's own name now undersells its scope — it started
+ * as tests for _resolveResumeRequest specifically — but all four are the same clean-exit-tail
+ * lifecycle moment, not worth fragmenting into separate files for.
  *
  * _resolveResumeRequest is the session-lookup half of --resume (index.tsx:766-776), independent
  * of the envelope-resume half (durable run state, tested in index.resume.test.ts's
@@ -13,6 +16,8 @@
  * "starting fresh" when the envelope lookup then finds an interrupted run to resume anyway.
  * _buildExitResumeHint exists because the same principle applies leaving as arriving: a thrown
  * saveSession must not print a hint pointing at a session that doesn't exist on disk.
+ * _reportSaveFailure exists because that same thrown saveSession was, until now, silently
+ * swallowed — the user was told nothing at all.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
@@ -22,7 +27,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { saveSession, _setSessionsDirForTest, type DiskSession } from "../../api/diskSessions.js";
 import {
   _resolveResumeRequest, _composeResumeMessage, RESUME_MISS_SUFFIX,
-  _buildExitResumeHint,
+  _buildExitResumeHint, _reportSaveFailure,
 } from "./index.js";
 
 const baseSession: DiskSession = {
@@ -168,5 +173,82 @@ describe("_buildExitResumeHint", () => {
     // has to have succeeded. Distinct from the empty-transcript case above: this one proves the
     // saved flag is checked independently, not inferred from transcript length.
     expect(_buildExitResumeHint(3, false, id)).toBeNull();
+  });
+});
+
+function makeFsError(code: string, message: string): NodeJS.ErrnoException {
+  const err = new Error(message) as NodeJS.ErrnoException;
+  err.code = code;
+  return err;
+}
+
+describe("_reportSaveFailure", () => {
+  it("write-phase failure: the marker carries the real error code", () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const err = makeFsError("ENOSPC", "no space left on device");
+
+    _reportSaveFailure(err, false, "session-abc", "write");
+
+    const call = logSpy.mock.calls.find((c) => c[0] === "[zone-session-save-failed]");
+    expect(JSON.parse(call?.[1] as string).code).toBe("ENOSPC");
+    logSpy.mockRestore();
+  });
+
+  it("write-phase failure: the returned message says the save failed and won't resume", () => {
+    // Hardcoded literal, not derived from SAVE_FAILURE_CLAUSE: deriving the expectation from
+    // the same constant the implementation reads would make a mutation to that constant's own
+    // value invisible to this test — the exact lesson from f7cd3c2e's own mutation-2 stop-and-
+    // report (see docs/deferred-work.md's "self-reference defeats a mutation test").
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const err = makeFsError("ENOSPC", "no space left on device");
+
+    const message = _reportSaveFailure(err, false, "session-abc", "write");
+
+    expect(message).toBe(
+      "Could not save this session: no space left on device. It will not be available to resume."
+    );
+    logSpy.mockRestore();
+  });
+
+  it("write-phase failure: a non-Error throw is represented honestly, not coerced", () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    _reportSaveFailure("disk gone", false, "session-abc", "write");
+
+    const call = logSpy.mock.calls.find((c) => c[0] === "[zone-session-save-failed]");
+    const payload = JSON.parse(call?.[1] as string);
+    expect(payload.isError).toBe(false);
+    expect(payload.message).toBe("disk gone");
+    logSpy.mockRestore();
+  });
+
+  it("saved=true (a prune-only failure): returns null and logs nothing", () => {
+    // Item 24's prune decision, made testable: by the time pruneOldSessions runs, saved is
+    // already true, so a caught error with saved=true can only be the prune failing — the
+    // session itself is already safe on disk, and this stays deliberately silent.
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const err = makeFsError("EACCES", "permission denied");
+
+    const message = _reportSaveFailure(err, true, "session-abc", "write");
+
+    expect(message).toBeNull();
+    expect(logSpy.mock.calls.find((c) => c[0] === "[zone-session-save-failed]")).toBeUndefined();
+    logSpy.mockRestore();
+  });
+
+  it("build-phase failure: distinct wording from write-phase, and the marker names the phase", () => {
+    // buildDiskSession throwing (e.g. process.cwd() failing) means nothing was ever attempted
+    // — "Could not save this session" would misreport that a write was tried and failed.
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const err = new Error("ENOENT: no such file or directory, uv_cwd");
+
+    const message = _reportSaveFailure(err, false, "session-abc", "build");
+
+    expect(message).toBe(
+      "Could not prepare this session to save: ENOENT: no such file or directory, uv_cwd. It will not be available to resume."
+    );
+    const call = logSpy.mock.calls.find((c) => c[0] === "[zone-session-save-failed]");
+    expect(JSON.parse(call?.[1] as string).phase).toBe("build");
+    logSpy.mockRestore();
   });
 });
