@@ -108,11 +108,16 @@ unchanged; the new marker records it under a different tag entirely, not by exte
 parser's own segmentation (not just the counter, which item 1 already did) — a real behavior
 change to which patches get *accepted*, deliberately out of scope for both the recount and the
 telemetry passes that touched this area. Note the ordering constraint if this is ever done:
-line-anchoring the walk in `toolExecutor.ts` without also line-anchoring `parsePatchBlocks` (its
-near-duplicate in `agentLoop.ts`, feeding `hashPatchBlocks`'s failure-dedup key — see item 16)
-would leave the dedup hash disagreeing with what the applier actually did. The structural
-alternative — sidestepping the parsing question entirely — is recorded separately as item 17.
-Two sharper, related consequences of this same defect are recorded as items 15 and 16.
+line-anchoring the walk in `toolExecutor.ts` without also line-anchoring the identically-
+segmenting `parsePatchBlocks` in `agentLoop.ts` (feeding `hashPatchBlocks`'s failure-dedup key —
+see item 16) would leave the dedup hash disagreeing with what the applier actually did. The
+structural alternative — sidestepping the parsing question entirely — is recorded separately as
+item 17. Two sharper, related consequences of this same defect are recorded as items 15 and 16.
+Item 16 has since been corrected and now records the concrete, behavior-preserving shape this
+line-anchoring work would need — share segmentation only, leave `normalizeSmartQuotes` as a
+post-pass at the walk. Item 20 records the prerequisite that now exists for attempting either
+parser change safely: `a7f4ff03`'s characterization tests, which pin exactly the values a shared
+implementation would need to preserve and didn't exist when this constraint was first written.
 
 **Where the code lives:** the block-splitting walk and the comment describing this defect sit
 directly above it in `apply_patch`'s handler, `toolExecutor.ts`. The new marker's emission sites
@@ -492,27 +497,64 @@ stop mis-splitting it.
 are all defined in `fileDiff.ts`; `buildRestageSeedBlock` is called from `agentLoop.ts`, where
 its result is threaded into the first user message on a restage.
 
-## 16. Three independent parsers of one format, two different algorithms
+## 16. Three independent parsers of one format, two different algorithms — corrected
 
-**What it is:** three separate places parse FIND/REPLACE patch text, and they don't agree on
-how. The applier's own walk (item 2, in `toolExecutor.ts`) and `parsePatchBlocks` (in
-`agentLoop.ts`, feeding `hashPatchBlocks` for failure-history dedup) both index-walk the raw
-string using the same substring-anywhere algorithm — a near-identical copy, not a shared
-implementation. `DiffView.tsx`'s `parseBlocks` — what renders the diff a user actually sees —
-uses a third, different algorithm (`.split()` on the FIND marker) instead of index-walking.
+**This entry originally overstated where the three parsers disagree. That claim is false and
+is corrected below, not softened.** The original text said the applier's walk and
+`parsePatchBlocks` are "a near-identical copy, not a shared implementation," and that all three
+parsers "can disagree about what the patch even contains… on exactly the patch shape item 2
+describes." A mechanical diff and a differential probe (all 126 marker sequences of length ≤ 6,
+plus a 200k-case fuzz) found otherwise on both counts.
 
-**Why this matters:** on exactly the patch shape item 2 describes, these can disagree about
-what the patch even contains. The rendered diff, the blocks actually applied to disk, and the
-dedup key used to recognize a repeated failing patch can each reflect a different reading of
-the same input.
+**The two index-walkers are character-for-character identical in their segmentation logic.**
+The loop condition, the `indexOf` calls, the `repIdx === -1` break, and the trim regexes are the
+same text in both `toolExecutor.ts`'s walk and `parsePatchBlocks`. They differ in exactly three
+places: an entry-coercion difference (`String(patch || "")` vs bare `patch`) that is not
+observable, since both call sites already pre-coerce to a string before calling in; a pair of
+smart-quote counters that exist only in the walk, for telemetry, and don't change what's
+returned; and the walk's call to `normalizeSmartQuotes` on FIND/REPLACE content, which is the
+only one of the three that changes output. That third difference is a live defect with its own
+consequences — see item 18.
 
-**What would close it:** one parser, shared by all three call sites — or, short of that, at
-least the two index-walking ones (the applier and `hashPatchBlocks`'s copy) sharing an
-implementation, since disagreement between those two specifically means a patch can be treated
-as a repeat failure it structurally isn't, or vice versa.
+**`DiffView`'s `.split()`-based parser disagrees with the index-walkers only on `FF`-shaped
+input — two consecutive FIND markers with no REPLACE between them.** Every disagreement found
+across the full differential and the fuzz required that shape; every non-`FF` sequence agreed,
+including item 2's own shape (an embedded, matched FIND/REPLACE pair). On that shape
+specifically, `DiffView` fabricates the identical second block the applier does — the rendered
+diff is faithfully showing the misparse, not lying about it. `FF` patches are malformed and
+mostly rejected by the marker-imbalance check before reaching either walk; where a balanced `FF`
+patch does reach parsing, unifying the third parser would be a rendering-behavior change with no
+test asserting which of the two readings is the correct one to show a user. **Recommend it stays
+out**, for that reason — folding it in belongs to a pass that first decides what `DiffView`
+should show on malformed input, which this one doesn't.
+
+**What would close the real half — the two index-walkers sharing one implementation — has one
+working shape, not two.** Sharing the walk's full logic, normalization included, changes every
+existing `hashPatchBlocks` dedup key for a smart-quote-bearing patch — a deliberate behavior
+change, not an extraction (see item 18). Sharing the segmentation with normalization removed
+from both sides breaks the applier's own smart-quote tests, which require the walk to normalize
+before matching against the file. The only behavior-preserving shape is sharing the segmentation
+loop alone and leaving `normalizeSmartQuotes` as a post-pass applied at the walk's call site
+only.
+
+**Candidate home: `core/fileDiff.ts`.** It's a genuine leaf (imports only `node:fs` and
+`node:path`), it already generates this exact format (`diffToFindReplace`, the subject of item
+15), and `agentLoop.ts` already imports it. `toolExecutor.ts` would gain one new edge to a leaf
+module — no cycle in either direction.
+
+**The two marker constants would move with it, but that centralizes less than it sounds like.**
+`FIND_MARKER`/`REPLACE_MARKER` are declared once each in `toolExecutor.ts` and not exported or
+imported anywhere. But the literal marker strings appear independently on sixteen further lines
+in the same file, none of them referencing the consts: the imbalance counter's own regex checks,
+the line-anchored recount's regex checks, and every error-message body shown to the model (the
+imbalance-rejection message's two example blocks, the content-before-FIND message and its
+example, the no-valid-blocks message and its example, and one further usage message elsewhere in
+the file) all inline the text separately. Moving the two declarations centralizes 2 of 18
+functional occurrences of the string in this file, not the string itself.
 
 **Where the code lives:** the applier's walk is in `toolExecutor.ts`; `parsePatchBlocks` and
-`hashPatchBlocks` are in `agentLoop.ts`; `parseBlocks` is in `DiffView.tsx`.
+`hashPatchBlocks` are in `agentLoop.ts`; `parseBlocks` is in `DiffView.tsx`; the candidate shared
+home, `fileDiff.ts`, already holds `diffToFindReplace`.
 
 ## 17. `apply_patch`'s delimiter ambiguity is self-inflicted — `multi_edit` shows the alternative
 
@@ -533,6 +575,114 @@ unbuilt, unscoped beyond this observation.
 
 **Where the code lives:** `multi_edit`'s schema (the precedent) and `apply_patch`'s schema
 (what would change) are both in `toolDefinitions.ts`.
+
+## 18. The applier's smart-quote normalization was never mirrored into the dedup hash — a live defect
+
+**What it is:** `normalizeSmartQuotes` (Unicode curly-quote → ASCII normalization, Phase V
+Commit 2) was added to the applier's walk in `toolExecutor.ts` and never added to
+`parsePatchBlocks` in `agentLoop.ts`, which feeds `hashPatchBlocks`'s failure-history dedup key.
+This is the one behavior-changing difference between the two index-walkers named in item 16.
+
+**Consequence, probe-confirmed, not inferred:** a patch whose FIND/REPLACE content uses curly
+quotes and its straight-quote equivalent are the same edit as far as the applier is concerned —
+both match and apply identically, since the walk normalizes before matching. `hashPatchBlocks`
+disagrees: it hashes the two patches to different values, since `parsePatchBlocks` never
+normalizes. Concretely, a model that resubmits a failing patch and "fixes" it only by
+straightening its quotes emits a patch `failureHistory` records under a *different* hash than
+the one that just failed. `detectRepeatedFailure`'s strongest verdict,
+`identical_patch_retried`, gates on `last.patchHash === prev.patchHash` — it never fires for
+this resubmission, which instead demotes to a weaker verdict (`same_root_cause_different_patch`
+or `same_trigger_repeated_2x`) or none at all.
+
+**A comment in the codebase already asserts this is normalized, and is wrong.**
+`antiThrash.ts`'s parallel repeated-failure check carries the comment "identical patch retried —
+same trigger AND same normalized patch hash" directly above the same `patchHash` equality check.
+The hash is not normalized. This comment is wrong at HEAD and should be corrected whenever this
+item is closed, not before — fixing the comment alone without fixing the underlying hash would
+make the claim it makes true, but for the wrong reason.
+
+**What would close it:** normalizing in the hash path — either by having `parsePatchBlocks` call
+`normalizeSmartQuotes` too, or by normalizing in `hashPatchBlocks` itself. Either **changes every
+existing dedup key for any patch that ever contained a smart quote** — a deliberate behavior
+change to which patches read as repeats, not a silent rider on a refactor or on item 16's
+extraction. `a7f4ff03`'s characterization tests now pin the current, unnormalized values
+specifically (a curly-quote patch and its straight-quote equivalent hashing differently is one
+of the pinned claims) — closing this item means updating those tests on purpose, not having them
+break as an unexpected side effect.
+
+**Where the code lives:** `normalizeSmartQuotes` is in `toolExecutor.ts`; `parsePatchBlocks` and
+`hashPatchBlocks` are in `agentLoop.ts`; the comment describing the hash as normalized is in
+`antiThrash.ts`, directly above its own `patchHash` equality check; `detectRepeatedFailure`'s
+matching check is in `agentLoop.ts`; the characterization tests pinning current values are in
+`agentLoop.patchBlocksCharacterization.test.ts`.
+
+## 19. Five parsers of FIND/REPLACE text exist, not three
+
+**What it is:** two more places in this codebase parse the same FIND/REPLACE marker text that
+item 16 describes, on a different path — the developer-patch / `plan_full_patch` flow rather
+than the `apply_patch` tool path, which is why item 16's investigation never surfaced them.
+`developerPatchParse.ts`'s `parseFindReplacePatch` extracts a single pair with one regex.
+`patchConversion.ts`'s `extractFindReplacePair` is more tolerant: it tries four regex patterns
+in sequence, accepting variants none of the other four parsers do — extra dashes in the marker,
+arbitrary internal whitespace, and a bare `FIND:`/`REPLACE:` form with no dashes at all. Both
+are single-pair only; neither handles the multi-block syntax `apply_patch` supports.
+
+**Why this is worth its own entry — a checked data path, not a described one.** All three of
+`tryRecoverDeveloperPatchFromModelOutput`'s call sites were traced to where `recovered
+.strictPatchText` actually goes. `runLlmPatchFlow.ts`'s own direct call site feeds it straight
+into `applyDeveloperPatchText`, which itself calls `parseDeveloperPatchText` to parse the text
+it was just handed — that parse is what determines the file's new content. The other two call
+sites (`planFullPatch.ts`) reach the same consumer by a longer path: `recovered.strictPatchText`
+becomes `patchText` on `planFullPatchWithLlm`'s return value, which `runLlmPatchFlow.ts` reads
+as `fullPatch.patchText` and passes to `parseDeveloperPatchText` directly (for a debug-log
+anchor line only — diagnostic, not the applying call) and, separately, into
+`applyDeveloperPatchText` again, the real consumer. All three call sites converge on the same
+parser: `parseDeveloperPatchText`/`parseFindReplacePatch` in `developerPatchParse.ts`. This
+path means `patchConversion.ts` can accept patch text none of the other four parsers would
+recognize as valid on their own, then hand it onward as if it were written in the strict form to
+begin with — and that handoff is confirmed, not assumed.
+
+**What this means for item 16's "what would close it":** unifying only the three parsers item
+16 names — even successfully, even choosing the behavior-preserving shape recorded there — would
+leave the format with three implementations, not one: the shared index-walker, `DiffView`'s
+`.split()` parser (if ever folded in), and this single-pair, four-regex-tolerant one. A "one
+parser" goal that stops at item 16's three is narrower than it sounds.
+
+**Where the code lives:** `parseFindReplacePatch`/`parseDeveloperPatchText` are in
+`developerPatchParse.ts`; `extractFindReplacePair` and `buildStrictDeveloperPatchText` are both
+in `patchConversion.ts`, inside `tryRecoverDeveloperPatchFromModelOutput`'s recovery pass;
+`applyDeveloperPatchText`, the confirmed consumer, is in `runLlmPatchFlow.ts`, called both from
+the recovery pass's own direct call site and from the `mode === "patch"` branch that reads
+`planFullPatchWithLlm`'s return value.
+
+## 20. `parsePatchBlocks` has no directly testable surface
+
+**What it is:** `parsePatchBlocks` (`agentLoop.ts`) is not exported, and nothing in this
+codebase imports it — confirmed by grep, zero hits. `hashPatchBlocks`, which calls it, is
+exported and has callers, but the segmentation function underneath it has never been reachable
+from a test file.
+
+**Why this matters beyond the immediate gap:** the segmentation half of the FIND/REPLACE format
+could be silently broken — by an unrelated edit, a bad merge, a naive refactor — with no test
+noticing. This is plausibly part of why it was able to drift from the applier's walk unnoticed
+in the first place (item 18): there was no test on either side that would have caught the two
+falling out of sync when `normalizeSmartQuotes` was added to only one of them.
+
+**What `a7f4ff03` did about it, and what it didn't:** the characterization tests pin
+`parsePatchBlocks`'s behavior indirectly, entirely through the exported `hashPatchBlocks` — a
+hypothesis assertion (a hand-written `{find, replace}` guess, hashed with a test-local helper
+that replicates `hashPatchBlocks`'s own concatenation formula) plus a discriminating companion
+patch, per claim. A mutation to that formula (changing the separator between `find` and
+`replace`) was confirmed to break the hypothesis assertions, ruling out the helper being a
+silent second source of truth. This pins current behavior; it does not create a testable surface
+on `parsePatchBlocks` itself, and it does not make the function exported.
+
+**What would close it properly:** exporting `parsePatchBlocks` directly, or extracting it as
+part of item 16's shared-segmentation module — either creates a surface a test can call
+directly, with assertions on `{find, replace}` fields instead of hash equality.
+
+**Where the code lives:** `parsePatchBlocks` is in `agentLoop.ts`, not exported. The
+characterization tests are in `agentLoop.patchBlocksCharacterization.test.ts`.
 
 ---
 
