@@ -1376,7 +1376,7 @@ export async function run(): Promise<void> {
     verbose: options.verbose,
     quiet: isHeadless,
     noColor: options.noColor,
-    resume: options.resume !== undefined ? true : undefined,
+    resume: options.resume,
     permissionMode: options.permissionMode,
     trust: parseTrustFlag(process.argv),
   };

@@ -794,6 +794,41 @@ the shared implementation to point `multi_edit` at instead of writing a fifth co
 **Where the code lives:** `multi_edit`'s own EOL-normalization is in its handler in
 `toolExecutor.ts`, independent of `apply_patch`'s handler in the same file.
 
+## 23. `resolveEnvelopeId`'s prefix match is silent-arbitrary, and it runs before the session lookup this pass makes deterministic
+
+**What it is:** `resolveEnvelopeId` (`diskRunEnvelope.ts:447-481`) resolves an id/prefix in
+three phases: exact filename match, then filename-prefix match, then a sessionId content-scan
+fallback. The prefix phase (`:463-466`) iterates `envelopeFiles`, built from a raw, unsorted
+`fs.readdir()` — the first `key.startsWith(idOrPrefix)` wins. With two envelopes sharing a typed
+prefix, which one resolves is whichever order the filesystem happens to enumerate, not a
+deliberate newest/oldest/error choice — the same silent-arbitrary-match defect class the
+session-side lookup (`loadSessionById`, item added this pass) exists to close.
+
+**Why it's higher-priority than it looks.** `cli/index.ts`'s `--continue`/`--resume` routing
+(`:1390-1415`) resolves the envelope FIRST, and on a hit drives the entire resume:
+`pendingEnvelopeResume` supplies the staged files, todos, failure history, and pre-generated plan
+that `_runPromptImpl` actually resumes from (`index.resume.test.ts`'s Fix A/Fix B coverage). The
+session-side lookup added this pass still runs unconditionally on every `--resume <id>` —
+confirmed by reading `index.tsx:766-776` (session lookup) and `:778-816` (envelope lookup): two
+independent `if` blocks, neither gated on the other — and its result independently drives what
+conversation is displayed (`App.tsx`'s `resumedTranscript`) and the startup banner, so it is not
+dead code reached only in a branch real users never hit. But for the one thing `--resume <id>`
+exists to guarantee — *which run's state actually gets resumed* — an ambiguous prefix is decided
+by the envelope path's arbitrary first match whenever a matching envelope exists, which is the
+common case for exactly the scenario `--resume` is for: an interrupted, not-yet-cleanly-completed
+run. A deterministic session-side rule sitting downstream of an arbitrary envelope-side one only
+fixes what the user sees, not which work is actually continued.
+
+**What would close it:** give `resolveEnvelopeId`'s prefix phase the same "sort candidates, take
+newest" treatment this pass gives `loadSessionById`. Not immediate: envelope filenames are
+`<sessionId>.envelope.json`, no ISO prefix to sort by, so a chronological ordering would need an
+mtime stat or a timestamp field read from each candidate — a real cost the session-side fix
+avoided by having `listAllSessionFilenames` already sort lexicographically. Not attempted here —
+the envelope layer's own resolution is explicitly out of scope for this pass.
+
+**Where the code lives:** `resolveEnvelopeId`, `diskRunEnvelope.ts:447-481`, specifically the
+filename-prefix loop at `:463-466`. Routing precedence is `cli/index.ts:1390-1415`.
+
 ---
 
 ## A pattern this document is built to avoid

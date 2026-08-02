@@ -41,7 +41,8 @@ export interface CliFlags {
   verbose?: boolean;
   quiet?: boolean;
   noColor?: boolean;
-  resume?: boolean;
+  /** true = --resume with no id (most recent session); a string = --resume <id>. */
+  resume?: boolean | string;
   permissionMode?: string;
   /** --trust (true) / --no-trust (false) / neither (undefined) */
   trust?: boolean;

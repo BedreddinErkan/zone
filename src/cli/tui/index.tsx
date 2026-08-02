@@ -19,7 +19,7 @@ import { createEventBus } from "../eventBus.js";
 import { applyStdoutInterception, applyStderrInterception } from "./stdoutShield.js";
 import type { LlmPatchProgressUpdate } from "../../core/agentLifecycleEvents.js";
 import { loadDiskTrust, diskTrustPrefixes } from "../../api/diskTrust.js";
-import { saveSession, saveSessionSync, pruneOldSessions, loadLastSession, type DiskSession } from "../../api/diskSessions.js";
+import { saveSession, saveSessionSync, pruneOldSessions, loadLastSession, loadSessionById, type DiskSession } from "../../api/diskSessions.js";
 import { latestResumableEnvelope, listResumableEnvelopes, stampEnvelopeStatus, buildResumeContextBlock, reconcileEnvelopeStaging, envelopeKeyFor } from "../../api/diskRunEnvelope.js";
 import { emitAskUserRefused } from "../../llm/loopTelemetry.js";
 import { buildResumeFlowInput } from "../dispatch.js";
@@ -322,6 +322,38 @@ export function _resumeStartupAction(
       iter: q.iter,
       conversationLost: resume?.messagesOmitted === true,
     },
+  };
+}
+
+/**
+ * What --resume <opts.resume> should load at startup, and what to tell the user if it doesn't.
+ *
+ * Pure aside from the diskSessions reads (which already respect _setSessionsDirForTest), and
+ * extracted rather than inlined so it's callable from tests without standing up runTui's own
+ * Ink render + signal-handler setup — the same reason _resumeStartupAction above is extracted.
+ *
+ * A string `resume` is an explicit id/prefix typed by the user and must never fall back to the
+ * most recent session on a miss — that silent substitution is the defect this exists to close.
+ * A bare `true` keeps the original "most recent session in this repo" behavior unchanged.
+ */
+export async function _resolveResumeRequest(
+  resume: boolean | string | undefined,
+  cwd: string,
+): Promise<{ session: DiskSession | null; missMessage: string | null }> {
+  if (!resume) return { session: null, missMessage: null };
+  if (typeof resume === "string") {
+    const session = await loadSessionById(cwd, resume);
+    return {
+      session,
+      missMessage: session
+        ? null
+        : `No session matching '${resume}' found in this directory; starting fresh.`,
+    };
+  }
+  const session = await loadLastSession(cwd);
+  return {
+    session,
+    missMessage: session ? null : "No prior session found in this directory; starting fresh.",
   };
 }
 
@@ -766,10 +798,9 @@ export async function runTui(
   let resumedSession: DiskSession | null = null;
   if (opts.resume) {
     try {
-      resumedSession = await loadLastSession(process.cwd());
-      if (!resumedSession) {
-        process.stderr.write("No prior session found in this directory; starting fresh.\n");
-      }
+      const { session, missMessage } = await _resolveResumeRequest(opts.resume, process.cwd());
+      resumedSession = session;
+      if (missMessage) process.stderr.write(`${missMessage}\n`);
     } catch (err) {
       process.stderr.write(`Resume failed: ${err instanceof Error ? err.message : String(err)}\n`);
     }

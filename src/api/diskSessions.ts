@@ -126,29 +126,6 @@ async function listAllSessionFilenames(): Promise<string[]> {
   }
 }
 
-export async function listSessions(cwd: string): Promise<string[]> {
-  const filenames = await listAllSessionFilenames();
-  const result: string[] = [];
-  for (const filename of filenames) {
-    let session: DiskSession | null;
-    try {
-      session = await loadSession(cwd, filename);
-    } catch (err) {
-      // loadSession already separates ENOENT (benign — file pruned between readdir and read,
-      // returns null, never reaches here) from everything else (re-thrown). Anything caught
-      // here is a real fault by loadSession's own distinction, not a race.
-      log("[zone-session-load-failed]", JSON.stringify({
-        filename,
-        queryingCwd: cwd,
-        reason: err instanceof Error ? err.message : String(err),
-      }));
-      continue;
-    }
-    if (session && session.cwd === cwd) result.push(filename);
-  }
-  return result;
-}
-
 export async function loadSession(_cwd: string, filename: string): Promise<DiskSession | null> {
   try {
     const raw = await fs.readFile(sessionFilePath(filename), "utf-8");
@@ -161,10 +138,65 @@ export async function loadSession(_cwd: string, filename: string): Promise<DiskS
   }
 }
 
+async function loadSessionOrSignal(cwd: string, filename: string): Promise<DiskSession | null> {
+  try {
+    return await loadSession(cwd, filename);
+  } catch (err) {
+    // loadSession already separates ENOENT (benign — file pruned between readdir and read,
+    // returns null, never reaches here) from everything else (re-thrown). Anything caught
+    // here is a real fault by loadSession's own distinction, not a race.
+    log("[zone-session-load-failed]", JSON.stringify({
+      filename,
+      queryingCwd: cwd,
+      reason: err instanceof Error ? err.message : String(err),
+    }));
+    return null;
+  }
+}
+
+interface LoadedSession {
+  filename: string;
+  session: DiskSession;
+}
+
+/** One readdir + one load per candidate file, filtered to `cwd`, newest first — the shared
+ *  primitive for every caller that needs session CONTENT rather than just filenames, so
+ *  loadSessionById and listSessionsMeta don't each re-read what this already opened. */
+async function listSessionsLoaded(cwd: string): Promise<LoadedSession[]> {
+  const filenames = await listAllSessionFilenames();
+  const result: LoadedSession[] = [];
+  for (const filename of filenames) {
+    const session = await loadSessionOrSignal(cwd, filename);
+    if (session && session.cwd === cwd) result.push({ filename, session });
+  }
+  return result;
+}
+
+export async function listSessions(cwd: string): Promise<string[]> {
+  return (await listSessionsLoaded(cwd)).map(l => l.filename);
+}
+
 export async function loadLastSession(cwd: string): Promise<DiskSession | null> {
   const list = await listSessions(cwd);
   if (list.length === 0) return null;
   return loadSession(cwd, list[0]);
+}
+
+/**
+ * Resolves an explicit --resume <id> to a session: exact sessionId match first, then prefix —
+ * mirroring resolveEnvelopeId's two-phase shape (diskRunEnvelope.ts) so a typed id means the
+ * same thing on both paths. Deliberately NOT mirroring its ambiguity rule: that phase walks
+ * raw, unsorted readdir output and returns the first startsWith match, which is filesystem-order
+ * luck, not a decision. listSessionsLoaded already returns newest-first, so iterating it in
+ * order gives a well-defined "newest match wins" instead — the same first-match shape, with an
+ * actual rule behind it. Never falls back to the most recent session on a miss: that silent
+ * substitution is the defect this function exists to close.
+ */
+export async function loadSessionById(cwd: string, idOrPrefix: string): Promise<DiskSession | null> {
+  const loaded = await listSessionsLoaded(cwd);
+  const exact = loaded.find(l => l.session.sessionId === idOrPrefix);
+  if (exact) return exact.session;
+  return loaded.find(l => l.session.sessionId.startsWith(idOrPrefix))?.session ?? null;
 }
 
 export async function pruneOldSessions(_cwd: string, keep: number = MAX_SESSIONS): Promise<number> {
@@ -195,12 +227,13 @@ export interface SessionMeta {
 }
 
 export async function listSessionsMeta(cwd: string, limit = 50): Promise<SessionMeta[]> {
-  const filenames = await listSessions(cwd);
+  const loaded = await listSessionsLoaded(cwd);
   const results: SessionMeta[] = [];
-  for (const filename of filenames.slice(0, limit)) {
+  for (const { filename, session } of loaded.slice(0, limit)) {
     try {
-      const session = await loadSession(cwd, filename);
-      if (!session) continue;
+      // listSessionsLoaded already resolved the load itself (corrupt/unreadable files never
+      // reach here) — this catch is narrower now: it's for malformed-but-parseable content,
+      // e.g. a transcript field that isn't the array shape .filter expects.
       const userMessages = session.transcript.filter(
         (e): e is Extract<typeof e, { kind: "user_prompt" }> => e.kind === "user_prompt"
       );

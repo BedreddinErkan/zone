@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdtemp, rm, mkdir, writeFile, readdir } from "node:fs/promises";
 import {
-  saveSession, listSessions, loadSession, loadLastSession,
+  saveSession, listSessions, loadSession, loadLastSession, loadSessionById,
   pruneOldSessions, listSessionsMeta, _setSessionsDirForTest, type DiskSession,
 } from "./diskSessions.js";
 
@@ -227,6 +227,42 @@ describe("diskSessions", () => {
       const call = logSpy.mock.calls.find((c) => c[0] === "[zone-session-load-failed]");
       expect(call?.[1]).toContain("2026-01-01T00-00-00-000Z-corrupt.json");
       logSpy.mockRestore();
+    });
+  });
+
+  describe("lookup by id", () => {
+    it("returns the session with an exact sessionId match", async () => {
+      await saveSession(tmp, { ...baseSession, sessionId: "exact-match-id", cwd: tmp });
+      const found = await loadSessionById(tmp, "exact-match-id");
+      expect(found?.sessionId).toBe("exact-match-id");
+    });
+
+    it("returns the session matching a prefix, mirroring resolveEnvelopeId's startsWith rule", async () => {
+      await saveSession(tmp, { ...baseSession, sessionId: "prefix-1234-full-id", cwd: tmp });
+      const found = await loadSessionById(tmp, "prefix-1234");
+      expect(found?.sessionId).toBe("prefix-1234-full-id");
+    });
+
+    it("returns null for an id that exists only in another repo", async () => {
+      await saveSession(tmp, { ...baseSession, sessionId: "other-repo-session", cwd: "/repo-b" });
+      const found = await loadSessionById("/repo-a", "other-repo-session");
+      expect(found).toBeNull();
+    });
+
+    it("returns null on a miss rather than the most recent session — the defect this fixes", async () => {
+      // The only session in the repo is therefore also the most recent one — a
+      // `?? mostRecent`-shaped bug would return it here despite matching nothing.
+      await saveSession(tmp, { ...baseSession, sessionId: "the-real-recent-session", cwd: tmp });
+      const found = await loadSessionById(tmp, "nonexistent-id");
+      expect(found).toBeNull();
+    });
+
+    it("resolves an ambiguous prefix to the newest match, not filesystem order", async () => {
+      await saveSession(tmp, { ...baseSession, sessionId: "amb1234-older", cwd: tmp });
+      await new Promise(r => setTimeout(r, 15));
+      await saveSession(tmp, { ...baseSession, sessionId: "amb1234-newer", cwd: tmp });
+      const found = await loadSessionById(tmp, "amb1234");
+      expect(found?.sessionId).toBe("amb1234-newer");
     });
   });
 });
