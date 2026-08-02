@@ -796,28 +796,34 @@ the shared implementation to point `multi_edit` at instead of writing a fifth co
 
 ## 23. `resolveEnvelopeId`'s prefix match is silent-arbitrary, and it runs before the session lookup this pass makes deterministic
 
-**What it is:** `resolveEnvelopeId` (`diskRunEnvelope.ts:447-481`) resolves an id/prefix in
-three phases: exact filename match, then filename-prefix match, then a sessionId content-scan
-fallback. The prefix phase (`:463-466`) iterates `envelopeFiles`, built from a raw, unsorted
-`fs.readdir()` — the first `key.startsWith(idOrPrefix)` wins. With two envelopes sharing a typed
-prefix, which one resolves is whichever order the filesystem happens to enumerate, not a
-deliberate newest/oldest/error choice — the same silent-arbitrary-match defect class the
-session-side lookup (`loadSessionById`, item added this pass) exists to close.
+**What it is:** `resolveEnvelopeId` (`diskRunEnvelope.ts`) resolves an id/prefix in three
+phases: exact filename match, then filename-prefix match, then a sessionId content-scan
+fallback. The prefix phase — the second of the three, marked `// Filename prefix match` in the
+function body — iterates `envelopeFiles`, built from a raw, unsorted `fs.readdir()` — the first
+`key.startsWith(idOrPrefix)` wins. With two envelopes sharing a typed prefix, which one resolves
+is whichever order the filesystem happens to enumerate, not a deliberate newest/oldest/error
+choice — the same silent-arbitrary-match defect class the session-side lookup (`loadSessionById`,
+item added this pass) exists to close.
 
-**Why it's higher-priority than it looks.** `cli/index.ts`'s `--continue`/`--resume` routing
-(`:1390-1415`) resolves the envelope FIRST, and on a hit drives the entire resume:
-`pendingEnvelopeResume` supplies the staged files, todos, failure history, and pre-generated plan
-that `_runPromptImpl` actually resumes from (`index.resume.test.ts`'s Fix A/Fix B coverage). The
-session-side lookup added this pass still runs unconditionally on every `--resume <id>` —
-confirmed by reading `index.tsx:766-776` (session lookup) and `:778-816` (envelope lookup): two
-independent `if` blocks, neither gated on the other — and its result independently drives what
-conversation is displayed (`App.tsx`'s `resumedTranscript`) and the startup banner, so it is not
-dead code reached only in a branch real users never hit. But for the one thing `--resume <id>`
-exists to guarantee — *which run's state actually gets resumed* — an ambiguous prefix is decided
-by the envelope path's arbitrary first match whenever a matching envelope exists, which is the
-common case for exactly the scenario `--resume` is for: an interrupted, not-yet-cleanly-completed
-run. A deterministic session-side rule sitting downstream of an arbitrary envelope-side one only
-fixes what the user sees, not which work is actually continued.
+**Why it's higher-priority than it looks.** `cli/index.ts`'s `--continue`/`--resume` routing —
+the block marked `// --continue / --resume: envelope-first routing.` — resolves the envelope
+FIRST, and on a hit drives the entire resume: `pendingEnvelopeResume` supplies the staged files,
+todos, failure history, and pre-generated plan that `_runPromptImpl` actually resumes from
+(`index.resume.test.ts`'s Fix A/Fix B coverage). The session-side lookup added this pass still
+runs unconditionally on every `--resume <id>` — confirmed by reading `runTui`'s `if (opts.resume)`
+block (session lookup) and its separate `if (envResumeId)` block (envelope lookup), both in
+`index.tsx`: two independent `if` blocks, neither gated on the other — and its result
+independently drives what conversation is displayed (`App.tsx`'s `resumedTranscript`) and the
+startup banner, so it is not dead code reached only in a branch real users never hit. But for the
+one thing `--resume <id>` exists to guarantee — *which run's state actually gets resumed* — an
+ambiguous prefix is decided by the envelope path's arbitrary first match whenever a matching
+envelope exists, which is the common case for exactly the scenario `--resume` is for: an
+interrupted, not-yet-cleanly-completed run. A deterministic session-side rule sitting downstream
+of an arbitrary envelope-side one only fixes what the user sees, not which work is actually
+continued. Restated in one line: `loadSessionById`'s prefix rule is deterministic (`56406d90`,
+newest-match-wins) and `resolveEnvelopeId`'s is not — precisely why the envelope side is the
+arbitrary half left standing, and the consequential one, since it is the envelope resume that
+decides which staged work actually continues, not the session lookup.
 
 **What would close it:** give `resolveEnvelopeId`'s prefix phase the same "sort candidates, take
 newest" treatment this pass gives `loadSessionById`. Not immediate: envelope filenames are
@@ -826,8 +832,68 @@ mtime stat or a timestamp field read from each candidate — a real cost the ses
 avoided by having `listAllSessionFilenames` already sort lexicographically. Not attempted here —
 the envelope layer's own resolution is explicitly out of scope for this pass.
 
-**Where the code lives:** `resolveEnvelopeId`, `diskRunEnvelope.ts:447-481`, specifically the
-filename-prefix loop at `:463-466`. Routing precedence is `cli/index.ts:1390-1415`.
+**Where the code lives:** `resolveEnvelopeId`, `diskRunEnvelope.ts` — specifically its
+filename-prefix phase (`// Filename prefix match`). Routing precedence is `cli/index.ts`'s
+envelope-first routing block (`// --continue / --resume: envelope-first routing.`).
+
+## 24. `saveSession`'s failure at exit is silent
+
+**What it is:** the clean-exit tail wraps `saveSession` and `pruneOldSessions` in one
+`try/catch` with an empty catch body — a save failure is swallowed entirely, with no marker and
+no message. The comment marking this block calls it "non-critical."
+
+**What `f7cd3c2e` changed, and what it left alone.** `f7cd3c2e` made the exit-time resume hint
+conditional on `saveSession` actually succeeding (a `saved` flag, set immediately after the
+write returns), closing the false-promise case: the user is no longer told to resume a session
+that was never written. But the underlying failure is still silent on its own terms — the user
+exits, sees nothing printed either way, and their conversation is gone with no indication why a
+later `--resume` won't find it. The fix narrowed what a failed save *causes* (a false hint)
+without touching whether a failed save is itself *observable*.
+
+**The "non-critical" framing is what's worth revisiting, not the catch block's shape.** The
+comment is accurate from the process's point of view — a failed save must not block exit, and a
+`try/catch` around it is correct for that. But "non-critical" describes the process's exposure,
+not the user's: a lost conversation, with no attempt made and no possibility of a later
+`--resume`, is not obviously non-critical to whoever just lost it.
+
+**What would close it:** a named marker on the catch path (consistent with this document's own
+markers elsewhere — see items 1, 2, 5, 21), or a printed message alongside the resume hint's own
+call site, using the same restore-stdout/restore-stderr-then-print placement `f7cd3c2e`
+established. Either keeps the process's own resilience (exit must still happen) while making the
+loss observable instead of silent. Not attempted here — found and recorded during a
+documentation-only pass.
+
+**Where the code lives:** the `try/catch` around `saveSession` and `pruneOldSessions` is in the
+clean-exit tail of `runTui`, immediately before the resume-hint call site `f7cd3c2e` added, in
+`index.tsx`.
+
+## 25. The resume catch-block has the same shape `2b61a51c` fixed for the miss case
+
+**What it is:** `_resolveResumeRequest`'s call site wraps the lookup in a `try/catch`; the catch
+prints `"Resume failed: <message>"` when the lookup itself throws — a fault, not a miss. This
+sits textually before the separate envelope-resume block, and the two are independent `if`
+blocks, neither gated on the other — confirmed by reading the current code directly, the same
+structural shape item 23 already establishes for the session-lookup/envelope-lookup pair.
+
+**The same defect class `2b61a51c` closed, deliberately left outside its scope.** `2b61a51c`
+reconciled `_resolveResumeRequest`'s *miss* message against the envelope outcome, via
+`_composeResumeMessage`, specifically because a miss is an expected, representable outcome. A
+thrown lookup is a fault state, explicitly excluded from that pass's hit/miss framing at the
+time (recorded there as a possible generalization, not built). The user-visible risk is the same
+shape: if the lookup faults but the envelope resume succeeds independently, the user reads
+"Resume failed" while the run actually continues, with nothing correcting it afterward.
+
+**What would close it:** route the catch path through `_composeResumeMessage` too — treating a
+caught error the way a miss is treated, reworded rather than left standing once the envelope
+outcome is known — or a sibling function that handles the fault-plus-envelope-success
+combination on its own terms, since a thrown error and a clean miss may warrant different
+wording even under the same reconciliation principle. Not attempted here — found and recorded
+during a documentation-only pass.
+
+**Where the code lives:** the catch block sits in the same `if (opts.resume)` block as
+`_resolveResumeRequest`'s own call, in `runTui`, `index.tsx` — immediately preceding the
+`if (envResumeId)` envelope-resume block that `_composeResumeMessage`'s own reconciliation
+already accounts for.
 
 ---
 
@@ -856,4 +922,33 @@ enough that a line number into it has a short half-life, sometimes shorter than 
 recording it. Every reference in this document — and the convention this document asks future
 entries to follow — points at code by shape: an enclosing function, a branch condition, a
 marker tag, a symbol name. None of it goes stale when the file around it does; it fails loudly
-instead, per the note above, if the shape itself is ever renamed away.
+instead, per the note above, if the shape itself is ever renamed away — including in this
+document's own item 23, originally written with line numbers despite this section, found on a
+later pass and converted to shape references the same way this section asks of everything else.
+
+## A second pattern, a few commits apart: self-reference defeats a mutation test
+
+A test verifying a constant's own value must not import that constant. Two opposite-conclusion
+cases of this occurred in this codebase within a few commits of each other, and are recorded
+together so the difference reads as a distinction, not an inconsistency.
+
+**Case one — importing the shared value was wrong.** `f7cd3c2e`'s exit-hint tests originally
+computed their own expected prefix by slicing the same length constant `_buildExitResumeHint`
+reads internally. Mutating that constant moved both sides of the comparison together — the
+mutation-testing pass caught its own target test still passing under the mutation it was meant
+to catch. The fix: hardcode the literal expected value in the test instead of deriving it from
+the constant under test.
+
+**Case two — importing the shared value was right.** The pass immediately before it, `2b61a51c`,
+pinned the coupling between `_resolveResumeRequest`'s miss-message wording and
+`_composeResumeMessage`'s pattern match against it, by having the test import the same suffix
+constant both functions already share. There, the test's claim was not "is this constant's value
+correct" but "do these two independently-callable functions still agree with each other" — and
+sharing the constant is exactly what makes a wording change in one correctly break the test
+pinning the other, rather than each drifting in its own test file's separately-typed copy.
+
+**The discriminator:** whether the test's claim is about a value or about an agreement. A test
+proving a constant equals some expectation must hold that expectation independently, or the
+constant can drift without the test noticing. A test proving two pieces of code still agree with
+each other should share the value they're both supposed to agree on, or the test can't tell
+"they agree" from "they both changed the same way and still match by coincidence."
