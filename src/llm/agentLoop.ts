@@ -4956,7 +4956,7 @@ Example:
         // Durable resume: checkpoint after every successful write-tool.
         if (
           (name === "apply_patch" || name === "write_file" || name === "multi_edit") &&
-          !toolEventCtx.failureDetected
+          result.success
         ) {
           writeRunCheckpoint();
         }
