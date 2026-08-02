@@ -1,7 +1,8 @@
 /**
- * Tests for _resolveResumeRequest — what --resume <opts.resume> should load at startup — and
- * _composeResumeMessage, which reconciles its miss message against whether an envelope resume
- * was also found.
+ * Tests for the three pieces of --resume's user-facing text: _resolveResumeRequest (what to
+ * load at startup), _composeResumeMessage (reconciling its miss message against whether an
+ * envelope resume was also found), and _buildExitResumeHint (what to tell the user on the way
+ * out, so they know a resumable session exists and what to type).
  *
  * _resolveResumeRequest is the session-lookup half of --resume (index.tsx:766-776), independent
  * of the envelope-resume half (durable run state, tested in index.resume.test.ts's
@@ -10,6 +11,8 @@
  * displayed transcript (App.tsx's resumedTranscript) and the startup banner regardless of
  * envelope presence. _composeResumeMessage exists because a session-lookup miss must not claim
  * "starting fresh" when the envelope lookup then finds an interrupted run to resume anyway.
+ * _buildExitResumeHint exists because the same principle applies leaving as arriving: a thrown
+ * saveSession must not print a hint pointing at a session that doesn't exist on disk.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
@@ -17,7 +20,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdtemp, rm } from "node:fs/promises";
 import { saveSession, _setSessionsDirForTest, type DiskSession } from "../../api/diskSessions.js";
-import { _resolveResumeRequest, _composeResumeMessage, RESUME_MISS_SUFFIX } from "./index.js";
+import {
+  _resolveResumeRequest, _composeResumeMessage, RESUME_MISS_SUFFIX,
+  _buildExitResumeHint,
+} from "./index.js";
 
 const baseSession: DiskSession = {
   version: 1,
@@ -131,5 +137,36 @@ describe("_composeResumeMessage", () => {
     expect(call?.[1]).toContain("ghost-id");
     expect(result).not.toContain("starting fresh");
     logSpy.mockRestore();
+  });
+});
+
+describe("_buildExitResumeHint", () => {
+  const id = "abcdef12-3456-7890-abcd-ef1234567890";
+
+  it("saved, non-empty transcript: hint names the id prefix", () => {
+    // Hardcoded, not derived from RESUME_HINT_ID_LENGTH: deriving the expectation from the same
+    // constant the implementation reads would make a mutation to that constant's own value
+    // invisible to this test — both sides would shift together.
+    expect(_buildExitResumeHint(3, true, id)).toBe(
+      "Resume this session with: zone --resume abcdef12"
+    );
+  });
+
+  it("empty transcript, nothing saved: no hint", () => {
+    expect(_buildExitResumeHint(0, false, id)).toBeNull();
+  });
+
+  it("the id prefix is exactly 8 characters, taken from the real id", () => {
+    const hint = _buildExitResumeHint(1, true, id);
+
+    expect(hint).toContain("abcdef12");
+    expect(hint).not.toContain("abcdef12-3456");
+  });
+
+  it("save failed: no hint, even with a non-empty transcript", () => {
+    // A non-empty transcript alone must never be read as "print the hint" — the write itself
+    // has to have succeeded. Distinct from the empty-transcript case above: this one proves the
+    // saved flag is checked independently, not inferred from transcript length.
+    expect(_buildExitResumeHint(3, false, id)).toBeNull();
   });
 });

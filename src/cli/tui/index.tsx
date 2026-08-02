@@ -357,6 +357,27 @@ export async function _resolveResumeRequest(
   };
 }
 
+const RESUME_HINT_ID_LENGTH = 8;
+
+/**
+ * What to tell the user about resuming, given whether the session was actually saved. Pure so
+ * "only print when something was actually persisted" pins to a test rather than an assumption.
+ * transcriptLength and saved are checked independently rather than collapsing to one flag: a
+ * thrown saveSession (transcript non-empty, but the write itself failed) must not print a hint
+ * pointing at a session that doesn't exist on disk — the same false-message class the last two
+ * passes closed. The caller sets `saved` immediately after saveSession returns, before
+ * pruneOldSessions runs, since both share one try/catch and a prune-only failure must not read
+ * as a save failure here.
+ */
+export function _buildExitResumeHint(
+  transcriptLength: number,
+  saved: boolean,
+  sessionId: string,
+): string | null {
+  if (transcriptLength === 0 || !saved) return null;
+  return `Resume this session with: zone --resume ${sessionId.slice(0, RESUME_HINT_ID_LENGTH)}`;
+}
+
 /** The exact trailing text _resolveResumeRequest's miss messages end with — exported so a test
  *  can pin that they still do, rather than the two functions being coupled by an untested
  *  assumption. */
@@ -1249,13 +1270,20 @@ export async function runTui(
   await storeCapture.state?.armedMcpManager?.closeAll().catch(() => {});
 
   const finalState = storeCapture.state;
+  let saved = false;
   if (finalState && finalState.transcript.length > 0) {
     try {
       await saveSession(process.cwd(), buildDiskSession(finalState));
+      saved = true;
       await pruneOldSessions(process.cwd());
     } catch { /* non-critical */ }
   }
 
   restoreStdout();
   restoreStderr();
+
+  if (finalState) {
+    const hint = _buildExitResumeHint(finalState.transcript.length, saved, finalState.sessionId);
+    if (hint) process.stderr.write(`${hint}\n`);
+  }
 }
