@@ -357,6 +357,40 @@ export async function _resolveResumeRequest(
   };
 }
 
+/** The exact trailing text _resolveResumeRequest's miss messages end with — exported so a test
+ *  can pin that they still do, rather than the two functions being coupled by an untested
+ *  assumption. */
+export const RESUME_MISS_SUFFIX = /; starting fresh\.$/;
+const RESUME_FOUND_CLAUSE = ", but an interrupted run was found and is resuming.";
+
+/**
+ * Reconciles the session lookup's miss message against whether an envelope resume was also
+ * found, so the user is never told "starting fresh" while a durable run is actually resuming.
+ * Deferred out of _resolveResumeRequest itself, which stays envelope-agnostic — the envelope
+ * outcome isn't known until after index.tsx's separate envelope-resume block has run.
+ *
+ * Coupled to _resolveResumeRequest's wording by RESUME_MISS_SUFFIX: String.replace silently
+ * returns its input unchanged when the pattern doesn't match, which here would mean quietly
+ * keeping the false "starting fresh" claim on an envelope hit — reintroducing the exact defect
+ * this function exists to close. Detected explicitly below rather than trusted implicitly.
+ */
+export function _composeResumeMessage(
+  sessionMissMessage: string | null,
+  envelopeFound: boolean,
+): string | null {
+  if (!sessionMissMessage) return null;
+  if (!envelopeFound) return sessionMissMessage;
+  if (!RESUME_MISS_SUFFIX.test(sessionMissMessage)) {
+    // The coupling above has drifted: _resolveResumeRequest's wording no longer ends in the
+    // suffix this replace depends on. Fail loud, and don't rely on .replace here — concatenation
+    // has no "pattern didn't match" case to silently no-op on, so the last thing the user reads
+    // is still true, even if the full sentence reads a little redundant until this is fixed.
+    log("[zone-resume-message-mismatch]", JSON.stringify({ sessionMissMessage }));
+    return `${sessionMissMessage}${RESUME_FOUND_CLAUSE}`;
+  }
+  return sessionMissMessage.replace(RESUME_MISS_SUFFIX, RESUME_FOUND_CLAUSE);
+}
+
 /**
  * Extracted core of runPrompt — all closure deps are explicit so this function
  * can be called from tests without rendering Ink.
@@ -796,11 +830,12 @@ export async function runTui(
   } catch { /* non-critical — badge shows $0 on read error */ }
 
   let resumedSession: DiskSession | null = null;
+  let sessionMissMessage: string | null = null;
   if (opts.resume) {
     try {
       const { session, missMessage } = await _resolveResumeRequest(opts.resume, process.cwd());
       resumedSession = session;
-      if (missMessage) process.stderr.write(`${missMessage}\n`);
+      sessionMissMessage = missMessage;
     } catch (err) {
       process.stderr.write(`Resume failed: ${err instanceof Error ? err.message : String(err)}\n`);
     }
@@ -845,6 +880,11 @@ export async function runTui(
       }
     }).catch(() => {});
   }
+
+  // Reconciled against the envelope outcome above — a session-lookup miss must not claim
+  // "starting fresh" when an envelope resume is about to continue the run anyway.
+  const resumeMessage = _composeResumeMessage(sessionMissMessage, !!pendingEnvelopeResume);
+  if (resumeMessage) process.stderr.write(`${resumeMessage}\n`);
 
   // Validate API key only when we're about to make API calls.
   // In no-args (idle) mode the TUI renders without a pending task — defer validation.
