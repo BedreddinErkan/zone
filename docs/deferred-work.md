@@ -208,7 +208,7 @@ classify from the resume conversation's `role:"tool"` prose result text:
 `reconcileDanglingToolCalls` proves that text is technically present and recoverable, but
 string-classifying an outcome from human-readable prose is the same fragile shape already
 rejected twice this session — once for marker-imbalance counts, and now again here. It's also
-the subject of a related, independent finding in the same log — see item 12.
+the subject of a related finding in the same log, now partially closed — see item 12.
 
 **Where the code lives:** the hardcoded `success: true` is in the entry-construction step
 inside `rehydrateFileAccess` in `agentLoop.ts`, gated on the tool-name allowlist described
@@ -306,43 +306,109 @@ a measured 4.4%-per-run trigger rate — a single forced run is closer to a lott
 a measurement at that cost tier. Passive accumulation over ordinary use reaches the same
 records for free.
 
-## 12. `didApplyPatch` classifies by string-matching result text, never by reading `success`
+## 12. `didApplyPatch`'s string-matching — partially closed
 
-**What it is:** `didApplyPatch` (`src/llm/verification/logUtils.ts`) decides whether a run
-applied anything by scanning each `apply_patch`/`write_file` tool-call-log entry's `result`
-text for the substrings "error", "not found", and "fail" — it does not read the entry's
-`success` field at all.
+`didApplyPatch` (`src/llm/verification/logUtils.ts`) decides whether a run applied anything —
+feeding the run's final reported verdict, not an internal nudge. This entry originally led with
+the rehydration link (see item 6); a fuller pass found that was the smallest of the reachable
+problems, and two load-bearing defects it didn't name are now fixed.
 
-**How this was found:** unprompted, while establishing whether item 6 (above) was a real
-defect. Tracing every `toolCallLog` consumer to check what would change if rehydrated
-`success` were made accurate turned up this one — and it's immune to any such fix, by
-construction, because it never reads that field in the first place.
+**What was wrong:** the predicate classified `apply_patch`/`write_file` entries by
+string-matching `result` text for "error"/"not found"/"fail", case-insensitively with no word
+boundary, and never checked `multi_edit` at all.
+- **The path-name false negative.** Every write-tool success message embeds `${filePath}`. A
+  patch to any of the 16 tracked files in this repo whose path contains one of those three
+  substrings — an ordinary single-file edit to `src/core/parseVerificationError.ts`, for
+  instance — reported as having applied nothing.
+- **`multi_edit` was never checked.** A `multi_edit`-only run with real replacements and staged
+  files returned `false` regardless of what actually happened.
 
-**Three consequences:**
-- Any future fix to item 6's `success` field, if one is ever built, would not change this
-  function's behavior at all — it is a fully independent classification path over the same
-  log, not a downstream consumer of `success`.
-- The rehydration placeholder text (`"(restored from a previous run; content not retained)"`)
-  contains none of the three trigger substrings, so every rehydrated `apply_patch`/`write_file`
-  entry counts as applied here regardless of what really happened before interruption — the
-  same blind spot as item 6, reached by a completely different mechanism and unreachable by
-  item 6's proposed fixes.
-- It is consumed by `composer.ts` and `deriveVerdict.ts` (both in `src/llm/runCompletion/`) for
-  verdict derivation — so this affects the run's final reported verdict, not an internal nudge.
+Both produced the identical user-visible wrong output — a warning that tests failed because of
+the patch, on a run where tests never ran and the patch was fine.
 
-**What would close it:** reading `success` instead of (or in addition to) string-matching
-`result` — the same category of fix as the bare-catch work already landed this session (making
-a `success` field trustworthy, or making a consumer stop trusting an untrustworthy proxy for
-it). Not attempted here: found during a documentation-only pass with explicit
-no-source-changes scope.
+**Fixed by `e21aab93`:** the predicate now reads structured fields instead of prose —
+`success === true` for `apply_patch`/`write_file`, and `success === true` plus non-empty
+`filesStaged` for `multi_edit`, reusing `multiEditChangedSomething` (the predicate `86ba4bd1`
+built for chain-saturation counting) rather than re-deriving it. Establish confirmed
+`success: true` is unreachable in `apply_patch`/`write_file` without a prior real write — why
+bare `success` is a sound proxy for those two tools but was never sufficient for `multi_edit`,
+where `success: true` survives zero replacements. Also closed: the false-positive class where
+scope-guard blocks and marker-imbalance rejections — real failures — counted as applied.
 
-**Same failure class as marker-imbalance's original problem:** classifying an outcome by
-pattern-matching human-readable text instead of reading a structured field meant to carry that
-outcome is the same shape of fragility that motivated the line-anchored marker recount (item
-1) — a different subsystem, the same lesson: prose is not a data model.
+**Still open, and what would close each:**
+- **Rehydrated entries still count.** Rehydration hardcodes `success: true` (item 6), and the
+  fixed predicate now reads exactly that field, so a rehydrated `apply_patch`/`write_file`
+  counts as applied regardless of what happened before interruption — unchanged by this fix.
+  Reading `resumeStagingFiles` — non-empty exactly when the prior run staged real work — would
+  close this without a new field, but needs threading into `inferVerificationFromLog`, which
+  today only receives a bare tool-call log.
+- **The no-op patch.** A FIND==REPLACE `apply_patch` stages byte-identical content and returns
+  `success: true`; neither `apply_patch` nor `write_file` has a no-op guard. Closing it needs
+  either such a guard, or a `filesStaged`-equivalent added to both write tools' returns —
+  established as a bigger pass than swapping a predicate, and explicitly out of scope for the
+  fix that landed.
 
-**Where the code lives:** `didApplyPatch` in `src/llm/verification/logUtils.ts`; called from
-`composer.ts` and `deriveVerdict.ts` in `src/llm/runCompletion/`.
+**The general lesson, past this fix:** classifying an outcome by pattern-matching
+human-readable text instead of reading a structured field meant to carry that outcome is the
+same shape of fragility that motivated the line-anchored marker recount (item 1) — prose is not
+a data model. See item 6 for the sibling defect this connects to: rehydration's hardcoded
+`success: true`, and why the read-before-patch gate it serves makes that hardcoding correct on
+its own terms even though it leaves this entry's first "still open" item unclosed.
+
+**Where the code lives:** `didApplyPatch` and `multiEditChangedSomething` both live in
+`src/llm/verification/logUtils.ts` (`multiEditChangedSomething` moved there from `agentLoop.ts`,
+which re-exports it for existing importers). Called from `composer.ts`
+(`src/llm/runCompletion/`) directly, and from `inferVerificationFromLog` in `classify.ts`
+(`src/llm/verification/`). `deriveVerdict.ts` imported it but never called it — that dead import
+is gone now too (see item 13).
+
+## 13. Dead-code detection is absent
+
+**What it is:** `deriveVerdict.ts` carried an unused `didApplyPatch` import that survived every
+`tsc --noEmit` run because `tsconfig.json` omits `noUnusedLocals`, and survived every commit
+because ESLint is configured (`eslint.config.mjs`) but not wired into any npm script — `npx
+eslint <path>` has to be run by hand to catch it.
+
+**Why this matters:** the import itself is gone now (`e21aab93`, found and removed as a
+byproduct of an unrelated fix — see item 12), but the detection gap that let a dead import live
+undetected is not closed. The next dead import, dead export, or unreachable branch has the same
+free pass.
+
+**What would close it, and what it would actually cost:** either enabling `noUnusedLocals` in
+`tsconfig.json`, or wiring ESLint into the npm scripts. Checked, not assumed: `npx tsc --noEmit
+--noUnusedLocals` surfaces 56 errors across 23 files, spanning `cli/`, `core/`, `engine/`,
+`llm/`, `repo/`, `roles/`, and `tools/` — a real, repo-wide backlog, confirming the "repo-wide
+fallout" concern rather than assuming it. Enabling the flag would mean clearing that backlog in
+the same change or accepting a red build; wiring lint into npm scripts changes what a green CI
+run means going forward. Either is a repo-wide change with its own fallout, which is why this
+is a ledger entry and not a drive-by fix.
+
+**Where the code lives:** `tsconfig.json`'s compiler options (`noUnusedLocals` absent);
+`eslint.config.mjs` (configured, not invoked by `npm test`/`npm run build`).
+
+## 14. `filesModified` is not a write oracle
+
+**What it is:** `handleToolResult` adds a tool call's `filePath` to `ctx.filesModified` for
+`apply_patch`/`write_file` unconditionally — no `success` check — so a failed attempt lands in
+the set exactly like a successful one. The `multi_edit` path is different and accurate: it adds
+via the entry's `filesStaged`, which stays empty unless a replacement actually happened.
+
+**Why this matters:** `filesModified` looks, at a glance, like the obvious signal for "did this
+run write anything" — it's already a `Set` of paths, threaded everywhere `toolCallLog` is. It is
+not that signal for two of the three write tools. This was flagged during the establish pass
+that led to `e21aab93` (see item 12), specifically to rule it out as an alternative to fixing
+`didApplyPatch` directly — recorded here so the next person looking for a "did this write
+anything" signal doesn't reach for it and rediscover the same trap.
+
+**What would close it:** gating the `apply_patch`/`write_file` additions on `success`, the same
+way the `multi_edit` path already gates on `filesStaged` — matching the asymmetry fix already
+applied to chain-saturation counting (`86ba4bd1`) and to `didApplyPatch` (`e21aab93`) elsewhere
+in this same file family. Not attempted here — found and recorded, not built, during a
+documentation-only pass.
+
+**Where the code lives:** the three additions are in `handleToolResult.ts`'s per-tool-call
+bookkeeping — `apply_patch`/`write_file` unconditional on `filePath` presence, `multi_edit`
+conditional on `result.filesStaged`.
 
 ---
 
