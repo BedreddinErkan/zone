@@ -128,3 +128,51 @@ describe("Phase F.2 — isVerificationRegressed strict-equals semantics", () => 
     expect(isVerificationRegressed(undefined)).toBe(false);
   });
 });
+
+// ── Characterization: item 14's Step 9 pre-fix pinning ─────────────────────────
+//
+// deriveVerdict.ts:42-47 wires filesModified straight through as validateUnrelatedClaim's
+// patchedFilePaths, with zero transformation. handleToolResult.ts:110 currently adds a
+// write attempt's filePath to filesModified with no result.success check, so a FAILED
+// patch on a file lands it in patchedFilePaths exactly like a successful one. This test
+// pins today's resulting demotion so a future fix gating Step 9 on result.success can be
+// proven to change only what it intends.
+describe("characterization: validateUnrelatedClaim treats patchedFilePaths as failure-blind (pre-fix pinning)", () => {
+  it("demotes an unrelated-failure claim when the only prior touch to the failing file was a FAILED patch", () => {
+    // Simulates today's ungated handleToolResult Step 9: a FAILED apply_patch on
+    // src/foo.ts still lands its filePath in ctx.filesModified, which deriveVerdict.ts
+    // wires straight through unchanged as patchedFilePaths. validateUnrelatedClaim
+    // (classify.ts:172) takes patchedFilePaths as a plain input — it never re-derives it
+    // from `log` and never inspects the apply_patch log entry's own `success` flag — so
+    // this call is structurally identical whether the patch succeeded or failed.
+    const result = validateUnrelatedClaim({
+      log: [
+        // Narrative fidelity only — validateUnrelatedClaim only ever inspects entries
+        // where tool==="run_command"; this entry's presence/absence does not change the
+        // function's return value. It documents WHY "src/foo.ts" is in patchedFilePaths
+        // despite never having a successful write.
+        {
+          tool: "apply_patch",
+          args: { filePath: "src/foo.ts" },
+          result: "Block 1: FIND content not found in file. Re-read the file with read_file...",
+          success: false,
+        },
+        {
+          tool: "run_command",
+          args: { command: "npm test" },
+          result:
+            "FAIL src/foo.test.ts\n" +
+            "TypeError: Cannot read properties of undefined (reading 'bar')\n" +
+            "    at Object.<anonymous> (src/foo.ts:12:5)\n" +
+            "    at Object.<anonymous> (src/foo.test.ts:8:3)",
+          success: false,
+        },
+      ],
+      patchedFilePaths: ["src/foo.ts"],
+      framework: { hasTests: true },
+    });
+
+    expect(result.accept).toBe(false);
+    expect(result.demoteTo).toBe("tests_failed_by_patch");
+  });
+});

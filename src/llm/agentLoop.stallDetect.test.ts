@@ -572,3 +572,208 @@ describe("agentLoop anti-thrash P3 observe-only (inc-4c)", () => {
     expect(stage1Calls.length).toBe(0);
   });
 });
+
+// ── Characterization: item 14's Step 9 pre-fix pinning ─────────────────────────
+//
+// handleToolResult.ts:110 currently adds a write attempt's filePath to filesModified
+// unconditionally, with no result.success check. These tests pin what P5/P6 and Stage-2
+// C2 do TODAY because of that, so a future fix gating Step 9 on result.success can be
+// proven to change only what it intends.
+//
+// Two stale comments, recorded here (not edited — out of scope for this pass):
+//   - agentLoop.ts:3692-3696, inside buildAntiThrashCtx: claims "any executed
+//     apply_patch/write_file fires handleToolResult Step 9 unconditionally, making
+//     filesModifiedSize>0" — false once Step 9 is gated.
+//   - antiThrash.ts:28-31, AntiThrashContext.stagedWriteCount's own doc: claims that in a
+//     P5/P6 context (filesModifiedSize===0), stagedWriteCount>0 "equals the count of files
+//     staged by multi_edit" — true only because ungated Step 9 currently guarantees any
+//     apply_patch/write_file call also bumps filesModifiedSize in the same pass. Post-gate,
+//     a run with only FAILED apply_patch calls reaching post-write rollback (test 11b below)
+//     reaches that same state attributable to apply_patch, not multi_edit.
+describe("characterization: Step 9 pre-fix pinning (handleToolResult.ts:110 unconditional filesModified add)", () => {
+  it("11a: failed new-file write_file pollutes filesModified → suppresses P6 (cost_burn) today", async () => {
+    const NEW_FILE = "src/brand-new.ts";
+
+    toolExecutorMock.executeTool.mockImplementation((name: string) => {
+      if (name === "write_file") {
+        return Promise.resolve({ success: false, output: "write_file_blocked: could not create file" });
+      }
+      if (name === "read_file") return Promise.resolve({ success: true, output: "const x = 1;" });
+      return Promise.resolve({ success: false, output: FAIL_OUTPUT });
+    });
+
+    const totalIters = ANTI_THRASH_COST_BURN_ITER_MIN + ANTI_THRASH_BREAK_ITERS + 2; // 15
+
+    // iter 0: FAILED write_file to a brand-new file. handleToolResult.ts Step 9 (real,
+    // ungated today) unconditionally adds NEW_FILE to ctx.filesModified even though
+    // result.success is false.
+    mocks.createChatCompletion.mockResolvedValueOnce({
+      choices: [{
+        message: {
+          content: null,
+          tool_calls: [{
+            id: "wf-fail-0",
+            type: "function",
+            function: { name: "write_file", arguments: JSON.stringify({ filePath: NEW_FILE, content: "const y = 1;" }) },
+          }],
+        },
+        finish_reason: "tool_calls",
+      }],
+      usage: HIGH_COST_USAGE,
+    });
+    // iters 1..totalIters-1: high-cost reads on distinct files — mirrors the file's own
+    // "(iii) P6 true stall" test's cost/iter shape exactly.
+    for (let i = 1; i < totalIters; i++) {
+      mocks.createChatCompletion.mockResolvedValueOnce({
+        ...llmReadFile(`rf-${i}`, `src/f${i}.ts`),
+        usage: HIGH_COST_USAGE,
+      });
+    }
+    mocks.createChatCompletion.mockResolvedValue(llmDone()); // fallback: run ends naturally
+
+    const result = await runAgentLoop({
+      task: "investigate and fix",
+      repoPath,
+      mode: "patch",
+      maxIterations: 40,
+      runId: "test-11a-write-fail-cost-burn",
+    });
+
+    // TODAY: filesModified.size===1 (from the failed write) suppresses P6 via
+    // detectCostBurnSignal's `ctx.filesModifiedSize !== 0` clause (antiThrash.ts:168)
+    // before cost/iter thresholds are even consulted. The run must NOT stall.
+    // EXPECTED TO FLIP once handleToolResult.ts:110 gates on result.success.
+    expect(result.terminationReason).not.toBe("semantic_stall");
+    // Direct, positive confirmation of the pollution mechanism. EXPECTED TO FLIP to [].
+    expect(result.filesModified).toEqual([NEW_FILE]);
+  });
+
+  it("11b: failed apply_patch (real post-write rollback) suppresses P6 today via filesModified AND stagedWriteCount", async () => {
+    const TARGET_JS = "src/target.js";
+    fs.mkdirSync(path.join(repoPath, "src"), { recursive: true });
+    fs.writeFileSync(path.join(repoPath, "src", "target.js"), "const x = 1;", "utf8");
+
+    // Real passthrough for apply_patch only (mirrors the file's own multi_edit
+    // real-passthrough test above). .js (not .ts) is load-bearing: findCheckerForFile has
+    // no entry for .js, so toolExecutor's W.1 inline-tsc-check block takes its
+    // `if (!checker)` branch (toolExecutor.ts:2490) synchronously — zero subprocess,
+    // regardless of whether tsc/npx are resolvable on the test machine. The POST-write
+    // validateSyntax check we DO want (toolExecutor.ts:2618) is a pure in-process
+    // @babel/parser call either way.
+    const { executeTool: realExecuteTool } =
+      await vi.importActual<typeof import("../tools/toolExecutor.js")>("../tools/toolExecutor.js");
+
+    toolExecutorMock.executeTool.mockImplementation(
+      (name: string, ...rest: unknown[]) => {
+        if (name === "apply_patch") {
+          return (realExecuteTool as (...a: unknown[]) => Promise<unknown>)(name, ...rest);
+        }
+        if (name === "read_file") return Promise.resolve({ success: true, output: "const x = 1;" });
+        return Promise.resolve({ success: false, output: FAIL_OUTPUT });
+      },
+    );
+
+    const totalIters = ANTI_THRASH_COST_BURN_ITER_MIN + ANTI_THRASH_BREAK_ITERS + 2; // 15
+
+    // iter 0: read_file(TARGET_JS) — required so the real apply_patch passes the
+    // read-before-patch gate (agentLoop.ts's own pre-check AND toolExecutor's internal
+    // input.filesReadThisRun check both key off this exact path string).
+    mocks.createChatCompletion.mockResolvedValueOnce({
+      ...llmReadFile("rf-setup", TARGET_JS),
+      usage: HIGH_COST_USAGE,
+    });
+    // iter 1: REAL apply_patch. FIND matches the fixture verbatim; REPLACE appends an
+    // unterminated `function broken(` that @babel/parser cannot parse — lands on the
+    // POST-write syntax-broken rollback (toolExecutor.ts:2638-2652), which calls the
+    // real stagedWrite(input?.stagingFiles, abs, original) at :2640, leaving TARGET_JS's
+    // key in the SAME stagingFiles Map agentLoop's closure holds (opts.stagingFiles,
+    // agentLoop.ts:4852).
+    mocks.createChatCompletion.mockResolvedValueOnce({
+      choices: [{
+        message: {
+          content: null,
+          tool_calls: [{
+            id: "ap-rollback-0",
+            type: "function",
+            function: {
+              name: "apply_patch",
+              arguments: JSON.stringify({
+                filePath: TARGET_JS,
+                patch: "--- FIND ---\nconst x = 1;\n--- REPLACE ---\nconst x = 1;\nfunction broken(",
+              }),
+            },
+          }],
+        },
+        finish_reason: "tool_calls",
+      }],
+      usage: HIGH_COST_USAGE,
+    });
+    // iters 2..totalIters-1 (13 calls): high-cost reads on distinct files. Combined with
+    // the 2 calls above: 15 total HIGH_COST_USAGE calls — identical count/per-call cost
+    // to 11a's [1 write-attempt + 14 reads], so both cross the cost/iter thresholds at
+    // the same cumulative point. Not a byte-for-byte minimal pair: apply_patch's
+    // read-before-patch precondition has no write_file analog, so this test's first call
+    // does double duty as both a precondition-satisfying read and a threshold contributor.
+    for (let i = 2; i < totalIters; i++) {
+      mocks.createChatCompletion.mockResolvedValueOnce({
+        ...llmReadFile(`rf-${i}`, `src/f${i}.ts`),
+        usage: HIGH_COST_USAGE,
+      });
+    }
+    mocks.createChatCompletion.mockResolvedValue(llmDone());
+
+    const result = await runAgentLoop({
+      task: "investigate and fix",
+      repoPath,
+      mode: "patch",
+      maxIterations: 40,
+      runId: "test-11b-apply-patch-rollback-cost-burn",
+    });
+
+    // TODAY: filesModified.size===1 (Step 9 fires on the failed apply_patch too) AND
+    // stagingFiles.size===1 (real rollback residue) both independently suppress P6.
+    // EXPECTED TO SURVIVE the Step-9 gate: stagedWriteCount stays 1 regardless — it's
+    // populated by toolExecutor's own stagedWrite, entirely independent of Step 9.
+    expect(result.terminationReason).not.toBe("semantic_stall");
+    // EXPECTED TO FLIP to [] under the same fix — unlike the assertion above, this one
+    // is a direct read of Step 9's own output.
+    expect(result.filesModified).toEqual([TARGET_JS]);
+  });
+
+  it("12: Stage-2's baseline (captured at Stage-1 fire) already includes a failed apply_patch's path", async () => {
+    // Structurally this is the file's own "P4 terminal" test (line 184) — the minimal
+    // shape where Stage 1 fires via P4 (failure_stall, independent of filesModifiedSize)
+    // and filesModified never grows after baseline capture, so filesModified's LIVE
+    // contents at the eventual stall exit are byte-identical to what
+    // antiThrashFilesModifiedAtStage1 (agentLoop.ts:3735) measured at capture time —
+    // verified empirically, see this task's build notes, not just argued here.
+    const totalFails = ANTI_THRASH_FAILURE_COACH_MIN + ANTI_THRASH_BREAK_ITERS + 1; // 2+3+1=6
+
+    toolExecutorMock.executeTool.mockImplementation((name: string) =>
+      name === "read_file"
+        ? Promise.resolve({ success: true, output: "const x = 1;" })
+        : Promise.resolve({ success: false, output: FAIL_OUTPUT }),
+    );
+
+    mocks.createChatCompletion.mockResolvedValueOnce(llmReadFile("rf-0"));
+    for (let n = 0; n < totalFails; n++) {
+      mocks.createChatCompletion.mockResolvedValueOnce(llmApplyPatch(`ap-${n}`, n));
+    }
+
+    const result = await runAgentLoop({
+      task: "update x to 2 in src/target.ts",
+      repoPath,
+      mode: "patch",
+      maxIterations: 20,
+    });
+
+    // Necessary scaffolding: proves Stage 2's C2 comparison held
+    // (filesModified.size <= antiThrashFilesModifiedAtStage1). SURVIVES the Step-9 gate
+    // (both sides of the comparison become 0 identically, C2 still holds).
+    expect(result.terminationReason).toBe("semantic_stall");
+    // THE fact under characterization: filesModified — and therefore the baseline
+    // snapshot taken from it — contains TARGET even though every apply_patch on it
+    // FAILED. EXPECTED TO FLIP to [] once handleToolResult.ts:110 gates on result.success.
+    expect(result.filesModified).toEqual([TARGET]);
+  });
+});
