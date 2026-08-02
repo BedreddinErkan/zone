@@ -52,9 +52,7 @@ Both pairs agree; the record stays indistinguishable from a genuine model format
 above the `[zone-apply-patch-marker-imbalance]` `log(...)` call, inside `apply_patch`'s
 marker-imbalance rejection branch, in `toolExecutor.ts`.
 
-## 2. The parser's silent misparse on a matched, own-line embedded pair
-
-Heavier than item 1: this is silent wrong content written to disk, not a rejection.
+## 2. The parser's silent misparse on a matched, own-line embedded pair — partially closed
 
 **What it is:** the FIND/REPLACE block-splitting walk (the loop that consumes
 `FIND_MARKER`/`REPLACE_MARKER` occurrences in `apply_patch`'s handler, `toolExecutor.ts`) uses
@@ -64,19 +62,61 @@ present, e.g. a doc example demonstrating the syntax), the walk splits there —
 real block's replacement short and fabricating a second, unintended block from the example
 text.
 
-**Why it can't be recorded under the existing marker:** a matched embedded pair raises
-`findMarkerCount` and `replaceMarkerCount` together, so they stay equal. The rejection branch
-that emits `[zone-apply-patch-marker-imbalance]` never fires. There is no payload shape that
-could capture this under that tag — it isn't a rejection at all.
+**It reproduces — confirmed by probe against built `dist/`, not by tracing.** A patch built to
+this exact shape was run through the real compiled `apply_patch` handler against a temp repo,
+both with and without the fabricated block's FIND text present in the target file. Both
+outcomes below were observed directly, not inferred.
 
-**What would close it:** its own pass. Line-anchoring the parser's own segmentation (not just
-the counter) would change which patches get *accepted*, not just which get rejected more
-legibly — a real behavior change, deliberately out of scope for the recount work that found
-it.
+**Two outcomes, and the FIND-not-found gate is what separates them — the single most
+load-bearing fact about real-world severity, which the original framing of this entry ("silent
+wrong content, not a rejection") omitted.** When the fabricated block's FIND text is absent
+from the target file — the common case, since it's accidental example text rather than
+something the model verified against the file — the whole patch is rejected: the model is told
+"Block 2: FIND content not found" when there is no real block 2, and it re-reads the file
+looking for text it never wrote. When that FIND text happens to independently exist in the
+file, the FIND-not-found gate never fires: the real block's replacement is silently truncated,
+an unrelated line is edited, and the tool reports success. Confusing-but-harmless is the common
+outcome; silent-and-wrong is the rare one — the original entry only described the rare one.
 
-**Where the code lives:** a comment already sits directly above the start of the
-block-splitting walk in `apply_patch`'s handler, `toolExecutor.ts`, stating this exact defect.
-This entry is the index pointing at that comment, not a duplicate of it.
+**Reachability is narrower than the raw marker count suggests.** 60 tracked files in this repo
+contain the marker substring somewhere; only 2 contain it on its own line, the shape that
+actually triggers this. A marker quoted or sitting mid-line (inside a string literal, say)
+mostly gets caught by the imbalance check first, since such patches tend to be unbalanced —
+only a *balanced* embedded pair ever reaches the walk at all. The protocol has no escape
+mechanism, and `apply_patch`'s tool description says nothing about markers appearing inside
+content.
+
+**What the detection-only telemetry pass added:** `[zone-apply-patch-marker-split]`, emitted
+once per multi-block `apply_patch` call — every one, not just suspected instances. The gate is
+deliberately the broad "more than one block," not the content-embedded heuristic, specifically
+so every record carries a denominator (see item 5 — the same structural-zero trap that marker's
+own gate avoided is why this one's gate isn't narrower). Each record carries the parsed block
+count, a blank-line-before-marker heuristic count (explicitly not a classifier — a model that
+omits the blank line produces a false negative, and a legitimate multi-block edit whose first
+replacement happens to end in one produces a false positive), the raw total marker count
+(independent of how the walk itself parsed the patch, so a better predicate can be re-derived
+from existing records without a new deploy), and whether the FIND-not-found gate fired. Zero
+change to parsing, acceptance, or rejection.
+
+**Why it still can't be recorded under `[zone-apply-patch-marker-imbalance]` specifically:** a
+matched embedded pair raises `findMarkerCount` and `replaceMarkerCount` together, so they stay
+equal — the rejection branch that emits that marker never fires, and there's no payload shape
+under that tag that could capture this, since it isn't an imbalance rejection at all. This is
+unchanged; the new marker records it under a different tag entirely, not by extending this one.
+
+**Still open — the parsing defect itself, unfixed.** What would close it: line-anchoring the
+parser's own segmentation (not just the counter, which item 1 already did) — a real behavior
+change to which patches get *accepted*, deliberately out of scope for both the recount and the
+telemetry passes that touched this area. Note the ordering constraint if this is ever done:
+line-anchoring the walk in `toolExecutor.ts` without also line-anchoring `parsePatchBlocks` (its
+near-duplicate in `agentLoop.ts`, feeding `hashPatchBlocks`'s failure-dedup key — see item 16)
+would leave the dedup hash disagreeing with what the applier actually did. The structural
+alternative — sidestepping the parsing question entirely — is recorded separately as item 17.
+Two sharper, related consequences of this same defect are recorded as items 15 and 16.
+
+**Where the code lives:** the block-splitting walk and the comment describing this defect sit
+directly above it in `apply_patch`'s handler, `toolExecutor.ts`. The new marker's emission sites
+sit just after that walk and inside the FIND-not-found rejection branch, in the same handler.
 
 ## 3. P2, R1, R2, R3 — definitions lost
 
@@ -137,7 +177,10 @@ This marker will read zero records here indefinitely, by construction.
 
 **What this means for interpretation, not what needs closing:** any future "which markers have
 zero records" tally must exclude this one explicitly, or it will misread structural
-unreachability as a silent-failure signal.
+unreachability as a silent-failure signal. The lesson generalizes past interpretation, into
+design: item 2's telemetry marker was deliberately gated broad (`blocks.length > 1`, not its
+own content-embedded heuristic) specifically to avoid reproducing this same structural-zero
+shape for a different marker — see item 2.
 
 **Where the code lives:** the ripgrep-availability cache and the fallback's two read loops are
 both in `search_in_files`'s handler in `toolExecutor.ts`; the cache variable is set once in the
@@ -409,6 +452,87 @@ documentation-only pass.
 **Where the code lives:** the three additions are in `handleToolResult.ts`'s per-tool-call
 bookkeeping — `apply_patch`/`write_file` unconditional on `filePath` presence, `multi_edit`
 conditional on `result.filesStaged`.
+
+## 15. The restage-prompt generator can produce text the walk would mis-parse
+
+**What it is:** `diffToFindReplace` (the function that renders a computed diff into
+FIND/REPLACE text) can produce output that is itself ambiguous under the walk's own parsing
+rules — a one-block diff whose added content happens to include the patch syntax renders as
+text the walk (item 2) would split into two blocks if it were fed back through it. No model is
+needed to produce this text: ordinary staged content that happens to include patch syntax is
+enough — item 2 already establishes such content exists in this repo.
+
+**Confirmed by feeding the real generator's output into the walk's exact algorithm, not
+guessed.** The walk itself is inline inside `executeTool`, not a separately callable function,
+so this was checked by transcribing its exact logic from `toolExecutor.ts` and feeding it
+`diffToFindReplace`'s real, unmodified return value for a one-block diff. The transcribed walk
+produced two blocks from a one-block change — matching item 2's shape exactly.
+
+**Where this actually flows, and the gap this pass left open:** `buildStagedDiffs` calls
+`diffToFindReplace` per staged file; `buildRestageSeedBlock` renders each file's result,
+verbatim, into a "PRIOR STAGING ATTEMPT — ...Revise or replace them" block threaded into the
+first user message on a restage (never the system prompt, preserving the cache-breakpoint
+invariant). That is as far as this pass traced it: the ambiguous text reaches the model's
+prompt unparsed — `buildRestageSeedBlock` only renders it, it does not itself invoke the walk.
+The misparse only completes if the model reuses that exact text in a subsequent `apply_patch`
+call, which the surrounding prompt text invites but which this pass did not separately observe
+a model do. The confirmed fact is narrower than "Zone corrupts its own representation
+automatically": Zone hands the model a syntactically live hazard, with no model action needed
+to generate it, sitting one resubmission away from the corruption item 2 describes.
+
+**Why still worth its own entry:** every other instance of item 2 needs a model to write
+content shaped like the trigger. This is the one place the hazardous text is generated by
+Zone's own code from ordinary diff content, with no model involvement in that step.
+
+**What would close it:** the same fix as item 2 — line-anchoring the walk closes this
+regardless of whether the model ever resubmits the hazardous text, since the walk itself would
+stop mis-splitting it.
+
+**Where the code lives:** `diffToFindReplace`, `buildStagedDiffs`, and `buildRestageSeedBlock`
+are all defined in `fileDiff.ts`; `buildRestageSeedBlock` is called from `agentLoop.ts`, where
+its result is threaded into the first user message on a restage.
+
+## 16. Three independent parsers of one format, two different algorithms
+
+**What it is:** three separate places parse FIND/REPLACE patch text, and they don't agree on
+how. The applier's own walk (item 2, in `toolExecutor.ts`) and `parsePatchBlocks` (in
+`agentLoop.ts`, feeding `hashPatchBlocks` for failure-history dedup) both index-walk the raw
+string using the same substring-anywhere algorithm — a near-identical copy, not a shared
+implementation. `DiffView.tsx`'s `parseBlocks` — what renders the diff a user actually sees —
+uses a third, different algorithm (`.split()` on the FIND marker) instead of index-walking.
+
+**Why this matters:** on exactly the patch shape item 2 describes, these can disagree about
+what the patch even contains. The rendered diff, the blocks actually applied to disk, and the
+dedup key used to recognize a repeated failing patch can each reflect a different reading of
+the same input.
+
+**What would close it:** one parser, shared by all three call sites — or, short of that, at
+least the two index-walking ones (the applier and `hashPatchBlocks`'s copy) sharing an
+implementation, since disagreement between those two specifically means a patch can be treated
+as a repeat failure it structurally isn't, or vice versa.
+
+**Where the code lives:** the applier's walk is in `toolExecutor.ts`; `parsePatchBlocks` and
+`hashPatchBlocks` are in `agentLoop.ts`; `parseBlocks` is in `DiffView.tsx`.
+
+## 17. `apply_patch`'s delimiter ambiguity is self-inflicted — `multi_edit` shows the alternative
+
+**What it is:** `apply_patch` packs a FIND string and a REPLACE string into one delimited blob
+and parses them back apart with a walk — which is what makes item 2 possible at all. `multi_edit`
+takes `find` and `replace` as separate JSON arguments; the model can put anything in either
+string, including literal marker text, with no delimiter to confuse it with, because there is
+no delimiter.
+
+**Why this is worth recording as its own option, not just a note under item 2:** it's additive
+— a `blocks: [{find, replace}]` structured argument wouldn't change how any patch that works
+today parses, since nothing about the existing delimited format would need to be removed to add
+it. This is the only option under item 2's "what would close it" that requires no
+model-facing behavior change to any patch that isn't already hitting the defect.
+
+**What would close it:** adding a structured `blocks` argument to `apply_patch`'s schema —
+unbuilt, unscoped beyond this observation.
+
+**Where the code lives:** `multi_edit`'s schema (the precedent) and `apply_patch`'s schema
+(what would change) are both in `toolDefinitions.ts`.
 
 ---
 
