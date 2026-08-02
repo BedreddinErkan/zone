@@ -836,36 +836,49 @@ the envelope layer's own resolution is explicitly out of scope for this pass.
 filename-prefix phase (`// Filename prefix match`). Routing precedence is `cli/index.ts`'s
 envelope-first routing block (`// --continue / --resume: envelope-first routing.`).
 
-## 24. `saveSession`'s failure at exit is silent
+## 24. Closed — `saveSession`'s failure at exit is no longer silent, on either path
 
-**What it is:** the clean-exit tail wraps `saveSession` and `pruneOldSessions` in one
-`try/catch` with an empty catch body — a save failure is swallowed entirely, with no marker and
-no message. The comment marking this block calls it "non-critical."
+**What it was:** the clean-exit tail wrapped `saveSession` and `pruneOldSessions` in one
+`try/catch` with an empty catch body — a save failure was swallowed entirely, with no marker and
+no message. The signal handler's equivalent, `saveSessionSync`, had the identical bare catch.
+The pre-existing comment on the clean-exit path called this "non-critical" — true of the
+process's own exposure, not of the user who just lost a conversation with no indication why.
 
-**What `f7cd3c2e` changed, and what it left alone.** `f7cd3c2e` made the exit-time resume hint
-conditional on `saveSession` actually succeeding (a `saved` flag, set immediately after the
-write returns), closing the false-promise case: the user is no longer told to resume a session
-that was never written. But the underlying failure is still silent on its own terms — the user
-exits, sees nothing printed either way, and their conversation is gone with no indication why a
-later `--resume` won't find it. The fix narrowed what a failed save *causes* (a false hint)
-without touching whether a failed save is itself *observable*.
+**Closed on the clean-exit path by `1917e294`: marker plus a user-facing message.**
+`[zone-session-save-failed]` fires on a caught error, carrying a `phase` field distinguishing
+build-time from write-time failure — added because `buildDiskSession` calls `process.cwd()`,
+which throws `ENOENT` if the working directory is removed while the process is still running, a
+real throw source found by reading the function rather than assumed unreachable. Without `phase`,
+a build-time failure (nothing ever written) and a write-time failure (a write attempted and
+failed) would report under the identical "could not save" wording — false for the first case,
+where nothing was attempted at all.
 
-**The "non-critical" framing is what's worth revisiting, not the catch block's shape.** The
-comment is accurate from the process's point of view — a failed save must not block exit, and a
-`try/catch` around it is correct for that. But "non-critical" describes the process's exposure,
-not the user's: a lost conversation, with no attempt made and no possibility of a later
-`--resume`, is not obviously non-critical to whoever just lost it.
+**Closed on the signal path by `a466c5af`: marker only, deliberately no message.** SIGHUP means
+the terminal is already disappearing by the time the handler runs; SIGTERM is typically sent by
+an orchestrator with no guarantee a human is watching; non-TTY SIGINT fires specifically outside
+the interactive-terminal case (`useInput`'s `\x03` handles that one, on the clean-exit path
+instead). None of the three make a printed message reliably seeable. The clean-exit path is
+different on this exact point — the user there provably is watching, since they just typed
+`/exit` or pressed Ctrl-C themselves. The marker is the whole fix on the signal path; the same
+`phase` split applies there too, since `buildSession`'s equivalent throw was already inside the
+existing catch, just not phase-distinguishable before this pass.
 
-**What would close it:** a named marker on the catch path (consistent with this document's own
-markers elsewhere — see items 1, 2, 5, 21), or a printed message alongside the resume hint's own
-call site, using the same restore-stdout/restore-stderr-then-print placement `f7cd3c2e`
-established. Either keeps the process's own resilience (exit must still happen) while making the
-loss observable instead of silent. Not attempted here — found and recorded during a
-documentation-only pass.
+**The marker payload carries `signal`, explicit rather than absent, so both paths stay
+queryable together and separable.** `null` on the clean-exit path, the firing signal's name
+(e.g. `"SIGTERM"`) on the fatal-signal path — a deliberate field in every record, not a key that
+only sometimes exists.
 
-**Where the code lives:** the `try/catch` around `saveSession` and `pruneOldSessions` is in the
-clean-exit tail of `runTui`, immediately before the resume-hint call site `f7cd3c2e` added, in
-`index.tsx`.
+**Still open, not attempted by either commit: `pruneOldSessions` still doesn't run on the signal
+path.** A session saved during a fatal signal is never pruned against the 30-session cap on that
+path — pre-existing, and by the signal handler's own design (no async I/O between the write and
+the exit, to avoid the signal-exit force-kill race), not an oversight of either save-failure
+commit. The session store was already measured, in an earlier pass, at 36 files — above the cap.
+
+**Where the code lives:** `[zone-session-save-failed]`'s shared emission logic is
+`_reportSaveFailure`, in `index.tsx`; called from the clean-exit tail's split `try`/`catch` (the
+build phase, then the write phase) and from `registerFatalSignalHandlers`'s own equivalent split,
+in the same file. The signal path passes its own injected log function explicitly; `phase` and
+`signal` are required parameters on every call, not optional ones.
 
 ## 25. The resume catch-block has the same shape `2b61a51c` fixed for the miss case
 
@@ -952,3 +965,57 @@ proving a constant equals some expectation must hold that expectation independen
 constant can drift without the test noticing. A test proving two pieces of code still agree with
 each other should share the value they're both supposed to agree on, or the test can't tell
 "they agree" from "they both changed the same way and still match by coincidence."
+
+## A third pattern: mutations that replace a real value can cascade for the wrong reason
+
+A mutation that swaps a real caught value for a synthetic stand-in can fail a *different* test
+than the one it targets, for reasons unrelated to the property under test — the stand-in
+clobbers state a different test depends on, and the resulting cascade reads as broader coverage
+than the mutation actually proved.
+
+`a466c5af`'s mutation 4 hit this directly. The property under test was "does the handler report
+a failure on a successful save" — proving it required forcing the reporting function to fire
+when it shouldn't. The first attempt did this by replacing the real caught error with a
+synthetic placeholder and calling the reporting function unconditionally. That also meant the
+*failure* path's own test — which asserts the real error's code reaches the marker — received
+the placeholder instead of the real error, and failed too. Not because the failure-path guard
+was broken; because the mutation's own construction had, as a side effect, discarded the value
+that test depends on.
+
+**The fix: add a call beside the real path, don't replace what it already does.** The
+unconditional report was moved to fire only after a successful write, immediately beside the
+existing, untouched failure-path reporting — leaving the real caught error exactly where the
+other test expects to find it. The mutation then isolated cleanly to the one test it was meant
+to break.
+
+**Why this matters beyond tidiness:** a cascade that looks like coverage is worse than no
+cascade, because it reads as the mutation proving more than it did. Two failing tests from one
+mutation reasonably suggests both are testing the mutated property; here, one of the two was
+failing for a reason the mutation's *implementation* introduced, not the property it described.
+Prefer adding a call beside the real path over replacing what the real path already does,
+whenever a mutation needs to force an alternate outcome.
+
+## A fourth pattern, beside the third: a default on an injected seam is a silent fallback
+
+An injectable dependency with a default value is a silent fallback: a call site that omits it
+compiles, runs, and behaves correctly in production — the default typically points at the same
+real implementation the injection exists to stand in for — while being invisible to whichever
+test harness relies on the injected path specifically.
+
+`a466c5af`'s `_reportSaveFailure` had exactly this shape at one point: its logging parameter
+defaulted to the module-level `log`, added purely to spare two clean-exit call sites one
+argument each. On the signal path, a call site that forgot to pass its own injected log function
+would have silently used the real one instead — indistinguishable from correct in production
+(both eventually reach the same sink), but invisible to `fatalSignalHandlers.test.ts`'s injected
+version, whose whole purpose is capturing what the handler emits without touching the real sink.
+Making the parameter required turned that possible silent break into a compile error instead.
+
+**The mutation that proved the seam was real, not assumed:** swap the handler's own injected
+logger for the module-level one at its one call site. The marker test failed, and the marker
+itself leaked into real stdout during the test run — visible, concrete evidence the harness was
+observing the injected path specifically, not passing by some other mechanism.
+
+**The connection to house rule #1** (unknown input reaching a plausible default silently): a
+default parameter on a test seam is that same rule applied to dependency injection. The "unknown
+input" is a forgotten argument; the "plausible default" is a same-shaped function that happens
+to work in production while defeating the one thing the seam was built for.
