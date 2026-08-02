@@ -240,9 +240,12 @@ describe("agentLoop anti-thrash Stage 1+2 (INC-1 P4)", () => {
     // After Stage 1 fires (capturing baseline filesModified.size=1 for src/target.ts),
     // a write_file to src/other.ts grows filesModified to 2. At the Stage 2 check
     // (iter - stage1FiredAtIter >= BREAK_ITERS), filesModified.size(2) > baseline(1) → skip.
+    // Item 14: a mocked write_file success must carry filesStaged itself now — Step 9 no
+    // longer infers a mutation from result.success alone, matching what a real successful
+    // write_file call returns (toolExecutor.ts's return #10).
     toolExecutorMock.executeTool.mockImplementation((name: string) => {
-      if (name === "read_file" || name === "write_file")
-        return Promise.resolve({ success: true, output: "// ok" });
+      if (name === "read_file") return Promise.resolve({ success: true, output: "// ok" });
+      if (name === "write_file") return Promise.resolve({ success: true, output: "// ok", filesStaged: [OTHER] });
       return Promise.resolve({ success: false, output: FAIL_OUTPUT });
     });
 
@@ -573,30 +576,26 @@ describe("agentLoop anti-thrash P3 observe-only (inc-4c)", () => {
   });
 });
 
-// ── Characterization: item 14's Step 9 pre-fix pinning ─────────────────────────
+// ── Characterization: item 14's Step 9 fix, confirmed ──────────────────────────
 //
-// handleToolResult.ts:110 currently adds a write attempt's filePath to filesModified
-// unconditionally, with no result.success check. These tests pin what P5/P6 and Stage-2
-// C2 do TODAY because of that, so a future fix gating Step 9 on result.success can be
-// proven to change only what it intends.
+// handleToolResult.ts's Step 9 now reads result.filesStaged uniformly for every write
+// tool (apply_patch/write_file/multi_edit), instead of adding a write attempt's filePath
+// to filesModified unconditionally regardless of result.success. These tests pin what
+// P5/P6 and Stage-2 C2 do now because of that.
 //
-// Two stale comments, recorded here (not edited — out of scope for this pass):
-//   - agentLoop.ts:3692-3696, inside buildAntiThrashCtx: claims "any executed
-//     apply_patch/write_file fires handleToolResult Step 9 unconditionally, making
-//     filesModifiedSize>0" — false once Step 9 is gated.
-//   - antiThrash.ts:28-31, AntiThrashContext.stagedWriteCount's own doc: claims that in a
-//     P5/P6 context (filesModifiedSize===0), stagedWriteCount>0 "equals the count of files
-//     staged by multi_edit" — true only because ungated Step 9 currently guarantees any
-//     apply_patch/write_file call also bumps filesModifiedSize in the same pass. Post-gate,
-//     a run with only FAILED apply_patch calls reaching post-write rollback (test 11b below)
-//     reaches that same state attributable to apply_patch, not multi_edit.
-describe("characterization: Step 9 pre-fix pinning (handleToolResult.ts:110 unconditional filesModified add)", () => {
+// The two stale comments this fix corrects (both now rewritten, not left open):
+//   - agentLoop.ts, inside buildAntiThrashCtx: no longer claims Step 9 fires
+//     unconditionally on any executed apply_patch/write_file call.
+//   - antiThrash.ts, AntiThrashContext.stagedWriteCount's own doc: no longer implies
+//     stagedWriteCount>0 in a P5/P6 context means multi_edit — an apply_patch/write_file
+//     rollback (test 11b below) reaches that same state too, attributable to itself.
+describe("characterization: Step 9's filesStaged-gated filesModified (item 14)", () => {
   // 11a was originally one test with both assertions below. Under the gate-as-mutation
   // (mutation (a) in this task's report), it failed at the first assertion and execution
   // stopped there, so the second — the direct evidence for the write_file-new-file subset
   // the gate actually changes — was predicted, never measured. Split so both are
   // independently observable, each alone, same fixture/mock setup duplicated verbatim.
-  it("11a-i: failed new-file write_file suppresses P6 (cost_burn) today — terminationReason", async () => {
+  it("11a-i: failed new-file write_file no longer suppresses P6 (cost_burn) — terminationReason", async () => {
     const NEW_FILE = "src/brand-new.ts";
 
     toolExecutorMock.executeTool.mockImplementation((name: string) => {
@@ -644,14 +643,15 @@ describe("characterization: Step 9 pre-fix pinning (handleToolResult.ts:110 unco
       runId: "test-11a-i-write-fail-cost-burn",
     });
 
-    // TODAY: filesModified.size===1 (from the failed write) suppresses P6 via
-    // detectCostBurnSignal's `ctx.filesModifiedSize !== 0` clause (antiThrash.ts:168)
-    // before cost/iter thresholds are even consulted. The run must NOT stall.
-    // EXPECTED TO FLIP once handleToolResult.ts:110 gates on result.success.
-    expect(result.terminationReason).not.toBe("semantic_stall");
+    // POST-FIX: the mock write_file failure never sets filesStaged, so Step 9 adds
+    // nothing — filesModifiedSize stays 0 for the whole run (nothing else in this
+    // fixture writes either). P6's guard (antiThrash.ts:129) no longer holds, so P6
+    // fires once the cost/iter thresholds are crossed, exactly as the file's own
+    // "(iii) P6 true stall" test does.
+    expect(result.terminationReason).toBe("semantic_stall");
   });
 
-  it("11a-ii: failed new-file write_file suppresses P6 (cost_burn) today — filesModified", async () => {
+  it("11a-ii: failed new-file write_file no longer pollutes filesModified", async () => {
     const NEW_FILE = "src/brand-new.ts";
 
     toolExecutorMock.executeTool.mockImplementation((name: string) => {
@@ -694,12 +694,13 @@ describe("characterization: Step 9 pre-fix pinning (handleToolResult.ts:110 unco
       runId: "test-11a-ii-write-fail-cost-burn",
     });
 
-    // Direct, positive confirmation of the pollution mechanism — the number the fix pass
-    // needs. EXPECTED TO FLIP to [] once handleToolResult.ts:110 gates on result.success.
-    expect(result.filesModified).toEqual([NEW_FILE]);
+    // POST-FIX: direct read of Step 9's own output. The mock write_file failure never
+    // sets filesStaged, so `for (const p of result.filesStaged ?? []) ...` adds nothing
+    // for this call — filesModified stays empty.
+    expect(result.filesModified).toEqual([]);
   });
 
-  it("11b: failed apply_patch (real post-write rollback) suppresses P6 today via filesModified AND stagedWriteCount", async () => {
+  it("11b: failed apply_patch (real post-write rollback) suppresses P6 via stagedWriteCount alone now", async () => {
     const TARGET_JS = "src/target.js";
     fs.mkdirSync(path.join(repoPath, "src"), { recursive: true });
     fs.writeFileSync(path.join(repoPath, "src", "target.js"), "const x = 1;", "utf8");
@@ -781,17 +782,19 @@ describe("characterization: Step 9 pre-fix pinning (handleToolResult.ts:110 unco
       runId: "test-11b-apply-patch-rollback-cost-burn",
     });
 
-    // TODAY: filesModified.size===1 (Step 9 fires on the failed apply_patch too) AND
-    // stagingFiles.size===1 (real rollback residue) both independently suppress P6.
-    // EXPECTED TO SURVIVE the Step-9 gate: stagedWriteCount stays 1 regardless — it's
-    // populated by toolExecutor's own stagedWrite, entirely independent of Step 9.
+    // POST-FIX: stagingFiles.size stays 1 — the real rollback's
+    // stagedWrite(input?.stagingFiles, abs, original) call (toolExecutor.ts's
+    // post-write-syntax-broken branch) still writes into stagingFiles regardless of
+    // whether the return carries filesStaged, so stagedWriteCount alone continues to
+    // suppress P5/P6 here.
     expect(result.terminationReason).not.toBe("semantic_stall");
-    // EXPECTED TO FLIP to [] under the same fix — unlike the assertion above, this one
-    // is a direct read of Step 9's own output.
-    expect(result.filesModified).toEqual([TARGET_JS]);
+    // POST-FIX: flipped to []. The real rollback return carries no filesStaged (content
+    // was restored to its pre-call state, not persisted — toolExecutor.ts's rollback
+    // returns are deliberately bare), so Step 9 adds nothing.
+    expect(result.filesModified).toEqual([]);
   });
 
-  it("12: Stage-2's baseline (captured at Stage-1 fire) already includes a failed apply_patch's path", async () => {
+  it("12: Stage-2's baseline (captured at Stage-1 fire) no longer includes a failed apply_patch's path", async () => {
     // Structurally this is the file's own "P4 terminal" test (line 184) — the minimal
     // shape where Stage 1 fires via P4 (failure_stall, independent of filesModifiedSize)
     // and filesModified never grows after baseline capture, so filesModified's LIVE
@@ -825,13 +828,15 @@ describe("characterization: Step 9 pre-fix pinning (handleToolResult.ts:110 unco
       maxIterations: 20,
     });
 
-    // Necessary scaffolding: proves Stage 2's C2 comparison held
-    // (filesModified.size <= antiThrashFilesModifiedAtStage1). SURVIVES the Step-9 gate
-    // (both sides of the comparison become 0 identically, C2 still holds).
+    // POST-FIX: unchanged. Stage-1 fires via P4 (failure_stall), which never consults
+    // filesModifiedSize/stagedWriteCount, so it fires identically either way. Stage 2's
+    // C2 comparison (filesModified.size <= antiThrashFilesModifiedAtStage1) now holds at
+    // 0 <= 0 instead of 1 <= 1 — both sides moved together, C2 still holds.
     expect(result.terminationReason).toBe("semantic_stall");
-    // THE fact under characterization: filesModified — and therefore the baseline
-    // snapshot taken from it — contains TARGET even though every apply_patch on it
-    // FAILED. EXPECTED TO FLIP to [] once handleToolResult.ts:110 gates on result.success.
-    expect(result.filesModified).toEqual([TARGET]);
+    // POST-FIX: flipped to []. Every apply_patch on TARGET failed before ever reaching
+    // toolExecutor's write-commit point (these mocked failures never call stagedWrite),
+    // so filesStaged was never set and Step 9 adds nothing — filesModified, and the
+    // Stage-1 baseline snapshot taken from it, both stay empty.
+    expect(result.filesModified).toEqual([]);
   });
 });

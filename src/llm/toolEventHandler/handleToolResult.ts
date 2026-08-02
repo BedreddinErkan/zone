@@ -106,13 +106,12 @@ export async function handleToolResult(
     ctx.rollbackCount += 1;
   }
 
-  // Step 9: filesModified
-  if ((name === "write_file" || name === "apply_patch") && parsedArgs.filePath != null) {
-    ctx.filesModified.add(String(parsedArgs.filePath));
-  }
-  if (name === "multi_edit" && Array.isArray(result.filesStaged)) {
-    for (const p of result.filesStaged) ctx.filesModified.add(p);
-  }
+  // Step 9: filesModified — reads result.filesStaged uniformly for every tool that
+  // reports it (apply_patch/write_file/multi_edit). A call with no persisting change
+  // (rollback, pre-write rejection, 0-replacement multi_edit) never populates
+  // filesStaged, so it never pollutes filesModified. `?? []` covers tools that don't
+  // participate in the protocol at all (filesStaged stays undefined for them).
+  for (const p of result.filesStaged ?? []) ctx.filesModified.add(p);
 
   // Step 9.6: P3 no_progress feeder — populate ring buffer from agent's own tsc/test run_command outputs
   if (name === "run_command" && ctx.noProgressBaselines && ctx.recentVerifyKeySets) {

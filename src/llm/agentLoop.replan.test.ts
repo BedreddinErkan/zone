@@ -157,9 +157,14 @@ beforeEach(() => {
   resetToolExecutorMock(toolExecutorMock);
   vi.clearAllMocks();
   // executeTool: distinguish read_file (success) vs apply_patch (scope-block) vs others
-  toolExecutorMock.executeTool.mockImplementation(async (name: string) => {
+  // Item 14: write_file's filesStaged must reflect the actual filePath argument — Step 9
+  // no longer infers a mutation from result.success alone.
+  toolExecutorMock.executeTool.mockImplementation(async (name: string, args?: Record<string, unknown>) => {
     if (name === "read_file") return READ_SUCCESS_RESULT;
-    if (name === "write_file") return WRITE_SUCCESS_RESULT;
+    if (name === "write_file") {
+      const filePath = typeof args?.["filePath"] === "string" ? args["filePath"] : undefined;
+      return { ...WRITE_SUCCESS_RESULT, filesStaged: filePath ? [filePath] : undefined };
+    }
     return SCOPE_BLOCK_RESULT;
   });
   replanMock.mockResolvedValue(makeNewPlan());

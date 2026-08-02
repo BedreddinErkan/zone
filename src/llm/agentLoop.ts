@@ -3689,11 +3689,14 @@ Example:
     archetype: input.originalArchetype,
     costUsd: budget.snapshot().costUsd,
     recentVerifyKeySets,
-    // stagingFiles.size is the net count of files staged by multi_edit that have not been reverted.
-    // Safe in P5/P6 contexts (filesModifiedSize===0): any executed apply_patch/write_file fires
-    // handleToolResult Step 9 unconditionally, making filesModifiedSize>0 and suppressing P5/P6
-    // before this field is consulted. No-read-blocked apply_patches skip handleToolResult entirely
-    // (agentLoop.ts:3824 `continue`), so they fire neither Step 9 nor stagedWrite — both counts stay 0.
+    // stagingFiles.size counts multi_edit successes AND apply_patch/write_file
+    // writes/rollbacks (item 14) — a rollback's stagedWrite call still bumps this even
+    // though it leaves filesStaged/filesModified unchanged (content restored, not
+    // persisted). So filesModifiedSize===0 && stagedWriteCount>0 in a P5/P6 context can
+    // now legitimately come from an apply_patch/write_file rollback, not just
+    // multi_edit. No-read-blocked apply_patches still skip handleToolResult entirely
+    // (the APPLY_PATCH_NO_READ inner-loop continue site), firing neither Step 9 nor
+    // stagedWrite — both counts stay 0 for those.
     stagedWriteCount: stagingFiles.size,
   });
 

@@ -26,8 +26,11 @@ export interface AntiThrashContext {
   costUsd: number;
   recentVerifyKeySets?: ErrorKeySnapshot[];  // ring buffer, most-recent last. Optional: absent = no feeder data yet.
   stagedWriteCount?: number;                 // stagingFiles.size at ctx build time. Optional: absent = 0.
-                                             // In P5/P6 contexts (filesModifiedSize===0) this equals the count
-                                             // of files staged by multi_edit that have not been reverted.
+                                             // In P5/P6 contexts (filesModifiedSize===0) this counts files
+                                             // staged by multi_edit successes AND apply_patch/write_file
+                                             // writes/rollbacks (item 14) — a rollback's stagedWrite call
+                                             // still bumps this even though it leaves filesStaged/
+                                             // filesModified unchanged.
                                              // Revert-aware: revert_patch removes from stagingFiles.
                                              // No-op multi_edits excluded: stagedWrite not called for 0 replacements.
 }

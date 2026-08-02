@@ -276,19 +276,19 @@ describe("handleToolResult parity — read_file success path", () => {
 });
 
 describe("handleToolResult parity — write_file path", () => {
-  it("filesModified populated for write_file success", async () => {
+  it("filesModified populated for write_file success (via filesStaged)", async () => {
     const ctx = makeCtx();
     const deps = makeDeps();
-    await handleToolResult("write_file", { filePath: "src/new.ts" }, "c1", { output: "written", success: true }, ctx, deps);
+    await handleToolResult("write_file", { filePath: "src/new.ts" }, "c1", { output: "written", success: true, filesStaged: ["src/new.ts"] }, ctx, deps);
     expect(ctx.filesModified.has("src/new.ts")).toBe(true);
   });
 });
 
 describe("handleToolResult parity — apply_patch success path", () => {
-  it("filesModified populated for apply_patch success", async () => {
+  it("filesModified populated for apply_patch success (via filesStaged)", async () => {
     const ctx = makeCtx();
     const deps = makeDeps();
-    await handleToolResult("apply_patch", { filePath: "src/existing.ts" }, "c1", { output: "Patch applied", success: true }, ctx, deps);
+    await handleToolResult("apply_patch", { filePath: "src/existing.ts" }, "c1", { output: "Patch applied", success: true, filesStaged: ["src/existing.ts"] }, ctx, deps);
     expect(ctx.filesModified.has("src/existing.ts")).toBe(true);
   });
 });

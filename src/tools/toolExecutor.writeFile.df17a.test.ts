@@ -155,5 +155,7 @@ describe("DF-17a: write_file new-file vs existing-file", () => {
     expect(result.success).toBe(false);
     // File must NOT be left dangling on disk after a failed new-file write
     expect(fs.existsSync(abs("src/broken.ts"))).toBe(false);
+    // Item 14: clean unlink means nothing persisted — filesStaged stays absent.
+    expect(result.filesStaged).toBeUndefined();
   });
 });

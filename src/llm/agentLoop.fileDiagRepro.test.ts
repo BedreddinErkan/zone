@@ -175,7 +175,9 @@ describe("Y.2.2 — apply_patch tracking pipeline", () => {
 
     toolExecutorMock.executeTool.mockImplementation(async (toolName: string) => {
       if (toolName === "read_file") return { success: true, output: FILE_BEFORE };
-      if (toolName === "apply_patch") return { success: true, output: "Patch applied." };
+      // Item 14: filesStaged now reports the persisted mutation — Step 9 no longer infers
+      // one from result.success alone.
+      if (toolName === "apply_patch") return { success: true, output: "Patch applied.", filesStaged: [FILE_REL] };
       return { success: true, output: "" };
     });
 
@@ -204,7 +206,9 @@ describe("Y.2.2 — apply_patch tracking pipeline", () => {
 
     toolExecutorMock.executeTool.mockImplementation(async (toolName: string) => {
       if (toolName === "read_file") return { success: true, output: FILE_BEFORE };
-      if (toolName === "apply_patch") return { success: true, output: "Patch applied." };
+      // Item 14: filesStaged now reports the persisted mutation — Step 9 no longer infers
+      // one from result.success alone.
+      if (toolName === "apply_patch") return { success: true, output: "Patch applied.", filesStaged: [FILE_REL] };
       return { success: true, output: "" };
     });
 
@@ -245,7 +249,8 @@ describe("Y.2.2 — apply_patch tracking pipeline", () => {
         if (toolName === "apply_patch") {
           // Write patched content to disk (simulates staging flush).
           fs.writeFileSync(path.join(repoPathArg, FILE_REL), FILE_AFTER, "utf8");
-          return { success: true, output: "Patch applied." };
+          // Item 14: filesStaged now reports the persisted mutation.
+          return { success: true, output: "Patch applied.", filesStaged: [FILE_REL] };
         }
         return { success: true, output: "" };
       }

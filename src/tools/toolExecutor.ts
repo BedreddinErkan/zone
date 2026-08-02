@@ -224,9 +224,15 @@ export interface ToolResult {
   rejectionReason?: string;
   contentLength?: number;
   metadata?: Record<string, unknown>;
-  /** Repo-relative paths of files actually staged by this tool call (multi_edit only).
-   *  Only includes files with replacement count > 0 — excludes 0-replacement / NOT-FOUND files.
-   *  undefined for all other tools. */
+  /** Repo-relative paths of files this call left with a PERSISTING content change —
+   *  not merely an attempted one. multi_edit: files with replacement count > 0
+   *  (excludes 0-replacement / NOT-FOUND files). apply_patch/write_file: set on
+   *  their success returns; write_file also sets it on one success:false return —
+   *  a new-file write whose post-write rollback failed to unlink, leaving the
+   *  broken file on disk. Rollback returns that DID restore/remove content omit
+   *  this field: the file ends up byte-identical to its pre-call state, so nothing
+   *  persisted. undefined means the tool doesn't report staging at all — not a
+   *  claim that nothing changed. */
   filesStaged?: string[];
 }
 
@@ -2675,6 +2681,7 @@ export async function executeTool(
           return {
             success: true,
             output: `Patch staged: ${blocks.length} block(s) in ${filePath}`,
+            filesStaged: [filePath],
           };
         }
         if (!stagedWrite(input?.stagingFiles, abs, original)) {
@@ -2696,6 +2703,7 @@ export async function executeTool(
       return {
         success: true,
         output: `Patch staged: ${blocks.length} block(s) in ${filePath}`,
+        filesStaged: [filePath],
       };
     }
 
@@ -2886,11 +2894,13 @@ export async function executeTool(
           return {
             success: true,
             output: `File staged: ${filePath} (${content.length} chars)`,
+            filesStaged: [filePath],
           };
         }
       }
 
       if (syntaxBroken || semanticSmellDetected) {
+        let newFileStillExists = false;
         if (fileExists) {
           if (!stagedWrite(input?.stagingFiles, abs, originalContent)) {
             fs.writeFileSync(abs, originalContent, "utf8");
@@ -2900,6 +2910,24 @@ export async function executeTool(
             fs.unlinkSync(abs);
           } catch {
             // Best-effort cleanup if the new file cannot be removed.
+          }
+          try {
+            newFileStillExists = fs.existsSync(abs);
+          } catch (err) {
+            // existsSync is documented as not throwing for a missing path, but it can
+            // still throw on EACCES/ENOTDIR/ELOOP against the parent directory — the
+            // same class of condition that could have made unlinkSync fail above. An
+            // inconclusive check defaults to false (not staged), matching the common
+            // case (unlink succeeded): git add -- <paths> fails ATOMICALLY for the
+            // whole run's commit on a single phantom pathspec (confirmed empirically),
+            // so the higher-blast-radius wrong guess is claiming a file exists when it
+            // doesn't, not the reverse.
+            log("[zone-write-file-unlink-check-failed]", JSON.stringify({
+              filePath,
+              code: (err as NodeJS.ErrnoException).code ?? null,
+              message: (err as NodeJS.ErrnoException).message,
+            }));
+            newFileStillExists = false;
           }
         }
 
@@ -2912,6 +2940,7 @@ export async function executeTool(
               `${validation.errorMessage ?? "parse error"}. ` +
               `The file has been reverted. Re-read the file and produce a corrected patch.`,
             rejectionReason: "syntax_broken_post_write",
+            filesStaged: newFileStillExists ? [filePath] : undefined,
           };
         }
 
@@ -2923,6 +2952,7 @@ export async function executeTool(
             `${smellValidation.details ?? "A semantic post-write validation smell was detected."}\n` +
             `The file has been reverted. Re-read the target file, remove the conflicting old code, and produce a corrected patch.`,
           rejectionReason: "semantic_smell_post_write",
+          filesStaged: newFileStillExists ? [filePath] : undefined,
         };
       }
 
@@ -2931,6 +2961,7 @@ export async function executeTool(
         output: fileExists
           ? `Staged edit to ${filePath} (${content.length} chars) — applied on run completion`
           : `Created ${filePath} (${content.length} chars)`,
+        filesStaged: [filePath],
       };
     }
 

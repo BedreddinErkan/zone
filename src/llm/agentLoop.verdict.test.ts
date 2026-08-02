@@ -129,15 +129,19 @@ describe("Phase F.2 — isVerificationRegressed strict-equals semantics", () => 
   });
 });
 
-// ── Characterization: item 14's Step 9 pre-fix pinning ─────────────────────────
+// ── Characterization: item 14's Step 9 fix — this test is unaffected by it ─────
 //
 // deriveVerdict.ts:42-47 wires filesModified straight through as validateUnrelatedClaim's
-// patchedFilePaths, with zero transformation. handleToolResult.ts:110 currently adds a
-// write attempt's filePath to filesModified with no result.success check, so a FAILED
-// patch on a file lands it in patchedFilePaths exactly like a successful one. This test
-// pins today's resulting demotion so a future fix gating Step 9 on result.success can be
-// proven to change only what it intends.
-describe("characterization: validateUnrelatedClaim treats patchedFilePaths as failure-blind (pre-fix pinning)", () => {
+// patchedFilePaths, with zero transformation. Before item 14's fix, Step 9 added a write
+// attempt's filePath to filesModified with no result.success check, so a FAILED patch
+// landed it in patchedFilePaths exactly like a successful one. This test calls
+// validateUnrelatedClaim directly with a hand-built patchedFilePaths — it never goes
+// through Step 9 — so it's a synthetic reproduction of that shape, not a
+// regression-sensitive measurement of the fix. It stays green, unchanged: a real run can
+// no longer produce this exact input (Step 9 now excludes a failed patch's file via
+// filesStaged), but validateUnrelatedClaim's own contract — treat patchedFilePaths as
+// given, don't re-derive it from `log` — is still worth pinning on its own terms.
+describe("characterization: validateUnrelatedClaim's patchedFilePaths contract (unaffected by item 14)", () => {
   it("demotes an unrelated-failure claim when the only prior touch to the failing file was a FAILED patch", () => {
     // Simulates today's ungated handleToolResult Step 9: a FAILED apply_patch on
     // src/foo.ts still lands its filePath in ctx.filesModified, which deriveVerdict.ts

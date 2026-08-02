@@ -232,18 +232,64 @@ describe("handleToolResult", () => {
   });
 
   describe("filesModified", () => {
-    it("adds filePath to filesModified for write_file success", async () => {
+    // Item 14: Step 9 reads result.filesStaged uniformly for every write tool now —
+    // it no longer adds a write attempt's filePath unconditionally. write_file/apply_patch
+    // must carry filesStaged themselves, same as multi_edit already does.
+    it("adds filePath to filesModified for write_file success (via filesStaged)", async () => {
       const ctx = makeCtx();
       const deps = makeDeps();
-      await handleToolResult("write_file", { filePath: "src/new.ts" }, "c1", SUCCESS_RESULT, ctx, deps);
+      const result = { output: "ok", success: true, filesStaged: ["src/new.ts"] };
+      await handleToolResult("write_file", { filePath: "src/new.ts" }, "c1", result, ctx, deps);
       expect(ctx.filesModified.has("src/new.ts")).toBe(true);
     });
 
-    it("adds filePath to filesModified for apply_patch success", async () => {
+    it("adds filePath to filesModified for apply_patch success (via filesStaged)", async () => {
+      const ctx = makeCtx();
+      const deps = makeDeps();
+      const result = { output: "ok", success: true, filesStaged: ["src/existing.ts"] };
+      await handleToolResult("apply_patch", { filePath: "src/existing.ts" }, "c1", result, ctx, deps);
+      expect(ctx.filesModified.has("src/existing.ts")).toBe(true);
+    });
+
+    it("does NOT add filePath to filesModified for write_file success when filesStaged is absent (item 14: no more unconditional add)", async () => {
+      const ctx = makeCtx();
+      const deps = makeDeps();
+      await handleToolResult("write_file", { filePath: "src/new.ts" }, "c1", SUCCESS_RESULT, ctx, deps);
+      expect(ctx.filesModified.size).toBe(0);
+    });
+
+    it("does NOT add filePath to filesModified for apply_patch success when filesStaged is absent (item 14: no more unconditional add)", async () => {
       const ctx = makeCtx();
       const deps = makeDeps();
       await handleToolResult("apply_patch", { filePath: "src/existing.ts" }, "c1", SUCCESS_RESULT, ctx, deps);
-      expect(ctx.filesModified.has("src/existing.ts")).toBe(true);
+      expect(ctx.filesModified.size).toBe(0);
+    });
+
+    it("adds filePath to filesModified when filesStaged is populated even though success is false (write_file new-file unlink-failure shape)", async () => {
+      const ctx = makeCtx();
+      const deps = makeDeps();
+      const result = {
+        output: "Patch applied but broke file syntax...",
+        success: false,
+        rejectionReason: "syntax_broken_post_write",
+        filesStaged: ["src/broken.ts"],
+      };
+      await handleToolResult("write_file", { filePath: "src/broken.ts" }, "c1", result, ctx, deps);
+      expect(ctx.filesModified.has("src/broken.ts")).toBe(true);
+    });
+
+    it("unions a partial filesStaged into filesModified for a failed multi_edit (path-escape mid-batch)", async () => {
+      const ctx = makeCtx();
+      const deps = makeDeps();
+      const result = {
+        output: 'multi_edit_blocked_path_escape: "../outside.ts" would escape repo',
+        success: false,
+        filesStaged: ["src/a.ts"],
+      };
+      await handleToolResult(
+        "multi_edit", { files: ["src/a.ts", "../outside.ts"], find: "x", replace: "y" }, "c1", result, ctx, deps
+      );
+      expect(ctx.filesModified.has("src/a.ts")).toBe(true);
     });
 
     it("unions result.filesStaged into filesModified for multi_edit", async () => {
