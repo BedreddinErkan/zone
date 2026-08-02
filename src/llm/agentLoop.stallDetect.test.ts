@@ -591,7 +591,12 @@ describe("agentLoop anti-thrash P3 observe-only (inc-4c)", () => {
 //     a run with only FAILED apply_patch calls reaching post-write rollback (test 11b below)
 //     reaches that same state attributable to apply_patch, not multi_edit.
 describe("characterization: Step 9 pre-fix pinning (handleToolResult.ts:110 unconditional filesModified add)", () => {
-  it("11a: failed new-file write_file pollutes filesModified → suppresses P6 (cost_burn) today", async () => {
+  // 11a was originally one test with both assertions below. Under the gate-as-mutation
+  // (mutation (a) in this task's report), it failed at the first assertion and execution
+  // stopped there, so the second — the direct evidence for the write_file-new-file subset
+  // the gate actually changes — was predicted, never measured. Split so both are
+  // independently observable, each alone, same fixture/mock setup duplicated verbatim.
+  it("11a-i: failed new-file write_file suppresses P6 (cost_burn) today — terminationReason", async () => {
     const NEW_FILE = "src/brand-new.ts";
 
     toolExecutorMock.executeTool.mockImplementation((name: string) => {
@@ -636,7 +641,7 @@ describe("characterization: Step 9 pre-fix pinning (handleToolResult.ts:110 unco
       repoPath,
       mode: "patch",
       maxIterations: 40,
-      runId: "test-11a-write-fail-cost-burn",
+      runId: "test-11a-i-write-fail-cost-burn",
     });
 
     // TODAY: filesModified.size===1 (from the failed write) suppresses P6 via
@@ -644,7 +649,53 @@ describe("characterization: Step 9 pre-fix pinning (handleToolResult.ts:110 unco
     // before cost/iter thresholds are even consulted. The run must NOT stall.
     // EXPECTED TO FLIP once handleToolResult.ts:110 gates on result.success.
     expect(result.terminationReason).not.toBe("semantic_stall");
-    // Direct, positive confirmation of the pollution mechanism. EXPECTED TO FLIP to [].
+  });
+
+  it("11a-ii: failed new-file write_file suppresses P6 (cost_burn) today — filesModified", async () => {
+    const NEW_FILE = "src/brand-new.ts";
+
+    toolExecutorMock.executeTool.mockImplementation((name: string) => {
+      if (name === "write_file") {
+        return Promise.resolve({ success: false, output: "write_file_blocked: could not create file" });
+      }
+      if (name === "read_file") return Promise.resolve({ success: true, output: "const x = 1;" });
+      return Promise.resolve({ success: false, output: FAIL_OUTPUT });
+    });
+
+    const totalIters = ANTI_THRASH_COST_BURN_ITER_MIN + ANTI_THRASH_BREAK_ITERS + 2; // 15
+
+    mocks.createChatCompletion.mockResolvedValueOnce({
+      choices: [{
+        message: {
+          content: null,
+          tool_calls: [{
+            id: "wf-fail-0",
+            type: "function",
+            function: { name: "write_file", arguments: JSON.stringify({ filePath: NEW_FILE, content: "const y = 1;" }) },
+          }],
+        },
+        finish_reason: "tool_calls",
+      }],
+      usage: HIGH_COST_USAGE,
+    });
+    for (let i = 1; i < totalIters; i++) {
+      mocks.createChatCompletion.mockResolvedValueOnce({
+        ...llmReadFile(`rf-${i}`, `src/f${i}.ts`),
+        usage: HIGH_COST_USAGE,
+      });
+    }
+    mocks.createChatCompletion.mockResolvedValue(llmDone());
+
+    const result = await runAgentLoop({
+      task: "investigate and fix",
+      repoPath,
+      mode: "patch",
+      maxIterations: 40,
+      runId: "test-11a-ii-write-fail-cost-burn",
+    });
+
+    // Direct, positive confirmation of the pollution mechanism — the number the fix pass
+    // needs. EXPECTED TO FLIP to [] once handleToolResult.ts:110 gates on result.success.
     expect(result.filesModified).toEqual([NEW_FILE]);
   });
 
@@ -759,6 +810,13 @@ describe("characterization: Step 9 pre-fix pinning (handleToolResult.ts:110 unco
     for (let n = 0; n < totalFails; n++) {
       mocks.createChatCompletion.mockResolvedValueOnce(llmApplyPatch(`ap-${n}`, n));
     }
+    mocks.createChatCompletion.mockResolvedValue(llmDone()); // safety net only — under normal
+    // execution the run terminates via Stage 2 well within the 7 queued responses above, so
+    // this is never reached; it activates only when a mutation delays termination (as the
+    // baseline-hardcoded-to-0 mutation does), turning a mock-queue-exhaustion crash into a
+    // clean, readable assertion result. The pre-existing "P4 terminal" test (line 184) this
+    // test structurally mirrors has the identical no-fallback shape and remains crash-prone
+    // under the same class of mutation — deliberately not touched here.
 
     const result = await runAgentLoop({
       task: "update x to 2 in src/target.ts",
