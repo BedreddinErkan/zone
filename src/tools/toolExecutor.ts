@@ -1949,6 +1949,36 @@ export async function executeTool(
         };
       }
 
+      // Detection-only telemetry for the KNOWN DEFECT documented above: every
+      // multi-block apply_patch call writes one record, so the denominator (how
+      // many multi-block patches occur at all) is knowable, not just the suspected
+      // instances. Gating emission on the heuristic below instead would silently
+      // drop any instance where it doesn't fire — the same structural-zero trap
+      // that makes [zone-search-in-files-read-error] (ledger item 5) permanently
+      // unreadable. contentEmbeddedBoundaryCount is a signal carried IN the
+      // record, not the gate: a content-embedded, matched marker pair inside what
+      // should be one block's REPLACE typically has a blank line before the
+      // marker that fabricates the next block, where this tool's own canonical
+      // multi-block example (in the imbalance-rejection message above) has none.
+      // Heuristic, not a classifier — recording unconditionally, plus the raw
+      // findMarkerCount, means a better predicate can be re-derived from these
+      // records later without a new deploy. Does not change which patches are
+      // accepted, rejected, or how they're parsed.
+      const isMultiBlockPatch = blocks.length > 1;
+      let contentEmbeddedBoundaryCount = 0;
+      if (isMultiBlockPatch) {
+        const patchLF = patch.replace(/\r\n/g, "\n");
+        let isFirstOccurrence = true;
+        let markerIdx = patchLF.indexOf(FIND_MARKER);
+        while (markerIdx !== -1) {
+          if (!isFirstOccurrence && patchLF.slice(Math.max(0, markerIdx - 2), markerIdx) === "\n\n") {
+            contentEmbeddedBoundaryCount += 1;
+          }
+          isFirstOccurrence = false;
+          markerIdx = patchLF.indexOf(FIND_MARKER, markerIdx + FIND_MARKER.length);
+        }
+      }
+
       if (sqFindTotal + sqReplaceTotal > 0) {
         if (input?.selfValidationCounts) {
           input.selfValidationCounts.smartQuoteFixes += sqFindTotal + sqReplaceTotal;
@@ -2226,6 +2256,15 @@ export async function executeTool(
               rejectionReason: "find_not_found",
             })
           );
+          if (isMultiBlockPatch) {
+            log("[zone-apply-patch-marker-split]", JSON.stringify({
+              filePath,
+              blockCount: blocks.length,
+              findMarkerCount,
+              contentEmbeddedBoundaryCount,
+              rejected: true,
+            }));
+          }
           return {
             success: false,
             output:
@@ -2359,6 +2398,16 @@ export async function executeTool(
         } else {
           currentNormalized = updatedSearchTarget;
         }
+      }
+
+      if (isMultiBlockPatch) {
+        log("[zone-apply-patch-marker-split]", JSON.stringify({
+          filePath,
+          blockCount: blocks.length,
+          findMarkerCount,
+          contentEmbeddedBoundaryCount,
+          rejected: false,
+        }));
       }
 
       let outputContent =
