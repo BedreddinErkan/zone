@@ -535,7 +535,10 @@ change, not an extraction (see item 18). Sharing the segmentation with normaliza
 from both sides breaks the applier's own smart-quote tests, which require the walk to normalize
 before matching against the file. The only behavior-preserving shape is sharing the segmentation
 loop alone and leaving `normalizeSmartQuotes` as a post-pass applied at the walk's call site
-only.
+only. Note this only ever concerns smart quotes — item 18's other two normalization classes
+(line endings, the read_file prefix) live in the match-time loop this extraction doesn't touch,
+in either shape; unifying segmentation resolves at most one of item 18's three classes, not the
+divergence as a whole.
 
 **Candidate home: `core/fileDiff.ts`.** It's a genuine leaf (imports only `node:fs` and
 `node:path`), it already generates this exact format (`diffToFindReplace`, the subject of item
@@ -576,44 +579,89 @@ unbuilt, unscoped beyond this observation.
 **Where the code lives:** `multi_edit`'s schema (the precedent) and `apply_patch`'s schema
 (what would change) are both in `toolDefinitions.ts`.
 
-## 18. The applier's smart-quote normalization was never mirrored into the dedup hash — a live defect
+## 18. The applier's normalization was never mirrored into the dedup hash — corrected, three classes not one
 
-**What it is:** `normalizeSmartQuotes` (Unicode curly-quote → ASCII normalization, Phase V
-Commit 2) was added to the applier's walk in `toolExecutor.ts` and never added to
-`parsePatchBlocks` in `agentLoop.ts`, which feeds `hashPatchBlocks`'s failure-history dedup key.
-This is the one behavior-changing difference between the two index-walkers named in item 16.
+**This entry originally framed the divergence as a smart-quote defect. That framing is
+incomplete, not just narrow: it is one of three live classes, corrected below.** The original
+title and text described only `normalizeSmartQuotes`. A follow-up establish pass found the same
+applier-normalizes/hash-doesn't shape recurring for two more classes, independently
+probe-confirmed against the real compiled applier: the walk writes byte-identical output for
+each pair below, and `hashPatchBlocks` assigns different dedup keys.
 
-**Consequence, probe-confirmed, not inferred:** a patch whose FIND/REPLACE content uses curly
-quotes and its straight-quote equivalent are the same edit as far as the applier is concerned —
-both match and apply identically, since the walk normalizes before matching. `hashPatchBlocks`
-disagrees: it hashes the two patches to different values, since `parsePatchBlocks` never
-normalizes. Concretely, a model that resubmits a failing patch and "fixes" it only by
-straightening its quotes emits a patch `failureHistory` records under a *different* hash than
-the one that just failed. `detectRepeatedFailure`'s strongest verdict,
-`identical_patch_retried`, gates on `last.patchHash === prev.patchHash` — it never fires for
-this resubmission, which instead demotes to a weaker verdict (`same_root_cause_different_patch`
-or `same_trigger_repeated_2x`) or none at all.
+- **Smart quotes** (parse-time, inside segmentation) — `normalizeSmartQuotes`.
+- **Line endings, CRLF and bare CR** (match-time, after segmentation) — the walk's own
+  `.replace(/\r\n/g,"\n").replace(/\r/g,"\n")` chain.
+- **The `read_file` line-number prefix** (match-time, after segmentation) —
+  `stripReadFilePrefix`.
 
-**A comment in the codebase already asserts this is normalized, and is wrong.**
-`antiThrash.ts`'s parallel repeated-failure check carries the comment "identical patch retried —
-same trigger AND same normalized patch hash" directly above the same `patchHash` equality check.
-The hash is not normalized. This comment is wrong at HEAD and should be corrected whenever this
-item is closed, not before — fixing the comment alone without fixing the underlying hash would
-make the claim it makes true, but for the wrong reason.
+**The architectural asymmetry this creates constrains any fix, and the entry's original "what
+would close it" only addressed one class.** Smart quotes live *inside* `parsePatchBlocks`'s own
+segmentation and could be mirrored there directly. Line endings and the read-file prefix live in
+the *match-time* loop, which `parsePatchBlocks` has no equivalent of at all — closing those two
+requires replicating the transformation in `hashPatchBlocks` itself, not in the parser.
+"Normalize in `parsePatchBlocks`," this entry's original fix, closes exactly one of three.
 
-**What would close it:** normalizing in the hash path — either by having `parsePatchBlocks` call
-`normalizeSmartQuotes` too, or by normalizing in `hashPatchBlocks` itself. Either **changes every
-existing dedup key for any patch that ever contained a smart quote** — a deliberate behavior
-change to which patches read as repeats, not a silent rider on a refactor or on item 16's
-extraction. `a7f4ff03`'s characterization tests now pin the current, unnormalized values
-specifically (a curly-quote patch and its straight-quote equivalent hashing differently is one
-of the pinned claims) — closing this item means updating those tests on purpose, not having them
-break as an unexpected side effect.
+**Measured, with the measurement's limits stated — not assumed rare.** Smart quotes: 0
+occurrences across 24 apply_patch calls that reached the walk. A *measured* zero, not a
+structural one — the marker (`[zone-self-validation]`, `rule:"smart_quote_autofix"`) predates the
+sink's observation window by months, and its sibling rules on the same tag have 42 records in
+that same window, so the tag is live and would have recorded a hit had one occurred. Line endings
+and the read-file prefix had **no telemetry of any kind** until the pass described below —
+"rare" for those two was a guess borrowed from the one class that happened to be instrumented,
+not a measurement.
 
-**Where the code lives:** `normalizeSmartQuotes` is in `toolExecutor.ts`; `parsePatchBlocks` and
-`hashPatchBlocks` are in `agentLoop.ts`; the comment describing the hash as normalized is in
-`antiThrash.ts`, directly above its own `patchHash` equality check; `detectRepeatedFailure`'s
-matching check is in `agentLoop.ts`; the characterization tests pinning current values are in
+**What the denominator pass (`563d5b63`) added:** `[zone-apply-patch-normalization-parity]`, one
+record per apply_patch call that reaches block-level normalization, carrying `blockCount`,
+`smartQuoteChanged`, `eolChangedBlocks`, `prefixStrippedBlocks`. Detection only — zero change to
+parsing, matching, or hashing.
+
+**The record's population, stated precisely — the part most likely to be misread later.** Its
+denominator is calls that survived ten earlier rejection paths and produced at least one parsed
+block; it is **not** all apply_patch calls. `[zone-self-validation]`'s `rule:"read_before_patch"`
+`"approved"` count is a *looser upper bound*, not the same population — an approved call can
+still exit at any of several later rejections before ever reaching this record. The opposite
+relationship holds for `[zone-apply-patch-marker-split]`: its population is exactly this
+record's `blockCount > 1` slice, so this record's own count — not `read_before_patch`'s — is the
+correct denominator for marker-split's rate.
+
+**Still open — the divergence itself, for all three classes.** What would close it: normalizing
+all three in `hashPatchBlocks` — importing `normalizeSmartQuotes` and `stripReadFilePrefix` from
+`toolExecutor.ts` (`agentLoop.ts` already imports from that file; no cycle). This **changes
+every existing dedup key** for any patch that ever contained a smart quote, CRLF, or a pasted
+`read_file` prefix — a deliberate behavior change, not a silent rider on item 16's extraction.
+`a7f4ff03`'s characterization tests pin the current, unnormalized values for two of the three
+classes by name and would need deliberate edits: **T7** (smart quotes) and **T6** (line
+endings). T6 is worth flagging specifically — it was written, in the pass that added it, as a
+neutral parsing property ("CRLF line endings inside find/replace content survive unparsed"). It
+is not neutral: it pins class 2 of this same defect as correct behavior, under a comment that
+never named it as such.
+
+**The real cost when it fires, not previously stated.** In the coaching path
+(`CoachingController`), the demotion is label-only — every consumer of `repeatPattern` treats it
+as `!== null`, `.filePath`, or `.reason` threaded into telemetry; routing and escalation behave
+identically regardless of which of the four reasons fired. In `antiThrash.detectFailureStall` it
+is worse: Verdict 1 misses on the hash, and Verdict 2 is excluded by its own
+`last.trigger !== prev.trigger` guard (a normalization-class resubmission has the *same*
+trigger), so the `failure_stall` signal is **skipped outright for that comparison, not
+relabelled to a weaker verdict**. Self-clearing on the next failure, once both compared records
+are hash-consistent again.
+
+**The resume interaction.** `failureHistory` persists `patchHash` into the run envelope
+(`FailureRecordLite`) with no version marker on the value itself — only the envelope's own
+`version: 1`, which has never been bumped. This repo's actual schema-drift precedent is additive
+optional fields with a stated default (`runId?`, `createdPaths?`), never invalidating a value
+already written — which is what fixing this would be. Bounded, not open-ended: only
+normalization-class-bearing patches produce a changed hash, and the stale-comparison window is
+at most one comparison per file path (the next failure after a resume makes both compared
+records new-style again).
+
+**Where the code lives:** `normalizeSmartQuotes` and the walk's own EOL-replace chain are in
+`toolExecutor.ts`, inside `apply_patch`'s handler; `stripReadFilePrefix` is also there.
+`parsePatchBlocks` and `hashPatchBlocks` are in `agentLoop.ts`. The wrong "normalized" comment is
+in `antiThrash.ts`, directly above its own `patchHash` equality check; `detectRepeatedFailure`'s
+matching check is in `agentLoop.ts`. `[zone-apply-patch-normalization-parity]`'s pre-pass and
+emission sit in `apply_patch`'s handler, `toolExecutor.ts`, right after the existing smart-quote
+telemetry. The characterization tests pinning current values are in
 `agentLoop.patchBlocksCharacterization.test.ts`.
 
 ## 19. Five parsers of FIND/REPLACE text exist, not three
@@ -666,7 +714,10 @@ from a test file.
 could be silently broken — by an unrelated edit, a bad merge, a naive refactor — with no test
 noticing. This is plausibly part of why it was able to drift from the applier's walk unnoticed
 in the first place (item 18): there was no test on either side that would have caught the two
-falling out of sync when `normalizeSmartQuotes` was added to only one of them.
+falling out of sync when `normalizeSmartQuotes` was added to only one of them. Item 18's own
+denominator pass makes this concrete rather than speculative: two more normalization classes
+(line endings, the read_file prefix) drifted the same way, silently, with zero telemetry until
+that pass — not just the one this entry already names.
 
 **What `a7f4ff03` did about it, and what it didn't:** the characterization tests pin
 `parsePatchBlocks`'s behavior indirectly, entirely through the exported `hashPatchBlocks` — a
@@ -683,6 +734,65 @@ directly, with assertions on `{find, replace}` fields instead of hash equality.
 
 **Where the code lives:** `parsePatchBlocks` is in `agentLoop.ts`, not exported. The
 characterization tests are in `agentLoop.patchBlocksCharacterization.test.ts`.
+
+## 21. Two existing EOL telemetry sites are each incomplete, in opposite directions
+
+**What it is:** `toolExecutor.ts` has two pre-existing `debugLog` sites describing FIND/REPLACE
+block line-endings, and neither observes the match-time normalization completely.
+`[zone-apply-patch-eol-warn]`'s CR-only check tests `/\r(?!\n)/` against the raw block content —
+it catches bare-CR-only content but *misses ordinary CRLF entirely*, since the negative
+lookahead excludes any `\r` immediately followed by `\n`. `[zone-apply-patch-eol]` carries
+`findEolBefore`/`replaceEolBefore` via `detectLineEnding`, whose own regexes never test for a
+bare `\r` with no `\n` anywhere in the string — a bare-CR-only block reads as `"none"`, silently
+missing exactly the case the *other* site exists to catch.
+
+**Two of the three EOL sites share a tag with different payloads.** The CR-only check and a
+third, unrelated site (the target file's own mixed-line-ending re-encoding, at output time — not
+a FIND/REPLACE content signal at all) both emit under `[zone-apply-patch-eol-warn]`, with
+different payload shapes.
+
+**Neither reaches the sink regardless of the above — both are `debugLog`.** Confirmed while
+building the item-18 denominator pass: this is exactly why that pass built a fresh, direct
+before/after comparison instead of promoting either site — promoting either one gives an
+incomplete or wrong-question denominator, not a fix.
+
+**What `563d5b63` did about it, and what it didn't:** built
+`[zone-apply-patch-normalization-parity]` alongside these two, using a direct string comparison
+rather than either proxy. It did not fix, reconcile, or retire the two existing sites — they are
+unchanged, still incomplete, still `debugLog`-only.
+
+**What would close it:** reconcile the two into one complete, correct signal, or retire them now
+that a complete signal exists elsewhere — not attempted here, found and recorded during a
+detection-only pass that deliberately left matching and existing telemetry untouched.
+
+**Where the code lives:** both sites are in `apply_patch`'s handler, `toolExecutor.ts` — the
+CR-only check immediately before the match-time normalization, the `detectLineEnding`-based one
+immediately after it. The unrelated third site sharing the CR-only check's tag is later in the
+same handler, at output re-encoding.
+
+## 22. `multi_edit` carries a fourth, independent copy of the EOL-normalization transformation
+
+**What it is:** `multi_edit`'s own handler has the identical
+`.replace(/\r\n/g,"\n").replace(/\r/g,"\n")` two-line chain, written independently of
+`apply_patch`'s walk and of `normalizeEol` (the helper item 18's denominator pass extracted so
+the walk and its own telemetry share one implementation). `multi_edit` takes `find`/`replace` as
+separate JSON arguments (see item 17) and never feeds `hashPatchBlocks`/`parsePatchBlocks`, so
+this copy is not part of item 18's divergence and is not a live defect today.
+
+**Why it's recorded anyway: this is a drift candidate, not a hypothetical one.** This exact
+transformation has already drifted once in this codebase — `normalizeSmartQuotes` was added to
+`apply_patch`'s walk and never mirrored into `parsePatchBlocks`, which is item 18 in full. A
+fourth independent copy of a two-line transformation is a small blast radius per copy, but the
+mechanism that produced item 18 — one copy edited, a sibling copy not — applies exactly as well
+to a third or fourth copy as it did to the second.
+
+**What would close it:** nothing urgent — recorded so a future normalization change to one copy
+prompts a check of the others, not a fix in itself. If `multi_edit` and `apply_patch` ever need
+the same EOL behavior deliberately kept in sync, `normalizeEol` (`toolExecutor.ts`) is already
+the shared implementation to point `multi_edit` at instead of writing a fifth copy.
+
+**Where the code lives:** `multi_edit`'s own EOL-normalization is in its handler in
+`toolExecutor.ts`, independent of `apply_patch`'s handler in the same file.
 
 ---
 
