@@ -903,6 +903,13 @@ combination on its own terms, since a thrown error and a clean miss may warrant 
 wording even under the same reconciliation principle. Not attempted here — found and recorded
 during a documentation-only pass.
 
+**The both-fault combination, verified by reading, not left open:** the two catches are fully
+independent — a simultaneous throw from both prints two accurate, separate messages (`Resume
+failed: ...`, then `resume: ...`) with no crash, and `_composeResumeMessage` correctly returns
+`null` rather than fabricating a third, since the null `sessionMissMessage` this path produces
+gives it nothing to reconcile. `localSessionId` and the startup banner both fall through cleanly
+to a fresh, not-resumed state that matches what actually happened — verified, not assumed.
+
 **Where the code lives:** the catch block sits in the same `if (opts.resume)` block as
 `_resolveResumeRequest`'s own call, in `runTui`, `index.tsx` — immediately preceding the
 `if (envResumeId)` envelope-resume block that `_composeResumeMessage`'s own reconciliation
