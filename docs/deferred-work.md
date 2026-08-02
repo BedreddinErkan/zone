@@ -434,29 +434,62 @@ is a ledger entry and not a drive-by fix.
 **Where the code lives:** `tsconfig.json`'s compiler options (`noUnusedLocals` absent);
 `eslint.config.mjs` (configured, not invoked by `npm test`/`npm run build`).
 
-## 14. `filesModified` is not a write oracle
+## 14. Closed — `filesModified` now tracks persisting mutations, not write attempts
 
-**What it is:** `handleToolResult` adds a tool call's `filePath` to `ctx.filesModified` for
-`apply_patch`/`write_file` unconditionally — no `success` check — so a failed attempt lands in
-the set exactly like a successful one. The `multi_edit` path is different and accurate: it adds
-via the entry's `filesStaged`, which stays empty unless a replacement actually happened.
+**What it was:** `handleToolResult`'s Step 9 added a tool call's `filePath` to `ctx.filesModified`
+for `apply_patch`/`write_file` unconditionally — no `success` check — so a failed attempt landed
+in the set exactly like a successful one. `multi_edit` was already accurate, gating on its own
+`filesStaged` field instead.
 
-**Why this matters:** `filesModified` looks, at a glance, like the obvious signal for "did this
-run write anything" — it's already a `Set` of paths, threaded everywhere `toolCallLog` is. It is
-not that signal for two of the three write tools. This was flagged during the establish pass
-that led to `e21aab93` (see item 12), specifically to rule it out as an alternative to fixing
-`didApplyPatch` directly — recorded here so the next person looking for a "did this write
-anything" signal doesn't reach for it and rediscover the same trap.
+**The entry's own proposed fix was wrong, established by reading rather than assumed correct on
+a second look:** the original text above proposed gating the two additions on `success`, the same
+asymmetry fix already applied elsewhere in this file family. Two independent findings falsified
+that, both from reading the actual code, not from reasoning about it:
+- `multi_edit` does not gate on `success` at all — it gates on *evidence of mutation*. Its
+  path-escape return carries `success: false` with a real, partially-accumulated `filesStaged`
+  array; a `success` gate would have dropped those files, the exact defect item 8 closed.
+- A `success` gate would have lost the one case where a failed write leaves a genuinely changed
+  tree: a new-file `write_file` whose post-write rollback `unlinkSync` call itself throws. The
+  file survives, unreported, under a blanket gate.
 
-**What would close it:** gating the `apply_patch`/`write_file` additions on `success`, the same
-way the `multi_edit` path already gates on `filesStaged` — matching the asymmetry fix already
-applied to chain-saturation counting (`86ba4bd1`) and to `didApplyPatch` (`e21aab93`) elsewhere
-in this same file family. Not attempted here — found and recorded, not built, during a
-documentation-only pass.
+**What landed (`3fa62c4a`):** `apply_patch` and `write_file` now return `filesStaged` themselves,
+on every return that leaves a *persisting* content change, matching `multi_edit`'s own contract
+instead of approximating it with `success`. `handleToolResult`'s Step 9 collapsed to one branch
+reading `result.filesStaged` uniformly for all three tools. This also closed a second, smaller
+defect found during the same pass: the old two branches stored different path formats (the raw
+model-supplied string vs. `multi_edit`'s `resolveAgentPath` output) — both tools now reuse the
+same `resolveAgentPath` local they already computed for themselves, so all three tools produce
+identical normalization.
 
-**Where the code lives:** the three additions are in `handleToolResult.ts`'s per-tool-call
-bookkeeping — `apply_patch`/`write_file` unconditional on `filePath` presence, `multi_edit`
-conditional on `result.filesStaged`.
+**The prerequisite (`c1570c7e`):** `performReplan`'s scope-widening used to depend on the blocked
+path having leaked into `filesModified` via the same unconditional Step 9 this item closes.
+Fixed first, separately, so gating Step 9 couldn't silently strand a scope-blocked path outside
+the widened plan the moment this item landed.
+
+**The measurement (`44adc59f`, `ecfd42e0`):** four characterization tests pinned the affected
+consumers' pre-fix behavior — anti-thrash P5/P6 suppression, Stage-2's C2 no-net-progress check,
+`validateUnrelatedClaim`'s unrelated-failure demotion — before any fix code was written, and the
+real fix was run as a mutation against them ahead of being built. All four predictions matched
+what the real fix produced.
+
+**Honest asymmetry, worth recording so it isn't rediscovered as a surprise:** for `apply_patch`
+alone, the shape that landed and a blanket `success` gate produce identical behavior — every one
+of `apply_patch`'s persisting-change returns is already `success: true`; none of its rollback
+returns persist anything. The richer design was required by `write_file`'s unlink-survivor case
+and by uniformity with `multi_edit`, not by anything `apply_patch` itself needed.
+
+**The unlink-check decision:** the new-file rollback path wraps `fs.existsSync` in its own
+try/catch, defaulting to `false` (not staged) when the check itself throws, and logs
+`[zone-write-file-unlink-check-failed]` on that path. The default was decided on cost asymmetry,
+not likelihood: `git add -- <paths>` fails atomically on a single phantom pathspec, silently
+losing an entire run's otherwise-legitimate auto-commit; a missed `filesStaged` entry on an
+inconclusive check is recoverable and visible in `git status`. Defaulting to the lower-blast-radius
+wrong guess was deliberate.
+
+**Where the code lives:** `filesStaged` population is in `toolExecutor.ts`'s `apply_patch` and
+`write_file` handlers, on their own success/persisting-change returns; Step 9 is in
+`handleToolResult.ts`; the unlink-check is inside `write_file`'s shared syntax/semantic-smell
+rollback block, guarding only the new-file sub-case.
 
 ## 15. The restage-prompt generator can produce text the walk would mis-parse
 
@@ -915,6 +948,70 @@ to a fresh, not-resumed state that matches what actually happened — verified, 
 `if (envResumeId)` envelope-resume block that `_composeResumeMessage`'s own reconciliation
 already accounts for.
 
+## 26. A second, parallel test surface for Step 9 exists and isn't cross-referenced
+
+**What it is:** `handleToolResult/parity.test.ts` tests `handleToolResult`'s Step 9 behavior
+alongside `handleToolResult.test.ts` — two separate files asserting overlapping claims about the
+same function. Neither the establish pass on item 14 nor a dedicated pre-implementation search for
+Step 9's test coverage surfaced the second file; only running the full suite after the fix
+landed did, when it broke there too.
+
+**Why this matters:** someone changing Step 9's behavior who greps for its test coverage, reads
+one file, updates its assertions, and reasonably believes the change is fully tested will miss
+the other file entirely — its own assertions keep asserting the pre-change contract, silently.
+That is exactly what happened during the shape-B pass: two tests in `parity.test.ts` broke
+alongside `handleToolResult.test.ts`'s own two, discovered only because the full-suite run is
+mandatory in this session's own process, not because either file pointed at the other.
+
+**What would close it:** a one-line pointer comment in each file naming the other as covering the
+same function from a different angle, or merging the two files outright so there is exactly one
+place to look.
+
+**Where the code lives:** `src/llm/toolEventHandler/handleToolResult.test.ts` and
+`src/llm/toolEventHandler/parity.test.ts`, both testing `handleToolResult.ts`.
+
+## 27. `success` cannot identify which files `multi_edit` touched — not merely worse, structurally incapable
+
+**What it is:** found by mutation testing during the shape-B pass, not by design review.
+Mutating `handleToolResult`'s Step 9 to gate on `result.success` instead of reading
+`result.filesStaged` broke `multi_edit`'s own pre-existing, untouched success test — not just the
+new tests written for this pass. `multi_edit`'s tool-call arguments carry `files` (plural); there
+is no singular `filePath` field anywhere in its args shape for a `success`-gated Step 9 to read.
+
+**Why this matters:** this is not "shape B is a better fit for `multi_edit` than a `success`
+gate" — it is that a `success`-gated Step 9 has no coherent value to add to `filesModified` for
+`multi_edit` at all, regardless of how carefully it's written. The tool is structurally
+incompatible with that design, not merely better served by another. Recorded as the independent,
+mutation-discovered confirmation that `filesStaged` (or some other per-file signal) was the only
+workable design for Step 9 once `multi_edit` is in scope — and as a caution against reaching for
+"just check `success`" as a simpler alternative anywhere a tool's own arguments don't name a
+single file.
+
+**Where the code lives:** `multi_edit`'s argument shape (`files: string[]`, no `filePath`) is in
+its handler in `toolExecutor.ts`; the mutation that found this is recorded in the commit history
+for `3fa62c4a`, not preserved as code anywhere.
+
+## 28. `write_file`'s rollback message is false in the unlink-survivor case
+
+**What it is:** `write_file`'s post-write syntax/semantic-smell rollback unconditionally tells
+the agent "The file has been reverted" — literally untrue on the one path item 14's fix added
+detection for: a new-file write whose `unlinkSync` call itself throws, leaving the broken file on
+disk. `filesStaged` now correctly reports this case as a persisting change, but the message text
+sitting right next to that correct signal still claims the opposite.
+
+**Why it wasn't fixed in `3fa62c4a`:** changing message wording risks rippling into tests that
+assert the exact output string, and auditing every such assertion was not that pass's scope.
+Recorded separately rather than folded in, so the honesty gap doesn't get lost once
+`filesStaged`'s own correctness makes it easy to assume the message is right too.
+
+**What would close it:** a conditional message — branching on whatever detection `filesStaged`'s
+own logic already computed for this return, rather than a fresh check — plus an audit of which
+tests assert the current fixed string, so the wording change doesn't silently break them.
+
+**Where the code lives:** the rollback return messages are in `write_file`'s shared
+syntax/semantic-smell rollback block in `toolExecutor.ts`, the same block item 14's `filesStaged`
+detection now lives in.
+
 ---
 
 ## A pattern this document is built to avoid
@@ -1026,3 +1123,25 @@ observing the injected path specifically, not passing by some other mechanism.
 default parameter on a test seam is that same rule applied to dependency injection. The "unknown
 input" is a forgotten argument; the "plausible default" is a same-shaped function that happens
 to work in production while defeating the one thing the seam was built for.
+
+## A fifth pattern, following the fourth: tracing is not running
+
+Establish work that traces every consumer by reading is not the same claim as "the full suite
+will pass." The shape-B pass traced apply_patch's 27 returns and write_file's 10, cross-checked
+against `multi_edit`'s own precedent, and produced a design validated three separate ways before
+a line of production code was written. It still missed six mock sites across three test files and
+an entire second test file for the function it was changing (item 26) — none of it visible to
+reading, all of it visible to one full-suite run.
+
+**Why tracing alone couldn't have found it:** every one of the missed sites was a mock returning
+a hand-built result object under the *old* contract — `{success: true, output: "..."}` with no
+`filesStaged` — sitting in a test file the establish pass had no reason to open, because nothing
+about Step 9's own source pointed at them. Reading traces what the code being changed does and
+what calls it; it does not enumerate every place something else assumed the old behavior and
+encoded that assumption into a fixture.
+
+**The rule this confirms, not a new one:** the full-suite step in this session's own process is
+not a formality to run once local tests pass — it is the step that catches exactly this class of
+miss. A change that looks locally scoped, fully traced, and mutation-tested against every named
+consumer can still break code nobody read, because nobody had a reason to. Treat "full suite green"
+as load-bearing evidence, not confirmation of what tracing already established.
