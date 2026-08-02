@@ -1423,6 +1423,33 @@ export function buildPlanAnnotationsBlock(
   return lines.join("\n");
 }
 
+/**
+ * Force-adds `blockedPath` into the regenerated plan's `filesLikely`, independent
+ * of `filesModified`. Today `ctx.filesModified` happens to already contain the
+ * scope-blocked path by the time a replan fires — handleToolResult's Step 9
+ * records every write attempt's filePath unconditionally, in the same call that
+ * later detects the 3rd consecutive block — so the filesModified-widening loop
+ * in performReplan already carries it, but only as an accident of ordering, not
+ * a guarantee. This function makes the guarantee explicit and independently
+ * testable, so a future fix gating Step 9 on result.success can't silently
+ * strand the blocked path outside the widened scope.
+ *
+ * No normalization applied: checkWriteScope (scopeGuard.ts) normalizes every
+ * filesLikely entry at comparison time, the same way it normalizes every other
+ * entry the plan generator and the filesModified loop already produce — pushing
+ * the raw value here matches that existing contract.
+ */
+export function addBlockedPathToPlan(
+  newPlan: import("./executionPlan.js").ExecutionPlan,
+  newPlanPaths: Set<string>,
+  blockedPath: string | undefined,
+): void {
+  if (blockedPath && !newPlanPaths.has(blockedPath)) {
+    newPlan.steps[0]!.filesLikely.push(blockedPath);
+    newPlanPaths.add(blockedPath);
+  }
+}
+
 export function detectRepeatedFailure(
   failureHistory: Map<string, FailureRecord[]>,
   targetFilePath: string | null
@@ -2819,6 +2846,7 @@ async function runAgentLoopScoped(input: AgentLoopInput, stats: LoopRunStats): P
         throw new Error("[zone-replan] regenerated plan has empty steps — falling back");
       }
       const newPlanPaths = new Set(newPlan.steps.flatMap((s) => s.filesLikely));
+      addBlockedPathToPlan(newPlan, newPlanPaths, params.blockedPath);
       for (const f of params.toolEventCtx.filesModified) {
         if (!newPlanPaths.has(f)) newPlan.steps[0]!.filesLikely.push(f);
       }

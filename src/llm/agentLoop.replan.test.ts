@@ -61,7 +61,8 @@ vi.mock("./executionPlan.js", async (importOriginal) => {
 
 // ── import under test ─────────────────────────────────────────────────────────
 
-import { runAgentLoop } from "./agentLoop.js";
+import { runAgentLoop, addBlockedPathToPlan } from "./agentLoop.js";
+import { checkWriteScope } from "../tools/scopeGuard.js";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -420,5 +421,141 @@ describe("agentLoop adaptive replan (Inc-3 — agent-driven via suggest_scope_ch
     const call = replanMock.mock.calls[0]![0] as Record<string, unknown>;
     expect(String(call["userFeedback"])).toContain(BLOCKED_FILE);
     expect(events.find((e) => (e as { type?: string }).type === "todo_revised")).toBeDefined();
+  });
+});
+
+// ── addBlockedPathToPlan (extracted pure helper) ────────────────────────────────
+// Direct unit tests, independent of the integration harness above. The harness
+// structurally cannot reach a state where blockedPath is absent from
+// filesModified — handleToolResult's Step 9 records every write attempt's
+// filePath unconditionally, in the same call that later detects the 3rd
+// consecutive block, before replan_signal is even returned — so these are the
+// only tests that isolate the explicit add from that accident.
+
+describe("addBlockedPathToPlan", () => {
+  it("pushes blockedPath into steps[0].filesLikely and newPlanPaths when absent", () => {
+    const plan = makeNewPlan(["src/other.ts"]);
+    const newPlanPaths = new Set(["src/other.ts"]); // NOT filesModified-shaped —
+    // the function takes no filesModified-like parameter at all.
+    addBlockedPathToPlan(plan, newPlanPaths, BLOCKED_FILE);
+    expect(plan.steps[0]!.filesLikely).toEqual(["src/other.ts", BLOCKED_FILE]);
+    expect(newPlanPaths.has(BLOCKED_FILE)).toBe(true);
+  });
+
+  it("does not duplicate when blockedPath is already in newPlanPaths", () => {
+    const plan = makeNewPlan([BLOCKED_FILE]);
+    const newPlanPaths = new Set([BLOCKED_FILE]);
+    addBlockedPathToPlan(plan, newPlanPaths, BLOCKED_FILE);
+    expect(plan.steps[0]!.filesLikely).toEqual([BLOCKED_FILE]);
+    expect(newPlanPaths.size).toBe(1);
+  });
+
+  it("no-ops when blockedPath is undefined", () => {
+    const plan = makeNewPlan(["src/other.ts"]);
+    const newPlanPaths = new Set(["src/other.ts"]);
+    addBlockedPathToPlan(plan, newPlanPaths, undefined);
+    expect(plan.steps[0]!.filesLikely).toEqual(["src/other.ts"]);
+    expect(newPlanPaths.size).toBe(1);
+  });
+
+  it("pushes blockedPath verbatim — no normalization applied inside the helper", () => {
+    const weird = "./nested/../src/target.ts";
+    const plan = makeNewPlan([]);
+    const newPlanPaths = new Set<string>();
+    addBlockedPathToPlan(plan, newPlanPaths, weird);
+    expect(plan.steps[0]!.filesLikely).toEqual([weird]);
+  });
+});
+
+// ── Bug-fix: performReplan force-adds blockedPath into filesLikely ──────────────
+
+describe("agentLoop adaptive replan — blockedPath force-add", () => {
+  it("force-adds blockedPath to filesLikely when the regenerated plan omits it", async () => {
+    // New plan intentionally omits BLOCKED_FILE — unlike every other test in this
+    // file, which defaults to a plan that already contains it.
+    replanMock.mockResolvedValue(makeNewPlan(["src/unrelated.ts"]));
+
+    llmMock.createChatCompletion
+      .mockResolvedValueOnce(makeReadFileResponse("rf-0"))
+      .mockResolvedValueOnce(makeScopeBlockResponse("ap-0"))
+      .mockResolvedValueOnce(makeScopeBlockResponse("ap-1"))
+      .mockResolvedValueOnce(makeScopeBlockResponse("ap-2"))
+      .mockResolvedValueOnce(makeDoneResponse());
+
+    const events: unknown[] = [];
+    await runAgentLoop({
+      task: "edit src/target.ts",
+      repoPath,
+      mode: "patch",
+      maxIterations: 20,
+      executionPlan: makeInitialPlan(["src/other.ts"]),
+      onStructuredEvent: (e) => events.push(e),
+    });
+
+    expect(replanMock).toHaveBeenCalledTimes(1);
+    const todoRevisedEvent = events.find(
+      (e) => (e as { type?: string }).type === "todo_revised"
+    ) as { todos: Array<{ filesLikely?: string[] }> } | undefined;
+    expect(todoRevisedEvent).toBeDefined();
+    expect(todoRevisedEvent!.todos[0]!.filesLikely).toContain(BLOCKED_FILE);
+  });
+
+  it("the widened plan passes the real checkWriteScope check for the blocked path", async () => {
+    replanMock.mockResolvedValue(makeNewPlan(["src/unrelated.ts"]));
+
+    llmMock.createChatCompletion
+      .mockResolvedValueOnce(makeReadFileResponse("rf-0"))
+      .mockResolvedValueOnce(makeScopeBlockResponse("ap-0"))
+      .mockResolvedValueOnce(makeScopeBlockResponse("ap-1"))
+      .mockResolvedValueOnce(makeScopeBlockResponse("ap-2"))
+      .mockResolvedValueOnce(makeDoneResponse());
+
+    const events: unknown[] = [];
+    await runAgentLoop({
+      task: "edit src/target.ts",
+      repoPath,
+      mode: "patch",
+      maxIterations: 20,
+      executionPlan: makeInitialPlan(["src/other.ts"]),
+      onStructuredEvent: (e) => events.push(e),
+    });
+
+    expect(replanMock).toHaveBeenCalledTimes(1);
+    const todoRevisedEvent = events.find(
+      (e) => (e as { type?: string }).type === "todo_revised"
+    ) as { todos: Array<{ filesLikely?: string[] }> } | undefined;
+    expect(todoRevisedEvent).toBeDefined();
+    const widenedFilesLikely = todoRevisedEvent!.todos[0]!.filesLikely ?? [];
+    // Reuse makeNewPlan to build a real, fully-shaped ExecutionPlan around the
+    // captured filesLikely — feeds the REAL, unmocked scope guard, not a stub.
+    expect(checkWriteScope(BLOCKED_FILE, makeNewPlan(widenedFilesLikely))).toBeNull();
+  });
+
+  it("Site A (agent_suggest_scope_change, no blockedPath): nothing extra beyond the regenerated plan's own filesLikely gets added", async () => {
+    // blockedPath is never set on this path — no single blocked-path concept for
+    // agent-driven scope changes. Empty filesLikely on both the mocked new plan
+    // and filesModified (no prior write in this sequence) makes any spurious
+    // addition from the new guard immediately visible.
+    replanMock.mockResolvedValue(makeNewPlan([]));
+    llmMock.createChatCompletion
+      .mockResolvedValueOnce(makeScopeChangeResponse("sc-0"))
+      .mockResolvedValueOnce(makeDoneResponse());
+
+    const events: unknown[] = [];
+    await runAgentLoop({
+      task: "edit src/target.ts",
+      repoPath,
+      mode: "patch",
+      maxIterations: 20,
+      executionPlan: makeInitialPlan(["src/other.ts"]),
+      onStructuredEvent: (e) => events.push(e),
+    });
+
+    expect(replanMock).toHaveBeenCalledTimes(1);
+    const todoRevisedEvent = events.find(
+      (e) => (e as { type?: string }).type === "todo_revised"
+    ) as { todos: Array<{ filesLikely?: string[] }> } | undefined;
+    expect(todoRevisedEvent).toBeDefined();
+    expect(todoRevisedEvent!.todos[0]!.filesLikely).toEqual([]);
   });
 });
