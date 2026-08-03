@@ -1194,6 +1194,94 @@ scoped to `**/*.ts` with no markdown rule; no markdownlint config; neither CI wo
 references `docs/` or `.md` at all. This isn't a small addition to existing infrastructure — it's
 a new script or test file plus a new `package.json` entry, from nothing.
 
+## 37. Two dead fixture files ship in the tarball
+
+**What it is:** `tsc` compiles all of `src/**` per `tsconfig.json`'s `include`, with no exception
+for test fixtures that don't happen to be named `*.test.ts` — so `src/test/fixtures/
+toolExecutorMock.ts` and `src/cli/tui/__fixtures__/staticHarness.tsx` compile into
+`dist/test/fixtures/toolExecutorMock.{js,d.ts,js.map}` and
+`dist/cli/tui/__fixtures__/staticHarness.{js,d.ts,js.map}` — six files. `package.json`'s
+`files: ["dist", "README.md", "LICENSE"]` allowlist has no exception for either path, and neither
+filename matches `*.test.*`, so both ship in the published tarball.
+
+**Why it's deferred:** the reachability audit that added the `files` allowlist traced every
+import from `dist/cli/index.js` and confirmed nothing in that graph reaches either file — dead
+weight, not a crash risk, unlike `undici` found in the same audit. Six files, a few KB, noted and
+explicitly left unfixed in that pass's own scope.
+
+**What would close it:** a `dist/.npmignore` (a subdirectory-level `.npmignore` still applies even
+though the root one is overridden once `files` is set — confirmed from npm's own docs during the
+same pass) or narrowing the `files` entries to exclude these two paths specifically.
+
+**Where the code lives:** source at `src/test/fixtures/toolExecutorMock.ts` and
+`src/cli/tui/__fixtures__/staticHarness.tsx`; the `files` field is in `package.json`.
+
+## 38. Whether shipping 416 sourcemaps is deliberate is undecided, not wrong
+
+**What it is:** the published tarball carries 416 `.js.map` files — one per compiled `dist/`
+module, from `tsconfig.json`'s `sourceMap: true` (present before the publish-prep pass; that
+commit added `declaration` alongside it, unchanged). Confirmed two ways — `find dist -name
+"*.map"` and `npm pack --dry-run`'s own file list — both agree at 416. They account for roughly
+39% of `dist/`'s own unpacked size (2.2 of 5.6 MB, measured directly) — a real, large share.
+
+**Whether this is deliberate: no stated position exists anywhere in this repo.** A grep for
+"sourcemap"/"source map" across every `*.md` file — `CLAUDE.md`, `README.md`, this file — returns
+zero hits. The publish-prep pass's own plan listed "sourcemap exclusion" under its out-of-scope
+section, but deferring a decision is not the same claim as the decision having been made either
+way; nothing commits to shipping them (e.g., for readable stack traces from user bug reports) or
+calls it unintended bloat.
+
+**What would close it:** an explicit decision, recorded somewhere durable, either way — kept
+deliberately with a stated reason, or excluded via a `files`/`.npmignore` pattern on `*.map`.
+`sourceMap: true` doesn't need to change regardless of which way the shipping decision goes —
+generating them for local dev and publishing them to npm are independent knobs.
+
+**Where the code lives:** `tsconfig.json`'s `sourceMap` field; `package.json`'s `files` allowlist,
+which has no `*.map` exclusion today.
+
+## 39. Only two of the audited devDependencies are actually unused — correcting the other two
+
+**What it is:** the publish-prep pass's reachability audit found zero `dist/` imports for
+`dompurify`, `marked`, `@vitejs/plugin-react`, and `typescript`, in service of a narrower question
+— which devDependencies are reachable from the published bin entry, the same shape of bug `undici`
+turned out to be. Re-checked against the current tree with the scope widened past `dist/` to all
+of `src/` and the root tooling configs, for the broader question of which are actually unused:
+
+- **`dompurify` and `marked` are genuinely unused** — zero references anywhere in `src/`,
+  `dist/`, or any root config. Both were vendored prebuilt browser bundles under the now-deleted
+  `dist/ui/` (a stale build artifact from an old, no-longer-present copy step) and were never
+  imported by anything else in the repo.
+- **`@vitejs/plugin-react` and `typescript` are not unused — they're real, active
+  devDependencies, correctly scoped.** `@vitejs/plugin-react` is imported directly in
+  `vitest.config.ts` (`plugins: [react()]`), needed for the `.tsx` component test suite.
+  `typescript` is invoked directly by `package.json`'s own `build`/`postbuild`/`typecheck`/
+  `check-types` scripts via its `tsc` binary — never via an ESM `import`, which is why the
+  import-based reachability check reported zero, but "no import found" isn't the same claim as
+  "unused" for a devDependency whose job is being run as a build tool rather than imported as a
+  library. Neither was ever a hygiene concern; their absence from `dist/`'s reachability graph is
+  by design.
+
+**What would close it:** remove `dompurify` and `marked` from `devDependencies` — nothing in the
+current tree references either, by name or by import, anywhere. Leave `@vitejs/plugin-react` and
+`typescript` alone.
+
+**Where the code lives:** `package.json`'s `devDependencies`; confirmed absent from `src/`,
+`dist/`, and every root config file (`vitest.config.ts`, `tsconfig.json`).
+
+## 40. Closed — `zone-vsextension` still type-checks after the `exports.types` repoint
+
+The publish-prep pass repointed all 16 `exports[*].types` fields from `./src/*.ts` to
+`./dist/*.d.ts`. `zone-vsextension`, a sibling project depending on `"zone": "file:../zone"` and
+importing 13 of the 16 subpaths in its own `src/extension.ts`, was the one real, currently-working
+consumer that change could have broken — its `moduleResolution: "Bundler"` previously followed
+`types` straight to raw source. Checked directly, not assumed: `npx tsc --noEmit` inside
+`zone-vsextension` after the repoint exits 0 with zero output. The new `./dist/*.d.ts` targets
+resolve cleanly through the same `file:` symlink (`node_modules/zone -> ../../zone`), now that
+`declaration: true` actually produces them.
+
+**Where the code lives:** `zone-vsextension`'s imports are in its own `src/extension.ts`; the
+repointed fields are in this repo's `package.json` `exports` map.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
@@ -1204,14 +1292,15 @@ priority ordering" cautions against ranking by importance, which this section do
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (12): 6, 8, 14, 20, 24, 26, 29, 30, 31, 33, 34, 35
+**Closed** (13): 6, 8, 14, 20, 24, 26, 29, 30, 31, 33, 34, 35, 40
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (16): 2 (after 16), 7, 10, 12, 13, 15 (after 2), 16, 17, 18, 21, 22, 23, 25, 28, 32, 36
+first (18): 2 (after 16), 7, 10, 12, 13, 15 (after 2), 16, 17, 18, 21, 22, 23, 25, 28, 32, 36, 37,
+39
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (2): 1, 4
 
-**Neither — a structural fact recorded, with no fix proposed** (6): 3, 5, 9, 11, 19, 27
+**Neither — a structural fact recorded, with no fix proposed** (7): 3, 5, 9, 11, 19, 27, 38
 
 Items 1, 2, 12, 16, and 18 are partially closed or corrected; the classification above covers
 only the portion still open, not the whole entry.
