@@ -1590,6 +1590,18 @@ miss. A change that looks locally scoped, fully traced, and mutation-tested agai
 consumer can still break code nobody read, because nobody had a reason to. Treat "full suite green"
 as load-bearing evidence, not confirmation of what tracing already established.
 
+This has recurred enough since to count precisely: four more confirmed instances in this document
+alone. The sharpest is `hasTrailingNewline` (item 44) — two separate, deliberate traces of
+`dominant`'s consumers preceded it and both missed it, because the defect lived in a function that
+read nothing either trace was tracing. `detectLineEnding` (item 43), from the same pass, is
+quieter: a mutation that broke nothing revealed its return value has no behavioral consumer at
+all, despite reading as load-bearing. R2 (item 29) is the same shape from further back — a test
+that passed for a reason unrelated to what it claimed to exercise, found only by mutating the
+guard it named. The claim this supports is sharper than "the full-suite step is not a formality":
+in this codebase, the findings that have actually changed a decision have come disproportionately
+from running the code, and reading's load-bearing role has been to know what to run — which
+mutation, which test, which probe — not to substitute for running it.
+
 ## A sixth pattern, following the fifth: a mutation that reroutes cannot prove suppression
 
 A guard's whole effect is suppressing an otherwise-observable signal — so a passing test that
