@@ -2190,21 +2190,6 @@ export async function executeTool(
           })
         );
 
-        const findHadCrOnly = /\r(?!\n)/.test(block.find);
-        const replaceHadCrOnly = /\r(?!\n)/.test(block.replace);
-        if (findHadCrOnly || replaceHadCrOnly) {
-          debugLog(
-            "[zone-apply-patch-eol-warn]",
-            JSON.stringify({
-              filePath,
-              block: bi + 1,
-              reason: "cr_only_detected",
-              findHadCrOnly,
-              replaceHadCrOnly,
-            })
-          );
-        }
-
         const normalizedFind = stripReadFilePrefix(normalizeEol(block.find).text);
         const normalizedReplace = normalizeEol(block.replace).text;
         const findLineCount = normalizedFind.split("\n").length;
@@ -2225,14 +2210,10 @@ export async function executeTool(
           "[zone-apply-patch-eol]",
           JSON.stringify({
             filePath,
+            block: bi + 1,
             originalEol,
-            fileHadBOM,
-            fileEndedWithNewline,
-            findEolBefore: detectLineEnding(block.find),
-            replaceEolBefore: detectLineEnding(block.replace),
             matchedAfterNormalize: normalizedOccurrences > 0,
             occurrencesAfterNormalize: normalizedOccurrences,
-            reEncodedTo,
             scopeActive: activeScopeInfo !== null,
           })
         );
