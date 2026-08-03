@@ -350,40 +350,39 @@ export function isBlockedCommand(command: string): boolean {
 
 function detectLineEnding(
   s: string
-): "crlf" | "lf" | "mixed" | "none" {
+): "crlf" | "lf" | "cr" | "mixed" | "none" {
   const crlfCount = (String(s || "").match(/\r\n/g) || []).length;
   const lfOnlyCount = (String(s || "").match(/(?<!\r)\n/g) || []).length;
-  if (crlfCount > 0 && lfOnlyCount > 0) return "mixed";
+  const crOnlyCount = (String(s || "").match(/\r(?!\n)/g) || []).length;
+  const nonZeroCount = [crlfCount, lfOnlyCount, crOnlyCount].filter((n) => n > 0).length;
+  if (nonZeroCount > 1) return "mixed";
   if (crlfCount > 0) return "crlf";
   if (lfOnlyCount > 0) return "lf";
+  if (crOnlyCount > 0) return "cr";
   return "none";
 }
 
 function analyzeLineEnding(s: string): {
-  detected: "crlf" | "lf" | "mixed" | "none";
-  dominant: "crlf" | "lf";
+  detected: "crlf" | "lf" | "cr" | "mixed" | "none";
+  dominant: "crlf" | "lf" | "cr";
   crlfCount: number;
   lfOnlyCount: number;
 } {
   const text = String(s || "");
   const crlfCount = (text.match(/\r\n/g) || []).length;
   const lfOnlyCount = (text.match(/(?<!\r)\n/g) || []).length;
+  const crOnlyCount = (text.match(/\r(?!\n)/g) || []).length;
   const detected = detectLineEnding(text);
-  if (detected === "crlf") {
-    return { detected, dominant: "crlf", crlfCount, lfOnlyCount };
-  }
-  if (detected === "lf") {
-    return { detected, dominant: "lf", crlfCount, lfOnlyCount };
-  }
-  if (detected === "mixed") {
-    return {
-      detected,
-      dominant: crlfCount >= lfOnlyCount ? "crlf" : "lf",
-      crlfCount,
-      lfOnlyCount,
-    };
-  }
-  return { detected, dominant: "lf", crlfCount, lfOnlyCount };
+  const maxCount = Math.max(crlfCount, lfOnlyCount, crOnlyCount);
+  const dominant: "crlf" | "lf" | "cr" =
+    maxCount === 0
+      ? "lf"
+      : crlfCount === maxCount
+        ? "crlf"
+        : lfOnlyCount === maxCount
+          ? "lf"
+          : "cr";
+  return { detected, dominant, crlfCount, lfOnlyCount };
 }
 
 function countOccurrences(haystack: string, needle: string): number {
@@ -407,7 +406,7 @@ function visibleEolPreview(s: string, maxChars = 200): string {
 }
 
 function hasTrailingNewline(s: string): boolean {
-  return /\r?\n$/.test(String(s || ""));
+  return /[\r\n]$/.test(String(s || ""));
 }
 
 export function resolveRunCommandCwd(
@@ -2032,7 +2031,7 @@ export async function executeTool(
         prefixStrippedBlocks: normParityPrefixStrippedBlocks,
       }));
 
-      let currentNormalized = originalWithoutBom.replace(/\r\n/g, "\n");
+      let currentNormalized = originalWithoutBom.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 
       // ─── Step 3.5: Scope resolution (only when scope is present) ────────────
       interface ScopeArg {
@@ -2430,14 +2429,16 @@ export async function executeTool(
       let outputContent =
         reEncodedTo === "crlf"
           ? currentNormalized.replace(/\n/g, "\r\n")
-          : currentNormalized;
+          : reEncodedTo === "cr"
+            ? currentNormalized.replace(/\n/g, "\r")
+            : currentNormalized;
 
       if (fileEndedWithNewline) {
         if (!hasTrailingNewline(outputContent)) {
-          outputContent += reEncodedTo === "crlf" ? "\r\n" : "\n";
+          outputContent += reEncodedTo === "crlf" ? "\r\n" : reEncodedTo === "cr" ? "\r" : "\n";
         }
       } else {
-        outputContent = outputContent.replace(/(?:\r\n|\n)+$/, "");
+        outputContent = outputContent.replace(/(?:\r\n|\n|\r)+$/, "");
       }
 
       if (fileHadBOM) {
@@ -3345,7 +3346,7 @@ export async function executeTool(
         }
 
         const eolAnalysis = analyzeLineEnding(content);
-        const normalizedContent = content.replace(/\r\n/g, "\n");
+        const normalizedContent = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 
         const matches = normalizedContent.match(pattern);
         const count = matches ? matches.length : 0;
@@ -3354,6 +3355,8 @@ export async function executeTool(
           let newContent = normalizedContent.replace(pattern, normalizedReplace);
           if (eolAnalysis.dominant === "crlf") {
             newContent = newContent.replace(/\n/g, "\r\n");
+          } else if (eolAnalysis.dominant === "cr") {
+            newContent = newContent.replace(/\n/g, "\r");
           }
           const wr = stagedWrite(input?.stagingFiles, abs, newContent, repoPath);
           if (wr === "escape") {
