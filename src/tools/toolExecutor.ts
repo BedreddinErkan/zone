@@ -2031,7 +2031,7 @@ export async function executeTool(
         prefixStrippedBlocks: normParityPrefixStrippedBlocks,
       }));
 
-      let currentNormalized = originalWithoutBom.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+      let currentNormalized = normalizeEol(originalWithoutBom).text;
 
       // ─── Step 3.5: Scope resolution (only when scope is present) ────────────
       interface ScopeArg {
@@ -2809,7 +2809,7 @@ export async function executeTool(
         if (eolAnalysis.dominant === "crlf") {
           contentToWrite = content.replace(/\r\n/g, "\n").replace(/\n/g, "\r\n");
         } else if (eolAnalysis.dominant === "cr") {
-          contentToWrite = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\n/g, "\r");
+          contentToWrite = normalizeEol(content).text.replace(/\n/g, "\r");
         }
       }
 
@@ -3318,8 +3318,8 @@ export async function executeTool(
 
       // Normalize find/replace to LF so multi-line patterns match CRLF files.
       // Each file's original EOL is detected and restored on write.
-      const normalizedFind    = find.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-      const normalizedReplace = replace.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+      const normalizedFind    = normalizeEol(find).text;
+      const normalizedReplace = normalizeEol(replace).text;
 
       const escaped = escapeRegex(normalizedFind);
       const pattern = new RegExp(wholeWord ? `\\b${escaped}\\b` : escaped, "g");
@@ -3348,7 +3348,7 @@ export async function executeTool(
         }
 
         const eolAnalysis = analyzeLineEnding(content);
-        const normalizedContent = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+        const normalizedContent = normalizeEol(content).text;
 
         const matches = normalizedContent.match(pattern);
         const count = matches ? matches.length : 0;
