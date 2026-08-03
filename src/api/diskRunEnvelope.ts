@@ -233,12 +233,29 @@ export async function saveRunEnvelope(
   try { await fs.chmod(p, 0o600); } catch { /* best effort */ }
 }
 
+/**
+ * A version bump would otherwise make every one of these four checks silently
+ * drop existing envelopes — this makes that discard loud before it ever needs
+ * to happen, not after.
+ */
+function isSupportedEnvelopeVersion(version: number, site: string, identifier: string): boolean {
+  if (version === 1) return true;
+  log("[zone-envelope-version-mismatch]", JSON.stringify({
+    event: "envelope_version_mismatch",
+    site,
+    actualVersion: version,
+    expectedVersion: 1,
+    identifier,
+  }));
+  return false;
+}
+
 /** @param key an envelope key — a runId, or a sessionId for a pre-cutover file. */
 export async function loadRunEnvelope(key: string): Promise<RunEnvelope | null> {
   try {
     const raw = await fs.readFile(envelopeFilePath(key), "utf-8");
     const parsed = JSON.parse(raw) as RunEnvelope;
-    if (parsed.version !== 1) return null;
+    if (!isSupportedEnvelopeVersion(parsed.version, "loadRunEnvelope", key)) return null;
     return parsed;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
@@ -284,7 +301,7 @@ export async function listResumableEnvelopes(repoPath?: string): Promise<Resumab
     try {
       const raw = await fs.readFile(join(dir, file), "utf-8");
       const env = JSON.parse(raw) as RunEnvelope;
-      if (env.version !== 1) continue;
+      if (!isSupportedEnvelopeVersion(env.version, "listResumableEnvelopes", file)) continue;
       if (repoPath !== undefined && env.repoPath !== repoPath) continue;
       if (!isResumable(env)) continue;
       results.push({ ...env, key: file.slice(0, -ENVELOPE_SUFFIX.length) });
@@ -357,7 +374,7 @@ export async function pruneOldEnvelopes(
     try {
       const raw = await fs.readFile(join(dir, file), "utf-8");
       const env = JSON.parse(raw) as RunEnvelope;
-      if (env.version !== 1) continue;
+      if (!isSupportedEnvelopeVersion(env.version, "pruneOldEnvelopes", file)) continue;
       // Safety guard: a live "running" envelope with an alive pid is never pruned.
       const isLiveRun = env.status === "running" && isPidAlive(env.pid);
       candidates.push({ file, updatedAt: env.updatedAt, keep: isLiveRun });
@@ -469,7 +486,7 @@ export async function resolveEnvelopeId(idOrPrefix: string): Promise<string | nu
   for (const file of envelopeFiles) {
     try {
       const env = JSON.parse(await fs.readFile(join(dir, file), "utf-8")) as RunEnvelope;
-      if (env.version !== 1) continue;
+      if (!isSupportedEnvelopeVersion(env.version, "resolveEnvelopeId", file)) continue;
       if (typeof env.sessionId === "string" && env.sessionId.startsWith(idOrPrefix)) {
         return file.slice(0, -ENVELOPE_SUFFIX.length);
       }

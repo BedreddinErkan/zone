@@ -102,6 +102,48 @@ describe("saveRunEnvelope / loadRunEnvelope", () => {
     expect(await loadRunEnvelope(env.sessionId)).toBeNull();
   });
 
+  it("emits [zone-envelope-version-mismatch] on version mismatch", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const env = makeEnvelope();
+      await saveRunEnvelope(env);
+      const p = join(envDir, `${env.sessionId}.envelope.json`);
+      const raw = JSON.parse(await readFile(p, "utf-8"));
+      raw.version = 99;
+      await writeFile(p, JSON.stringify(raw));
+
+      await loadRunEnvelope(env.sessionId);
+
+      const hits = logSpy.mock.calls.filter(c => c[0] === "[zone-envelope-version-mismatch]");
+      expect(hits).toHaveLength(1);
+      const payload = JSON.parse(String(hits[0]![1])) as {
+        event: string; site: string; actualVersion: number; expectedVersion: number; identifier: string;
+      };
+      expect(payload.event).toBe("envelope_version_mismatch");
+      expect(payload.site).toBe("loadRunEnvelope");
+      expect(payload.actualVersion).toBe(99);
+      expect(payload.expectedVersion).toBe(1);
+      expect(payload.identifier).toBe(env.sessionId);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("emits nothing for a valid envelope", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const env = makeEnvelope();
+      await saveRunEnvelope(env);
+
+      await loadRunEnvelope(env.sessionId);
+
+      const hits = logSpy.mock.calls.filter(c => c[0] === "[zone-envelope-version-mismatch]");
+      expect(hits).toHaveLength(0);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
   it("atomic write leaves no .tmp file", async () => {
     await saveRunEnvelope(makeEnvelope());
     const files = await readdir(envDir);
@@ -213,6 +255,34 @@ describe("pruneOldEnvelopes / maybeCleanupOldEnvelopes", () => {
     expect(list.some(e => (e as unknown as { file?: string }).file === ".envelope-last-cleanup")).toBe(false);
     expect(await resolveEnvelopeId(".envelope-last-cleanup")).toBeNull();
   });
+
+  it("emits [zone-envelope-version-mismatch] on version mismatch, and leaves the file untouched", async () => {
+    const { pruneOldEnvelopes } = await import("./diskRunEnvelope.js");
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const env = makeEnvelope({ sessionId: "sess-mismatch-prune" });
+      await saveRunEnvelope(env);
+      const p = join(envDir, `${env.sessionId}.envelope.json`);
+      const raw = JSON.parse(await readFile(p, "utf-8"));
+      raw.version = 99;
+      raw.updatedAt = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString();
+      await writeFile(p, JSON.stringify(raw));
+
+      const result = await pruneOldEnvelopes({ maxAgeDays: 0, maxCount: 0 });
+
+      const hits = logSpy.mock.calls.filter(c => c[0] === "[zone-envelope-version-mismatch]");
+      expect(hits).toHaveLength(1);
+      const payload = JSON.parse(String(hits[0]![1])) as { site: string; actualVersion: number; identifier: string };
+      expect(payload.site).toBe("pruneOldEnvelopes");
+      expect(payload.actualVersion).toBe(99);
+      expect(payload.identifier).toBe(`${env.sessionId}.envelope.json`);
+      expect(result.removed).toBe(0);
+      const filesAfter = await readdir(envDir);
+      expect(filesAfter).toContain(`${env.sessionId}.envelope.json`);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
 });
 
 // ---- Stamp ------------------------------------------------------------------
@@ -289,6 +359,30 @@ describe("listResumableEnvelopes — PID liveness", () => {
     const list = await listResumableEnvelopes();
     expect(list.map(e => e.sessionId)).toContain(good.sessionId);
   });
+
+  it("emits [zone-envelope-version-mismatch] on version mismatch", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const env = makeEnvelope({ sessionId: "sess-mismatch-list" });
+      await saveRunEnvelope(env);
+      const p = join(envDir, `${env.sessionId}.envelope.json`);
+      const raw = JSON.parse(await readFile(p, "utf-8"));
+      raw.version = 99;
+      await writeFile(p, JSON.stringify(raw));
+
+      const result = await listResumableEnvelopes("/repo");
+
+      const hits = logSpy.mock.calls.filter(c => c[0] === "[zone-envelope-version-mismatch]");
+      expect(hits).toHaveLength(1);
+      const payload = JSON.parse(String(hits[0]![1])) as { site: string; actualVersion: number; identifier: string };
+      expect(payload.site).toBe("listResumableEnvelopes");
+      expect(payload.actualVersion).toBe(99);
+      expect(payload.identifier).toBe(`${env.sessionId}.envelope.json`);
+      expect(result).toEqual([]);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
 });
 
 // ---- latestResumableEnvelope ------------------------------------------------
@@ -329,6 +423,33 @@ describe("resolveEnvelopeId", () => {
   it("returns null if directory does not exist", async () => {
     _setEnvelopeDirForTest(join(tmp, "nonexistent"));
     expect(await resolveEnvelopeId("anything")).toBeNull();
+  });
+
+  it("emits [zone-envelope-version-mismatch] on version mismatch, reached via the fallback content-scan", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      // Distinct runId vs. sessionId: the file is keyed by runId, so querying by sessionId
+      // skips both filename-only match attempts and forces the fallback content-scan (the
+      // only place the version check runs).
+      const env = makeEnvelope({ sessionId: "sess-mismatch-resolve", runId: "run-mismatch-resolve" });
+      await saveRunEnvelope(env);
+      const p = join(envDir, `${env.runId}.envelope.json`);
+      const raw = JSON.parse(await readFile(p, "utf-8"));
+      raw.version = 99;
+      await writeFile(p, JSON.stringify(raw));
+
+      const result = await resolveEnvelopeId(env.sessionId);
+
+      const hits = logSpy.mock.calls.filter(c => c[0] === "[zone-envelope-version-mismatch]");
+      expect(hits).toHaveLength(1);
+      const payload = JSON.parse(String(hits[0]![1])) as { site: string; actualVersion: number; identifier: string };
+      expect(payload.site).toBe("resolveEnvelopeId");
+      expect(payload.actualVersion).toBe(99);
+      expect(payload.identifier).toBe(`${env.runId}.envelope.json`);
+      expect(result).toBeNull();
+    } finally {
+      logSpy.mockRestore();
+    }
   });
 });
 
