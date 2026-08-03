@@ -235,6 +235,12 @@ describe("handleToolResult", () => {
     // Item 14: Step 9 reads result.filesStaged uniformly for every write tool now —
     // it no longer adds a write attempt's filePath unconditionally. write_file/apply_patch
     // must carry filesStaged themselves, same as multi_edit already does.
+    //
+    // parity.test.ts's "write_file path" and "apply_patch success path" describes lock in
+    // the same two success-path scenarios as the first two tests below — near-duplicates,
+    // not a different angle. multi_edit, the two negative cases (filesStaged absent;
+    // success:false but filesStaged present), and the toolCallLog-threading case are
+    // covered only here.
     it("adds filePath to filesModified for write_file success (via filesStaged)", async () => {
       const ctx = makeCtx();
       const deps = makeDeps();

@@ -275,6 +275,10 @@ describe("handleToolResult parity — read_file success path", () => {
   });
 });
 
+// Step 9 (handleToolResult.ts): these two describes lock in the same write_file/apply_patch
+// success-path scenarios handleToolResult.test.ts's own describe("filesModified", ...) covers.
+// multi_edit, the filesStaged-absent and success:false negative cases, and the
+// toolCallLog-threading case are covered only in that file, not duplicated here.
 describe("handleToolResult parity — write_file path", () => {
   it("filesModified populated for write_file success (via filesStaged)", async () => {
     const ctx = makeCtx();

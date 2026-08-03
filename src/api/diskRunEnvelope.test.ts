@@ -452,9 +452,6 @@ describe("reconcileEnvelopeStaging", () => {
   it("suppresses drop-note for flushedPaths (R2)", () => {
     const absPath = join(repoRoot, "flushed.ts");
     const entry = makeEntry("flushed.ts", "original", "staged");
-    // makeEntry writes baseContent ("original") to absPath internally, so a write BEFORE
-    // calling it is silently clobbered — the divergent write simulating the post-interrupt
-    // flush must happen AFTER, exactly as the repo-relative version of this test (below) does.
     writeFileSync(absPath, "was flushed to disk by persistStagingOnError", "utf-8");
     // Hash mismatch — but path is in flushedPaths
     const env = makeEnvelope({ staging: [entry], flushedPaths: [absPath] });
@@ -465,14 +462,6 @@ describe("reconcileEnvelopeStaging", () => {
 
   it("suppresses drop-note for a repo-relative flushedPaths entry — the format production actually emits", () => {
     const entry = makeEntry("flushed2.ts", "original", "staged");
-    // makeEntry writes baseContent to absPath internally — a write BEFORE calling it
-    // (as R2, above, does) is silently clobbered by that internal write, so disk ends
-    // up matching baseHash and reconcileEnvelopeStaging never reaches the flushedSet
-    // check at all (found via mutation 1 passing when it shouldn't have — traced and
-    // confirmed empirically, not assumed; R2 itself has the same latent issue,
-    // recorded for the ledger, not fixed here). The write simulating a post-stage
-    // flush must happen AFTER makeEntry, so it's what's actually on disk when
-    // reconcileEnvelopeStaging reads it.
     writeFileSync(entry.absPath, "staged", "utf-8");
     // Hash mismatch — but the relative path is in flushedPaths, the format item 14's
     // filesStaged actually produces. repoPath must be the real tmpdir root, not
