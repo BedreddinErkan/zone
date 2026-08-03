@@ -823,52 +823,42 @@ often the sink actually trims.
 in `apply_patch`'s handler, `toolExecutor.ts`. The test pinning the reduced payload's exact field
 set is `toolExecutor.eolMatchOutcomeTelemetry.test.ts`.
 
-## 22. `multi_edit` carries a fourth, independent copy of the EOL-normalization transformation — recount: six, not four
+## 22. Closed — `multi_edit` carries a fourth, independent copy of the EOL-normalization transformation — recount: six, not four
 
-**What it is:** the same `.replace(/\r\n/g,"\n").replace(/\r/g,"\n")` two-step transformation
-exists as six independent, character-identical inline copies: `apply_patch`'s search-target
-normalization, `multi_edit`'s find normalization, `multi_edit`'s replace normalization,
-`multi_edit`'s content normalization, `write_file`'s `"cr"` re-encode arm (the same two steps as
-a prefix before a third), and `patchCorrectnessValidator.ts`'s own defensive normalization —
-alongside `normalizeEol` (`toolExecutor.ts`), the one canonical implementation.
+**What it was:** six character-identical inline copies of the same two-step EOL-normalization
+transformation, five of them in `toolExecutor.ts` alongside the one canonical `normalizeEol`
+implementation they never called.
 
-**The count was wrong in both directions, established by checking the commit that introduced this
-entry directly (`53c87064`), not by re-deriving from memory.** At that commit, the literal text
-existed in exactly three places — `normalizeEol`, and `multi_edit`'s own find and replace
-normalizations. `apply_patch`'s search target was one step (CRLF only) at that point, not yet a
-copy of the full pattern; "a fourth" never cleanly counted. `da3db4be` (fixing items 41/42) added
-the missing second step to both `apply_patch`'s search target and `multi_edit`'s content
-normalization, and `7665ee95` added `write_file`'s arm afterward — bringing the total to six,
-plus the pre-existing, previously-unnoticed copy in `patchCorrectnessValidator.ts` that no prior
-pass in this document had ever found.
+**What landed (`4df53b05`):** the five in-file copies — `apply_patch`'s search target,
+`multi_edit`'s find/replace/content, `write_file`'s `"cr"` re-encode prefix — now call
+`normalizeEol` directly. Zero behavior change, proven two ways: the full suite moved by zero
+tests, and the thirteen bare-CR tests `da3db4be`/`7665ee95` added at exactly these sites stayed
+green by name.
 
-**They all still agree, character for character — measured, not assumed absent an alarm.** Every
-one of the six performs the identical two substitutions in the identical order: `/\r\n/g → "\n"`,
-then `/\r/g → "\n"`. The drift item 18 describes — one copy gaining a step a sibling never got —
-has not recurred here. That is this entry's good news, and it is worth stating outright rather
-than leaving a reader to infer it from the absence of a "these disagree" sentence.
+**The proof is the mutation, not the green suite.** Breaking `normalizeEol`'s own bare-CR step
+produced a *different* single failing test before the substitution than after — same count,
+different member, which is stronger evidence than a plain size increase would have been. Before:
+only `apply_patch`'s FIND/REPLACE routed through the helper, so the still-inline search target
+stayed correctly normalized and disagreed with the now-broken FIND — one test failed on that
+mismatch. After: the search target shares the same broken helper as FIND now, so the two coincide
+again and that failure clears — but the target's own stray-CR-flattening, now also routed through
+the broken helper, fails for the first time instead.
 
-**Five of the six could point at `normalizeEol` cleanly; the sixth cannot, for a structural
-reason, not a semantic one.** `apply_patch`'s search target, `multi_edit`'s find/replace/content,
-and `write_file`'s arm are all in `toolExecutor.ts`, the same file `normalizeEol` is
-module-private to — substituting any of them for `normalizeEol(x).text` changes nothing about
-what gets transformed, and discarding the unused `.changed` field is not awkward: it is already
-the established idiom at `apply_patch`'s own FIND normalization
-(`stripReadFilePrefix(normalizeEol(block.find).text)`). `patchCorrectnessValidator.ts` cannot do
-the same today — it lives in `src/engine/`, a different module, and `normalizeEol` is not
-exported. Unifying that sixth copy needs exporting the helper first, a separate decision from
-substituting the other five.
+**A single-site revert confirmed both directions independently.** Reverting only the search-target
+substitution (keeping the other four and the helper mutation in place) cleared the stray-CR
+failure — proving that substitution load-bearing on its own — and simultaneously reintroduced the
+original FIND/REPLACE failure, proving the find/replace substitutions are independently
+load-bearing too, not just riding along.
 
-**What would close it:** point the five in-file copies at `normalizeEol` directly — a mechanical
-substitution, zero behavior change, verified above rather than assumed. Separately, decide
-whether `normalizeEol` should be exported so `patchCorrectnessValidator.ts` can share it too, or
-whether that copy's different purpose (defensive heuristic normalization, not match-or-write
-correctness) is reason enough to leave it independent.
+**The sixth copy stays out, spun off rather than left as unfinished work on this item — see item
+46.** `patchCorrectnessValidator.ts`'s own copy needs `normalizeEol` exported before it could
+share it, a real module-boundary decision distinct from the drift risk this item was actually
+about; all six copies still agree character for character regardless of whether that decision is
+ever made.
 
-**Where the code lives:** `normalizeEol` and the five in-file copies are all in `toolExecutor.ts`
-— `apply_patch`'s search target, `multi_edit`'s find/replace/content, and `write_file`'s
-re-encode arm, each in its own tool's handler. The sixth is in
-`src/engine/patchCorrectnessValidator.ts`.
+**Where the code lives:** `normalizeEol` and the five substituted call sites are all in
+`toolExecutor.ts`. The bare-CR tests pinning this are `toolExecutor.bareCrMatch.test.ts`,
+`toolExecutor.multiEdit.bareCr.test.ts`, and `toolExecutor.writeFile.bareCr.test.ts`.
 
 ## 23. `resolveEnvelopeId`'s prefix match is silent-arbitrary, and it runs before the session lookup this pass makes deterministic
 
@@ -1482,26 +1472,51 @@ it may be correct as written.
 **Where the code lives:** inside `layer1LexicalIntegrity`'s `localizedValidationMode` branch, in
 `patchCorrectnessValidator.ts`, `src/engine/`.
 
+## 46. Whether to export `normalizeEol` for `patchCorrectnessValidator.ts`'s sixth copy is undecided
+
+**What it is:** spun off from item 22's closure. Five of the six EOL-normalization copies now
+point at `normalizeEol` directly (`4df53b05`); the sixth, in `patchCorrectnessValidator.ts`
+(`src/engine/`, a different module), still can't — `normalizeEol` is module-private to
+`toolExecutor.ts`. Unifying it needs exporting the helper first.
+
+**Why this is a separate decision, not unfinished work on item 22 itself:** item 22's own risk —
+copies drifting apart from each other, the way item 18's smart-quote normalization did — is
+closed for all six; they still agree character for character, confirmed before the five
+substitutions landed. The sixth copy's own purpose differs from the other five's (defensive
+heuristic normalization on already-proposed content, not match-or-write correctness), which is
+itself a real argument for leaving it independent rather than forcing every EOL-shaped transform
+in the repo through one shared helper.
+
+**What would close it:** decide either way — export `normalizeEol` (a real, if small,
+module-boundary change: a public API surface where there was none) and point the sixth copy at
+it, or record explicitly that the two purposes are different enough to justify five copies
+sharing an implementation and a sixth standing alone.
+
+**Where the code lives:** `normalizeEol` is in `toolExecutor.ts`, not exported. The sixth copy is
+in `src/engine/patchCorrectnessValidator.ts`; see item 22 for the full establish behind this
+finding.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 45 to find out which ones still need something. No index of
+reader the trouble of reading all 46 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (17): 6, 8, 14, 20, 21, 24, 26, 29, 30, 31, 33, 34, 35, 40, 41, 42, 44
+**Closed** (18): 6, 8, 14, 20, 21, 22, 24, 26, 29, 30, 31, 33, 34, 35, 40, 41, 42, 44
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (17): 2 (after 16), 7, 10, 12, 13, 15 (after 2), 16, 17, 18, 22, 23, 25, 28, 32, 36, 37, 39
+first (16): 2 (after 16), 7, 10, 12, 13, 15 (after 2), 16, 17, 18, 23, 25, 28, 32, 36, 37, 39
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (2): 1, 4
 
-**Neither — a structural fact recorded, with no fix proposed** (9): 3, 5, 9, 11, 19, 27, 38, 43, 45
+**Neither — a structural fact recorded, with no fix proposed** (10): 3, 5, 9, 11, 19, 27, 38, 43,
+45, 46
 
-Items 1, 2, 12, 16, 18, and 22 are partially closed or corrected; the classification above covers
+Items 1, 2, 12, 16, and 18 are partially closed or corrected; the classification above covers
 only the portion still open, not the whole entry.
 
 ---
@@ -1755,6 +1770,21 @@ trusting a green result from it alone. A battery built with variety (here, tests
 answers span all three of `"crlf"`/`"lf"`/`"cr"`) still proves the mutation even when one specific
 test can't, but that has to be confirmed by running the whole battery, not assumed from which
 test the mutation was written to target.
+
+A related discovery, from a different pass (`4df53b05`, unifying ledger item 22's own inline EOL
+copies): the same coincidence-blindness applies to *comparing two mutation-testing runs*, not
+just to one test's own named target. The check used there — did the failure-set size grow after
+the substitution, proving the new code now routes through the shared helper — was itself a
+shortcut with the identical shape of blind spot. Breaking the shared helper before the
+substitution failed exactly one test; breaking it after failed exactly one test again — same
+count. The substitution was real anyway: the *member* changed, trading one failure for a
+mechanistically different one (the search target and the still-broken FIND coincided again,
+clearing one failure, while the target's own now-shared normalization broke for the first time).
+A set-size comparison could not see this; only reading which test failed, and why, could.
+
+**The sharpened rule:** compare failure-set *membership*, not cardinality. Two mutation-testing
+runs of equal size can differ completely in which tests they killed, and that difference — not
+the count — is where the real information about whether a change altered behavior actually lives.
 
 ## A ninth pattern, beside the seventh: a ledger entry that prescribes a check does not cause the check to happen
 
