@@ -1012,48 +1012,44 @@ tests assert the current fixed string, so the wording change doesn't silently br
 syntax/semantic-smell rollback block in `toolExecutor.ts`, the same block item 14's `filesStaged`
 detection now lives in.
 
-## 29. `diskRunEnvelope.test.ts`'s R2 test has never exercised `flushedSet` suppression
+## 29. Closed — R2 now reaches its claimed branch; `makeEntry` no longer writes
 
-**What it is:** found empirically, by tracing under a mutation during the `ab76002f` pass, not
-by reading. The test named "suppresses drop-note for flushedPaths (R2)" calls `writeFileSync` on
-its fixture file *before* calling `makeEntry(relPath, baseContent, stagedContent)` — and
-`makeEntry` itself unconditionally `writeFileSync`s `absPath` with `baseContent` as its own last
-step, silently clobbering the earlier write. Disk ends up holding `baseContent`, which matches
-`entry.baseHash` by construction, so `reconcileEnvelopeStaging` takes the hash-match "restore"
-branch and returns before the `flushedSet` check is ever reached. The test's assertion
-(`dropNotes` has length 0) passes — but for the "nothing changed" reason, not the "this file
-changed and `flushedSet` suppressed the note" reason its name and setup claim to exercise.
+**What it was:** R2 wrote its fixture content to disk *before* calling `makeEntry`, whose own
+internal write silently clobbered it — disk ended up matching `baseHash` by construction, so
+`reconcileEnvelopeStaging` took the hash-match restore branch and returned before the
+`flushedSet` guard was ever reached. The test passed for the "nothing changed" reason, not the
+"suppressed" reason its name and setup claimed.
 
-**Why this matters:** `ab76002f`'s fix does work correctly for both path formats — confirmed by
-the pass's new relative-format test, whose own mutation results are honest (it fails under
-exactly the mutations that should break relative-path suppression) — but that confirmation comes
-entirely from the new test. The establish pass that reused R2 as "the old-format lock, confirmed
-already passing, no changes needed" was right about the outcome — R2 does pass, unmodified, both
-before and after `ab76002f` — and wrong about the mechanism it credited that outcome to. A green,
-unmodified R2 was read as proof the absolute-path format still works; it never tested that, in
-this respect not by drift but from the moment it was written.
+**What the audit established, measured not assumed (`855bdbca`):** every one of the block's 8
+tests was mutation-audited — 8 mutations, one per branch/guard of `reconcileEnvelopeStaging` —
+with predictions for which tests would fail written down before anything ran. They matched
+exactly. **Only R2 failed to reach its claimed branch; the other seven genuinely exercise what
+they name.**
 
-**A distinct variant, not a repeat, of two existing patterns:** the second closing-section
-pattern ("self-reference defeats a mutation test") is a test whose expected value derives from
-the same thing it tests — this test's expected value is an ordinary literal, correct in
-isolation; the defect is fixture write ordering, not what the assertion compares against. The
-fifth pattern ("tracing is not running") is a change's blast radius reaching mock sites nobody
-had reason to read — this is not a missed consumer, it is the one test already in scope, found
-only by mutating the code it claims to guard. Worth naming beside both, not folded into either:
-a test can fail to test its own claim for a reason neither a self-reference check nor a
-full-suite run would catch, because the test itself is the only place the defect lives — the
-test encodes nothing, and green is indistinguishable from covered.
+**The proof is `G2O`**, not R2 turning green — R2 was already green before this pass; that was
+the problem. `G2O` forces the second `flushedSet` guard site open. Pre-fix it killed only the
+repo-relative sibling test; R2 survived it, because R2's real execution never reaches that guard
+at all. Post-fix, `G2O` kills both — that single new kill is the evidence the reorder worked, not
+R2's own passing status, which never changed.
 
-**What would close it:** reorder R2 the same way the new relative-format test was fixed during
-the same pass — call `makeEntry` first, establishing `baseHash` from `baseContent`, then
-`writeFileSync` the divergent "was flushed to disk" content second, so disk genuinely mismatches
-`baseHash` when `reconcileEnvelopeStaging` reads it and execution actually reaches the
-`flushedSet` check. A one-line reorder, deliberately not folded into `ab76002f`: that commit's
-scope was the production fix, and editing R2 was explicitly out of scope for it.
+**What landed:** two changes, not one. R2's divergent write moved after `makeEntry`, matching
+the sibling test's already-correct pattern. Separately, `makeEntry` was stripped of its own
+internal write entirely — the write moved to callers. This went beyond what this entry originally
+proposed (a one-line reorder); tracing all 5 call sites showed only one (the base-hash-match
+test) needed a new explicit write to keep working, since the other four already wrote their own
+real state after calling the helper or never called it at all.
 
-**Where the code lives:** the R2 test and the `makeEntry` helper it (and every other test in the
-same block) calls are both in `diskRunEnvelope.test.ts`, inside the
-`describe("reconcileEnvelopeStaging", ...)` block.
+**Why the helper change mattered more than the reorder alone:** under the old design, a caller
+that got the write order wrong (as R2 did) failed *silently* — the test still passed, for the
+wrong reason, and nothing distinguished that from correctness short of mutating the exact guard
+it claimed to test. Under the new design, a caller that forgets to write at all fails *loudly*:
+`baseExisted` is set from the parameter, independent of any write, so a missing write immediately
+produces a mismatch against `existsNow` and an assertion failure — not a silent pass. The reorder
+alone would have fixed R2; it would not have stopped the same trap from recurring in whatever
+test eventually closes item 33, below.
+
+**Where the code lives:** the fixed test and the no-longer-writing `makeEntry` helper are both in
+`diskRunEnvelope.test.ts`, inside `describe("reconcileEnvelopeStaging", ...)`.
 
 ## 30. `flushedPaths`'s doc names one source; the stamped value is broader
 
@@ -1133,6 +1129,28 @@ visible migration decision instead of a silent discard.
 **Where the code lives:** the four checks are in `loadRunEnvelope`, `listResumableEnvelopes`,
 `pruneOldEnvelopes`, and `resolveEnvelopeId`, all in `diskRunEnvelope.ts`; the `version: 1`
 literal type is on `RunEnvelope` itself, same file.
+
+## 33. Two branches of `reconcileEnvelopeStaging` have zero test coverage in this block
+
+**What it is:** two of the function's branches have no test exercising them at all —
+existence-changed-and-suppressed (a path whose existence flipped since staging, but which is
+also in `flushedSet`), and the read-failure catch (`existsSync` reports a path present but
+`readFileSync` throws on it).
+
+**Why this is empirical, not inferred:** the write-ordering audit (item 29) ran one mutation per
+branch across all 8 tests in the block. Two of the eight — forcing the existence-changed guard's
+suppression off, and gutting the read-failure catch's message — killed nothing, before the fix
+and after it. A mutation aimed at a branch that kills zero tests is the direct signature of a gap
+in coverage, not a conclusion drawn from reading the tests' names or intent.
+
+**What would close it:** one test each. The existence-changed-and-suppressed case needs an entry
+whose existence flipped and whose path is also in `flushedSet`, asserting no drop-note. The
+read-failure case needs a path `existsSync` reports present but `readFileSync` throws on — a
+directory created at the entry's absolute path is the obvious shape (`EISDIR`), asserting the
+`"could not read current file"` note.
+
+**Where the code lives:** both guards are in `reconcileEnvelopeStaging`, `diskRunEnvelope.ts`; the
+new tests would belong in `describe("reconcileEnvelopeStaging", ...)`, `diskRunEnvelope.test.ts`.
 
 ---
 
@@ -1267,3 +1285,34 @@ not a formality to run once local tests pass — it is the step that catches exa
 miss. A change that looks locally scoped, fully traced, and mutation-tested against every named
 consumer can still break code nobody read, because nobody had a reason to. Treat "full suite green"
 as load-bearing evidence, not confirmation of what tracing already established.
+
+## A sixth pattern, following the fifth: a mutation that reroutes cannot prove suppression
+
+A guard's whole effect is suppressing an otherwise-observable signal — so a passing test that
+depends on that guard and a passing test that never reached it can look identical from the
+outside: both produce the same empty output. A mutation that only changes *which branch
+executes* — flipping a comparison, forcing a conditional's other arm — without touching the
+guard's own condition is blind to any input that already satisfies the guard: the correct
+behavior and the mutated behavior both suppress, coincidentally, for different reasons, and the
+test meant to catch the mutation can't tell them apart.
+
+The write-ordering audit (item 29) found this directly, on two separate mutations. Flipping
+`reconcileEnvelopeStaging`'s hash comparison, and forcing its existence-changed check
+unconditionally, both left the block's two `flushedSet`-suppression tests passing — not because
+either mutation failed to change behavior, but because both tests' fixtures happen to hold a path
+that the (unmutated) `flushedSet` guard would suppress regardless of which branch routed them
+there. Only a mutation to the guard condition itself discriminated: forcing
+`!flushedSet.has(entry.absPath)` open killed exactly the tests whose passing genuinely depends on
+the guard running, and left every other test untouched.
+
+**The consequence for those two tests specifically, left as-is:** neither asserts on `restored`,
+only on `dropNotes` — so neither can distinguish "suppressed by the guard" from "restored by
+accident, which also happens to leave `dropNotes` empty." This gap is pre-existing and shared by
+both, not introduced by `855bdbca`'s fix to the first of the two; closing it means asserting
+`restored.has(...)` is false alongside the `dropNotes` check in both.
+
+**The rule:** proving a test reaches a suppression guard requires mutating the guard's own
+condition, not the branch that leads to it. Any mutation that only changes routing is confounded
+by every input that would satisfy the guard by coincidence — which is exactly the set of inputs
+a suppression test is built around, making this exactly the case a routing-only mutation is
+least equipped to check.
