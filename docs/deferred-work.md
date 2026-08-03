@@ -1207,6 +1207,29 @@ stale when the code it describes changes underneath it; this one was never right
 **Where the code lives:** `makeEntry`'s doc comment, `diskRunEnvelope.test.ts`, immediately above
 the helper's declaration inside `describe("reconcileEnvelopeStaging", ...)`.
 
+## Status snapshot — a partition, not a priority ordering
+
+A snapshot, current as of this commit — it goes stale the moment any item closes or is
+reclassified; the numbered entries above are the source of truth, and this section only saves a
+reader the trouble of reading all 35 to find out which ones still need something. No index of
+this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
+priority ordering" cautions against ranking by importance, which this section doesn't do: it
+groups by mechanical status only, items listed by number within each group, not by what to do
+first.
+
+**Closed** (8): 6, 8, 14, 24, 26, 29, 33, 34
+
+**Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
+first (19): 2 (after 16), 7, 10, 12, 13, 15 (after 2), 16, 17, 18, 20, 21, 22, 23, 25, 28, 30,
+31, 32, 35
+
+**Blocked on data** — closing requires an observation that doesn't exist yet (2): 1, 4
+
+**Neither — a structural fact recorded, with no fix proposed** (6): 3, 5, 9, 11, 19, 27
+
+Items 1, 2, 12, 16, and 18 are partially closed or corrected; the classification above covers
+only the portion still open, not the whole entry.
+
 ---
 
 ## A pattern this document is built to avoid
