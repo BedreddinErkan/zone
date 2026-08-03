@@ -342,13 +342,14 @@ describe("reconcileEnvelopeStaging", () => {
     mkdirSync(repoRoot, { recursive: true });
   });
 
+  // Deliberately does not write to disk itself — a helper that writes as a side effect
+  // is a trap (see the R2 fix above): a caller who writes BEFORE calling this gets
+  // silently clobbered. Every caller that needs real disk content writes it explicitly,
+  // in the order it controls.
   function makeEntry(relPath: string, baseContent: string | null, stagedContent: string) {
     const absPath = join(repoRoot, relPath);
     const { createHash } = require("node:crypto") as typeof import("node:crypto");
     const baseHash = baseContent !== null ? createHash("sha256").update(baseContent).digest("hex") : "";
-    if (baseContent !== null) {
-      writeFileSync(absPath, baseContent, "utf-8");
-    }
     return {
       path: relPath,
       absPath,
@@ -360,6 +361,7 @@ describe("reconcileEnvelopeStaging", () => {
 
   it("restores when base-hash matches (file unchanged)", () => {
     const entry = makeEntry("foo.ts", "original content", "staged content");
+    writeFileSync(entry.absPath, "original content", "utf-8");
     const env = makeEnvelope({ staging: [entry] });
     const { restored, dropNotes } = reconcileEnvelopeStaging(env);
     expect(restored.get(entry.absPath)).toBe("staged content");
@@ -416,8 +418,11 @@ describe("reconcileEnvelopeStaging", () => {
 
   it("suppresses drop-note for flushedPaths (R2)", () => {
     const absPath = join(repoRoot, "flushed.ts");
-    writeFileSync(absPath, "was flushed to disk by persistStagingOnError", "utf-8");
     const entry = makeEntry("flushed.ts", "original", "staged");
+    // makeEntry writes baseContent ("original") to absPath internally, so a write BEFORE
+    // calling it is silently clobbered — the divergent write simulating the post-interrupt
+    // flush must happen AFTER, exactly as the repo-relative version of this test (below) does.
+    writeFileSync(absPath, "was flushed to disk by persistStagingOnError", "utf-8");
     // Hash mismatch — but path is in flushedPaths
     const env = makeEnvelope({ staging: [entry], flushedPaths: [absPath] });
     const { dropNotes } = reconcileEnvelopeStaging(env);
