@@ -1301,80 +1301,157 @@ resolve cleanly through the same `file:` symlink (`node_modules/zone -> ../../zo
 **Where the code lives:** `zone-vsextension`'s imports are in its own `src/extension.ts`; the
 repointed fields are in this repo's `package.json` `exports` map.
 
-## 41. `apply_patch` cannot match anything in a bare-CR-only file
+## 41. Closed — apply_patch matches bare-CR content now; the reachability estimate undersold it
 
-**What it is:** `apply_patch`'s search target and its FIND text are normalized for line endings
-by two different lines, and they disagree. The search target normalizes CRLF only — a bare `\r`
-survives into it unchanged. The FIND text's own normalization converts both CRLF and bare CR. On
-a classic-Mac-encoded file, the FIND is normalized past what it is being searched against: a `\r`
-in the file's own content stays `\r` in the search target, but the same `\r` in the FIND (copied
-verbatim from a `read_file` of that same file) becomes `\n`. The match is guaranteed to fail — the
-model is told "FIND content not found" for text it copied directly out of the file it is trying
-to patch.
+**What it was:** `apply_patch`'s search target normalized CRLF only while the FIND normalized
+both CRLF and bare CR, so a bare-CR file's FIND was always normalized past what it was being
+searched against — the match was guaranteed to fail on text copied verbatim out of the file.
 
-**Established by transcribing both normalization lines and evaluating them directly, not by a
-live probe of the compiled handler — labelled as such deliberately, the way this document labels
-other unverified-mechanism findings (see item 15).** Both expressions were copied verbatim into a
-standalone script and run against synthetic bare-CR content: the search target retained a bare
-`\r`, the normalized FIND did not, and a direct occurrence count between them returned zero. This
-confirms the mechanism, not a real `apply_patch` call against the compiled tool.
+**The recommended fix reversed direction mid-investigation, and the reversal came from measuring
+a precedent, not from reconsidering.** The first establish pass recommended FIND-only
+normalization — stop normalizing bare CR out of the FIND, leave the search target and the
+eventual write untouched — specifically to avoid changing what gets written to disk. A follow-up
+establish measured what the *existing, working* CRLF path already does: a model-authored, pure-LF
+REPLACE spliced into a CRLF file comes out fully re-encoded to CRLF on write, model content
+included. There is no precedent for leaving anything mixed. Once that was measured rather than
+assumed, both FIND-only variants (leave REPLACE's own normalization as-is, or make it CRLF-only
+to "match") were probed and found to produce **byte-identical mixed output** regardless —
+changing what gets written wasn't a risk to avoid, it was the same thing the architecture was
+already doing for CRLF, extended to a third ending.
 
-**Reachability is low, and that is the reason this has never surfaced — not a reason to discount
-it.** Classic-Mac-only line endings (bare `\r`, no `\n` anywhere) are effectively extinct in real
-source files. The defect is real regardless of how rarely its precondition occurs.
+**The reachability estimate this item opened with was too narrow, corrected by probing before any
+code was written.** Framed as classic-Mac-only and effectively extinct. The probes found: no FIND
+the model could write escapes the defect — a FIND with `\r` pre-converted to `\n` fails
+identically to the verbatim copy, so there is no workaround at all; any file with a stray bare CR
+*anywhere in the patched region*, not only pure classic-Mac files, is affected; and `multi_edit`
+carried the identical asymmetry independently, failing more quietly than `apply_patch` —
+`success: true`, zero replacements, a "not found" note rather than an explicit rejection.
 
-**What would close it:** make the two normalizations agree — either normalize the search target
-for both CRLF and bare CR, matching what the FIND already gets, or stop normalizing bare CR out
-of the FIND, matching what the search target gets. This is a behavioral change to what
-`apply_patch` accepts as a match, not a telemetry change, and needs its own establish pass: which
-direction is correct depends on what should happen to bare-CR content in the *output*, a separate
-question from whether the *match* should succeed. See item 42 for the coupled write-back question.
+**What landed (`da3db4be`):** the search target normalizes bare CR now, matching the FIND; the
+output re-encode gained a `"cr"` branch (both the append and strip arms of trailing-newline
+handling); `multi_edit` gained the same two changes, inseparably — see item 42's closure for why.
+`write_file`'s own `"cr"` re-encode arm landed separately (`7665ee95`), since it has no match step
+and no coupling to the other two.
 
-**Where the code lives:** the search target's normalization and the FIND's normalization are both
-in `apply_patch`'s per-block loop, `toolExecutor.ts`.
+**Where the code lives:** `apply_patch`'s search-target normalization and output re-encode, and
+`multi_edit`'s content normalization and re-encode, are all in `toolExecutor.ts`.
 
-## 42. `detectLineEnding`'s bare-CR blind spot feeds three write-back decisions, coupled to item 41
+## 42. Closed — the coupling was the blocker, not a detail; multi_edit's own asymmetry was worse than framed
 
-**What it is:** neither of `detectLineEnding`'s two regexes can match a bare `\r` with no `\n`
-anywhere in the string — such content classifies as `"none"`. `analyzeLineEnding` calls
-`detectLineEnding` and falls `"none"` through to `dominant: "lf"`. `dominant` isn't just a
-classification value — it's read directly as the write-back decision in three tools: `apply_patch`
-(whether to re-encode output to CRLF), `write_file` (whether to re-encode new content to match an
-existing CRLF file), and `multi_edit` (the same, for its own replacement content). A bare-CR file
-is silently written back as LF by all three.
+**What it was:** `detectLineEnding` couldn't see a bare CR at all — such content classified as
+`"none"`, and `analyzeLineEnding` fell that through to `dominant: "lf"`. `dominant` is read
+directly as the write-back decision in `apply_patch`, `write_file`, and `multi_edit`, so this
+item's own text framed itself as a secondary coupling note, deliberately not a standalone defect
+— "the real, unambiguous defect is item 41's match failure."
 
-**Recorded as a coupling, not a standalone defect.** Converting classic-Mac line endings to LF on
-write may be perfectly acceptable behavior on its own — nothing here establishes that it isn't.
-The real, unambiguous defect is item 41's match failure, upstream of any write-back decision: in
-`apply_patch`'s case, a bare-CR file whose content can never match a copied-verbatim FIND never
-reaches a write at all. But `write_file` and `multi_edit` don't route through that same match
-step, so item 41's fix doesn't automatically resolve what either of them does here. A fix to
-either item has to account for the other: changing `detectLineEnding`'s classification changes
-what all three tools write, not just what item 41 matches against.
+**That framing didn't survive contact with the fix.** Item 41's own recommended direction (see
+its closure) requires re-encoding output to the file's dominant ending, model content included —
+impossible to do correctly for a bare-CR-dominant file without this item's own widening landing
+first. The two were never separable: this item's classification blind spot was the direct blocker
+on item 41's only correct fix, not an independent, lower-priority coupling.
+
+**`multi_edit`'s own asymmetry was worse than this item's original text stated.** The original
+text said `write_file` and `multi_edit` "don't route through that same match step" as
+`apply_patch` — true for `write_file`, false for `multi_edit`, which carries the identical
+FIND/REPLACE-vs-content normalization mismatch as item 41's own defect, independently. Established
+by probe, before any fix code was written: `multi_edit`'s current CR "preservation" on a
+non-spanning find is accidental — nothing in its pipeline ever looks at a bare CR outside the
+matched region, not deliberate design — so applying only the content-normalization half of the
+fix converts that accidental silence into active destruction on the exact path that works
+correctly today. The fix could not ship as a match-only change; the re-encode arm had to land in
+the same commit.
+
+**What landed (`da3db4be`, `7665ee95`):** `detectLineEnding`/`analyzeLineEnding` widened to a
+`"cr"` ending, chosen by highest raw count among CRLF/LF/CR occurrences (ties broken
+crlf > lf > cr, preserving the existing crlf-over-lf tie behavior). `write_file`'s `"cr"` re-encode
+arm landed as its own commit, since it alone has no match step and no coupling to the other two.
 
 **Where the code lives:** `detectLineEnding` and `analyzeLineEnding` are both in `toolExecutor.ts`;
 `dominant` is read at its three write-back sites in `apply_patch`'s, `write_file`'s, and
 `multi_edit`'s own handlers, same file.
 
+## 43. `detectLineEnding`'s return value has no behavioral consumer — a function that looks load-bearing and isn't
+
+**What it is:** found by mutation testing during the `da3db4be` pass, not by design review.
+Forcing `detectLineEnding` to return `"lf"` for bare-CR content — a direct, deliberate corruption
+of its own classification — broke nothing in the full battery of tests written for that pass.
+`analyzeLineEnding`'s `dominant` field, the only value any of `apply_patch`, `write_file`, or
+`multi_edit` actually reads to decide what to write, is computed directly from raw
+`crlfCount`/`lfOnlyCount`/`crOnlyCount` — it never reads `detectLineEnding`'s return at all.
+`detected` (what the mutation actually changes) has exactly one consumer anywhere: `originalEol`,
+which feeds only item 21's surviving telemetry site, itself `debugLog`-gated.
+
+**Recorded as a structural fact worth knowing, not a defect.** Nothing is wrong — `dominant`'s own
+independent computation is correct, tested, and mutation-proven (see items 41/42's closures). But
+a function whose output shapes a return type, gets destructured into a named field, and reads as
+if it feeds a decision — doesn't, for the one caller that matters. A future change to
+`detectLineEnding` alone, made on the assumption that `dominant` derives from it, would silently
+not do what its author expected.
+
+**What would close it, if anything — genuinely unknown, not a covered decision:** either
+`dominant` should read `detected` instead of recomputing the same counts a second time, or the
+duplication is deliberate (perhaps to keep the two computations independently auditable, or
+because `detected`'s four-way partition — `crlf`/`lf`/`cr`/`mixed`/`none` — and `dominant`'s
+three-way one don't map cleanly onto each other for the `"mixed"` case, where `detected` needs a
+value `dominant` doesn't have an equivalent of). This pass didn't establish which; recorded as
+open rather than guessed at.
+
+**The only reason this is testable at all today** is the telemetry-observing test added during
+the same pass specifically to close this gap — before it existed, no test anywhere could have
+distinguished `detectLineEnding` returning the right value from returning a wrong one for bare
+CR, in either direction.
+
+**Where the code lives:** `detectLineEnding` and `analyzeLineEnding` are both in `toolExecutor.ts`;
+the telemetry-observing test is in `toolExecutor.bareCrMatch.test.ts`.
+
+## 44. Closed — `hasTrailingNewline` carried the same bare-CR blind spot, independently, and no consumer trace could have found it
+
+**What it was:** `hasTrailingNewline`'s regex (`/\r?\n$/`) couldn't recognize a lone trailing `\r`
+as a newline — the identical shape of gap items 41/42 closed, in a third, independent site. It
+feeds `fileEndedWithNewline` and the append/strip arms of `apply_patch`'s trailing-newline
+handling, both already in scope for the `da3db4be` pass.
+
+**Two separate, careful traces of `dominant`'s consumers — the third establish pass's own
+question, and this document's own item 42 before it — both missed it, and the reason is
+structural, not carelessness.** `hasTrailingNewline` doesn't read `dominant`, `detected`, or
+either classifier function at all; it answers an entirely separate question (does this content
+already end in a newline) that the CR-aware re-encode arms merely depend on being answered
+correctly. A consumer trace finds everything that reads a given value — it cannot find a sibling
+defect in a function that reads nothing the value comes from.
+
+**Found only by running a test, not by reading — the fifth closing-section pattern's own lesson,
+recurring on a smaller scale.** The first bare-CR match test failed with a missing trailing `\r`;
+tracing the failure back led to `hasTrailingNewline` directly, not through any `dominant`-shaped
+path.
+
+**What landed (`da3db4be`):** widened to `/[\r\n]$/` — a single-character-class match, simpler
+than the original three-way alternation and provably equivalent for the LF/CRLF cases it already
+handled correctly, additionally correct for the CR case it didn't. Folded into the same commit as
+the match fix, as a direct mechanical necessity: the CR-aware trailing-newline arms this pass was
+already adding would have been dead code for exactly the bare-CR files they exist to handle,
+without this fix landing alongside them.
+
+**Where the code lives:** `hasTrailingNewline` is in `toolExecutor.ts`, module-private, with its
+two call sites in `apply_patch`'s handler, same file.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 42 to find out which ones still need something. No index of
+reader the trouble of reading all 44 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (14): 6, 8, 14, 20, 21, 24, 26, 29, 30, 31, 33, 34, 35, 40
+**Closed** (17): 6, 8, 14, 20, 21, 24, 26, 29, 30, 31, 33, 34, 35, 40, 41, 42, 44
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (18): 2 (after 16), 7, 10, 12, 13, 15 (after 2), 16, 17, 18, 22, 23, 25, 28, 32, 36, 37, 39,
-41
+first (17): 2 (after 16), 7, 10, 12, 13, 15 (after 2), 16, 17, 18, 22, 23, 25, 28, 32, 36, 37, 39
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (2): 1, 4
 
-**Neither — a structural fact recorded, with no fix proposed** (8): 3, 5, 9, 11, 19, 27, 38, 42
+**Neither — a structural fact recorded, with no fix proposed** (8): 3, 5, 9, 11, 19, 27, 38, 43
 
 Items 1, 2, 12, 16, and 18 are partially closed or corrected; the classification above covers
 only the portion still open, not the whole entry.
@@ -1593,3 +1670,28 @@ real, in-progress edit before the first mutation touches the same file, whenever
 and mutation-tests one file in the same commit — and after every `git checkout --` revert during a
 mutation-testing cycle, verify by reading (a grep for a known-deleted or known-changed identifier
 is enough) that what came back is what was expected, not just that the mutation is gone.
+
+## An eighth pattern, beside the sixth: a mutation can be correct and still coincide with one test's answer
+
+The sixth pattern is about a routing mutation invisible to inputs a downstream guard would
+suppress regardless of the route taken. This is a different mechanism: a value-substitution
+mutation — replacing a computed result with a fixed constant — invisible to exactly the one test
+built around it, because that test's own correct answer already equals the constant. No guard, no
+routing; the discriminator is coincidence between the mutated value and the input's real answer,
+not between two code paths converging on the same output.
+
+`da3db4be`'s mutation testing (ledger items 41/42) found this directly. Forcing
+`analyzeLineEnding`'s `dominant` to always `"lf"` was meant to prove the stray-CR test — a
+mostly-LF file with one bare CR, expected to flatten to LF — depended on the real dominance
+computation. It didn't: that file's real answer is already `"lf"` (four real LF newlines outweigh
+one stray CR), so the mutation and the unmutated code agree for that exact input, and the test the
+mutation targeted stayed green. The mutation was not inert, though — it broke six other tests in
+the same battery, every one whose correct `dominant` is `"crlf"` or `"cr"`, cleanly proving the
+same line the named target failed to.
+
+**The rule:** a value-substitution mutation's named target is only a prediction, not a guarantee
+— check whether the target's own correct answer happens to equal the substituted constant before
+trusting a green result from it alone. A battery built with variety (here, tests whose correct
+answers span all three of `"crlf"`/`"lf"`/`"cr"`) still proves the mutation even when one specific
+test can't, but that has to be confirmed by running the whole battery, not assumed from which
+test the mutation was written to target.
