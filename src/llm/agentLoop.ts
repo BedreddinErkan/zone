@@ -1341,7 +1341,7 @@ export type FailureRecord = {
   iter: number;
 };
 
-function parsePatchBlocks(patch: string): Array<{ find: string; replace: string }> {
+export function parsePatchBlocks(patch: string): Array<{ find: string; replace: string }> {
   const blocks: Array<{ find: string; replace: string }> = [];
   const FIND_MARKER = "--- FIND ---";
   const REPLACE_MARKER = "--- REPLACE ---";
