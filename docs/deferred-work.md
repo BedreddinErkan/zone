@@ -736,36 +736,37 @@ in `patchConversion.ts`, inside `tryRecoverDeveloperPatchFromModelOutput`'s reco
 the recovery pass's own direct call site and from the `mode === "patch"` branch that reads
 `planFullPatchWithLlm`'s return value.
 
-## 20. `parsePatchBlocks` has no directly testable surface
+## 20. Closed — parsePatchBlocks is exported, and its tests now name the field a mutation broke
 
-**What it is:** `parsePatchBlocks` (`agentLoop.ts`) is not exported, and nothing in this
-codebase imports it — confirmed by grep, zero hits. `hashPatchBlocks`, which calls it, is
-exported and has callers, but the segmentation function underneath it has never been reachable
-from a test file.
+**What it was:** `parsePatchBlocks` had no directly testable surface — every characterization
+claim about its segmentation was pinned only indirectly, through the exported `hashPatchBlocks`
+and a test-local helper (`expectedHash`) replicating its concatenation formula.
 
-**Why this matters beyond the immediate gap:** the segmentation half of the FIND/REPLACE format
-could be silently broken — by an unrelated edit, a bad merge, a naive refactor — with no test
-noticing. This is plausibly part of why it was able to drift from the applier's walk unnoticed
-in the first place (item 18): there was no test on either side that would have caught the two
-falling out of sync when `normalizeSmartQuotes` was added to only one of them. Item 18's own
-denominator pass makes this concrete rather than speculative: two more normalization classes
-(line endings, the read_file prefix) drifted the same way, silently, with zero telemetry until
-that pass — not just the one this entry already names.
+**What landed (`5f5f66fe`):** the function is exported; all seven segmentation-specific
+characterization tests now call it directly. **The proof is the failure message, not the
+export.** Before: `expected '567f4bfff58b' to be 'a3899fe5aa34'` — an opaque hex mismatch naming
+nothing. Under the identical mutation, after: a field-level diff — `"find": "const label =
+"hello";"` vs `"find": "const label = \"hello\";"` — naming the exact field and the exact
+character that changed. That difference is what this closure was for, not the export line
+itself.
 
-**What `a7f4ff03` did about it, and what it didn't:** the characterization tests pin
-`parsePatchBlocks`'s behavior indirectly, entirely through the exported `hashPatchBlocks` — a
-hypothesis assertion (a hand-written `{find, replace}` guess, hashed with a test-local helper
-that replicates `hashPatchBlocks`'s own concatenation formula) plus a discriminating companion
-patch, per claim. A mutation to that formula (changing the separator between `find` and
-`replace`) was confirmed to break the hypothesis assertions, ruling out the helper being a
-silent second source of truth. This pins current behavior; it does not create a testable surface
-on `parsePatchBlocks` itself, and it does not make the function exported.
+**What narrowed, deliberately, and measured rather than assumed:** the separator mutation inside
+`hashPatchBlocks` — the original characterization pass's own proof that its formula-mirroring
+helper wasn't a silent second source of truth — killed 8 of the block's tests before this
+closure, and exactly 1 after: the ANCHOR test alone, the one test in the file with no formula
+replicated anywhere in its own path. The other seven, now calling `parsePatchBlocks` directly, no
+longer route through `hashPatchBlocks` at all and are correctly blind to a change in its formula.
+**ANCHOR is the sole remaining detector for that mutation and must not be weakened** — confirmed
+by running the mutation against the converted file, not inferred from the conversion alone.
 
-**What would close it properly:** exporting `parsePatchBlocks` directly, or extracting it as
-part of item 16's shared-segmentation module — either creates a surface a test can call
-directly, with assertions on `{find, replace}` fields instead of hash equality.
+**`expectedHash` and its only consumer, the `createHash` import, were deleted** as dead code —
+nothing else in the file called either.
 
-**Where the code lives:** `parsePatchBlocks` is in `agentLoop.ts`, not exported. The
+**Only one of the two paths this entry named was taken.** Extracting `parsePatchBlocks` into a
+shared module (item 16's own work) remains open and untouched; this closure took the export path
+only, deliberately not preempting item 16.
+
+**Where the code lives:** `parsePatchBlocks` and `hashPatchBlocks` are in `agentLoop.ts`; the
 characterization tests are in `agentLoop.patchBlocksCharacterization.test.ts`.
 
 ## 21. Two existing EOL telemetry sites are each incomplete, in opposite directions
@@ -1217,11 +1218,11 @@ priority ordering" cautions against ranking by importance, which this section do
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (8): 6, 8, 14, 24, 26, 29, 33, 34
+**Closed** (9): 6, 8, 14, 20, 24, 26, 29, 33, 34
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (19): 2 (after 16), 7, 10, 12, 13, 15 (after 2), 16, 17, 18, 20, 21, 22, 23, 25, 28, 30,
-31, 32, 35
+first (18): 2 (after 16), 7, 10, 12, 13, 15 (after 2), 16, 17, 18, 21, 22, 23, 25, 28, 30, 31,
+32, 35
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (2): 1, 4
 
@@ -1399,3 +1400,28 @@ least equipped to check.
 to both suppression tests, then re-ran the hash-compare mutation. It had killed neither test
 before; with the assertion in place, it kills both — the exact discrimination this section
 predicted, confirmed by running it rather than left as an untested recommendation.
+
+## A seventh pattern, following the sixth: a mutation-testing revert can destroy the very change it's supposed to be testing around
+
+Every pattern above is about designing a test or a mutation correctly. This one is about running
+them: `git checkout -- <path>` restores a file to its last *committed* state, not to whatever
+state it was in a moment ago. A mutation-testing cycle that reverts by checkout is safe only
+because the file being mutated has no other uncommitted change sitting in it — true for every
+prior mutation pass in this session, where the file being mutated had nothing else pending. The
+first time that stops being true — a pass that both edits a file and mutates that same file to
+test around the edit — a checkout-based revert wipes the edit along with the mutation, silently,
+with nothing surfacing a warning that anything but the mutation was undone.
+
+**This is exactly what happened during `5f5f66fe`.** The pass added `export` to
+`parsePatchBlocks`, then began mutation-testing `agentLoop.ts` to validate the surrounding test
+conversion. The first revert (`git checkout -- agentLoop.ts`) restored the file to `HEAD` —
+discarding the still-uncommitted `export` along with the mutation being undone. Nothing had been
+staged, so there was no intermediate state for `checkout` to fall back to. Caught by a follow-up
+grep for the export before the next mutation, not by any tool surfacing a warning.
+
+**What closed it in the moment, and what the rule is going forward:** re-apply the edit, then
+`git add` it — once staged, `git checkout -- <path>` restores the *index*, not `HEAD`, so a
+mutation revert undoes only the mutation. Every subsequent revert in that same pass verified the
+export survived, by grep, before proceeding. The rule: stage a real, in-progress edit *before*
+the first mutation touches the same file, whenever a pass both edits and mutation-tests one file
+in the same commit — not just after a mistake is noticed.
