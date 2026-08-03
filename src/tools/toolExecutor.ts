@@ -2808,6 +2808,8 @@ export async function executeTool(
         const eolAnalysis = analyzeLineEnding(originalContent);
         if (eolAnalysis.dominant === "crlf") {
           contentToWrite = content.replace(/\r\n/g, "\n").replace(/\n/g, "\r\n");
+        } else if (eolAnalysis.dominant === "cr") {
+          contentToWrite = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\n/g, "\r");
         }
       }
 
