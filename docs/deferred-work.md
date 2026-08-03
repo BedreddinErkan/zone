@@ -1130,27 +1130,68 @@ visible migration decision instead of a silent discard.
 `pruneOldEnvelopes`, and `resolveEnvelopeId`, all in `diskRunEnvelope.ts`; the `version: 1`
 literal type is on `RunEnvelope` itself, same file.
 
-## 33. Two branches of `reconcileEnvelopeStaging` have zero test coverage in this block
+## 33. Closed — both zero-coverage branches now have a discriminating test
 
-**What it is:** two of the function's branches have no test exercising them at all —
-existence-changed-and-suppressed (a path whose existence flipped since staging, but which is
-also in `flushedSet`), and the read-failure catch (`existsSync` reports a path present but
-`readFileSync` throws on it).
+**What it was:** two branches of `reconcileEnvelopeStaging` had no test exercising them at all —
+existence-changed-and-suppressed, and the read-failure catch — proven by two of the write-ordering
+audit's eight mutations (`G1`, `RF`) killing nothing, before and after `855bdbca`'s own fix.
 
-**Why this is empirical, not inferred:** the write-ordering audit (item 29) ran one mutation per
-branch across all 8 tests in the block. Two of the eight — forcing the existence-changed guard's
-suppression off, and gutting the read-failure catch's message — killed nothing, before the fix
-and after it. A mutation aimed at a branch that kills zero tests is the direct signature of a gap
-in coverage, not a conclusion drawn from reading the tests' names or intent.
+**What landed (`aa088f2f`):** one test each. **Closure here means `G1` and `RF` now kill exactly
+one test each — not that the new tests are green.** Green was never in question; a test that
+reaches nothing still reports green, exactly as R2 (item 29) did. The only evidence that closes a
+zero-coverage finding is the specific mutation that found it flipping from killing nothing to
+killing something.
 
-**What would close it:** one test each. The existence-changed-and-suppressed case needs an entry
-whose existence flipped and whose path is also in `flushedSet`, asserting no drop-note. The
-read-failure case needs a path `existsSync` reports present but `readFileSync` throws on — a
-directory created at the entry's absolute path is the obvious shape (`EISDIR`), asserting the
-`"could not read current file"` note.
+**How the read-failure case was reached:** a directory at the entry's `absPath`, not a missing
+file — verified by a live probe, not assumed: `existsSync` reports `true` for a directory,
+`readFileSync` on that same path throws `EISDIR`. A genuinely-absent file doesn't work for this
+branch — it's intercepted upstream by the existence-changed branch (the same one this item was
+about) and never reaches the catch at all, exactly as the existing "base file was deleted" test
+already demonstrates for the drop-note case. The directory shape was the only one that reaches
+the catch itself.
+
+**The existence-changed-and-suppressed case took two attempts, and the rejected one is worth
+recording.** The first candidate mirrored the existing "deleted" test's shape (`baseExisted:
+true`, file genuinely absent) with a `flushedSet` entry added. Traced against the existence-check
+mutation (forcing detection off): that shape falls through into a *real* `ENOENT` on the
+subsequent read, landing in the read-failure catch and failing for an unrelated reason — a
+confound, killing two mutations instead of the one it meant to isolate. The shape that shipped
+instead mirrors the existing "created" test (`baseExisted: false`, file now present): under the
+same mutation, it falls through to the unconditional new-file-restore branch instead, which
+doesn't touch `dropNotes` either way — isolating cleanly to the one mutation (`G1`) it exists to
+prove.
 
 **Where the code lives:** both guards are in `reconcileEnvelopeStaging`, `diskRunEnvelope.ts`; the
-new tests would belong in `describe("reconcileEnvelopeStaging", ...)`, `diskRunEnvelope.test.ts`.
+two new tests are in `describe("reconcileEnvelopeStaging", ...)`, `diskRunEnvelope.test.ts`.
+
+## 34. Two test comments went stale with the code they describe
+
+**What it is:** both `flushedSet`-suppression tests' inline comments still describe `makeEntry`
+as writing to disk "internally" — `855bdbca` stripped that write entirely (the same commit that
+fixed the write-ordering defect these comments were originally explaining). One of the two
+additionally claims the repo-relative test's sibling ("R2") "has the same latent issue... not
+fixed here" — also stale, since `855bdbca` is the commit that fixed R2.
+
+**The test-comment analogue of this document's own first closing-section pattern.** That pattern
+is about a citation going stale as the file around it changes; this is the same failure mode in a
+place the shape-reference convention doesn't reach, because the convention governs how *this
+document* cites code, not how a test comments on its own fixture. A comment can be accurate when
+written and invalidated by the very commit that makes it obsolete, exactly like a line number —
+and, exactly like a line number, nothing forces it to be revisited once the code it describes
+changes underneath it.
+
+**Why this matters:** a reader trusting these comments would reconstruct a fixture contract that
+no longer exists — that `makeEntry` writes, and that a pre-`makeEntry` write is what gets silently
+clobbered. Both are now false. Anyone extending this block by reading its comments rather than its
+current code would rebuild the exact trap item 29 closed.
+
+**What would close it:** correct both comments to describe the current, caller-writes contract.
+Cheap — a few lines — and worth doing before someone writes a new test against the
+described-but-wrong one.
+
+**Where the code lives:** both comments are in `diskRunEnvelope.test.ts`, inside
+`describe("reconcileEnvelopeStaging", ...)`, on the two `flushedSet`-suppression tests (nicknamed
+R2 and its repo-relative sibling).
 
 ---
 
@@ -1316,3 +1357,8 @@ condition, not the branch that leads to it. Any mutation that only changes routi
 by every input that would satisfy the guard by coincidence — which is exactly the set of inputs
 a suppression test is built around, making this exactly the case a routing-only mutation is
 least equipped to check.
+
+**Verified, not just proposed:** `aa088f2f` added the `restored` assertion this section describes
+to both suppression tests, then re-ran the hash-compare mutation. It had killed neither test
+before; with the assertion in place, it kills both — the exact discrimination this section
+predicted, confirmed by running it rather than left as an untested recommendation.
