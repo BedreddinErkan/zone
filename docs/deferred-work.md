@@ -1012,6 +1012,128 @@ tests assert the current fixed string, so the wording change doesn't silently br
 syntax/semantic-smell rollback block in `toolExecutor.ts`, the same block item 14's `filesStaged`
 detection now lives in.
 
+## 29. `diskRunEnvelope.test.ts`'s R2 test has never exercised `flushedSet` suppression
+
+**What it is:** found empirically, by tracing under a mutation during the `ab76002f` pass, not
+by reading. The test named "suppresses drop-note for flushedPaths (R2)" calls `writeFileSync` on
+its fixture file *before* calling `makeEntry(relPath, baseContent, stagedContent)` — and
+`makeEntry` itself unconditionally `writeFileSync`s `absPath` with `baseContent` as its own last
+step, silently clobbering the earlier write. Disk ends up holding `baseContent`, which matches
+`entry.baseHash` by construction, so `reconcileEnvelopeStaging` takes the hash-match "restore"
+branch and returns before the `flushedSet` check is ever reached. The test's assertion
+(`dropNotes` has length 0) passes — but for the "nothing changed" reason, not the "this file
+changed and `flushedSet` suppressed the note" reason its name and setup claim to exercise.
+
+**Why this matters:** `ab76002f`'s fix does work correctly for both path formats — confirmed by
+the pass's new relative-format test, whose own mutation results are honest (it fails under
+exactly the mutations that should break relative-path suppression) — but that confirmation comes
+entirely from the new test. The establish pass that reused R2 as "the old-format lock, confirmed
+already passing, no changes needed" was right about the outcome — R2 does pass, unmodified, both
+before and after `ab76002f` — and wrong about the mechanism it credited that outcome to. A green,
+unmodified R2 was read as proof the absolute-path format still works; it never tested that, in
+this respect not by drift but from the moment it was written.
+
+**A distinct variant, not a repeat, of two existing patterns:** the second closing-section
+pattern ("self-reference defeats a mutation test") is a test whose expected value derives from
+the same thing it tests — this test's expected value is an ordinary literal, correct in
+isolation; the defect is fixture write ordering, not what the assertion compares against. The
+fifth pattern ("tracing is not running") is a change's blast radius reaching mock sites nobody
+had reason to read — this is not a missed consumer, it is the one test already in scope, found
+only by mutating the code it claims to guard. Worth naming beside both, not folded into either:
+a test can fail to test its own claim for a reason neither a self-reference check nor a
+full-suite run would catch, because the test itself is the only place the defect lives — the
+test encodes nothing, and green is indistinguishable from covered.
+
+**What would close it:** reorder R2 the same way the new relative-format test was fixed during
+the same pass — call `makeEntry` first, establishing `baseHash` from `baseContent`, then
+`writeFileSync` the divergent "was flushed to disk" content second, so disk genuinely mismatches
+`baseHash` when `reconcileEnvelopeStaging` reads it and execution actually reaches the
+`flushedSet` check. A one-line reorder, deliberately not folded into `ab76002f`: that commit's
+scope was the production fix, and editing R2 was explicitly out of scope for it.
+
+**Where the code lives:** the R2 test and the `makeEntry` helper it (and every other test in the
+same block) calls are both in `diskRunEnvelope.test.ts`, inside the
+`describe("reconcileEnvelopeStaging", ...)` block.
+
+## 30. `flushedPaths`'s doc names one source; the stamped value is broader
+
+**What it is:** the field's doc comment reads "Paths already flushed to disk by
+`persistStagingOnError` — suppress drop-notes for these (R2)." The value actually stamped is
+`result.filesModified`, passed straight through by `agentLoop.ts`'s durable-resume block (the
+non-natural-completion branch) into `stampEnvelopeStatus`. `filesModified` accumulates across the
+whole run from every write tool's evidence of persisting mutation (ledger item 14) — not only
+`persistStagingOnError`'s own early-exit flush, but also files a run completed through
+`finalizeStaging` on other exit paths and direct-to-disk new-file creates. The set the doc names
+is a strict subset of the set the code actually stamps.
+
+**Why this matters:** the semantics that landed are arguably better than the doc — suppressing
+drop-notes for anything the run itself is known to have written, not just one code path's flush —
+but a future reader deciding what belongs in this array, or debugging why a drop-note did or
+didn't fire, will trust the doc's narrower claim and reason from the wrong set.
+
+**What would close it:** reword the doc comment to name `result.filesModified` (or describe it as
+"every file this run persisted a mutation to"), dropping the `persistStagingOnError`-specific
+framing.
+
+**Where the code lives:** the doc comment is on the `flushedPaths` field of the `RunEnvelope`
+interface in `diskRunEnvelope.ts`; the actual stamped value is computed at the
+`stampEnvelopeStatus(...)` call inside `agentLoop.ts`'s durable-resume block, the branch taken on
+every exit except `natural_completion` with `success`.
+
+## 31. `StagedEntryEnvelope.path` is documented as the reconciliation key; the code reconciles on `absPath`
+
+**What it is:** the schema's doc comment reads "Repo-relative path (display + reconciliation
+key)." `reconcileEnvelopeStaging` never reads `entry.path` for any reconciliation decision — every
+comparison (`fsSync.existsSync`, the base-hash check via `readFileSync`, the `restored` map's own
+key) runs against `entry.absPath`. `entry.path` appears in the function exactly once, interpolated
+into a human-readable `dropNotes` message string. The doc calls it a reconciliation key; the code
+uses it only for display, exactly as `absPath`'s own doc comment ("Absolute path as staged —
+re-seeds the staging map directly") independently claims for itself.
+
+**Why this matters:** plausibly the original source of the format mismatch `ab76002f` fixed. A
+comparison written against "the reconciliation key," as the schema itself names it, would
+reasonably be written against `path` — the field carrying repo-relative paths, the same format
+`flushedPaths` turned out to be stamped in — not `absPath`. Recorded as the schema documenting a
+contract its own primary consumer doesn't follow.
+
+**What would close it:** reword `path`'s doc to name it display-only (matching what
+`reconcileEnvelopeStaging` actually does with it), and move "reconciliation key" to `absPath`'s
+own doc comment, where the behavior actually lives.
+
+**Where the code lives:** both doc comments are on `StagedEntryEnvelope`'s `path` and `absPath`
+fields in `diskRunEnvelope.ts`; the usage they contradict is `reconcileEnvelopeStaging`'s own
+body, same file.
+
+## 32. A `version` bump would silently drop every existing envelope
+
+**What it is:** `RunEnvelope.version` is a literal `1` type, checked at four independent sites —
+`loadRunEnvelope`, `listResumableEnvelopes`, `pruneOldEnvelopes`, and `resolveEnvelopeId` — each
+guarding with a bare `if (env.version !== 1) return null` or `continue`. None of the four logs
+anything or surfaces a message on a mismatch; a non-matching envelope is treated identically to
+one that was never there.
+
+**Why this matters:** the schema-evolution hatch this codebase nominally has is, in practice, a
+silent data-loss switch. Bumping `version` to `2` for a genuinely necessary schema change would
+make every envelope written under version 1 invisible to all four functions simultaneously — no
+error, no log line, nothing printed — and the practical effect is every in-flight resumable run
+at the time of the bump loses its resume path with no visible signal that this happened, to
+either the user or whoever shipped the bump.
+
+**Why `ab76002f` needed this to be true:** that fix chose compare-time normalization
+(`resolve(env.repoPath, p)` at read time) specifically because it required no version bump — the
+envelopes on disk at the time both had `flushedPaths: []`, so the fix needed to keep working for
+old and new envelope shapes without a schema change forcing a discard. This entry is why that
+constraint mattered rather than being only a convenience: the alternative (bump the version,
+migrate) would have hit this exact silent-drop behavior.
+
+**What would close it:** a loud path before any bump is ever considered — a log line or startup
+message naming the version mismatch and the affected envelope count, so a schema change becomes a
+visible migration decision instead of a silent discard.
+
+**Where the code lives:** the four checks are in `loadRunEnvelope`, `listResumableEnvelopes`,
+`pruneOldEnvelopes`, and `resolveEnvelopeId`, all in `diskRunEnvelope.ts`; the `version: 1`
+literal type is on `RunEnvelope` itself, same file.
+
 ---
 
 ## A pattern this document is built to avoid
