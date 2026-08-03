@@ -380,6 +380,27 @@ describe("reconcileEnvelopeStaging", () => {
     expect(dropNotes[0]).toMatch(/bar\.ts.*changed/);
   });
 
+  it("drops and notes when the current file cannot be read (B4)", () => {
+    // A directory, not a missing file: existsSync(dir) is true and baseExisted is true,
+    // so existence-changed detection at line 505 does NOT fire (unlike test 5's genuine
+    // ENOENT) — this is the only fixture shape that reaches the read-failure catch itself
+    // rather than being intercepted upstream by the existence-changed branch.
+    const absPath = join(repoRoot, "not-a-file");
+    mkdirSync(absPath);
+    const { createHash } = require("node:crypto") as typeof import("node:crypto");
+    const entry = {
+      path: "not-a-file",
+      absPath,
+      baseHash: createHash("sha256").update("placeholder base content").digest("hex"),
+      baseExisted: true,
+      content: "staged",
+    };
+    const env = makeEnvelope({ staging: [entry] });
+    const { restored, dropNotes } = reconcileEnvelopeStaging(env);
+    expect(restored.has(absPath)).toBe(false);
+    expect(dropNotes[0]).toMatch(/not-a-file.*could not read/);
+  });
+
   it("restores a new file (base did not exist, still absent)", () => {
     const absPath = join(repoRoot, "new.ts");
     const entry = { path: "new.ts", absPath, baseHash: "", baseExisted: false, content: "new file content" };
@@ -416,6 +437,18 @@ describe("reconcileEnvelopeStaging", () => {
     expect(dropNotes[0]).toMatch(/gone\.ts.*deleted/);
   });
 
+  it("suppresses drop-note for a flushed, existence-changed entry (B3)", () => {
+    // Same "created" shape as test 4 (baseExisted:false, file now present), but this
+    // path is in flushedPaths — exercises the OTHER guard (line 507, inside the
+    // existence-changed branch), not the hash-mismatch guard tests 6/7/8 already cover.
+    const absPath = join(repoRoot, "shouldnt-note.ts");
+    writeFileSync(absPath, "someone created this", "utf-8");
+    const entry = { path: "shouldnt-note.ts", absPath, baseHash: "", baseExisted: false, content: "staged" };
+    const env = makeEnvelope({ repoPath: repoRoot, staging: [entry], flushedPaths: ["shouldnt-note.ts"] });
+    const { dropNotes } = reconcileEnvelopeStaging(env);
+    expect(dropNotes).toHaveLength(0);
+  });
+
   it("suppresses drop-note for flushedPaths (R2)", () => {
     const absPath = join(repoRoot, "flushed.ts");
     const entry = makeEntry("flushed.ts", "original", "staged");
@@ -425,8 +458,9 @@ describe("reconcileEnvelopeStaging", () => {
     writeFileSync(absPath, "was flushed to disk by persistStagingOnError", "utf-8");
     // Hash mismatch — but path is in flushedPaths
     const env = makeEnvelope({ staging: [entry], flushedPaths: [absPath] });
-    const { dropNotes } = reconcileEnvelopeStaging(env);
+    const { restored, dropNotes } = reconcileEnvelopeStaging(env);
     expect(dropNotes).toHaveLength(0);
+    expect(restored.has(absPath)).toBe(false);
   });
 
   it("suppresses drop-note for a repo-relative flushedPaths entry — the format production actually emits", () => {
@@ -444,8 +478,9 @@ describe("reconcileEnvelopeStaging", () => {
     // filesStaged actually produces. repoPath must be the real tmpdir root, not
     // makeEnvelope's own "/repo" default, or resolve() has nothing real to match.
     const env = makeEnvelope({ repoPath: repoRoot, staging: [entry], flushedPaths: ["flushed2.ts"] });
-    const { dropNotes } = reconcileEnvelopeStaging(env);
+    const { restored, dropNotes } = reconcileEnvelopeStaging(env);
     expect(dropNotes).toHaveLength(0);
+    expect(restored.has(entry.absPath)).toBe(false);
   });
 
   it("a flushedPaths entry for a different file does not suppress this file's own drop-note", () => {
