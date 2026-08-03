@@ -7,6 +7,7 @@ import { promises as fs } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import os from "node:os";
+import { createRequire } from "node:module";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { classifyPatchIntent } from "../patch-generation/classifyPatchIntent.js";
 import { runLlmPatchFlow } from "../core/runLlmPatchFlow.js";
@@ -1271,6 +1272,9 @@ export async function runCliWithOptions(options: CliOptions): Promise<number> {
 }
 
 export async function run(): Promise<void> {
+  const require = createRequire(import.meta.url);
+  const { version } = require("../../package.json") as { version: string };
+
   const program = new Command();
   let subcommandHandled = false;
 
@@ -1288,6 +1292,7 @@ export async function run(): Promise<void> {
     .description(
       "Zone — AI Code Agent: deterministic, explainable, safe"
     )
+    .version(version)
     .argument("[query...]", "Task or initial prompt (omit for interactive TUI)")
     .option("-p, --print", "Headless one-shot mode (non-interactive, no TUI)")
     .option("-c, --continue", "Resume the most recently interrupted run (envelope-first)")

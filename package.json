@@ -1,29 +1,32 @@
 {
-  "name": "zone",
-  "version": "0.1.0",
-  "private": true,
+  "name": "zone-ai-agent",
+  "version": "2.0.0",
   "type": "module",
   "description": "Self-host AI coding agent. Tier-bounded execution, atomic safety, BYOK transparency.",
+  "engines": {
+    "node": ">=22"
+  },
   "bin": {
     "zone": "./dist/cli/index.js"
   },
+  "files": ["dist", "README.md", "LICENSE"],
  "exports": {
-  "./flow":       { "types": "./src/core/runLlmPatchFlow.ts",         "default": "./dist/core/runLlmPatchFlow.js" },
-  "./agent":      { "types": "./src/llm/agentLoop.ts",                "default": "./dist/llm/agentLoop.js" },
-  "./openai":     { "types": "./src/llm/openaiClient.ts",             "default": "./dist/llm/openaiClient.js" },
-  "./approvals":  { "types": "./src/api/commandApprovals.ts",         "default": "./dist/api/commandApprovals.js" },
-  "./store-core": { "types": "./src/cli/tui/store-core.ts",           "default": "./dist/cli/tui/store-core.js" },
-  "./events":     { "types": "./src/cli/tui/hooks/eventToActions.ts", "default": "./dist/cli/tui/hooks/eventToActions.js" },
-  "./lifecycle":  { "types": "./src/core/agentLifecycleEvents.ts",    "default": "./dist/core/agentLifecycleEvents.js" },
-  "./config":     { "types": "./src/cli/config.ts",                   "default": "./dist/cli/config.js" },
-  "./dispatch":   { "types": "./src/cli/dispatch.ts",                 "default": "./dist/cli/dispatch.js" },
-  "./init":       { "types": "./src/memory/initFlow.ts",              "default": "./dist/memory/initFlow.js" },
-  "./snapshots":  { "types": "./src/snapshots/snapshotStore.ts",      "default": "./dist/snapshots/snapshotStore.js" },
-  "./model-registry":     { "types": "./src/llm/modelRegistry.ts",                "default": "./dist/llm/modelRegistry.js" },
-  "./session-window":     { "types": "./src/llm/sessionWindow.ts",                "default": "./dist/llm/sessionWindow.js" },
-  "./conversation-store": { "types": "./src/core/conversationFilesystemStore.ts", "default": "./dist/core/conversationFilesystemStore.js" },
-  "./tier-settings":      { "types": "./src/visual/tierSettings.ts",              "default": "./dist/visual/tierSettings.js" },
-  "./feedback":           { "types": "./src/feedback/buildFeedbackReport.ts",      "default": "./dist/feedback/buildFeedbackReport.js" }
+  "./flow":       { "types": "./dist/core/runLlmPatchFlow.d.ts",         "default": "./dist/core/runLlmPatchFlow.js" },
+  "./agent":      { "types": "./dist/llm/agentLoop.d.ts",                "default": "./dist/llm/agentLoop.js" },
+  "./openai":     { "types": "./dist/llm/openaiClient.d.ts",             "default": "./dist/llm/openaiClient.js" },
+  "./approvals":  { "types": "./dist/api/commandApprovals.d.ts",         "default": "./dist/api/commandApprovals.js" },
+  "./store-core": { "types": "./dist/cli/tui/store-core.d.ts",           "default": "./dist/cli/tui/store-core.js" },
+  "./events":     { "types": "./dist/cli/tui/hooks/eventToActions.d.ts", "default": "./dist/cli/tui/hooks/eventToActions.js" },
+  "./lifecycle":  { "types": "./dist/core/agentLifecycleEvents.d.ts",    "default": "./dist/core/agentLifecycleEvents.js" },
+  "./config":     { "types": "./dist/cli/config.d.ts",                   "default": "./dist/cli/config.js" },
+  "./dispatch":   { "types": "./dist/cli/dispatch.d.ts",                 "default": "./dist/cli/dispatch.js" },
+  "./init":       { "types": "./dist/memory/initFlow.d.ts",              "default": "./dist/memory/initFlow.js" },
+  "./snapshots":  { "types": "./dist/snapshots/snapshotStore.d.ts",      "default": "./dist/snapshots/snapshotStore.js" },
+  "./model-registry":     { "types": "./dist/llm/modelRegistry.d.ts",                "default": "./dist/llm/modelRegistry.js" },
+  "./session-window":     { "types": "./dist/llm/sessionWindow.d.ts",                "default": "./dist/llm/sessionWindow.js" },
+  "./conversation-store": { "types": "./dist/core/conversationFilesystemStore.d.ts", "default": "./dist/core/conversationFilesystemStore.js" },
+  "./tier-settings":      { "types": "./dist/visual/tierSettings.d.ts",              "default": "./dist/visual/tierSettings.js" },
+  "./feedback":           { "types": "./dist/feedback/buildFeedbackReport.d.ts",      "default": "./dist/feedback/buildFeedbackReport.js" }
 },
   "scripts": {
     "build": "node node_modules/typescript/bin/tsc -p tsconfig.json",
@@ -46,6 +49,7 @@
     "body-parser": "^1.20.3",
     "qrcode-terminal": "^0.12.0",
     "ws": "^8.21.0",
+    "undici": "^8.3.0",
     "commander": "^12.1.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
@@ -78,7 +82,6 @@
     "ink-testing-library": "^4.0.0",
     "marked": "^18.0.3",
     "typescript": "^5.9.3",
-    "undici": "^8.3.0",
     "vitest": "^2.1.9"
   },
   "license": "AGPL-3.0-or-later",

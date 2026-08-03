@@ -19,20 +19,25 @@ Subscription agents (Cursor, Codex, Claude Code) hide your usage behind rate lim
 ## Quick start
 
 ```bash
-# 1 — clone & build
-git clone https://github.com/BedreddinErkan/zone && cd zone
-npm install && npm run build && npm link
+# 1 — install
+npm install -g zone-ai-agent
 
 # 2 — add your API key
 export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY
-or
-use /keys feature inside zone
+# or use /keys inside zone
 
 # 3 — run, from any repo
 cd ~/your-project && zone
 ```
 
 Press **Shift+Tab** for plan mode. You can also add and manage keys from inside the TUI with `/keys` — no `.env` needed for personal use.
+
+### Contributing / running from source
+
+```bash
+git clone https://github.com/BedreddinErkan/zone && cd zone
+npm install && npm run build && npm link
+```
 
 ## Windows
 
