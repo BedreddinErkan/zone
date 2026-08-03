@@ -769,40 +769,59 @@ only, deliberately not preempting item 16.
 **Where the code lives:** `parsePatchBlocks` and `hashPatchBlocks` are in `agentLoop.ts`; the
 characterization tests are in `agentLoop.patchBlocksCharacterization.test.ts`.
 
-## 21. Two existing EOL telemetry sites are each incomplete, in opposite directions
+## 21. Closed — retired one site, reduced a second, kept the third; the item's own premise was wrong twice
 
-**What it is:** `toolExecutor.ts` has two pre-existing `debugLog` sites describing FIND/REPLACE
-block line-endings, and neither observes the match-time normalization completely.
-`[zone-apply-patch-eol-warn]`'s CR-only check tests `/\r(?!\n)/` against the raw block content —
-it catches bare-CR-only content but *misses ordinary CRLF entirely*, since the negative
-lookahead excludes any `\r` immediately followed by `\n`. `[zone-apply-patch-eol]` carries
-`findEolBefore`/`replaceEolBefore` via `detectLineEnding`, whose own regexes never test for a
-bare `\r` with no `\n` anywhere in the string — a bare-CR-only block reads as `"none"`, silently
-missing exactly the case the *other* site exists to catch.
+**What it was:** two pre-existing `debugLog` sites in `apply_patch`'s handler, each incomplete in
+opposite directions — a CR-only check that missed ordinary CRLF, and a `detectLineEnding`-based
+site whose regexes couldn't see a bare `\r` at all. A third, unrelated site shared the CR-only
+check's tag while reporting on the *target file's* own mixed line endings, not FIND/REPLACE
+content.
 
-**Two of the three EOL sites share a tag with different payloads.** The CR-only check and a
-third, unrelated site (the target file's own mixed-line-ending re-encoding, at output time — not
-a FIND/REPLACE content signal at all) both emit under `[zone-apply-patch-eol-warn]`, with
-different payload shapes.
+**The item's own premise was wrong in two ways, both found while establishing the actual fix, not
+assumed from the item's own text.** First: `[zone-apply-patch-normalization-parity]` (`563d5b63`)
+does not subsume all three sites — only the CR-only check's trigger condition, and even that with
+less resolution. The parity marker collapses to one boolean per block; it cannot distinguish CRLF
+from bare CR, cannot say which half of the block changed, and reports a count rather than block
+indices. Retiring all three sites, which this item's own "what would close it" offered as one live
+option, would have discarded the target-file site's signal with nothing replacing it.
 
-**Neither reaches the sink regardless of the above — both are `debugLog`.** Confirmed while
-building the item-18 denominator pass: this is exactly why that pass built a fresh, direct
-before/after comparison instead of promoting either site — promoting either one gives an
-incomplete or wrong-question denominator, not a fix.
+**Second: "neither reaches the sink regardless... both are `debugLog`" was false, not just
+imprecise.** The stdout shield's `appendMarkerRecord` classifies a line as sink-eligible by tag
+pattern, never by which logging function emitted it — so both `debugLog` sites were, and the
+surviving one still is, sink-eligible under `ZONE_VERBOSE_LOGS=1`. The sink currently shows zero
+records for all four related tags — both former `debugLog` sites, the unrelated third, and the
+`log`-based parity marker alike — but that is because the sink has no records after 2026-08-01
+while the parity marker (`563d5b63`) landed 2026-08-02: a stale sink, not structural silence. The
+`log`-based marker reading zero alongside the `debugLog` ones is the proof — if the logging
+function were the reason, a `log` site would read differently from a `debugLog` one, and it
+doesn't.
 
-**What `563d5b63` did about it, and what it didn't:** built
-`[zone-apply-patch-normalization-parity]` alongside these two, using a direct string comparison
-rather than either proxy. It did not fix, reconcile, or retire the two existing sites — they are
-unchanged, still incomplete, still `debugLog`-only.
+**What landed (`c839399b`):** the CR-only site deleted outright. The target-file site left
+untouched — it answers a question nothing else does, and the parity marker has no equivalent of
+it. The `detectLineEnding`-based site reduced from ten fields to six:
+`matchedAfterNormalize`/`occurrencesAfterNormalize` are the only place anything reports whether
+normalization actually rescued a match, and neither is reported anywhere else; `scopeActive` was
+kept because it changes what the occurrence count means (a scoped search vs. the whole file);
+`originalEol` was kept as context for what state normalization started from. `fileHadBOM` and
+`fileEndedWithNewline` were dropped — both are consumed before or after the match decision, never
+during, so neither can explain a match outcome. `reEncodedTo` was dropped as redundant with
+`originalEol` for every non-mixed file, and already carried by the target-file site for mixed
+ones.
 
-**What would close it:** reconcile the two into one complete, correct signal, or retire them now
-that a complete signal exists elsewhere — not attempted here, found and recorded during a
-detection-only pass that deliberately left matching and existing telemetry untouched.
+**A gap found only while doing the reduction, invisible from the item's own text:** the surviving
+site never carried a block index — the deleted site was the only one of the two that did.
+Deleting it would have made the survivor's per-block counts unattributable across any multi-block
+patch's resulting log lines. `block` was added, matching the deleted site's own convention.
 
-**Where the code lives:** both sites are in `apply_patch`'s handler, `toolExecutor.ts` — the
-CR-only check immediately before the match-time normalization, the `detectLineEnding`-based one
-immediately after it. The unrelated third site sharing the CR-only check's tag is later in the
-same handler, at output re-encoding.
+**`debugLog` was kept deliberately, not left by default.** The surviving site fires unconditionally
+once per block, on every `apply_patch` call — unlike the parity marker, which fires once per
+*call* regardless of block count. Promoting it would multiply steady-state sink volume by average
+block count, and item 10's own read-trim-rewrite race gets proportionally more exposure the more
+often the sink actually trims.
+
+**Where the code lives:** the surviving, reduced site and the untouched target-file site are both
+in `apply_patch`'s handler, `toolExecutor.ts`. The test pinning the reduced payload's exact field
+set is `toolExecutor.eolMatchOutcomeTelemetry.test.ts`.
 
 ## 22. `multi_edit` carries a fourth, independent copy of the EOL-normalization transformation
 
@@ -1282,25 +1301,80 @@ resolve cleanly through the same `file:` symlink (`node_modules/zone -> ../../zo
 **Where the code lives:** `zone-vsextension`'s imports are in its own `src/extension.ts`; the
 repointed fields are in this repo's `package.json` `exports` map.
 
+## 41. `apply_patch` cannot match anything in a bare-CR-only file
+
+**What it is:** `apply_patch`'s search target and its FIND text are normalized for line endings
+by two different lines, and they disagree. The search target normalizes CRLF only — a bare `\r`
+survives into it unchanged. The FIND text's own normalization converts both CRLF and bare CR. On
+a classic-Mac-encoded file, the FIND is normalized past what it is being searched against: a `\r`
+in the file's own content stays `\r` in the search target, but the same `\r` in the FIND (copied
+verbatim from a `read_file` of that same file) becomes `\n`. The match is guaranteed to fail — the
+model is told "FIND content not found" for text it copied directly out of the file it is trying
+to patch.
+
+**Established by transcribing both normalization lines and evaluating them directly, not by a
+live probe of the compiled handler — labelled as such deliberately, the way this document labels
+other unverified-mechanism findings (see item 15).** Both expressions were copied verbatim into a
+standalone script and run against synthetic bare-CR content: the search target retained a bare
+`\r`, the normalized FIND did not, and a direct occurrence count between them returned zero. This
+confirms the mechanism, not a real `apply_patch` call against the compiled tool.
+
+**Reachability is low, and that is the reason this has never surfaced — not a reason to discount
+it.** Classic-Mac-only line endings (bare `\r`, no `\n` anywhere) are effectively extinct in real
+source files. The defect is real regardless of how rarely its precondition occurs.
+
+**What would close it:** make the two normalizations agree — either normalize the search target
+for both CRLF and bare CR, matching what the FIND already gets, or stop normalizing bare CR out
+of the FIND, matching what the search target gets. This is a behavioral change to what
+`apply_patch` accepts as a match, not a telemetry change, and needs its own establish pass: which
+direction is correct depends on what should happen to bare-CR content in the *output*, a separate
+question from whether the *match* should succeed. See item 42 for the coupled write-back question.
+
+**Where the code lives:** the search target's normalization and the FIND's normalization are both
+in `apply_patch`'s per-block loop, `toolExecutor.ts`.
+
+## 42. `detectLineEnding`'s bare-CR blind spot feeds three write-back decisions, coupled to item 41
+
+**What it is:** neither of `detectLineEnding`'s two regexes can match a bare `\r` with no `\n`
+anywhere in the string — such content classifies as `"none"`. `analyzeLineEnding` calls
+`detectLineEnding` and falls `"none"` through to `dominant: "lf"`. `dominant` isn't just a
+classification value — it's read directly as the write-back decision in three tools: `apply_patch`
+(whether to re-encode output to CRLF), `write_file` (whether to re-encode new content to match an
+existing CRLF file), and `multi_edit` (the same, for its own replacement content). A bare-CR file
+is silently written back as LF by all three.
+
+**Recorded as a coupling, not a standalone defect.** Converting classic-Mac line endings to LF on
+write may be perfectly acceptable behavior on its own — nothing here establishes that it isn't.
+The real, unambiguous defect is item 41's match failure, upstream of any write-back decision: in
+`apply_patch`'s case, a bare-CR file whose content can never match a copied-verbatim FIND never
+reaches a write at all. But `write_file` and `multi_edit` don't route through that same match
+step, so item 41's fix doesn't automatically resolve what either of them does here. A fix to
+either item has to account for the other: changing `detectLineEnding`'s classification changes
+what all three tools write, not just what item 41 matches against.
+
+**Where the code lives:** `detectLineEnding` and `analyzeLineEnding` are both in `toolExecutor.ts`;
+`dominant` is read at its three write-back sites in `apply_patch`'s, `write_file`'s, and
+`multi_edit`'s own handlers, same file.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 36 to find out which ones still need something. No index of
+reader the trouble of reading all 42 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (13): 6, 8, 14, 20, 24, 26, 29, 30, 31, 33, 34, 35, 40
+**Closed** (14): 6, 8, 14, 20, 21, 24, 26, 29, 30, 31, 33, 34, 35, 40
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (18): 2 (after 16), 7, 10, 12, 13, 15 (after 2), 16, 17, 18, 21, 22, 23, 25, 28, 32, 36, 37,
-39
+first (18): 2 (after 16), 7, 10, 12, 13, 15 (after 2), 16, 17, 18, 22, 23, 25, 28, 32, 36, 37, 39,
+41
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (2): 1, 4
 
-**Neither — a structural fact recorded, with no fix proposed** (7): 3, 5, 9, 11, 19, 27, 38
+**Neither — a structural fact recorded, with no fix proposed** (8): 3, 5, 9, 11, 19, 27, 38, 42
 
 Items 1, 2, 12, 16, and 18 are partially closed or corrected; the classification above covers
 only the portion still open, not the whole entry.
@@ -1493,9 +1567,29 @@ discarding the still-uncommitted `export` along with the mutation being undone. 
 staged, so there was no intermediate state for `checkout` to fall back to. Caught by a follow-up
 grep for the export before the next mutation, not by any tool surfacing a warning.
 
-**What closed it in the moment, and what the rule is going forward:** re-apply the edit, then
-`git add` it — once staged, `git checkout -- <path>` restores the *index*, not `HEAD`, so a
-mutation revert undoes only the mutation. Every subsequent revert in that same pass verified the
-export survived, by grep, before proceeding. The rule: stage a real, in-progress edit *before*
-the first mutation touches the same file, whenever a pass both edits and mutation-tests one file
-in the same commit — not just after a mistake is noticed.
+**What closed it in the moment:** re-apply the edit, then `git add` it — once staged,
+`git checkout -- <path>` restores the *index*, not `HEAD`, so a mutation revert undoes only the
+mutation. Every subsequent revert in that same pass verified the export survived, by grep, before
+proceeding.
+
+**A second incident, `c839399b`, on a different file, by an author who had just read this exact
+pattern.** The pass deleted one EOL telemetry site and reduced a second (ledger item 21) in
+`toolExecutor.ts`, then began mutation-testing the new test asserting on the reduced payload. The
+first revert (`git checkout -- toolExecutor.ts`) ran before the real edit was staged — restoring
+`HEAD`, wiping the deletion and the reduction along with the mutation, silently, the same failure
+mode as `5f5f66fe`. Caught the same way: a follow-up grep for `findHadCrOnly` (the deleted site's
+own local variable) before the next step, not by any tool surfacing a warning. The edit was
+re-applied, staged, and both remaining mutations reverted cleanly against the index. Having just
+read the pattern describing this exact mistake did not prevent it — only the habit of checking a
+revert's result did.
+
+**The rule, sharpened after the second incident:** staging before the first mutation is the
+prevention, and it worked, every time it was actually in place. But it isn't what caught either
+incident — both times, the first mutation of the pass ran before staging, and the loss was caught
+only by checking what the revert actually restored, not by remembering to stage first. Staging
+early makes the check unnecessary; checking after every revert catches the failure even when
+staging was forgotten, which is exactly the state both incidents started from. Do both: stage a
+real, in-progress edit before the first mutation touches the same file, whenever a pass both edits
+and mutation-tests one file in the same commit — and after every `git checkout --` revert during a
+mutation-testing cycle, verify by reading (a grep for a known-deleted or known-changed identifier
+is enough) that what came back is what was expected, not just that the mutation is gone.
