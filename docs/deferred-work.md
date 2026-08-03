@@ -823,29 +823,52 @@ often the sink actually trims.
 in `apply_patch`'s handler, `toolExecutor.ts`. The test pinning the reduced payload's exact field
 set is `toolExecutor.eolMatchOutcomeTelemetry.test.ts`.
 
-## 22. `multi_edit` carries a fourth, independent copy of the EOL-normalization transformation
+## 22. `multi_edit` carries a fourth, independent copy of the EOL-normalization transformation — recount: six, not four
 
-**What it is:** `multi_edit`'s own handler has the identical
-`.replace(/\r\n/g,"\n").replace(/\r/g,"\n")` two-line chain, written independently of
-`apply_patch`'s walk and of `normalizeEol` (the helper item 18's denominator pass extracted so
-the walk and its own telemetry share one implementation). `multi_edit` takes `find`/`replace` as
-separate JSON arguments (see item 17) and never feeds `hashPatchBlocks`/`parsePatchBlocks`, so
-this copy is not part of item 18's divergence and is not a live defect today.
+**What it is:** the same `.replace(/\r\n/g,"\n").replace(/\r/g,"\n")` two-step transformation
+exists as six independent, character-identical inline copies: `apply_patch`'s search-target
+normalization, `multi_edit`'s find normalization, `multi_edit`'s replace normalization,
+`multi_edit`'s content normalization, `write_file`'s `"cr"` re-encode arm (the same two steps as
+a prefix before a third), and `patchCorrectnessValidator.ts`'s own defensive normalization —
+alongside `normalizeEol` (`toolExecutor.ts`), the one canonical implementation.
 
-**Why it's recorded anyway: this is a drift candidate, not a hypothetical one.** This exact
-transformation has already drifted once in this codebase — `normalizeSmartQuotes` was added to
-`apply_patch`'s walk and never mirrored into `parsePatchBlocks`, which is item 18 in full. A
-fourth independent copy of a two-line transformation is a small blast radius per copy, but the
-mechanism that produced item 18 — one copy edited, a sibling copy not — applies exactly as well
-to a third or fourth copy as it did to the second.
+**The count was wrong in both directions, established by checking the commit that introduced this
+entry directly (`53c87064`), not by re-deriving from memory.** At that commit, the literal text
+existed in exactly three places — `normalizeEol`, and `multi_edit`'s own find and replace
+normalizations. `apply_patch`'s search target was one step (CRLF only) at that point, not yet a
+copy of the full pattern; "a fourth" never cleanly counted. `da3db4be` (fixing items 41/42) added
+the missing second step to both `apply_patch`'s search target and `multi_edit`'s content
+normalization, and `7665ee95` added `write_file`'s arm afterward — bringing the total to six,
+plus the pre-existing, previously-unnoticed copy in `patchCorrectnessValidator.ts` that no prior
+pass in this document had ever found.
 
-**What would close it:** nothing urgent — recorded so a future normalization change to one copy
-prompts a check of the others, not a fix in itself. If `multi_edit` and `apply_patch` ever need
-the same EOL behavior deliberately kept in sync, `normalizeEol` (`toolExecutor.ts`) is already
-the shared implementation to point `multi_edit` at instead of writing a fifth copy.
+**They all still agree, character for character — measured, not assumed absent an alarm.** Every
+one of the six performs the identical two substitutions in the identical order: `/\r\n/g → "\n"`,
+then `/\r/g → "\n"`. The drift item 18 describes — one copy gaining a step a sibling never got —
+has not recurred here. That is this entry's good news, and it is worth stating outright rather
+than leaving a reader to infer it from the absence of a "these disagree" sentence.
 
-**Where the code lives:** `multi_edit`'s own EOL-normalization is in its handler in
-`toolExecutor.ts`, independent of `apply_patch`'s handler in the same file.
+**Five of the six could point at `normalizeEol` cleanly; the sixth cannot, for a structural
+reason, not a semantic one.** `apply_patch`'s search target, `multi_edit`'s find/replace/content,
+and `write_file`'s arm are all in `toolExecutor.ts`, the same file `normalizeEol` is
+module-private to — substituting any of them for `normalizeEol(x).text` changes nothing about
+what gets transformed, and discarding the unused `.changed` field is not awkward: it is already
+the established idiom at `apply_patch`'s own FIND normalization
+(`stripReadFilePrefix(normalizeEol(block.find).text)`). `patchCorrectnessValidator.ts` cannot do
+the same today — it lives in `src/engine/`, a different module, and `normalizeEol` is not
+exported. Unifying that sixth copy needs exporting the helper first, a separate decision from
+substituting the other five.
+
+**What would close it:** point the five in-file copies at `normalizeEol` directly — a mechanical
+substitution, zero behavior change, verified above rather than assumed. Separately, decide
+whether `normalizeEol` should be exported so `patchCorrectnessValidator.ts` can share it too, or
+whether that copy's different purpose (defensive heuristic normalization, not match-or-write
+correctness) is reason enough to leave it independent.
+
+**Where the code lives:** `normalizeEol` and the five in-file copies are all in `toolExecutor.ts`
+— `apply_patch`'s search target, `multi_edit`'s find/replace/content, and `write_file`'s
+re-encode arm, each in its own tool's handler. The sixth is in
+`src/engine/patchCorrectnessValidator.ts`.
 
 ## 23. `resolveEnvelopeId`'s prefix match is silent-arbitrary, and it runs before the session lookup this pass makes deterministic
 
@@ -1434,11 +1457,36 @@ without this fix landing alongside them.
 **Where the code lives:** `hasTrailingNewline` is in `toolExecutor.ts`, module-private, with its
 two call sites in `apply_patch`'s handler, same file.
 
+## 45. An unrelated double-escaped pattern sits near item 22's genuine copy — unverified, not asserted as a defect
+
+**What it is:** inside `layer1LexicalIntegrity`'s `localizedValidationMode` branch — a sibling
+function to `layer2LanguageHeuristics`, which holds item 22's genuine copy, in the same file —
+computing `scanTarget`'s line window uses
+`input.updatedContent.replace(/\\r\\n/g, "\\n").split("\\n")`: a regex matching the literal
+four-character sequence `\`,`r`,`\`,`n` as text, and a split on the literal two-character string
+`\n`, neither of which matches a real carriage-return or newline byte. Found by proximity while
+establishing item 22's recount — this is not a copy of item 22's transformation, and was not
+sought out by design review of this function.
+
+**Deliberately not asserted as a defect — established, not investigated.** Whether this is wrong
+depends on what `input.updatedContent` actually holds at this specific call site: if it is ever
+itself an escaped-text representation rather than real source content, the pattern could be
+correct for its own input. That trace was not run. Recorded rather than fixed or dismissed,
+matching this document's own standard for findings surfaced in passing.
+
+**What would close it:** trace `input.updatedContent`'s actual shape at this call site — real
+file content, in which case this pattern never matches anything and the line-window logic
+silently degrades to operating on the whole string, or something already escaped, in which case
+it may be correct as written.
+
+**Where the code lives:** inside `layer1LexicalIntegrity`'s `localizedValidationMode` branch, in
+`patchCorrectnessValidator.ts`, `src/engine/`.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 44 to find out which ones still need something. No index of
+reader the trouble of reading all 45 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -1451,9 +1499,9 @@ first (17): 2 (after 16), 7, 10, 12, 13, 15 (after 2), 16, 17, 18, 22, 23, 25, 2
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (2): 1, 4
 
-**Neither — a structural fact recorded, with no fix proposed** (8): 3, 5, 9, 11, 19, 27, 38, 43
+**Neither — a structural fact recorded, with no fix proposed** (9): 3, 5, 9, 11, 19, 27, 38, 43, 45
 
-Items 1, 2, 12, 16, and 18 are partially closed or corrected; the classification above covers
+Items 1, 2, 12, 16, 18, and 22 are partially closed or corrected; the classification above covers
 only the portion still open, not the whole entry.
 
 ---
@@ -1707,3 +1755,35 @@ trusting a green result from it alone. A battery built with variety (here, tests
 answers span all three of `"crlf"`/`"lf"`/`"cr"`) still proves the mutation even when one specific
 test can't, but that has to be confirmed by running the whole battery, not assumed from which
 test the mutation was written to target.
+
+## A ninth pattern, beside the seventh: a ledger entry that prescribes a check does not cause the check to happen
+
+The seventh pattern's own second incident already names this shape once: "having just read the
+pattern describing this exact mistake did not prevent it — only the habit of checking a revert's
+result did." This is the same lesson, in a different domain — not git reverts during mutation
+testing, but establish passes during investigation.
+
+Item 22 prescribed its own mitigation in plain language: "recorded so a future normalization
+change to one copy prompts a check of the others." `da3db4be` was exactly that change — it
+touched two of item 22's own named copies. Three establish passes and two implementation commits
+followed across the same investigation, all tracing `dominant`'s consumers exhaustively, and item
+22 itself was read and cited more than once in that work. None of those passes searched outside
+`toolExecutor.ts` for other copies of the transformation item 22 is about. The check item 22
+asked for ran for the first time only in a dedicated pass afterward, and found a copy — in
+`patchCorrectnessValidator.ts` — that no prior pass in this investigation knew existed.
+
+**The lesson is not "the establish passes were careless."** Each of them did real, verified work
+inside its own stated scope; the `dominant`-consumer trace was exhaustive *for `dominant`*. The
+lesson is narrower and less comfortable: an entry can be read, cited, and still not fire, because
+nothing connects "I am changing this line" to "check what this ledger already says about lines
+like it." Reading the prescription is not the same event as executing it, and no pass in this
+document's own history noticed the gap between the two until this one.
+
+**Not a numbered item, on purpose.** Item 36 is the closest-looking sibling — both are about the
+ledger prescribing something nothing enforces — but item 36 is a document-mechanics problem with
+a script-shaped fix: compare the snapshot's bucket lists against the headings, mechanically,
+every time. This has no script-shaped fix. Nothing can mechanically verify "did the establish
+pass search outside the file it was editing" — that is a question about what a reader did with an
+open-ended prescription, not a comparison between two closed sets. It belongs with the patterns
+that record lessons about this document's own process, not with the numbered items that record
+closable facts about the codebase.
