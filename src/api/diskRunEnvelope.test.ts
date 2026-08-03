@@ -343,7 +343,7 @@ describe("reconcileEnvelopeStaging", () => {
   });
 
   // Deliberately does not write to disk itself — a helper that writes as a side effect
-  // is a trap (see the R2 fix above): a caller who writes BEFORE calling this gets
+  // is a trap (see the R2 test below): a caller who writes BEFORE calling this gets
   // silently clobbered. Every caller that needs real disk content writes it explicitly,
   // in the order it controls.
   function makeEntry(relPath: string, baseContent: string | null, stagedContent: string) {

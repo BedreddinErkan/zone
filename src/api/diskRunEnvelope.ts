@@ -12,9 +12,9 @@ import type { AgentLoopResult } from "../llm/agentLoop.js";
 // ---- Schema ----------------------------------------------------------------
 
 export interface StagedEntryEnvelope {
-  /** Repo-relative path (display + reconciliation key). */
+  /** Repo-relative path — display only, interpolated into dropNotes messages; absPath is the reconciliation key. */
   path: string;
-  /** Absolute path as staged — re-seeds the staging map directly. */
+  /** Absolute path as staged — re-seeds the staging map directly, and is the reconciliation key reconcileEnvelopeStaging actually compares on. */
   absPath: string;
   /** sha256 of the file's content when it first entered staging (the base). "" for new files. */
   baseHash: string;
@@ -77,7 +77,7 @@ export interface RunEnvelope {
   failureHistory: Array<{ path: string; records: FailureRecordLite[] }>;
   /** Staged content (full file content per path; entries >1MB are omitted). */
   staging: StagedEntryEnvelope[];
-  /** Paths already flushed to disk by persistStagingOnError — suppress drop-notes for these (R2). */
+  /** Every file this run persisted a mutation to (agentLoop.ts's result.filesModified) — suppress drop-notes for these (R2). */
   flushedPaths: string[];
   /**
    * Repo-relative paths created direct-to-disk this run via write_file's new-file
