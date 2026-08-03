@@ -1058,54 +1058,24 @@ test eventually closes item 33, below.
 **Where the code lives:** the fixed test and the no-longer-writing `makeEntry` helper are both in
 `diskRunEnvelope.test.ts`, inside `describe("reconcileEnvelopeStaging", ...)`.
 
-## 30. `flushedPaths`'s doc names one source; the stamped value is broader
+## 30. Closed — the doc now names what's actually stamped
 
-**What it is:** the field's doc comment reads "Paths already flushed to disk by
-`persistStagingOnError` — suppress drop-notes for these (R2)." The value actually stamped is
-`result.filesModified`, passed straight through by `agentLoop.ts`'s durable-resume block (the
-non-natural-completion branch) into `stampEnvelopeStatus`. `filesModified` accumulates across the
-whole run from every write tool's evidence of persisting mutation (ledger item 14) — not only
-`persistStagingOnError`'s own early-exit flush, but also files a run completed through
-`finalizeStaging` on other exit paths and direct-to-disk new-file creates. The set the doc names
-is a strict subset of the set the code actually stamps.
+`bc393ead` reworded `flushedPaths`'s doc comment (`diskRunEnvelope.ts`) to name
+`result.filesModified` and what it means, rather than `persistStagingOnError`. Closing this
+re-traced the claim through `filesStaged` fresh rather than trusting this entry's own summary —
+confirmed still true after `3fa62c4a`, unchanged since. Two nuances found along the way were
+deliberately left out of the field doc: `revert_patch` removes a path from `filesModified` on
+revert, and `Task` subagent results merge into the same set — both consistent with "persisted
+mutation," and re-deriving `filesModified`'s own contract isn't this field's doc's job.
 
-**Why this matters:** the semantics that landed are arguably better than the doc — suppressing
-drop-notes for anything the run itself is known to have written, not just one code path's flush —
-but a future reader deciding what belongs in this array, or debugging why a drop-note did or
-didn't fire, will trust the doc's narrower claim and reason from the wrong set.
+## 31. Closed — `absPath` gained the role, `path` didn't just lose one
 
-**What would close it:** reword the doc comment to name `result.filesModified` (or describe it as
-"every file this run persisted a mutation to"), dropping the `persistStagingOnError`-specific
-framing.
-
-**Where the code lives:** the doc comment is on the `flushedPaths` field of the `RunEnvelope`
-interface in `diskRunEnvelope.ts`; the actual stamped value is computed at the
-`stampEnvelopeStatus(...)` call inside `agentLoop.ts`'s durable-resume block, the branch taken on
-every exit except `natural_completion` with `success`.
-
-## 31. `StagedEntryEnvelope.path` is documented as the reconciliation key; the code reconciles on `absPath`
-
-**What it is:** the schema's doc comment reads "Repo-relative path (display + reconciliation
-key)." `reconcileEnvelopeStaging` never reads `entry.path` for any reconciliation decision — every
-comparison (`fsSync.existsSync`, the base-hash check via `readFileSync`, the `restored` map's own
-key) runs against `entry.absPath`. `entry.path` appears in the function exactly once, interpolated
-into a human-readable `dropNotes` message string. The doc calls it a reconciliation key; the code
-uses it only for display, exactly as `absPath`'s own doc comment ("Absolute path as staged —
-re-seeds the staging map directly") independently claims for itself.
-
-**Why this matters:** plausibly the original source of the format mismatch `ab76002f` fixed. A
-comparison written against "the reconciliation key," as the schema itself names it, would
-reasonably be written against `path` — the field carrying repo-relative paths, the same format
-`flushedPaths` turned out to be stamped in — not `absPath`. Recorded as the schema documenting a
-contract its own primary consumer doesn't follow.
-
-**What would close it:** reword `path`'s doc to name it display-only (matching what
-`reconcileEnvelopeStaging` actually does with it), and move "reconciliation key" to `absPath`'s
-own doc comment, where the behavior actually lives.
-
-**Where the code lives:** both doc comments are on `StagedEntryEnvelope`'s `path` and `absPath`
-fields in `diskRunEnvelope.ts`; the usage they contradict is `reconcileEnvelopeStaging`'s own
-body, same file.
+`bc393ead` moved "reconciliation key" to `absPath`'s doc comment and left `path`'s accurately
+narrow — display only (`diskRunEnvelope.ts`, `StagedEntryEnvelope`). The count that settled which
+field actually deserved the claim: every reconciliation decision in `reconcileEnvelopeStaging`
+reads `absPath`; `path` appears exactly three times, all inside `dropNotes` message strings. The
+two roles — "re-seeds the staging map directly" and "reconciliation key" — coexist on `absPath`;
+nothing was removed, only relocated to the field that actually has it.
 
 ## 32. A `version` bump would silently drop every existing envelope
 
@@ -1195,18 +1165,34 @@ comment — no third site.
 `describe("reconcileEnvelopeStaging", ...)`, on the two `flushedSet`-suppression tests and the
 `makeEntry` helper they call.
 
-## 35. A comment's directional reference points the wrong way, and never pointed the right one
+## 35. Closed — named the test instead of dropping the direction
 
-`makeEntry`'s doc comment says "(see the R2 fix above)"; the R2 test sits textually *below* it.
-Nothing it claims is false — it's accurate about the fix, wrong only about direction. Not the
-staleness item 34 was about: a line number decays as a file changes around it; a comment goes
-stale when the code it describes changes underneath it; this one was never right, because
-"above" described the order things happened in a commit, not their order on the page.
+`bc393ead` changed `makeEntry`'s doc comment (`diskRunEnvelope.test.ts`) from "see the R2 fix
+above" to "see the R2 test below." Naming beat dropping the directional word: a parenthetical
+pointing nowhere is less useful than a wrong-but-present one, and "the R2 fix" was a historical
+idea with no single findable spot in the file, while "the R2 test" is a concrete, greppable
+`it(...)` block. That's the one thing in this closure worth more than a line.
 
-**What would close it:** drop the directional word, or name the test instead of pointing at it.
+## 36. The status snapshot isn't mechanically checked against the ledger's own headings
 
-**Where the code lives:** `makeEntry`'s doc comment, `diskRunEnvelope.test.ts`, immediately above
-the helper's declaration inside `describe("reconcileEnvelopeStaging", ...)`.
+**What it is:** nothing compares the snapshot's bucket lists against the `Closed —` prefixes on
+the headings above it. The section's own caveat says it goes stale the moment any item closes;
+two updates in, that's still true and still unenforced — a closing pass that forgets the
+snapshot leaves the file silently self-contradicting, and a reader picking a next task from it
+would pick one that's actually done. This pass's own Change 2 verification (grep every heading,
+compare by hand against the snapshot's claim) is exactly the manual version of the check being
+proposed here.
+
+**What would close it:** a check that reads every `## N. ...` heading, classifies each by whether
+it starts with "Closed —", and compares that set against the snapshot's own "Closed" bucket —
+failing loudly on any mismatch.
+
+**No natural home exists for this today, which changes whether it's cheap.** Checked: `scripts/`
+holds only sweep/probe tooling; `package.json`'s scripts are build/test/sweep, nothing
+docs-related; no test in the repo reads `docs/*.md` programmatically; `eslint.config.mjs` is
+scoped to `**/*.ts` with no markdown rule; no markdownlint config; neither CI workflow
+references `docs/` or `.md` at all. This isn't a small addition to existing infrastructure — it's
+a new script or test file plus a new `package.json` entry, from nothing.
 
 ## Status snapshot — a partition, not a priority ordering
 
@@ -1218,11 +1204,10 @@ priority ordering" cautions against ranking by importance, which this section do
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (9): 6, 8, 14, 20, 24, 26, 29, 33, 34
+**Closed** (12): 6, 8, 14, 20, 24, 26, 29, 30, 31, 33, 34, 35
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (18): 2 (after 16), 7, 10, 12, 13, 15 (after 2), 16, 17, 18, 21, 22, 23, 25, 28, 30, 31,
-32, 35
+first (15): 2 (after 16), 7, 10, 12, 13, 15 (after 2), 16, 17, 18, 21, 22, 23, 25, 28, 32
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (2): 1, 4
 
