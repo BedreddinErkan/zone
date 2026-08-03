@@ -423,6 +423,34 @@ describe("reconcileEnvelopeStaging", () => {
     const { dropNotes } = reconcileEnvelopeStaging(env);
     expect(dropNotes).toHaveLength(0);
   });
+
+  it("suppresses drop-note for a repo-relative flushedPaths entry — the format production actually emits", () => {
+    const entry = makeEntry("flushed2.ts", "original", "staged");
+    // makeEntry writes baseContent to absPath internally — a write BEFORE calling it
+    // (as R2, above, does) is silently clobbered by that internal write, so disk ends
+    // up matching baseHash and reconcileEnvelopeStaging never reaches the flushedSet
+    // check at all (found via mutation 1 passing when it shouldn't have — traced and
+    // confirmed empirically, not assumed; R2 itself has the same latent issue,
+    // recorded for the ledger, not fixed here). The write simulating a post-stage
+    // flush must happen AFTER makeEntry, so it's what's actually on disk when
+    // reconcileEnvelopeStaging reads it.
+    writeFileSync(entry.absPath, "staged", "utf-8");
+    // Hash mismatch — but the relative path is in flushedPaths, the format item 14's
+    // filesStaged actually produces. repoPath must be the real tmpdir root, not
+    // makeEnvelope's own "/repo" default, or resolve() has nothing real to match.
+    const env = makeEnvelope({ repoPath: repoRoot, staging: [entry], flushedPaths: ["flushed2.ts"] });
+    const { dropNotes } = reconcileEnvelopeStaging(env);
+    expect(dropNotes).toHaveLength(0);
+  });
+
+  it("a flushedPaths entry for a different file does not suppress this file's own drop-note", () => {
+    const entry = makeEntry("bar2.ts", "original content", "staged content");
+    writeFileSync(entry.absPath, "someone edited this!", "utf-8");
+    const env = makeEnvelope({ repoPath: repoRoot, staging: [entry], flushedPaths: ["other-file.ts"] });
+    const { dropNotes } = reconcileEnvelopeStaging(env);
+    expect(dropNotes).toHaveLength(1);
+    expect(dropNotes[0]).toMatch(/bar2\.ts.*changed/);
+  });
 });
 
 // ---- deriveCreatedPaths -----------------------------------------------------

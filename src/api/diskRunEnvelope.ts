@@ -493,7 +493,11 @@ function sha256hex(s: string): string {
 export function reconcileEnvelopeStaging(env: RunEnvelope): ReconcileResult {
   const restored = new Map<string, string>();
   const dropNotes: string[] = [];
-  const flushedSet = new Set(env.flushedPaths);
+  // flushedPaths is stamped with repo-relative paths (item 14: filesStaged's own
+  // normalization), but entries here are compared against absolute entry.absPath.
+  // resolve() is idempotent for an already-absolute input, so this also keeps any
+  // pre-existing envelope's absolute-format entries working unchanged.
+  const flushedSet = new Set(env.flushedPaths.map((p) => resolve(env.repoPath, p)));
 
   for (const entry of env.staging) {
     const existsNow = fsSync.existsSync(entry.absPath);
