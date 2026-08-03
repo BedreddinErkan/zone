@@ -948,27 +948,33 @@ to a fresh, not-resumed state that matches what actually happened — verified, 
 `if (envResumeId)` envelope-resume block that `_composeResumeMessage`'s own reconciliation
 already accounts for.
 
-## 26. A second, parallel test surface for Step 9 exists and isn't cross-referenced
+## 26. Closed — both Step 9 test files now name what the other covers
 
-**What it is:** `handleToolResult/parity.test.ts` tests `handleToolResult`'s Step 9 behavior
-alongside `handleToolResult.test.ts` — two separate files asserting overlapping claims about the
-same function. Neither the establish pass on item 14 nor a dedicated pre-implementation search for
-Step 9's test coverage surfaced the second file; only running the full suite after the fix
-landed did, when it broke there too.
+**What it was:** `handleToolResult.test.ts` and `parity.test.ts` both asserted on Step 9
+(`handleToolResult`'s `filesModified` population from `result.filesStaged`) with no
+cross-reference between them — a change to one could silently leave the other asserting the
+pre-change contract, exactly what happened during the shape-B pass.
 
-**Why this matters:** someone changing Step 9's behavior who greps for its test coverage, reads
-one file, updates its assertions, and reasonably believes the change is fully tested will miss
-the other file entirely — its own assertions keep asserting the pre-change contract, silently.
-That is exactly what happened during the shape-B pass: two tests in `parity.test.ts` broke
-alongside `handleToolResult.test.ts`'s own two, discovered only because the full-suite run is
-mandatory in this session's own process, not because either file pointed at the other.
+**The overlap, established concretely, not assumed (`90d39f5a`):** `handleToolResult.test.ts`'s
+`describe("filesModified", ...)` holds nine tests. `parity.test.ts` has exactly two
+Step-9-relevant describes, and both are near-duplicates of two of the nine — same tool, same
+fixture literal, same assertion shape, differing only in output string and title wording.
+`multi_edit` (all three variants), both negative cases (`filesStaged` absent; `success:false` but
+`filesStaged` present), and the `toolCallLog`-threading case exist in `handleToolResult.test.ts`
+alone.
 
-**What would close it:** a one-line pointer comment in each file naming the other as covering the
-same function from a different angle, or merging the two files outright so there is exactly one
-place to look.
+**Merging was considered and rejected, on a read reason rather than an assumed one.**
+`parity.test.ts`'s own header states a distinct purpose — locking in behavioral parity against a
+specific old inline code path in `agentLoop.ts`, not general functional coverage. Two of its
+tests happening to duplicate Step 9 assertions elsewhere doesn't make the file itself redundant;
+merging would blur that stated purpose for its other nine describes.
 
-**Where the code lives:** `src/llm/toolEventHandler/handleToolResult.test.ts` and
-`src/llm/toolEventHandler/parity.test.ts`, both testing `handleToolResult.ts`.
+**What landed:** a pointer in each file naming the other and what it covers, so a reader landing
+on either one knows which file to change for what, rather than "see also" with no substance.
+
+**Where the code lives:** `src/llm/toolEventHandler/handleToolResult.test.ts`'s
+`describe("filesModified", ...)` and `src/llm/toolEventHandler/parity.test.ts`'s two Step-9
+describes, both testing `handleToolResult.ts`.
 
 ## 27. `success` cannot identify which files `multi_edit` touched — not merely worse, structurally incapable
 
@@ -1164,34 +1170,42 @@ prove.
 **Where the code lives:** both guards are in `reconcileEnvelopeStaging`, `diskRunEnvelope.ts`; the
 two new tests are in `describe("reconcileEnvelopeStaging", ...)`, `diskRunEnvelope.test.ts`.
 
-## 34. Two test comments went stale with the code they describe
+## 34. Closed — both comments deleted, not rewritten, and why that's the right call
 
-**What it is:** both `flushedSet`-suppression tests' inline comments still describe `makeEntry`
-as writing to disk "internally" — `855bdbca` stripped that write entirely (the same commit that
-fixed the write-ordering defect these comments were originally explaining). One of the two
-additionally claims the repo-relative test's sibling ("R2") "has the same latent issue... not
-fixed here" — also stale, since `855bdbca` is the commit that fixed R2.
+**What it was:** both `flushedSet`-suppression tests' inline comments described `makeEntry` as
+writing to disk "internally," and one additionally called R2 unfixed — both false since
+`855bdbca`, which stripped the write and fixed R2 in the same commit.
 
-**The test-comment analogue of this document's own first closing-section pattern.** That pattern
-is about a citation going stale as the file around it changes; this is the same failure mode in a
-place the shape-reference convention doesn't reach, because the convention governs how *this
-document* cites code, not how a test comments on its own fixture. A comment can be accurate when
-written and invalidated by the very commit that makes it obsolete, exactly like a line number —
-and, exactly like a line number, nothing forces it to be revisited once the code it describes
-changes underneath it.
+**Why deletion, not correction (`90d39f5a`):** `makeEntry` performs zero disk I/O since
+`855bdbca` — traced precisely, not assumed: moving either test's own write to before the
+`makeEntry` call now produces an identical result, because there is nothing left inside
+`makeEntry` to clobber it or be clobbered by. The write-ordering concern both comments described
+doesn't have a corrected version to write; it has no successor at all. The helper's own doc
+comment already states the current, caller-writes contract once, correctly, at the one shared
+site every caller reads from — rewriting the two per-test comments would have duplicated that
+contract inaccurately rather than added anything a reader doesn't already get from the helper
+itself.
 
-**Why this matters:** a reader trusting these comments would reconstruct a fixture contract that
-no longer exists — that `makeEntry` writes, and that a pre-`makeEntry` write is what gets silently
-clobbered. Both are now false. Anyone extending this block by reading its comments rather than its
-current code would rebuild the exact trap item 29 closed.
+**The sweep, established rather than assumed:** `rg` across the whole ten-test block for every
+term either stale comment used found exactly the two known blocks plus that one accurate doc
+comment — no third site.
 
-**What would close it:** correct both comments to describe the current, caller-writes contract.
-Cheap — a few lines — and worth doing before someone writes a new test against the
-described-but-wrong one.
+**Where the code lives:** `src/api/diskRunEnvelope.test.ts`, inside
+`describe("reconcileEnvelopeStaging", ...)`, on the two `flushedSet`-suppression tests and the
+`makeEntry` helper they call.
 
-**Where the code lives:** both comments are in `diskRunEnvelope.test.ts`, inside
-`describe("reconcileEnvelopeStaging", ...)`, on the two `flushedSet`-suppression tests (nicknamed
-R2 and its repo-relative sibling).
+## 35. A comment's directional reference points the wrong way, and never pointed the right one
+
+`makeEntry`'s doc comment says "(see the R2 fix above)"; the R2 test sits textually *below* it.
+Nothing it claims is false — it's accurate about the fix, wrong only about direction. Not the
+staleness item 34 was about: a line number decays as a file changes around it; a comment goes
+stale when the code it describes changes underneath it; this one was never right, because
+"above" described the order things happened in a commit, not their order on the page.
+
+**What would close it:** drop the directional word, or name the test instead of pointing at it.
+
+**Where the code lives:** `makeEntry`'s doc comment, `diskRunEnvelope.test.ts`, immediately above
+the helper's declaration inside `describe("reconcileEnvelopeStaging", ...)`.
 
 ---
 
