@@ -1198,7 +1198,7 @@ a new script or test file plus a new `package.json` entry, from nothing.
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 35 to find out which ones still need something. No index of
+reader the trouble of reading all 36 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -1207,7 +1207,7 @@ first.
 **Closed** (12): 6, 8, 14, 20, 24, 26, 29, 30, 31, 33, 34, 35
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (15): 2 (after 16), 7, 10, 12, 13, 15 (after 2), 16, 17, 18, 21, 22, 23, 25, 28, 32
+first (16): 2 (after 16), 7, 10, 12, 13, 15 (after 2), 16, 17, 18, 21, 22, 23, 25, 28, 32, 36
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (2): 1, 4
 
