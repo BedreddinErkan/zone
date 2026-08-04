@@ -1560,7 +1560,11 @@ message alone that other files had already changed.
 (`checkPathBoundary`) before the first write, so a batch either fully proceeds or touches nothing
 at all. The rejection message names the specific offending path — it does not additionally state
 that nothing was applied; `success:false` plus an empty `filesStaged` imply it structurally, but
-the string itself doesn't say so. Both pre-existing in-loop checks (the one added when
+the string itself doesn't say so. `01f243de` closed that gap: all three copies of the message —
+the reachable pre-flight check and the two now-unreachable in-loop checks — were reworded
+identically to state it explicitly, rather than leaving the two dead ones on stale wording and
+repeating the near-identical-site divergence items 18 and 22 document. Both pre-existing in-loop
+checks (the one added when
 `checkPathBoundary` was first built, and the one inside `stagedWrite` itself) stay as defense in
 depth. With pre-flight validating the identical `abs`/`repoPath` before the loop starts, both are
 now unreachable through `multi_edit`'s public behavior — no test can exercise them, and none
