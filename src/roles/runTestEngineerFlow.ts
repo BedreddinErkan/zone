@@ -203,28 +203,6 @@ function deduplicatePlaywrightImport(content: string): string {
   );
 }
 
-function splitTestBlocks(content: string): { prefix: string; blocks: string[] } {
-  const normalized = normalizeTestContent(content);
-  const blockStartPattern = /^\s*test(?:\.each)?/gm;
-  const starts = [...normalized.matchAll(blockStartPattern)].map(
-    (match) => match.index ?? 0
-  );
-
-  if (starts.length === 0) {
-    return {
-      prefix: normalized,
-      blocks: [],
-    };
-  }
-
-  return {
-    prefix: normalized.slice(0, starts[0]),
-    blocks: starts.map((start, index) =>
-      normalized.slice(start, starts[index + 1] ?? normalized.length)
-    ),
-  };
-}
-
 function countTestBlocks(content: string): number {
   return (
     (content.match(/^\s*test\s*\(/gm) || []).length +
@@ -596,24 +574,6 @@ function buildValidationBlockedResult(input: {
     validationBlocked: true,
     debug: input.debug,
   };
-}
-
-function adjustConfidenceForWarnings(
-  confidence: number,
-  warnings: string[]
-): number {
-  if (!warnings.length) return confidence;
-
-  let cappedConfidence = Math.min(confidence, warnings.length > 1 ? 90 : 95);
-  const hasPlaceholderSelectorWarning = warnings.some((warning) =>
-    warning.toLowerCase().includes("placeholder selector")
-  );
-
-  if (hasPlaceholderSelectorWarning) {
-    cappedConfidence = Math.min(cappedConfidence, 80);
-  }
-
-  return cappedConfidence;
 }
 
 function hasRepoContextSelector(

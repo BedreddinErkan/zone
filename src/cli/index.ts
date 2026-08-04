@@ -50,7 +50,7 @@ import {
 import { runTestEngineerFlow } from "../roles/runTestEngineerFlow.js";
 import { runDataAnalystFlow } from "../roles/runDataAnalystFlow.js";
 import { checkConfidenceGate, renderConfidenceGateBlock } from "../core/confidenceGate.js";
-import { runHeadless, runHeadlessResume, runOneShotFromCli } from "./dispatch.js";
+import { runHeadless, runHeadlessResume } from "./dispatch.js";
 import { latestResumableEnvelope, resolveEnvelopeId } from "../api/diskRunEnvelope.js";
 import { parseTrustFlag } from "./config.js";
 const execFileAsync = promisify(execFile);

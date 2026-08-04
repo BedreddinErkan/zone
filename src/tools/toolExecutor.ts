@@ -274,10 +274,6 @@ export function truncateCommandOutput(output: string): {
   return { truncated, wasTruncated: true, originalLineCount: total };
 }
 
-function safeRelPath(rel: string): string {
-  return String(rel || "").replace(/^[\\/]+/, "");
-}
-
 /**
  * path-duplication Tur: agents sometimes pass absolute paths that already
  * include the repoPath prefix (e.g. "/home/bedo/zone-landing/app/global-error.tsx"
@@ -2643,7 +2639,11 @@ export async function executeTool(
           let decision: "approved" | "rejected" = "approved";
           let errorCodes: string[] = [];
           let rawStdout: string | null = null;
+          // item 13 follow-up: captured alongside rawStdout but never read — only rawStdout
+          // feeds parseTscErrorPreview below, so a checker that writes to stderr instead of
+          // stdout would have its error text silently unused here.
           let rawStderr: string | null = null;
+          void rawStderr;
           let checkerParsedErrors: ReturnType<typeof checker.parseErrors> = [];
           const tempPath = path.join(os.tmpdir(), `zone-tsc-${randomUUID()}${ext}`);
 

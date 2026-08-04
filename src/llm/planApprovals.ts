@@ -4,7 +4,6 @@
  * User chooses how to proceed before execution begins.
  */
 
-import crypto from "node:crypto";
 import { log } from "../utils/logger.js";
 
 export interface PlanReadyProposal {

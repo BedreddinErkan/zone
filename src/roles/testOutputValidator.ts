@@ -1,4 +1,3 @@
-import type { RepoFile } from "../types/project.js";
 import type { TestComplexity } from "./detectTestComplexity.js";
 
 export type ValidationDecision = "pass" | "preview_only" | "blocked";

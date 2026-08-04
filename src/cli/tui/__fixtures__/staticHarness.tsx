@@ -1,7 +1,6 @@
 import { render } from "ink-testing-library";
 import { render as inkRender } from "ink";
 import { EventEmitter } from "node:events";
-import React from "react";
 import { StoreProvider } from "../store.js";
 import { Transcript } from "../components/Transcript.js";
 import type { TranscriptEntry } from "../store.js";

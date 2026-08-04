@@ -340,11 +340,6 @@ function extractJsImportsWithSymbols(content: string): RawImport[] {
   return results;
 }
 
-// ─── Keep backward-compat path-only helper (used by Python extractor) ────────
-
-function extractJsImports(content: string): string[] {
-  return extractJsImportsWithSymbols(content).map((r) => r.spec);
-}
 
 // ─── Export/Python helpers (unchanged from original) ─────────────────────────
 
@@ -397,7 +392,7 @@ function extractPyImports(content: string, fromRel: string, fileSet: Set<string>
   return out;
 }
 
-function discoverEntryPoints(files: string[], fileSet: Set<string>): string[] {
+function discoverEntryPoints(fileSet: Set<string>): string[] {
   const found: string[] = [];
   for (const base of ENTRY_DIRS) {
     for (const name of ENTRY_NAMES) {
@@ -451,7 +446,7 @@ export async function buildDependencyGraph(
   const posixFiles = files.map(posix);
   const fileSet = fileSetFromList(posixFiles);
   const nodes = new Map<string, DependencyNode>();
-  const entryPoints = discoverEntryPoints(posixFiles, fileSet);
+  const entryPoints = discoverEntryPoints(fileSet);
 
   let analyzed = 0;
   for (const rel of posixFiles) {

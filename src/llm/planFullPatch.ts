@@ -4,7 +4,6 @@ import {
   buildEmptyModelResponseDetailsLine,
   extractResponsesApiOutputText,
   formatOpenAiThrownErrorPayload,
-  formatResponsesTextExtractionFailure,
   getModelName,
   logOpenAiResponseDebug,
 } from "./openaiClient.js";

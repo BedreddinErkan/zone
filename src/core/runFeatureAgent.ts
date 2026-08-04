@@ -40,9 +40,7 @@ import { validatePatchPlan } from "../patch/validatePatchPlan.js";
 import { logInfo, logSuccess, logWarn } from "../utils/logger.js";
 import {
   normalizePatchValidationIssues,
-  normalizeSchemaValidationIssues,
-  normalizePatchRiskWarnings,
-  normalizeArchitectureWarnings
+  normalizeSchemaValidationIssues
 } from "./normalizeIssues.js";
 
 const CONFIDENCE_WEIGHTS = {

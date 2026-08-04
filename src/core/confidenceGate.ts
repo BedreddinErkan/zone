@@ -40,11 +40,6 @@ const ROLE_RISK_DESCRIPTIONS: Record<string, string[]> = {
   ],
 };
 
-function getThreshold(role?: string): number {
-  if (!role) return THRESHOLDS.default;
-  return THRESHOLDS[role as keyof typeof THRESHOLDS] ?? THRESHOLDS.default;
-}
-
 export function computeEffectiveThreshold(input: ConfidenceGateInput): number {
   let base =
     THRESHOLDS[input.role as keyof typeof THRESHOLDS] ?? THRESHOLDS.default;

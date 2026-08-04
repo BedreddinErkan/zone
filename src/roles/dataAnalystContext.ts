@@ -1,4 +1,3 @@
-import path from "node:path";
 import type { RepoFile } from "../types/project.js";
 import type {
   DetectedDataSchema,

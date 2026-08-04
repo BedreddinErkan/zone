@@ -1,7 +1,5 @@
-import path from "node:path";
 import type {
   DependencyGraph,
-  DependencyNode,
   ImportedSymbolDetail,
 } from "./buildDependencyGraph.js";
 

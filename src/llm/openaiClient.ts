@@ -2,7 +2,6 @@ import OpenAI from "openai";
 import { getRequestUserApiKey } from "./openaiContext.js";
 import type { LLMProvider } from "./types.js";
 import { isValidModelId } from "./models.js";
-import { normalizeModelId } from "./modelRegistry.js";
 
 export type ZoneInferenceMode = "hosted" | "local";
 

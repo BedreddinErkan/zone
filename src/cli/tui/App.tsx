@@ -1,4 +1,4 @@
-import { Box, Text, useInput, useApp } from "ink";
+import { Box, useInput, useApp } from "ink";
 import { useEffect, useRef, type Dispatch } from "react";
 import { StoreProvider, useStore } from "./store.js";
 import { useAgentEvents } from "./hooks/useAgentEvents.js";

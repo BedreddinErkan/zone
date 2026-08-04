@@ -20,7 +20,7 @@ import { applyStdoutInterception, applyStderrInterception } from "./stdoutShield
 import type { LlmPatchProgressUpdate } from "../../core/agentLifecycleEvents.js";
 import { loadDiskTrust, diskTrustPrefixes } from "../../api/diskTrust.js";
 import { saveSession, saveSessionSync, pruneOldSessions, loadLastSession, loadSessionById, type DiskSession } from "../../api/diskSessions.js";
-import { latestResumableEnvelope, listResumableEnvelopes, stampEnvelopeStatus, buildResumeContextBlock, reconcileEnvelopeStaging, envelopeKeyFor } from "../../api/diskRunEnvelope.js";
+import { latestResumableEnvelope, listResumableEnvelopes, stampEnvelopeStatus, envelopeKeyFor } from "../../api/diskRunEnvelope.js";
 import { emitAskUserRefused } from "../../llm/loopTelemetry.js";
 import { buildResumeFlowInput } from "../dispatch.js";
 import { loadDiskModel, type DiskModelSettings } from "../../api/diskModel.js";

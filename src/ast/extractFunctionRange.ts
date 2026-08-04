@@ -65,7 +65,6 @@ function indexOfUnescapedBraceOpen(line: string, fromIndex = 0): number {
 
 function scanFunctionEnd(
   lines: string[],
-  startLineIndex: number,
   openBraceLineIndex: number,
   openBraceCharIndex: number
 ): { endLineIndex: number; endCharIndex: number } | null {
@@ -204,7 +203,7 @@ export function extractFunctionRanges(
           if (!found) continue;
         }
 
-        const end = scanFunctionEnd(lines, li, openBraceLineIndex, openBraceCharIndex);
+        const end = scanFunctionEnd(lines, openBraceLineIndex, openBraceCharIndex);
         if (!end) continue;
         const endChar = lineOffsets[end.endLineIndex] + end.endCharIndex;
         const content = normalized.slice(lineOffsets[li], endChar);
@@ -269,7 +268,7 @@ export function extractFunctionRanges(
           continue;
         }
 
-        const end = scanFunctionEnd(lines, li, li, openBraceIdx);
+        const end = scanFunctionEnd(lines, li, openBraceIdx);
         if (!end) continue;
         const endChar = lineOffsets[end.endLineIndex] + end.endCharIndex;
         const content = normalized.slice(lineOffsets[li], endChar);
@@ -299,7 +298,7 @@ export function extractFunctionRanges(
         const openBraceIdx = line.indexOf("{");
         if (openBraceIdx < 0) continue;
 
-        const end = scanFunctionEnd(lines, li, li, openBraceIdx);
+        const end = scanFunctionEnd(lines, li, openBraceIdx);
         if (!end) continue;
         const startChar = lineOffsets[li] + line.indexOf(name);
         const endChar = lineOffsets[end.endLineIndex] + end.endCharIndex;

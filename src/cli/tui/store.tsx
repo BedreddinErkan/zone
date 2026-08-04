@@ -1,9 +1,6 @@
 import { createContext, useContext, useReducer, type Dispatch } from "react";
 import { buildInitialState, reducer } from "./store-core.js";
-import type { StoreState, StoreAction, TranscriptEntry, TuiMode } from "./store-core.js";
-import type { DiskModelSettings } from "../../api/diskModel.js";
-import type { UserCommand } from "./userCommands.js";
-import type { UserHooksConfig } from "../../api/diskHooks.js";
+import type { StoreState, StoreAction } from "./store-core.js";
 
 export * from "./store-core.js";
 

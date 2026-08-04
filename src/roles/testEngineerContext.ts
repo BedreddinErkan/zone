@@ -149,9 +149,13 @@ function detectTestFiles(
   }
 }
 
+// item 13 follow-up: framework is unused — this checks every recognized framework's config
+// pattern unconditionally, unlike sibling detectTestFiles/detectPageObjects which do branch on
+// it. Ambiguous whether that's deliberate (report any test-config file as context) or a bug
+// (should filter to just the detected framework's own pattern) — not resolved here.
 function detectConfigFiles(
   files: RepoFile[],
-  framework: DetectedTestFramework
+  _framework: DetectedTestFramework
 ): RepoFile[] {
   if (!Array.isArray(files)) return [];
   return files.filter(

@@ -119,20 +119,6 @@ function hasUploadGuardAlready(fn: t.FunctionDeclaration): boolean {
   return t.isBooleanLiteral(cons.argument) && cons.argument.value === false;
 }
 
-function insertUploadNullGuard(fn: t.FunctionDeclaration): boolean {
-  if (!fn.params || fn.params.length === 0) return false;
-  const p0 = fn.params[0];
-  if (!t.isIdentifier(p0) || p0.name !== "upload") return false;
-  if (hasUploadGuardAlready(fn)) return false;
-
-  const guard = t.ifStatement(
-    t.unaryExpression("!", t.identifier("upload")),
-    t.returnStatement(t.booleanLiteral(false))
-  );
-  fn.body.body.unshift(guard);
-  return true;
-}
-
 function removeStrayOneCharIdentifierStatements(ast: t.File): { removed: number } {
   let removed = 0;
   traverse(ast, {

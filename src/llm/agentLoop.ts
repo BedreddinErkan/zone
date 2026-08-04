@@ -2,11 +2,10 @@
   extractResponsesApiOutputText,
   getModelName,
 } from "./openaiClient.js";
-import { normalizeModelId } from "./modelRegistry.js";
 import { createLLMClient } from "./factory.js";
 import { getRequestContext, withRequestContext } from "./openaiContext.js";
 import { readProjectMemoryBlock } from "../memory/projectMemory.js";
-import { log, debugLog, errorLog } from "../utils/logger.js";
+import { log, debugLog } from "../utils/logger.js";
 import { buildVerifyDiagnostic } from "../core/buildVerifyDiagnostic.js";
 import { maybeExpandScopeForVerifyDiagnostic } from "../tools/scopeGuard.js";
 import { requestEditApproval } from "../api/editApprovals.js";
@@ -15,7 +14,7 @@ import { buildRestageSeedBlock } from "../core/fileDiff.js";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { CHAT_TOOLS, READ_ONLY_TOOLS, ZONE_TOOLS } from "../tools/toolDefinitions.js";
+import { CHAT_TOOLS, ZONE_TOOLS } from "../tools/toolDefinitions.js";
 import {
   resetSubagentCallCount,
   type SubagentTokenUsage,
@@ -62,10 +61,6 @@ import {
   type RunEnvelope,
   type EnvelopeStatus,
 } from "../api/diskRunEnvelope.js";
-import {
-  buildApplyRolledBackMessage,
-  parseTscErrorPreview,
-} from "./applyRollbackFeedback.js";
 import { validateTodoWriteArgs } from "../tools/todoWriteValidate.js";
 import {
   executeTool,
@@ -129,7 +124,6 @@ import type { VerificationReason } from "./verification/verificationReason.js";
 import {
   selectVerificationCommand,
   runStagingVerification,
-  buildVerificationWarningsMessage,
   finalizeStaging,
   inferVerificationFromLog,
   validateUnrelatedClaim,
@@ -482,28 +476,6 @@ export const TOKEN_BUDGET_MID_WARN = 0.50;
 function cleanTokenNumber(value: unknown): number {
   const n = Number(value);
   return Number.isFinite(n) && n > 0 ? n : 0;
-}
-
-function extractTokenUsageForBudget(rawUsage: unknown): Omit<SubagentTokenUsage, "perIter"> {
-  if (!rawUsage || typeof rawUsage !== "object") {
-    return { input: 0, output: 0, cached: 0, total: 0 };
-  }
-  const usage = rawUsage as Record<string, unknown>;
-  const promptTokenDetails =
-    usage.prompt_tokens_details && typeof usage.prompt_tokens_details === "object"
-      ? (usage.prompt_tokens_details as Record<string, unknown>)
-      : null;
-  const input = cleanTokenNumber(usage.prompt_tokens ?? usage.input_tokens);
-  const output = cleanTokenNumber(usage.completion_tokens ?? usage.output_tokens);
-  const cached = cleanTokenNumber(
-    promptTokenDetails?.cached_tokens ?? usage.cache_read_input_tokens
-  );
-  return {
-    input,
-    output,
-    cached,
-    total: input + output,
-  };
 }
 
 function getZoneToolName(tool: (typeof ZONE_TOOLS)[number]): string {
@@ -2272,7 +2244,11 @@ async function runAgentLoopScoped(input: AgentLoopInput, stats: LoopRunStats): P
   let rollbackCount = 0;
   let antiThrashStage1Fired = false;
   let antiThrashStage1FiredAtIter = -1;
+  // item 13 follow-up: written at two sites below, never read — its 3 sibling anti-thrash
+  // trackers (Fired/FiredAtIter/FilesModifiedAtStage1) are all read; this one isn't compared
+  // against anything.
   let antiThrashStage1Pattern = "";
+  void antiThrashStage1Pattern;
   let antiThrashFilesModifiedAtStage1 = 0;
   const recentVerifyKeySets: ErrorKeySnapshot[] = [];
   const noProgressBaselines: { tsc: Set<string> | null; test: Set<string> | null } = { tsc: null, test: null };

@@ -21,14 +21,6 @@ function normalizeLineForMatch(line: string): string {
   return normalizeTrailingComma(collapseSpaces(String(line || "").trim()));
 }
 
-function normalizeTextForMatch(text: string): string {
-  const norm = normalizeNewlines(String(text || ""));
-  return norm
-    .split("\n")
-    .map((l) => normalizeLineForMatch(l))
-    .join("\n")
-    .trim();
-}
 
 function estimateChangedLines(find: string, replace: string): number {
   const a = normalizeNewlines(find).split("\n");

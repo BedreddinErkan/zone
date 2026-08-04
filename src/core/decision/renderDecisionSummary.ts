@@ -4,8 +4,7 @@ import type {
 } from "./decideExecutionMode.js";
 import type {
   SavedAgentResult,
-  ScoredRisk,
-  ValidationIssue
+  ScoredRisk
 } from "../../types/agent.js";
 import { buildDecisionExplanation } from "./buildDecisionExplanation.js";
 import { buildSavedRecommendation } from "../result/buildSavedRecommendation.js";
@@ -80,13 +79,6 @@ export function renderDecisionSummary(
 
   return lines.join("\n");
 }
-
-function formatIssueSeverity(severity: ValidationIssue["severity"]): string {
-  if (severity === "error") return "ERROR";
-  if (severity === "warning") return "WARNING";
-  return "INFO";
-}
-
 
 export function renderSavedAgentResultSummary(
   result: SavedAgentResult

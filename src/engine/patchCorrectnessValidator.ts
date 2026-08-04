@@ -52,82 +52,6 @@ function issue(input: IssueFactoryInput): PatchCorrectnessIssue {
   };
 }
 
-function normalizeWhitespace(input: string): string {
-  return input.replace(/\r\n/g, "\n").replace(/[ \t]+/g, " ").trim();
-}
-
-function stripCommentsForComparison(input: string): string {
-  // Best-effort comment stripping for normalization. This intentionally does NOT
-  // attempt to parse every edge case; it only needs to be stable/deterministic.
-  const s = input.replace(/\r\n/g, "\n");
-  let out = "";
-  let mode: "code" | "single" | "double" | "template" | "line" | "block" =
-    "code";
-  let escaped = false;
-
-  for (let i = 0; i < s.length; i += 1) {
-    const ch = s[i] ?? "";
-    const next = s[i + 1] ?? "";
-    const chCode = ch ? ch.charCodeAt(0) : -1;
-    const isAsciiSingleQuote = chCode === 39; // '
-    const isAsciiDoubleQuote = chCode === 34; // "
-    const isAsciiBacktick = chCode === 96; // `
-
-    if (mode === "line") {
-      if (ch === "\n") {
-        mode = "code";
-        out += "\n";
-      }
-      continue;
-    }
-    if (mode === "block") {
-      if (ch === "*" && next === "/") {
-        mode = "code";
-        i += 1;
-      }
-      continue;
-    }
-
-    if (mode === "single" || mode === "double" || mode === "template") {
-      out += ch;
-      if (escaped) {
-        escaped = false;
-        continue;
-      }
-      if (ch === "\\") {
-        escaped = true;
-        continue;
-      }
-      if (mode === "single" && isAsciiSingleQuote) mode = "code";
-      if (mode === "double" && isAsciiDoubleQuote) mode = "code";
-      if (mode === "template" && isAsciiBacktick) mode = "code";
-      continue;
-    }
-
-    // mode === "code"
-    if (ch === "/" && next === "/") {
-      mode = "line";
-      i += 1;
-      continue;
-    }
-    if (ch === "/" && next === "*") {
-      mode = "block";
-      i += 1;
-      continue;
-    }
-    out += ch;
-    if (isAsciiSingleQuote) mode = "single";
-    if (isAsciiDoubleQuote) mode = "double";
-    if (isAsciiBacktick) mode = "template";
-  }
-
-  return out;
-}
-
-function normalizeForSanityCompare(input: string): string {
-  return normalizeWhitespace(stripCommentsForComparison(input));
-}
-
 function fastDiffCounts(before: string, after: string): {
   addedLines: number;
   removedLines: number;
@@ -943,9 +867,6 @@ function scanDelimitersWithDiagnostics(src: string): DelimiterScanResult {
 }
 
 function layer0DiffSanity(input: PatchCorrectnessInput): PatchCorrectnessIssue[] {
-  const normalizedBefore = normalizeForSanityCompare(input.originalContent);
-  const normalizedAfter = normalizeForSanityCompare(input.updatedContent);
-
   // Only treat as a no-op when the patch truly changed zero lines.
   // Normalization can collapse whitespace/comments and make legitimate additive-only patches
   // appear identical, so guard with a raw line-diff check.
@@ -1345,7 +1266,7 @@ function jsxTagBalanceWarn(
     if (m.index != null) selfClosing.add(m.index);
   }
 
-  for (const m of s.matchAll(/<\/([A-Za-z][\w:-]*)\s*>/g)) {
+  for (const _m of s.matchAll(/<\/([A-Za-z][\w:-]*)\s*>/g)) {
     closeCount += 1;
   }
 
@@ -1547,6 +1468,11 @@ export function validatePatchCorrectness(
   // ── Minimal safe patch override ─────────────────────────────────────────
   // If a patch is very small and does not worsen delimiter counts, allow it even if
   // heuristics like broken_import_line fire on an already-broken file outside the import region.
+  // item 13 follow-up: only touchesImport actually gates the override below — the size/delimiter
+  // half this comment promises was never wired in. Wiring it would newly block some patches that
+  // are downgraded to a warning today, so it's deferred as a behavior-change decision, not fixed
+  // here. blockingCodes was likely meant to feed the debugLog call below (which hardcodes a
+  // single-element array instead) — folded into the same deferral.
   const diffCountsFinal = fastDiffCounts(input.originalContent, input.updatedContent);
   const beforeCountsFinal = analyzeDelimiterCounts(input.originalContent);
   const afterCountsFinal = analyzeDelimiterCounts(input.updatedContent);
@@ -1557,6 +1483,9 @@ export function validatePatchCorrectness(
   });
 
   const blockingCodes = blocking.map((b) => b.code);
+  void diffCountsFinal;
+  void noDelimiterRegression;
+  void blockingCodes;
   const hasBrokenImport = blocking.some((b) => b.code === "broken_import_line");
   if (hasBrokenImport && !touchesImport) {
     const ignored = blocking.filter((b) => b.code === "broken_import_line");

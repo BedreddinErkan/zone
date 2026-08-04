@@ -65,7 +65,6 @@ import {
   type VerificationReason,
 } from "../llm/agentLoop.js";
 import { resolveAgentPath } from "../tools/toolExecutor.js";
-import { stripVerificationTag } from "../llm/verification/index.js";
 import {
   isPlanOrchestrationEnabled,
   buildStepTask,
@@ -131,11 +130,6 @@ import {
 import { indexRepoFiles } from "../embeddings/indexRepository.js";
 import { logger, debugLog, errorLog, log } from "../utils/logger.js";
 import { attachRunIdentity } from "../llm/openaiContext.js";
-import { resolveTierLimits, type TierLimits } from "../llm/tierLimits.js";
-import {
-  requestRevisionApproval,
-  type RevisionDecision,
-} from "../llm/revisionApprovals.js";
 import { buildToolCallPatch } from "./toolCallPatch.js";
 import { toolCallIdentifyingArg } from "./toolCallIdentifyingArg.js";
 
@@ -887,10 +881,6 @@ function resolveExplicitTarget(
   return null;
 }
 
-function parseExplicitTargetFileLineFromTask(task: string): string | null {
-  return extractExplicitTarget(task);
-}
-
 function findRepoFileByExplicitTarget(
   allFiles: RepoFile[],
   explicitTargetPath: string | null
@@ -1146,8 +1136,6 @@ const CRITICAL_UI_ANCHORS = [
   "patch preview",
 ];
 
-const DEVELOPER_VAGUE_TASK_WARNING =
-  "[VAGUE_TASK] Task is too vague to generate a reliable patch. Please describe the specific file, function, and change needed.";
 const ZONE_INTERNAL_TASK_WARNING =
   "[ZONE_INTERNAL_TASK] Task targets Zone itself, not the selected repo. Switch to the Zone codebase or clarify the intended target before patching.";
 
@@ -2227,87 +2215,6 @@ function buildConstrainedSyntheticModifyPatch(filePath: string): PatchPreviewIte
   };
 }
 
-type ConstrainedFallbackPickResult =
-  | {
-      ok: true;
-      path: string;
-      content: string;
-      rankScore: number;
-      candidatesChecked: number;
-      rejectedCandidates: Array<{ path: string; reason: string; score: number }>;
-    }
-  | {
-      ok: false;
-      candidatesChecked: number;
-      rejectedCandidates: Array<{ path: string; reason: string; score: number }>;
-    };
-
-function pickConstrainedDeveloperApplyTargetFallback(input: {
-  task: string;
-  rejectedPaths: Set<string>;
-  contentByPath: Map<string, string>;
-  relevantFileScores: Map<string, number>;
-}): ConstrainedFallbackPickResult {
-  const rejectedCandidates: Array<{ path: string; reason: string; score: number }> =
-    [];
-  const entries = [...input.contentByPath.entries()].filter(
-    ([path]) =>
-      !input.rejectedPaths.has(path) &&
-      !isIrrelevantDeveloperContextPath(path) &&
-      !isProtectedDeveloperUiPath(path)
-  );
-  entries.sort(
-    (a, b) =>
-      (input.relevantFileScores.get(b[0]) ?? 0) -
-        (input.relevantFileScores.get(a[0]) ?? 0) || a[0].localeCompare(b[0])
-  );
-
-  const eligible: Array<{
-    path: string;
-    content: string;
-    rankScore: number;
-  }> = [];
-  for (const [path, content] of entries) {
-    const eligibility = assessConstrainedTargetEligibility({
-      task: input.task,
-      filePath: path,
-      fileContent: content,
-    });
-    if (!eligibility.eligible) {
-      rejectedCandidates.push({
-        path,
-        reason: eligibility.reason,
-        score: eligibility.structureScore,
-      });
-      continue;
-    }
-    eligible.push({
-      path,
-      content,
-      rankScore: input.relevantFileScores.get(path) ?? 0,
-    });
-  }
-
-  const candidatesChecked = entries.length;
-  if (eligible.length === 0) {
-    return { ok: false, candidatesChecked, rejectedCandidates };
-  }
-  eligible.sort((a, b) => {
-    if (b.rankScore !== a.rankScore) {
-      return b.rankScore - a.rankScore;
-    }
-    return a.path.localeCompare(b.path);
-  });
-  const best = eligible[0];
-  return {
-    ok: true,
-    path: best.path,
-    content: best.content,
-    rankScore: best.rankScore,
-    candidatesChecked,
-    rejectedCandidates,
-  };
-}
 
 function hasSensitiveLogging(content: string): boolean {
   const loggingCalls = [
@@ -3859,46 +3766,6 @@ function applyDeveloperPatchText(
 
 export const __testOnly_applyDeveloperPatchText = applyDeveloperPatchText;
 
-const SAFE_PREVIEW_REUSE_MAX_CHARS = 4000;
-
-function canReusePatchPreviewAsFinalPatch(input: {
-  patchCount: number;
-  contentPreview: string;
-  taskRiskResult: TaskRiskResult;
-}): boolean {
-  return (
-    input.patchCount === 1 &&
-    input.taskRiskResult.score === 0 &&
-    input.taskRiskResult.breakdown.destructive === 0 &&
-    input.taskRiskResult.breakdown.schema === 0 &&
-    input.taskRiskResult.breakdown.massScope === 0 &&
-    input.contentPreview.trim().length > 0 &&
-    input.contentPreview.length <= SAFE_PREVIEW_REUSE_MAX_CHARS
-  );
-}
-
-function buildApplyPatchFromPreview(input: {
-  patch: { operation: "create" | "modify"; contentPreview: string };
-  currentContent: string;
-}): { ok: true; fullContent: string } | { ok: false } {
-  if (input.patch.operation === "create" && !input.currentContent.trim()) {
-    return {
-      ok: true,
-      fullContent: input.patch.contentPreview,
-    };
-  }
-
-  const applied = applyDeveloperPatchText(
-    input.currentContent,
-    input.patch.contentPreview
-  );
-  if (!applied.ok) {
-    return { ok: false };
-  }
-
-  return applied;
-}
-
 function findBalancedBraceBlock(input: {
   content: string;
   openBraceIndex: number;
@@ -4077,58 +3944,6 @@ function findSubmitHandlerBlock(fileContent: string): {
 
   debugLog("[zone-fallback-detect] handler NOT found");
   return null;
-}
-
-function injectDeterministicValidationIntoSubmitHandler(
-  handlerBlock: string
-): { replacedBlock: string; insertedAt: "before_submit_call" | "handler_top" } | null {
-  const lines = handlerBlock.replace(/\r\n/g, "\n").split("\n");
-  const submitLineIndex = lines.findIndex((line) =>
-    /\bsubmit[A-Za-z0-9_]*\s*\(/i.test(line)
-  );
-  const indentFromLine = (line: string): string => {
-    const m = line.match(/^\s*/);
-    return m ? m[0] : "";
-  };
-
-  const validationIndent =
-    submitLineIndex >= 0
-      ? indentFromLine(lines[submitLineIndex] ?? "")
-      : (() => {
-          // Prefer indentation of the first non-empty line inside the block.
-          const firstInner =
-            lines.slice(1).find((l) => l.trim().length > 0) ?? "";
-          if (firstInner) return indentFromLine(firstInner);
-          // Fallback: base indentation + two spaces.
-          return `${indentFromLine(lines[0] ?? "")}  `;
-        })();
-
-  const insert = [
-    `${validationIndent}if (!fullName || fullName.trim() === "") {`,
-    `${validationIndent}  setError("Full name is required");`,
-    `${validationIndent}  return;`,
-    `${validationIndent}}`,
-    "",
-    `${validationIndent}if (email && !email.includes("@")) {`,
-    `${validationIndent}  setError("Invalid email");`,
-    `${validationIndent}  return;`,
-    `${validationIndent}}`,
-    "",
-  ];
-
-  const insertedAt =
-    submitLineIndex >= 0 ? ("before_submit_call" as const) : ("handler_top" as const);
-
-  const nextLines =
-    submitLineIndex >= 0
-      ? [
-          ...lines.slice(0, submitLineIndex),
-          ...insert,
-          ...lines.slice(submitLineIndex),
-        ]
-      : [lines[0] ?? "", ...insert, ...lines.slice(1)];
-
-  return { replacedBlock: nextLines.join("\n"), insertedAt };
 }
 
 function buildDeterministicFallbackPatch(input: {
@@ -6277,7 +6092,7 @@ const initializeTodosFromPlan = (): void => {
     const rolledBackErrorPreview = isVerificationRegressed
       ? String(loop.summary || "")
           .split("```")
-          .filter((part, idx) => idx % 2 === 1)
+          .filter((_part, idx) => idx % 2 === 1)
           .map((s) => s.trim())
           .filter(Boolean)
           .join("\n")
@@ -6962,6 +6777,8 @@ const initializeTodosFromPlan = (): void => {
     })
   );
 
+  // item 13 follow-up: built but never injected into any prompt — this "use ONLY these paths, do
+  // not invent new ones" anti-hallucination block is computed and then discarded.
   const existingFilesSummary =
     input.hostedContext?.existingFilesSummary ??
     (() => {
@@ -6973,6 +6790,7 @@ const initializeTodosFromPlan = (): void => {
             topRelevantPaths.map((filePath) => `- ${filePath}`).join("\n")
         : "EXISTING FILES IN REPO (use ONLY these paths, do not invent new ones):\n(none)";
     })();
+  void existingFilesSummary;
 
   if (input.preGeneratedPlan) {
     executionPlan = input.preGeneratedPlan;
@@ -10075,7 +9893,7 @@ const initializeTodosFromPlan = (): void => {
               status: "active",
             });
           },
-          onToolResult: (name, result) => {
+          onToolResult: (_name, result) => {
             emitStructuredProgress({
               type: "tool_result",
               title: String(result.output || "").slice(0, 100),
@@ -10279,7 +10097,10 @@ const initializeTodosFromPlan = (): void => {
           filePath: verificationErrorInfo.failingFile,
         });
 
+        // item 13 follow-up: resolved but never named in the prompt below — the sub-run is told
+        // "a verification command failed" without saying which one.
         const verificationCommand = runtimeVerificationPlan.failedCommand ?? plan[0]?.command ?? "";
+        void verificationCommand;
         const fixResult = await runAgentLoop({
           task: [
             `Target file: ${verificationErrorInfo.failingFile}`,
@@ -10781,8 +10602,11 @@ const initializeTodosFromPlan = (): void => {
     runtimeVerification?.attempted === true &&
     (runtimeVerification.status === "failed" || runtimeVerification.status === "timeout");
   const runtimeVerificationCodeFailed = runtimeVerificationPlan?.status === "failed_code_related";
+  // item 13 follow-up: computed but never read — a failed_environment_or_tooling verification is
+  // never distinguished from a code failure anywhere downstream of this point.
   const runtimeVerificationToolingFailed =
     runtimeVerificationPlan?.status === "failed_environment_or_tooling";
+  void runtimeVerificationToolingFailed;
   const runtimeFailureGuidance =
     (runtimeVerificationCodeFailed || runtimeVerification?.status === "timeout") && runtimeVerification
       ? buildRetryGuidanceFromFailure({
