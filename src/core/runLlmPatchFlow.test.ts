@@ -3606,6 +3606,157 @@ expect(result.safetyResolution).toEqual(
     }
   });
 
+  it("item 13: type:'validated' reports status:'warning' (not hardcoded 'success') when patch correctness fails", async () => {
+    const files = [
+      buildRepoFile("client/src/pages/app/PatientsPage.jsx", "frontend"),
+    ];
+    const brokenJsx = [
+      "import { useState } from \"react\";",
+      "export function PatientsPage() {",
+      "  const [fullName, setFullName] = useState(\"\");",
+      "  const [email, setEmail] = useState(\"\");",
+      "  const [formError, setFormError] = useState(\"\");",
+      "  const [success, setSuccess] = useState(\"\");",
+      "  const submitForm = () => fetch(\"/api\", { method: \"POST\" });",
+      "  const handleSubmit = (e) => {",
+      "    e.preventDefault();",
+      "    setSuccess(\"\"",
+      "    submitForm();",
+      "  };",
+      "  return <form onSubmit={handleSubmit}></form>;",
+      "}",
+    ].join("\n");
+
+    scanRepoMock.mockResolvedValue(files);
+    detectProjectStructureMock.mockReturnValue({ notes: ["React app"] });
+    rankRelevantFilesMock.mockReturnValue([{ ...files[0], score: 40 }]);
+    planFeatureWithLlmMock.mockResolvedValue({
+      implementationSummary: "Add validation",
+      steps: ["Validate inputs"],
+      suggestedFiles: [
+        {
+          path: "client/src/pages/app/PatientsPage.jsx",
+          reason: "Target",
+          action: "modify",
+        },
+      ],
+      risks: [],
+    });
+    readProjectFilesMock.mockImplementation(async (paths: string[]) =>
+      Object.fromEntries(paths.map((filePath) => [filePath, brokenJsx]))
+    );
+    planPatchPreviewWithLlmMock.mockResolvedValue({
+      summary: "Add validation",
+      patches: [
+        {
+          path: "client/src/pages/app/PatientsPage.jsx",
+          operation: "modify",
+          summary: "Insert validation",
+          targetHint: "handleSubmit",
+          contentPreview: "(preview)",
+        },
+      ],
+      warnings: [],
+    });
+    planFullPatchWithLlmMock.mockResolvedValue({
+      mode: "invalid_patch_format",
+      filePath: "client/src/pages/app/PatientsPage.jsx",
+      summary: "Model failed",
+      warnings: ["[invalid_patch_format] Model failed after retries"],
+    });
+
+    process.env["NODE_ENV"] = "production";
+    const onProgress = vi.fn();
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    await runLlmPatchFlow({
+      task: "Add minimal client-side validation to the existing form submit handler only. Reuse the existing state and existing submit flow. Do not create a new form.",
+      repoPath: "C:/repo",
+      runId: "test-item13-validated-warning",
+      onProgress,
+    });
+    delete process.env["NODE_ENV"];
+
+    const calls = onProgress.mock.calls.map((c) => c[0] as { progress?: { type?: string; status?: string } });
+    const validated = calls.find((c) => c?.progress?.type === "validated");
+    expect(validated?.progress?.status).toBe("warning");
+  });
+
+  it("item 13: atomic_patch_failed return carries finalRunReport (was discarded before)", async () => {
+    const files = [
+      buildRepoFile("client/src/pages/app/PatientsPage.jsx", "frontend"),
+    ];
+    const brokenJsx = [
+      "import { useState } from \"react\";",
+      "export function PatientsPage() {",
+      "  const [fullName, setFullName] = useState(\"\");",
+      "  const [email, setEmail] = useState(\"\");",
+      "  const [formError, setFormError] = useState(\"\");",
+      "  const [success, setSuccess] = useState(\"\");",
+      "  const submitForm = () => fetch(\"/api\", { method: \"POST\" });",
+      "  const handleSubmit = (e) => {",
+      "    e.preventDefault();",
+      "    setSuccess(\"\"",
+      "    submitForm();",
+      "  };",
+      "  return <form onSubmit={handleSubmit}></form>;",
+      "}",
+    ].join("\n");
+
+    scanRepoMock.mockResolvedValue(files);
+    detectProjectStructureMock.mockReturnValue({ notes: ["React app"] });
+    rankRelevantFilesMock.mockReturnValue([{ ...files[0], score: 40 }]);
+    planFeatureWithLlmMock.mockResolvedValue({
+      implementationSummary: "Add validation",
+      steps: ["Validate inputs"],
+      suggestedFiles: [
+        {
+          path: "client/src/pages/app/PatientsPage.jsx",
+          reason: "Target",
+          action: "modify",
+        },
+      ],
+      risks: [],
+    });
+    readProjectFilesMock.mockImplementation(async (paths: string[]) =>
+      Object.fromEntries(paths.map((filePath) => [filePath, brokenJsx]))
+    );
+    planPatchPreviewWithLlmMock.mockResolvedValue({
+      summary: "Add validation",
+      patches: [
+        {
+          path: "client/src/pages/app/PatientsPage.jsx",
+          operation: "modify",
+          summary: "Insert validation",
+          targetHint: "handleSubmit",
+          contentPreview: "(preview)",
+        },
+      ],
+      warnings: [],
+    });
+    planFullPatchWithLlmMock.mockResolvedValue({
+      mode: "invalid_patch_format",
+      filePath: "client/src/pages/app/PatientsPage.jsx",
+      summary: "Model failed",
+      warnings: ["[invalid_patch_format] Model failed after retries"],
+    });
+
+    process.env["NODE_ENV"] = "production";
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    const result = await runLlmPatchFlow({
+      task: "Add minimal client-side validation to the existing form submit handler only. Reuse the existing state and existing submit flow. Do not create a new form.",
+      repoPath: "C:/repo",
+      atomicPatch: true,
+    });
+    delete process.env["NODE_ENV"];
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe("atomic_patch_failed");
+      expect(result.finalRunReport).toBeDefined();
+      expect(result.finalRunReport?.title).toBeTruthy();
+    }
+  });
+
   it("unbalanced syntax: blocks and warns generated_patch_unbalanced_syntax", async () => {
     const files = [buildRepoFile("src/example.ts", "frontend")];
     scanRepoMock.mockResolvedValue(files);

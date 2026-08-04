@@ -9623,7 +9623,7 @@ const initializeTodosFromPlan = (): void => {
       type: "validated",
       title: "Patch validation completed",
       detail: `changed lines: ${validatedChangedLines}`,
-      status: "success",
+      status: validatedStatus,
     });
   }
 
@@ -9673,6 +9673,7 @@ const initializeTodosFromPlan = (): void => {
     return {
       ok: false,
       reason: "atomic_patch_failed",
+      finalRunReport: atomicReport,
     };
   }
 

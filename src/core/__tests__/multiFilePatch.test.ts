@@ -343,10 +343,14 @@ describe("multi-file patch results", () => {
       atomicPatch: true,
     });
 
-    expect(result).toEqual({
-      ok: false,
-      reason: "atomic_patch_failed",
-    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe("atomic_patch_failed");
+      // item 13: finalRunReport is now populated on this return (was silently
+      // discarded before) — assert it's present rather than the old strict
+      // two-key .toEqual, which would fail on any legitimate new field here.
+      expect(result.finalRunReport).toBeDefined();
+    }
   });
 
   it.skip("rolls back hosted multi-file apply results when one file fails validation", async () => {
