@@ -1133,34 +1133,61 @@ reads `absPath`; `path` appears exactly three times, all inside `dropNotes` mess
 two roles — "re-seeds the staging map directly" and "reconciliation key" — coexist on `absPath`;
 nothing was removed, only relocated to the field that actually has it.
 
-## 32. A `version` bump would silently drop every existing envelope — partially closed
+## 32. Closed — a per-sweep mismatch-count summary now exists; three of four sites carry it, resolveEnvelopeId's is partial by construction
 
 **What it was:** `RunEnvelope.version` is a literal `1` type, checked at four independent sites —
 `loadRunEnvelope`, `listResumableEnvelopes`, `pruneOldEnvelopes`, and `resolveEnvelopeId` — each
 guarding with a bare `if (env.version !== 1) return null` or `continue`, none of them logging or
 surfacing anything on a mismatch.
 
-**Fixed by `d1ce3dc4`, landed and never recorded here until now.** A shared
+**Fixed by `d1ce3dc4` (marker) and `63c06395` (count).** A shared
 `isSupportedEnvelopeVersion(version, site, identifier)` helper, wired into all four sites without
 changing their control flow, logs `[zone-envelope-version-mismatch]` unconditionally (`log`, not
 `debugLog`) with the actual version, expected version, an identifying key or file, and which of
 the four sites fired. Five tests, twenty-three assertions, three mutations run and reverted — the
-version-mismatch half of this item's own "what would close it" is done, tested, and confirmed
-load-bearing.
+version-mismatch half of this item's own "what would close it" was done, tested, and confirmed
+load-bearing first. A second helper, `logEnvelopeVersionMismatchSummary(site, mismatchCount,
+totalExamined)`, logs `[zone-envelope-version-mismatch-summary]` once per sweep — **only when
+`mismatchCount > 0`**, symmetric with the per-record marker, which already only fires on a
+mismatch; a summary on every clean sweep would be noise on every ordinary startup/prune cycle.
 
-**Still open: the affected-envelope-count half was not delivered.** This item's own text asked
-for a log line "naming the version mismatch and the affected envelope count." The marker fires
-once per mismatched envelope encountered, at whichever site encounters it — there is no aggregate
-count anywhere, in the payload or as a separate summary. A reader who wants "how many envelopes
-did this affect" has to count `[zone-envelope-version-mismatch]` records themselves after the
-fact; nothing in the fix computes or surfaces that number as its own signal.
+**The count was not already derivable in practice.** Per-record markers carry `site` and
+`identifier`, so a careful reader could group and tally them by hand after the fact — but that
+breaks the moment two sweeps run in the same process (TUI startup's `listResumableEnvelopes`
+alongside a throttled `pruneOldEnvelopes`), where an ungrouped count conflates two different
+totals unless the reader already knows to split by `site`. The pass that closed this reached that
+conclusion independently before finding it: this item's own prior text had already said the same
+thing in different words ("nothing... computes or surfaces that number as its own signal") —
+convergent, not merely inherited.
 
-**What would close the rest:** a summary line — emitted once, after a given operation's own
-per-envelope calls have all run — naming how many mismatches were seen in that pass. Not
-attempted; `d1ce3dc4`'s own message only ever claims the marker.
+**Three of four sites carry the summary; `loadRunEnvelope` deliberately does not.**
+`listResumableEnvelopes` and `pruneOldEnvelopes` both sweep every directory entry unconditionally,
+so each one's `totalExamined` is a complete count for that operation. `loadRunEnvelope` loads
+exactly one envelope with no loop — there is nothing to aggregate, so it was left untouched. This
+is an asymmetry by design, not a gap the fix missed.
 
-**Where the code lives:** `isSupportedEnvelopeVersion` and its four call sites are all in
-`diskRunEnvelope.ts`; the tests are in `diskRunEnvelope.test.ts`.
+**`resolveEnvelopeId`'s count is partial by construction.** Its fallback loop — the third of
+three lookup phases, after two filename-only phases that never call the version check at all —
+stops at its first content match. Its summary reports what that lookup actually examined before
+stopping, not a directory-wide census. None of the three instrumented sites answers "how many
+mismatches exist in the directory" in isolation — each is scoped to its own operation, the same
+way the per-record marker always was.
+
+**`isSupportedEnvelopeVersion`'s signature is unchanged.** An accumulator parameter was
+considered and rejected: `loadRunEnvelope` would have had to pass a no-op value it has no use
+for, or the helper would have grown an internal "is a caller tracking this" branch — coupling a
+cross-cutting aggregate concern into what stays a single-purpose check-and-log helper. Each
+walker's own local counter, incremented in the branch that already existed next to `continue`,
+was enough.
+
+**`resolveEnvelopeId`'s early `return` became `found = ...; break`,** so the summary call has
+exactly one exit point to sit before. The search's own behavior — same order, same first-match
+stop, same corrupt-file skipping — is unchanged; the file's 66 pre-existing tests stayed green
+throughout, alongside 6 new ones and 3 further mutations run and reverted.
+
+**Where the code lives:** `isSupportedEnvelopeVersion` and `logEnvelopeVersionMismatchSummary`,
+and all their call sites, are in `diskRunEnvelope.ts`; the tests are in
+`diskRunEnvelope.test.ts`.
 
 ## 33. Closed — both zero-coverage branches now have a discriminating test
 
@@ -1725,17 +1752,17 @@ priority ordering" cautions against ranking by importance, which this section do
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (25): 6, 7, 8, 14, 20, 21, 22, 24, 26, 28, 29, 30, 31, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49
+**Closed** (26): 6, 7, 8, 14, 20, 21, 22, 24, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (12): 2 (after 16), 10, 12, 13, 15 (after 2), 16, 17, 18, 23, 25, 32, 36
+first (11): 2 (after 16), 10, 12, 13, 15 (after 2), 16, 17, 18, 23, 25, 36
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (2): 1, 4
 
 **Neither — a structural fact recorded, with no fix proposed** (11): 3, 5, 9, 11, 19, 27, 38, 43,
 45, 46, 50
 
-Items 1, 2, 12, 16, 18, 32, and 36 are partially closed or corrected; the classification above covers
+Items 1, 2, 12, 16, 18, and 36 are partially closed or corrected; the classification above covers
 only the portion still open, not the whole entry.
 
 ---
