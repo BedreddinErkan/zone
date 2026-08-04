@@ -1533,49 +1533,72 @@ sharing an implementation and a sixth standing alone.
 in `src/engine/patchCorrectnessValidator.ts`; see item 22 for the full establish behind this
 finding.
 
-## 47. `multi_edit`'s partial-batch escape leaks into `filesModified`, not disk — severity corrected
+## 47. Closed — `multi_edit`'s partial-batch escape was a real defect, but neither of its first two framings was
 
-**What it is:** found while closing item 28, whose fix covers `apply_patch`/`write_file` only.
-`multi_edit`'s handler in `toolExecutor.ts` has no restore mechanism and no post-write validation
-(`validateSyntax`/`checkSemanticSmells`) — it applies each file's find/replace and stages it in a
-loop over `files`, before moving to the next.
+**First framing:** unreverted disk writes needing a rollback. Falsified before this pass closed —
+nothing lands on disk from `multi_edit` itself; every successful write goes only into the
+in-memory staging map, and the handler has no direct-disk-write fallback the way
+`write_file`/`apply_patch` do.
 
-**Corrected from this entry's original text:** the original framing said files "stay permanently
-edited" once staged, as if disk were involved. It isn't. `multi_edit` has no direct-disk-write
-fallback at all — unlike `write_file`/`apply_patch`, there is no `if (!wr) fs.writeFileSync(...)`
-anywhere in its handler; every successful write lands *only* in the in-memory staging map.
-Whatever happens to that content afterward — flushed via `finalizeStaging`, or never flushed at
-all if the run never reaches that point — is decided entirely outside this handler.
+**Second framing (this ledger's own prior correction):** `ctx.filesModified` contamination —
+`handleToolResult`'s Step 9 unions a failed call's honest, partial `filesStaged` into
+`ctx.filesModified`, and that name could reach a `git add` whose target was never flushed.
+**Also falsified, verified independently this pass, not just deferred to:** `finalizeStaging`
+flushes regardless of any tool-call's or the run's own `success` — see item 50. Every run
+termination path reaches a flush of the entire staging map, gated on verification, not on
+success. A file `multi_edit` staged before a since-rejected entry was always going to reach disk
+eventually; `git add` was never going to find a missing or stale pathspec from this specific
+mechanism.
 
-**What actually leaks: `ctx.filesModified`, not disk content.** `handleToolResult.ts` unions
-`result.filesStaged` into `ctx.filesModified` unconditionally on `result.success`
-(`for (const p of result.filesStaged ?? []) ctx.filesModified.add(p);`) — correct for
-`write_file`/`apply_patch`, where a `filesStaged` entry on a failed call means the content
-genuinely is on disk (item 28's `restore_failed` state). For `multi_edit`, the same field means
-only "staged in memory," and the union doesn't know the difference: a path-escape mid-batch
-(`resolveAgentPath` doesn't block `../` in a relative input, so `stagedWrite`'s repoPath check —
-now `checkPathBoundary`, see item 49 — is what actually rejects it) returns immediately with
-`filesStaged` correctly listing the files staged before the escaping entry, and that list flows,
-unconditionally, all the way to `git add`: `ctx.filesModified` → `loop.filesModified` →
-`filesTouched` → `fileDiffs` (`.map()`, not filtered) → `filePaths` in the TUI's post-run commit
-path → `executeCommit`'s `git add -- <paths>`. Confirmed live: `git add -- real.txt
-nonexistent.txt` exits 128 and stages *nothing*, not even `real.txt` — a single missing pathspec
-fails the whole command atomically. If the staged edit never gets flushed by the time auto-commit
-runs, that file's name in the pathspec either doesn't exist (hard failure) or exists with stale,
-pre-edit content (a silent, wrong commit) — never the mid-batch-unreverted-disk-content scenario
-this entry originally described.
+**What was actually true: batch atomicity, not data loss.** Because the staged files *do*
+eventually flush, the old mid-batch escape left a `multi_edit` call that reported `success:false`
+having genuinely, durably applied every file before the rejected one — the model was told the
+call failed, with a message naming only the offending path, and had no way to know from that
+message alone that other files had already changed.
 
-**This changes which fix is right.** A rollback mechanism is unnecessary — there's no disk state
-to revert. The options: preflight-validate every path in `args.files` against the repo boundary
-before writing any of them (so a batch either fully proceeds or fully doesn't touch the staging
-map), or stop unioning a partial-failure `filesStaged` into `filesModified` for this specific
-early-exit shape.
+**What shipped (`a8b299f9`):** every entry in `args.files` is validated against the repo boundary
+(`checkPathBoundary`) before the first write, so a batch either fully proceeds or touches nothing
+at all. The rejection message names the specific offending path — it does not additionally state
+that nothing was applied; `success:false` plus an empty `filesStaged` imply it structurally, but
+the string itself doesn't say so. Both pre-existing in-loop checks (the one added when
+`checkPathBoundary` was first built, and the one inside `stagedWrite` itself) stay as defense in
+depth. With pre-flight validating the identical `abs`/`repoPath` before the loop starts, both are
+now unreachable through `multi_edit`'s public behavior — no test can exercise them, and none
+tries to.
 
-**Where the code lives:** `multi_edit`'s handler in `toolExecutor.ts`, the `files` loop and its
-`stagedWrite` call; the union at `handleToolResult.ts`'s Step 9; `filesTouched`/`fileDiffs` in
-`runLlmPatchFlow.ts`; `executeCommit` in `CommitModal.tsx`. (Item 27 documents a related but
-distinct structural fact about the same handler — that `success` alone can't identify which files
-were touched; this item is about what a partial `filesStaged` does once it leaves the handler.)
+**Where the code lives:** the pre-flight loop and both in-loop checks in `multi_edit`'s handler,
+`toolExecutor.ts`. Tests in `toolExecutor.pathBoundary.test.ts` and
+`agentLoop.multiEditSaturation.test.ts`.
+
+## 50. `finalizeStaging` flushes regardless of any tool-call's or the run's own `success` — deliberate (Phase F), not evaluated for a narrower gate
+
+**What it is:** `finalizeStaging` (`src/llm/verification/staging.ts`) takes no `success`
+parameter. Its flush decision is gated entirely on its own verification run and `verifyMode`
+(default `"warn"`, which flushes even a regressed verification — the code's own comment names it
+Phase F and states the rationale: keep patches on disk, surface errors as warnings, rather than
+discard). Both callers — `persistStagingOnError` (`agentLoop.ts`, 8 call sites across early-exit
+termination reasons) and `verifyAndFinalize` (the natural-completion/max-iterations path) — gate
+only on staging ownership, not on any tool-call's or the run's own success. Every run-termination
+path reaches one or the other.
+
+**This is the fact item 47's corrected understanding rests on:** whatever is staged when a run
+ends gets flushed, regardless of what individual tool calls along the way returned. For
+`multi_edit`, before this session's fix, that meant a "failed" batch call had still durably
+applied everything staged before the rejection point. For `apply_patch`/`write_file` — single-file
+tools — the same fact is narrower and mostly already by design: a `restore_failed` state (item 28)
+is *meant* to flush its broken content, and a `reverted` state's staged entry already matches
+disk, so flushing it is a no-op.
+
+**Not asserted as wrong.** Gating the flush on success would conflict with item 28's own
+deliberate `restore_failed` behavior, and reaches into the durable envelope's staged-content
+reconciliation on resume (`RunEnvelope.staging`) in ways not traced here. A narrower fix likely
+needs the staging map to carry per-entry provenance — which call staged which file, and whether
+that call itself succeeded — rather than one global gate; that's a design question, not a
+drop-in change, which is why no fix is proposed here.
+
+**Where the code lives:** `finalizeStaging`, `persistStagingOnError` (`agentLoop.ts`),
+`verifyAndFinalize` (`verification/composer.ts`). The `verifyMode` parameter's own JSDoc comment
+on `finalizeStaging`'s signature names the "Phase F" rationale directly.
 
 ## 48. Closed — the shared boundary check gained symlink-awareness; a check-ordering bug had let any no-staging-map write bypass it
 
@@ -1637,21 +1660,21 @@ directory-creation side effect rather than after it.
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 49 to find out which ones still need something. No index of
+reader the trouble of reading all 50 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (22): 6, 7, 8, 14, 20, 21, 22, 24, 26, 28, 29, 30, 31, 33, 34, 35, 40, 41, 42, 44, 48, 49
+**Closed** (23): 6, 7, 8, 14, 20, 21, 22, 24, 26, 28, 29, 30, 31, 33, 34, 35, 40, 41, 42, 44, 47, 48, 49
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (15): 2 (after 16), 10, 12, 13, 15 (after 2), 16, 17, 18, 23, 25, 32, 36, 37, 39, 47
+first (14): 2 (after 16), 10, 12, 13, 15 (after 2), 16, 17, 18, 23, 25, 32, 36, 37, 39
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (2): 1, 4
 
-**Neither — a structural fact recorded, with no fix proposed** (10): 3, 5, 9, 11, 19, 27, 38, 43,
-45, 46
+**Neither — a structural fact recorded, with no fix proposed** (11): 3, 5, 9, 11, 19, 27, 38, 43,
+45, 46, 50
 
 Items 1, 2, 12, 16, 18, 32, and 36 are partially closed or corrected; the classification above covers
 only the portion still open, not the whole entry.
