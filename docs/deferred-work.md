@@ -1205,48 +1205,40 @@ pointing nowhere is less useful than a wrong-but-present one, and "the R2 fix" w
 idea with no single findable spot in the file, while "the R2 test" is a concrete, greppable
 `it(...)` block. That's the one thing in this closure worth more than a line.
 
-## 36. The status snapshot isn't mechanically checked against the ledger's own headings
+## 36. The status snapshot isn't mechanically checked against the ledger's own headings — partially closed
 
-**What it is:** nothing compares the snapshot's bucket lists against the `Closed —` prefixes on
-the headings above it. The section's own caveat says it goes stale the moment any item closes;
-two updates in, that's still true and still unenforced — a closing pass that forgets the
-snapshot leaves the file silently self-contradicting, and a reader picking a next task from it
-would pick one that's actually done. This pass's own Change 2 verification (grep every heading,
-compare by hand against the snapshot's claim) is exactly the manual version of the check being
-proposed here.
+**What it was:** nothing compared the snapshot's bucket lists against the `Closed —` prefixes on
+the headings above it, and no natural home existed for such a check — `scripts/` held only sweep
+tooling, no test read `docs/*.md`, no CI workflow touched markdown.
 
-**A sharper distinction, from `d1ce3dc4` and `af3125f0` both landing without their closures ever
-being recorded:** the check this item proposes — comparing the snapshot's bucket lists against
-the `Closed —` headings — verifies the ledger's own **internal consistency**, not its **currency
-against the code**. This incident is why the distinction matters, not just a restatement of it:
-item 32's heading and the snapshot agreed with each other the whole time — both said open — and
-both were wrong; the fix had shipped commits earlier. The proposed check would have passed,
-cleanly, on a ledger that was already stale. This is the first recorded instance found where the
-internal-consistency check specifically would not have helped — searched for prior instances of
-this exact shape in the ledger's own text and found none stated precisely enough to count with
-confidence, so none is claimed here.
+**The consistency half is closed.** `scripts/deferredWorkSnapshot.test.ts` (`964296ac`) parses
+every `## N.` heading and the snapshot's own bucket lines, asserting four things: the Closed-set
+comparison this item originally proposed, plus three coverage assertions it didn't — declared
+count vs. actual list length per bucket, no item in two buckets, and none in zero. **Coverage is
+the dimension with the demonstrated catch, not the one this item named.** Run against the tree at
+`9f45989c` — the commit where item 36 itself had a heading but appeared in no bucket — the
+Closed-set comparison passes cleanly, and only the coverage assertion fires: "Item(s) 36 have a
+heading but appear in no snapshot bucket." The check this item originally proposed would have
+missed the one real failure that ever occurred; it was never the dimension that broke.
 
-**Whether a currency check — comparing the ledger against the code itself, not just against
-itself — is even mechanizable: checked, not assumed, and the honest answer is partial.** One
-candidate exists: grep commit messages for "item N" and diff against whether item N's current
-heading says "Closed —" — this pass's own establish did exactly that, by hand, and it is what
-found both `d1ce3dc4` and `af3125f0`. But the method has a real, structural blind spot: a commit
-that closes an item without naming it in the message is invisible to it, by construction — there
-is no way to mechanically infer "this diff closes ledger item N" from a diff that never says so.
-The check would catch every future instance of this exact mistake (a commit that says "closes
-item N" while the ledger is never told); it cannot catch the mistake of forgetting to say so in
-the commit at all.
+**The currency half closes as a decision, not a fix.** A second establish pass built and ran a
+currency check — matching commit messages against item numbers, comparing against heading status
+— and it is not worth shipping. At HEAD it produces 5 flags and 0 true positives: every flag is a
+legitimate reference (a context citation, an explicit "not fixed here" disclaimer, or a
+deliberate partial closure whose heading correctly doesn't say "Closed —"). Its structural blind
+spot is real — a commit that closes an item without naming it is invisible to it by construction,
+which is exactly how items 7 and 32 went unrecorded for a session's worth of passes — but the
+opposite failure (constant false alarms on a ledger that's currently correct) is just as real and
+not tunable away. It would also need `fetch-depth: 0` added to CI's checkout (shallow by default
+today) to see history at all, and no test in this suite shells out to git — a boundary this would
+be the first to cross. Recording the technique instead: item references across this repo's
+history take at least 14 distinct phrasings (`item N`, `Item N`, `ledger item N`, `items N-N`,
+`items N, N, N`, `items N/N`, and others); a naive `/item (\d+)/i` misses every plural form. A
+future hand sweep should use `/items?\s+(\d+(?:\s*[-\/,+&]\s*\d+)*)/gi` and expect to read every
+hit rather than trust the count.
 
-**What would close it:** a check that reads every `## N. ...` heading, classifies each by whether
-it starts with "Closed —", and compares that set against the snapshot's own "Closed" bucket —
-failing loudly on any mismatch.
-
-**No natural home exists for this today, which changes whether it's cheap.** Checked: `scripts/`
-holds only sweep/probe tooling; `package.json`'s scripts are build/test/sweep, nothing
-docs-related; no test in the repo reads `docs/*.md` programmatically; `eslint.config.mjs` is
-scoped to `**/*.ts` with no markdown rule; no markdownlint config; neither CI workflow
-references `docs/` or `.md` at all. This isn't a small addition to existing infrastructure — it's
-a new script or test file plus a new `package.json` entry, from nothing.
+**Where the code lives:** the check is `scripts/deferredWorkSnapshot.test.ts`; the currency
+technique is recorded here only, not implemented anywhere.
 
 ## 37. Two dead fixture files ship in the tarball
 
@@ -1538,7 +1530,7 @@ first (15): 2 (after 16), 10, 12, 13, 15 (after 2), 16, 17, 18, 23, 25, 28, 32, 
 **Neither — a structural fact recorded, with no fix proposed** (10): 3, 5, 9, 11, 19, 27, 38, 43,
 45, 46
 
-Items 1, 2, 12, 16, 18, and 32 are partially closed or corrected; the classification above covers
+Items 1, 2, 12, 16, 18, 32, and 36 are partially closed or corrected; the classification above covers
 only the portion still open, not the whole entry.
 
 ---
