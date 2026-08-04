@@ -92,7 +92,7 @@ describe("parsePatchBlocks — direct", () => {
 
     expect(parsePatchBlocks(curly)).toEqual([{ find: "const label = “hello”;", replace: 'const label = "world";' }]);
     // The applier's walk normalizes curly quotes (toolExecutor.ts:41, normalizeSmartQuotes) at
-    // match time; this parser does not (see ledger item 16). This is the defect behind the
+    // parse time; this parser does not (see ledger item 16). This is the defect behind the
     // identical_patch_retried miss (detectRepeatedFailure's identical_patch_retried branch,
     // agentLoop.ts): a model that "fixes" a failing patch only by straightening its quotes is
     // not recognized as retrying the same patch.
