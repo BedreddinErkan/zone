@@ -920,7 +920,7 @@ export async function runTui(
       resumedSession = session;
       sessionMissMessage = missMessage;
     } catch (err) {
-      process.stderr.write(`Resume failed: ${err instanceof Error ? err.message : String(err)}\n`);
+      process.stderr.write(`Could not load the prior session: ${err instanceof Error ? err.message : String(err)}\n`);
     }
   }
 
