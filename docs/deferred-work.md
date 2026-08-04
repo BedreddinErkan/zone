@@ -647,7 +647,40 @@ example, the no-valid-blocks message and its example, and one further usage mess
 the file) all inline the text separately. Moving the two declarations centralizes 2 of 18
 functional occurrences of the string in this file, not the string itself.
 
-**Where the code lives:** the applier's walk is in `toolExecutor.ts`; `parsePatchBlocks` and
+**A prerequisite for the real half has now landed.** The walk in `toolExecutor.ts` is no longer
+inline — it's `segmentApplyPatchBlocks`, an exported, directly callable function, pinned by ten
+characterization tests mirroring `parsePatchBlocks`'s own suite (`a7f4ff03`, `5f5f66fe`) case for
+case. Both sides of the eventual shared implementation are now pinned; before this, only
+`parsePatchBlocks` was.
+
+**The divergence this entry and item 18 describe is now asserted in code, not just recorded in
+prose.** Two comparison tests run `segmentApplyPatchBlocks` and `parsePatchBlocks` on the same
+input and assert the result directly — smart quotes diverge, CRLF does not. A future unification
+attempt that silently collapses the smart-quote difference now fails a test instead of shipping
+quietly. This is the ledger entry becoming executable, not just narrated.
+
+**The extracted function's return shape is `{blocks, sqFindTotal, sqReplaceTotal}`, not a bare
+block array** — `sqFindTotal`/`sqReplaceTotal` feed four call sites downstream (self-validation
+telemetry, normalization-parity telemetry) that a `blocks`-only signature would have silently
+stopped feeding.
+
+**It stayed in `toolExecutor.ts`, not `fileDiff.ts`, deliberately — not an oversight of the
+candidate-home paragraph above.** `fileDiff.ts` is still verified cycle-free and is the likely
+home if unification is ever attempted, but relocating now would itself be unification-prep; the
+prerequisite pass scoped that out on purpose, leaving the actual move for whenever unification is
+attempted for real.
+
+**One found-but-not-fixed loose end:** `agentLoop.patchBlocksCharacterization.test.ts`'s own
+smart-quote test carries a comment saying the walk normalizes quotes "at match time" — it's
+parse-time, inside `segmentApplyPatchBlocks`'s own segmentation loop, not a separate later
+match-time step the way `normalizeEol`/`stripReadFilePrefix` are. Left as-is here: a one-line
+test-file comment fix is a source change, out of scope for a documentation-only pass.
+
+**Still open — nothing has been unified.** The extraction makes the eventual fix provable rather
+than hopeful; it does not itself close this entry.
+
+**Where the code lives:** the applier's walk is `segmentApplyPatchBlocks` in `toolExecutor.ts`,
+characterized in `toolExecutor.patchBlocksCharacterization.test.ts`; `parsePatchBlocks` and
 `hashPatchBlocks` are in `agentLoop.ts`; `parseBlocks` is in `DiffView.tsx`; the candidate shared
 home, `fileDiff.ts`, already holds `diffToFindReplace`.
 
