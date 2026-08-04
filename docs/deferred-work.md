@@ -670,11 +670,14 @@ home if unification is ever attempted, but relocating now would itself be unific
 prerequisite pass scoped that out on purpose, leaving the actual move for whenever unification is
 attempted for real.
 
-**One found-but-not-fixed loose end:** `agentLoop.patchBlocksCharacterization.test.ts`'s own
-smart-quote test carries a comment saying the walk normalizes quotes "at match time" — it's
-parse-time, inside `segmentApplyPatchBlocks`'s own segmentation loop, not a separate later
-match-time step the way `normalizeEol`/`stripReadFilePrefix` are. Left as-is here: a one-line
-test-file comment fix is a source change, out of scope for a documentation-only pass.
+**The loose end is closed (`9f6539e4`).** `agentLoop.patchBlocksCharacterization.test.ts`'s
+smart-quote test comment claimed the walk normalizes quotes "at match time" — it's parse-time,
+inside `segmentApplyPatchBlocks`'s own segmentation loop, not a separate later match-time step the
+way `normalizeEol`/`stripReadFilePrefix` are. Fixed in its own commit rather than bundled into a
+documentation-only pass, matching `90d39f5a`'s precedent for comment-only corrections. The
+citation alongside it, pointing at `normalizeSmartQuotes`'s own definition in `toolExecutor.ts`,
+was checked separately and found still accurate — the extraction added `segmentApplyPatchBlocks`
+as a new function elsewhere; it never moved `normalizeSmartQuotes`.
 
 **Still open — nothing has been unified.** The extraction makes the eventual fix provable rather
 than hopeful; it does not itself close this entry.
@@ -1038,35 +1041,67 @@ build phase, then the write phase) and from `registerFatalSignalHandlers`'s own 
 in the same file. The signal path passes its own injected log function explicitly; `phase` and
 `signal` are required parameters on every call, not optional ones.
 
-## 25. The resume catch-block has the same shape `2b61a51c` fixed for the miss case
+## 25. Closed — the resume catch-block message no longer claims total failure
 
-**What it is:** `_resolveResumeRequest`'s call site wraps the lookup in a `try/catch`; the catch
-prints `"Resume failed: <message>"` when the lookup itself throws — a fault, not a miss. This
+**What it was:** `_resolveResumeRequest`'s call site wraps the lookup in a `try/catch`; the catch
+printed `"Resume failed: <message>"` when the lookup itself threw — a fault, not a miss. This
 sits textually before the separate envelope-resume block, and the two are independent `if`
-blocks, neither gated on the other — confirmed by reading the current code directly, the same
-structural shape item 23 already establishes for the session-lookup/envelope-lookup pair.
+blocks, neither gated on the other. `2b61a51c` had already reconciled the *miss* message against
+the envelope outcome via `_composeResumeMessage`, specifically because a miss is expected and
+representable; a thrown lookup was a fault state explicitly left outside that pass's scope. The
+risk: if the lookup faulted but the envelope resume succeeded independently, the user read
+"Resume failed" while the run actually continued, with nothing correcting it afterward.
 
-**The same defect class `2b61a51c` closed, deliberately left outside its scope.** `2b61a51c`
-reconciled `_resolveResumeRequest`'s *miss* message against the envelope outcome, via
-`_composeResumeMessage`, specifically because a miss is an expected, representable outcome. A
-thrown lookup is a fault state, explicitly excluded from that pass's hit/miss framing at the
-time (recorded there as a possible generalization, not built). The user-visible risk is the same
-shape: if the lookup faults but the envelope resume succeeds independently, the user reads
-"Resume failed" while the run actually continues, with nothing correcting it afterward.
+**The ordering constraint is what shaped the fix, not a stylistic choice.** The catch around
+`_resolveResumeRequest`'s own call, inside the `if (opts.resume)` block, runs *before* the
+separate `if (envResumeId)` envelope-resume block that follows it — at the moment the message is
+written, whether the run will continue is not yet known. That rules out both "your run
+continues" (unknown) and "the resume failed" (untrue whenever the envelope succeeds next). The
+one claim true in every combination: the prior session did not load. `487341f5` reworded the
+message to say exactly that — "Could not load the prior session: `<message>`" — and nothing else.
 
-**What would close it:** route the catch path through `_composeResumeMessage` too — treating a
-caught error the way a miss is treated, reworded rather than left standing once the envelope
-outcome is known — or a sibling function that handles the fault-plus-envelope-success
-combination on its own terms, since a thrown error and a clean miss may warrant different
-wording even under the same reconciliation principle. Not attempted here — found and recorded
-during a documentation-only pass.
+**A composer was considered and rejected, not skipped for effort.** Routing the catch through
+`_composeResumeMessage` (`2b61a51c`'s own suggested generalization) doesn't work: its rewrite is
+driven by `RESUME_MISS_SUFFIX`, a pattern matching `"; starting fresh."` — a claim that's false
+the moment an envelope resume is in play, which is exactly the case this fix needed to handle. And
+`_composeResumeMessage` never sees the fault message in the first place: the catch has no
+`sessionMissMessage` to hand it, since the lookup threw before producing one. A sibling composer
+was the shape left available — rejected as unwarranted, not overlooked, since a single reworded
+string already reads true in both combinations.
 
-**The both-fault combination, verified by reading, not left open:** the two catches are fully
-independent — a simultaneous throw from both prints two accurate, separate messages (`Resume
-failed: ...`, then `resume: ...`) with no crash, and `_composeResumeMessage` correctly returns
-`null` rather than fabricating a third, since the null `sessionMissMessage` this path produces
-gives it nothing to reconcile. `localSessionId` and the startup banner both fall through cleanly
-to a fresh, not-resumed state that matches what actually happened — verified, not assumed.
+**Why a one-string fix is proportionate:** `resumedSession`'s downstream effects were traced in
+full, not assumed to be one field. Four, across two files — `localSessionId`'s own fallback chain
+(superseded by the envelope whenever both resolve), the startup banner's `isResumed` flag, and,
+via the `resumedSession` prop passed to `<App>`, `resumedTranscript` and `resumedStartedAt` (both
+destructured from it in `App.tsx`) feeding the initial transcript array and session-start
+timestamp. All four are display-only. Staged work, todos, and the plan all arrive through
+`pendingEnvelopeResume`, entirely independent of this catch — nothing structural is at stake, only
+what the user sees on the way in.
+
+**No test landed, and that's recorded as a real coverage gap, not an omission.** `runTui` — the
+function this catch lives inside — has zero direct call sites in any test file in this codebase.
+The file's four other testable helpers (`_resolveResumeRequest`, `_composeResumeMessage`,
+`_buildExitResumeHint`, `_reportSaveFailure`) were extracted specifically so each is callable
+without standing up `runTui`'s own Ink render and signal-handler setup; this catch never received
+that treatment. **What would close it:** extract the catch's body — construct the message, decide
+whether to write it — into a fifth testable function the same way, at the cost of touching the
+call site once more.
+
+**Reachability, checked rather than assumed uniform:** a corrupt session file does *not* reach
+this catch in steady state — both `loadSessionById` and `loadLastSession`'s listing pass go
+through `loadSessionOrSignal`, which swallows every non-ENOENT fault and returns it as a miss
+(already reconciled by `2b61a51c`). What actually reaches the catch is narrower: an EACCES (or
+similar) on the sessions directory's `readdir`, or a TOCTOU race specific to `loadLastSession`'s
+own final re-read (`return loadSession(cwd, list[0])`), which bypasses the swallowing wrapper.
+Real, but not the everyday corrupt-file case; `[zone-session-load-failed]` — the marker that would
+fire on the swallowed path — has zero records in the sink.
+
+**The both-fault combination, verified separately and unaffected by this fix:** a simultaneous
+throw from both the session lookup and the envelope lookup prints two accurate, independent
+messages with no crash, and `_composeResumeMessage` correctly returns `null` — the null
+`sessionMissMessage` this path produces gives it nothing to reconcile. `localSessionId` and the
+startup banner both fall through cleanly to a fresh, not-resumed state that matches what actually
+happened.
 
 **Where the code lives:** the catch block sits in the same `if (opts.resume)` block as
 `_resolveResumeRequest`'s own call, in `runTui`, `index.tsx` — immediately preceding the
@@ -1988,10 +2023,10 @@ priority ordering" cautions against ranking by importance, which this section do
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (28): 6, 7, 8, 10, 13, 14, 20, 21, 22, 24, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49
+**Closed** (29): 6, 7, 8, 10, 13, 14, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (9): 2 (after 16), 12, 15 (after 2), 16, 17, 18, 23, 25, 36
+first (8): 2 (after 16), 12, 15 (after 2), 16, 17, 18, 23, 36
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (2): 1, 4
 
