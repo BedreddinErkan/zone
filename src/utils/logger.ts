@@ -6,6 +6,7 @@ export const log = (...args: unknown[]): void => {
   console.log(...args);
 };
 
+// Only emits output when ZONE_VERBOSE_LOGS=1 is set in the environment.
 export const debugLog = (...args: unknown[]): void => {
   if (VERBOSE) console.log(...args);
 };
