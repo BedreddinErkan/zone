@@ -99,7 +99,7 @@ describe("multi_edit chain-saturation counting", () => {
     )).toBe(true);
   });
 
-  it("E — the escape return carries paths staged before the escape", async () => {
+  it("E — item 47: a pre-flight-rejected batch carries no staged paths at all, not even the ones before the escape", async () => {
     const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "zone-me-outside-"));
     const insideFile = "inside.ts";
     fs.writeFileSync(abs(insideFile), "const foo = 1;\n", "utf8");
@@ -115,7 +115,7 @@ describe("multi_edit chain-saturation counting", () => {
       { stagingFiles: new Map() }
     );
 
-    expect(result.filesStaged).toEqual([insideFile]);
+    expect(result.filesStaged).toEqual([]);
     expect(result.success).toBe(false);
 
     fs.rmSync(outsideDir, { recursive: true, force: true });

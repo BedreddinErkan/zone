@@ -3475,6 +3475,27 @@ export async function executeTool(
         return { success: false, output: "multi_edit: files array must be non-empty." };
       }
 
+      // Item 47: validate every path in the batch against the repo boundary before writing
+      // anything. Without this, a path escape mid-batch returns success:false with an honest,
+      // partial filesStaged (the files staged before the escaping entry) — but "staged" isn't
+      // "flushed", and handleToolResult's Step 9 unions filesStaged into ctx.filesModified
+      // unconditionally on success, so that partial list can still reach a later `git add`
+      // whose target was never actually written to disk. Refusing to start avoids the ambiguous
+      // partial state entirely, rather than trying to revert it after the fact. The two
+      // existing in-loop checks below stay as defense in depth; they're unreachable from here
+      // on, but this staying the sole barrier is exactly what this pre-flight prevents.
+      for (const relPath of files) {
+        const filePath = resolveAgentPath(String(relPath), repoPath, "multi_edit");
+        const abs = path.join(repoPath, filePath);
+        if (checkPathBoundary(abs, repoPath, toolName) === "escape") {
+          return {
+            success: false,
+            output: `multi_edit_blocked_path_escape: "${filePath}" would escape repo`,
+            filesStaged: [],
+          };
+        }
+      }
+
       // Normalize find/replace to LF so multi-line patterns match CRLF files.
       // Each file's original EOL is detected and restored on write.
       const normalizedFind    = normalizeEol(find).text;

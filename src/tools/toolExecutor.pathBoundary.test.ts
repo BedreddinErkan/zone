@@ -206,12 +206,13 @@ describe("wiring proof — apply_patch (pre-patch read must not fire on an escap
   });
 });
 
-describe("wiring proof — multi_edit (item 47's partial-batch behavior must stay untouched)", () => {
-  it("rejects an escaping file mid-batch; filesStaged still lists only the files before it", async () => {
+describe("wiring proof — multi_edit (item 47: pre-flight makes the batch atomic)", () => {
+  it("rejects a batch with an escaping file before touching anything — nothing staged, not even the files before it", async () => {
     // multi_edit has no direct-disk-write fallback the way write_file/apply_patch do — with no
-    // staging map, stagedWrite returns false (not "escape") for a legitimate file and the edit
-    // is silently dropped (a pre-existing, separate multi_edit gap, not this pass's concern). A
-    // real staging map is required for this test to actually observe a.ts's edit at all.
+    // staging map, edits are silently dropped rather than written (a pre-existing, separate
+    // multi_edit gap, not this pass's concern). A real staging map lets this test prove the
+    // pre-flight negative directly: a.ts genuinely never gets staged, not just that the call
+    // fails.
     writeRepoFile("a.ts", "const target = 1;\n");
     writeRepoFile("c.ts", "const target = 1;\n");
     const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "zone-path-boundary-multiedit-"));
@@ -228,13 +229,65 @@ describe("wiring proof — multi_edit (item 47's partial-batch behavior must sta
         { stagingFiles }
       );
       expect(result.success).toBe(false);
-      expect((result as { filesStaged?: string[] }).filesStaged).toEqual(["a.ts"]);
-      expect(stagingFiles.get(path.resolve(abs("a.ts")))).toContain("renamed");
-      expect(stagingFiles.has(path.resolve(abs("c.ts")))).toBe(false);
+      expect(result.output).toContain("multi_edit_blocked_path_escape");
+      expect(result.output).toContain(escapingRel);
+      expect((result as { filesStaged?: string[] }).filesStaged).toEqual([]);
+      expect(stagingFiles.size).toBe(0);
+      expect(fs.readFileSync(abs("a.ts"), "utf8")).toBe("const target = 1;\n");
+      expect(fs.readFileSync(abs("c.ts"), "utf8")).toBe("const target = 1;\n");
       expect(fs.readFileSync(outsideTarget, "utf8")).toBe("const target = 1;\n");
     } finally {
       fs.rmSync(outsideDir, { recursive: true, force: true });
     }
+  });
+
+  it("all-valid batch proceeds normally — pre-flight doesn't false-positive", async () => {
+    writeRepoFile("a.ts", "const target = 1;\n");
+    writeRepoFile("b.ts", "const target = 1;\n");
+    const stagingFiles = new Map<string, string>();
+    const result = await executeTool(
+      "multi_edit",
+      { files: ["a.ts", "b.ts"], find: "target", replace: "renamed" },
+      repoPath,
+      undefined,
+      { stagingFiles }
+    );
+    expect(result.success).toBe(true);
+    expect((result as { filesStaged?: string[] }).filesStaged).toEqual(["a.ts", "b.ts"]);
+    expect(stagingFiles.get(path.resolve(abs("a.ts")))).toContain("renamed");
+    expect(stagingFiles.get(path.resolve(abs("b.ts")))).toContain("renamed");
+  });
+
+  it("single-file case is unaffected by the pre-flight loop", async () => {
+    writeRepoFile("solo.ts", "const target = 1;\n");
+    const stagingFiles = new Map<string, string>();
+    const result = await executeTool(
+      "multi_edit",
+      { files: ["solo.ts"], find: "target", replace: "renamed" },
+      repoPath,
+      undefined,
+      { stagingFiles }
+    );
+    expect(result.success).toBe(true);
+    expect((result as { filesStaged?: string[] }).filesStaged).toEqual(["solo.ts"]);
+    expect(stagingFiles.get(path.resolve(abs("solo.ts")))).toContain("renamed");
+  });
+
+  it("a read failure and a zero-match don't trip the pre-flight — only path escapes do", async () => {
+    writeRepoFile("present.ts", "const other = 1;\n"); // no match for "target"
+    const stagingFiles = new Map<string, string>();
+    const result = await executeTool(
+      "multi_edit",
+      { files: ["missing.ts", "present.ts"], find: "target", replace: "renamed" },
+      repoPath,
+      undefined,
+      { stagingFiles }
+    );
+    expect(result.success).toBe(true);
+    expect(result.output).toContain("could not read");
+    expect(result.output).toContain("was not found in");
+    expect((result as { filesStaged?: string[] }).filesStaged).toEqual([]);
+    expect(stagingFiles.size).toBe(0);
   });
 });
 
