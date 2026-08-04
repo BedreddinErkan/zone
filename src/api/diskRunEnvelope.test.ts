@@ -283,6 +283,52 @@ describe("pruneOldEnvelopes / maybeCleanupOldEnvelopes", () => {
       logSpy.mockRestore();
     }
   });
+
+  it("emits a version-mismatch summary with the count and total when mismatches exist", async () => {
+    const { pruneOldEnvelopes } = await import("./diskRunEnvelope.js");
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const bad1 = makeEnvelope({ sessionId: "sess-prune-bad-1" });
+      const bad2 = makeEnvelope({ sessionId: "sess-prune-bad-2" });
+      const good = makeEnvelope({ sessionId: "sess-prune-good-1" });
+      await saveRunEnvelope(bad1);
+      await saveRunEnvelope(bad2);
+      await saveRunEnvelope(good);
+      for (const env of [bad1, bad2]) {
+        const p = join(envDir, `${env.sessionId}.envelope.json`);
+        const raw = JSON.parse(await readFile(p, "utf-8"));
+        raw.version = 99;
+        await writeFile(p, JSON.stringify(raw));
+      }
+
+      await pruneOldEnvelopes();
+
+      const hits = logSpy.mock.calls.filter(c => c[0] === "[zone-envelope-version-mismatch-summary]");
+      expect(hits).toHaveLength(1);
+      const payload = JSON.parse(String(hits[0]![1])) as { site: string; mismatchCount: number; totalExamined: number };
+      expect(payload.site).toBe("pruneOldEnvelopes");
+      expect(payload.mismatchCount).toBe(2);
+      expect(payload.totalExamined).toBe(3);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("emits no version-mismatch summary when there are no mismatches", async () => {
+    const { pruneOldEnvelopes } = await import("./diskRunEnvelope.js");
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await saveRunEnvelope(makeEnvelope({ sessionId: "sess-prune-clean-1" }));
+      await saveRunEnvelope(makeEnvelope({ sessionId: "sess-prune-clean-2" }));
+
+      await pruneOldEnvelopes();
+
+      const hits = logSpy.mock.calls.filter(c => c[0] === "[zone-envelope-version-mismatch-summary]");
+      expect(hits).toHaveLength(0);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
 });
 
 // ---- Stamp ------------------------------------------------------------------
@@ -383,6 +429,50 @@ describe("listResumableEnvelopes — PID liveness", () => {
       logSpy.mockRestore();
     }
   });
+
+  it("emits a version-mismatch summary with the count and total when mismatches exist", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const bad1 = makeEnvelope({ sessionId: "sess-bad-1" });
+      const bad2 = makeEnvelope({ sessionId: "sess-bad-2" });
+      const good = makeEnvelope({ sessionId: "sess-good-1" });
+      await saveRunEnvelope(bad1);
+      await saveRunEnvelope(bad2);
+      await saveRunEnvelope(good);
+      for (const env of [bad1, bad2]) {
+        const p = join(envDir, `${env.sessionId}.envelope.json`);
+        const raw = JSON.parse(await readFile(p, "utf-8"));
+        raw.version = 99;
+        await writeFile(p, JSON.stringify(raw));
+      }
+
+      await listResumableEnvelopes();
+
+      const hits = logSpy.mock.calls.filter(c => c[0] === "[zone-envelope-version-mismatch-summary]");
+      expect(hits).toHaveLength(1);
+      const payload = JSON.parse(String(hits[0]![1])) as { site: string; mismatchCount: number; totalExamined: number };
+      expect(payload.site).toBe("listResumableEnvelopes");
+      expect(payload.mismatchCount).toBe(2);
+      expect(payload.totalExamined).toBe(3);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("emits no version-mismatch summary when there are no mismatches", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await saveRunEnvelope(makeEnvelope({ sessionId: "sess-clean-1" }));
+      await saveRunEnvelope(makeEnvelope({ sessionId: "sess-clean-2" }));
+
+      await listResumableEnvelopes();
+
+      const hits = logSpy.mock.calls.filter(c => c[0] === "[zone-envelope-version-mismatch-summary]");
+      expect(hits).toHaveLength(0);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
 });
 
 // ---- latestResumableEnvelope ------------------------------------------------
@@ -447,6 +537,46 @@ describe("resolveEnvelopeId", () => {
       expect(payload.actualVersion).toBe(99);
       expect(payload.identifier).toBe(`${env.runId}.envelope.json`);
       expect(result).toBeNull();
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("emits no version-mismatch summary when resolved via filename match (fallback scan never runs)", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await saveRunEnvelope(makeEnvelope({ sessionId: "full-uuid-5678" }));
+      await resolveEnvelopeId("full-uuid-5678");
+
+      const hits = logSpy.mock.calls.filter(c => c[0] === "[zone-envelope-version-mismatch-summary]");
+      expect(hits).toHaveLength(0);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("emits a version-mismatch summary reporting only what the fallback scan actually examined", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      // Same distinct-runId-vs-sessionId shape as the marker test above, forcing the fallback
+      // content-scan — the only place totalExamined/mismatchCount are tracked. No other envelope
+      // present, so this pins the summary to exactly what this one lookup scanned, not a
+      // directory-wide count.
+      const env = makeEnvelope({ sessionId: "sess-summary-resolve", runId: "run-summary-resolve" });
+      await saveRunEnvelope(env);
+      const p = join(envDir, `${env.runId}.envelope.json`);
+      const raw = JSON.parse(await readFile(p, "utf-8"));
+      raw.version = 99;
+      await writeFile(p, JSON.stringify(raw));
+
+      await resolveEnvelopeId(env.sessionId);
+
+      const hits = logSpy.mock.calls.filter(c => c[0] === "[zone-envelope-version-mismatch-summary]");
+      expect(hits).toHaveLength(1);
+      const payload = JSON.parse(String(hits[0]![1])) as { site: string; mismatchCount: number; totalExamined: number };
+      expect(payload.site).toBe("resolveEnvelopeId");
+      expect(payload.mismatchCount).toBe(1);
+      expect(payload.totalExamined).toBe(1);
     } finally {
       logSpy.mockRestore();
     }

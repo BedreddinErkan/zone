@@ -250,6 +250,22 @@ function isSupportedEnvelopeVersion(version: number, site: string, identifier: s
   return false;
 }
 
+// Item 32's second half: the per-record marker above names which envelope and where, but nothing
+// aggregates "how many" as its own signal. Fires only when mismatchCount > 0 — symmetric with the
+// per-record marker, which already only logs on a mismatch; a summary on every clean sweep would
+// be noise on every ordinary startup/prune cycle. totalExamined means "files whose version was
+// actually checked" — for resolveEnvelopeId's fallback loop specifically, that can be a partial
+// count (it stops at the first match), not a directory-wide census.
+function logEnvelopeVersionMismatchSummary(site: string, mismatchCount: number, totalExamined: number): void {
+  if (mismatchCount === 0) return;
+  log("[zone-envelope-version-mismatch-summary]", JSON.stringify({
+    event: "envelope_version_mismatch_summary",
+    site,
+    mismatchCount,
+    totalExamined,
+  }));
+}
+
 /** @param key an envelope key — a runId, or a sessionId for a pre-cutover file. */
 export async function loadRunEnvelope(key: string): Promise<RunEnvelope | null> {
   try {
@@ -296,12 +312,15 @@ export async function listResumableEnvelopes(repoPath?: string): Promise<Resumab
   }
 
   const results: ResumableEnvelope[] = [];
+  let mismatchCount = 0;
+  let totalExamined = 0;
   for (const file of files) {
     if (!file.endsWith(ENVELOPE_SUFFIX) || file.endsWith(".tmp")) continue;
     try {
       const raw = await fs.readFile(join(dir, file), "utf-8");
       const env = JSON.parse(raw) as RunEnvelope;
-      if (!isSupportedEnvelopeVersion(env.version, "listResumableEnvelopes", file)) continue;
+      totalExamined++;
+      if (!isSupportedEnvelopeVersion(env.version, "listResumableEnvelopes", file)) { mismatchCount++; continue; }
       if (repoPath !== undefined && env.repoPath !== repoPath) continue;
       if (!isResumable(env)) continue;
       results.push({ ...env, key: file.slice(0, -ENVELOPE_SUFFIX.length) });
@@ -309,6 +328,7 @@ export async function listResumableEnvelopes(repoPath?: string): Promise<Resumab
       // skip corrupt files
     }
   }
+  logEnvelopeVersionMismatchSummary("listResumableEnvelopes", mismatchCount, totalExamined);
 
   results.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   return results;
@@ -370,11 +390,14 @@ export async function pruneOldEnvelopes(
   type Candidate = { file: string; updatedAt: string; keep: boolean };
   const candidates: Candidate[] = [];
 
+  let mismatchCount = 0;
+  let totalExamined = 0;
   for (const file of envelopeFiles) {
     try {
       const raw = await fs.readFile(join(dir, file), "utf-8");
       const env = JSON.parse(raw) as RunEnvelope;
-      if (!isSupportedEnvelopeVersion(env.version, "pruneOldEnvelopes", file)) continue;
+      totalExamined++;
+      if (!isSupportedEnvelopeVersion(env.version, "pruneOldEnvelopes", file)) { mismatchCount++; continue; }
       // Safety guard: a live "running" envelope with an alive pid is never pruned.
       const isLiveRun = env.status === "running" && isPidAlive(env.pid);
       candidates.push({ file, updatedAt: env.updatedAt, keep: isLiveRun });
@@ -382,6 +405,7 @@ export async function pruneOldEnvelopes(
       // skip corrupt/unreadable files — leave them alone rather than risk mis-deleting
     }
   }
+  logEnvelopeVersionMismatchSummary("pruneOldEnvelopes", mismatchCount, totalExamined);
 
   const toRemove = new Set<string>();
 
@@ -482,19 +506,28 @@ export async function resolveEnvelopeId(idOrPrefix: string): Promise<string | nu
     if (key.startsWith(idOrPrefix)) return key;
   }
 
-  // Fallback: the id may be a sessionId of an envelope now keyed by runId.
+  // Fallback: the id may be a sessionId of an envelope now keyed by runId. Stops at the first
+  // match, so mismatchCount/totalExamined below reflect what this lookup actually scanned before
+  // stopping, not a directory-wide census — the early `return` becomes found+break so the summary
+  // has exactly one exit point to sit before; the search's own behavior is unchanged.
+  let mismatchCount = 0;
+  let totalExamined = 0;
+  let found: string | null = null;
   for (const file of envelopeFiles) {
     try {
       const env = JSON.parse(await fs.readFile(join(dir, file), "utf-8")) as RunEnvelope;
-      if (!isSupportedEnvelopeVersion(env.version, "resolveEnvelopeId", file)) continue;
+      totalExamined++;
+      if (!isSupportedEnvelopeVersion(env.version, "resolveEnvelopeId", file)) { mismatchCount++; continue; }
       if (typeof env.sessionId === "string" && env.sessionId.startsWith(idOrPrefix)) {
-        return file.slice(0, -ENVELOPE_SUFFIX.length);
+        found = file.slice(0, -ENVELOPE_SUFFIX.length);
+        break;
       }
     } catch {
       // skip corrupt files
     }
   }
-  return null;
+  logEnvelopeVersionMismatchSummary("resolveEnvelopeId", mismatchCount, totalExamined);
+  return found;
 }
 
 // ---- Reconciliation --------------------------------------------------------
