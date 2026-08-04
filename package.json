@@ -9,7 +9,7 @@
   "bin": {
     "zone": "./dist/cli/index.js"
   },
-  "files": ["dist", "README.md", "LICENSE"],
+  "files": ["dist", "!dist/**/__fixtures__/**", "!dist/**/fixtures/**", "README.md", "LICENSE"],
  "exports": {
   "./flow":       { "types": "./dist/core/runLlmPatchFlow.d.ts",         "default": "./dist/core/runLlmPatchFlow.js" },
   "./agent":      { "types": "./dist/llm/agentLoop.d.ts",                "default": "./dist/llm/agentLoop.js" },
