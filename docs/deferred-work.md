@@ -411,29 +411,65 @@ which re-exports it for existing importers). Called from `composer.ts`
 (`src/llm/verification/`). `deriveVerdict.ts` imported it but never called it — that dead import
 is gone now too (see item 13).
 
-## 13. Dead-code detection is absent
+## 13. Closed — `noUnusedLocals` and `noUnusedParameters` are both enabled; 61 real findings resolved, 7 recorded as their own follow-ups
 
-**What it is:** `deriveVerdict.ts` carried an unused `didApplyPatch` import that survived every
-`tsc --noEmit` run because `tsconfig.json` omits `noUnusedLocals`, and survived every commit
-because ESLint is configured (`eslint.config.mjs`) but not wired into any npm script — `npx
-eslint <path>` has to be run by hand to catch it.
+**What it was:** `deriveVerdict.ts` carried an unused `didApplyPatch` import that survived every
+`tsc --noEmit` run because `tsconfig.json` omitted `noUnusedLocals`, and survived every commit
+because ESLint is configured but not wired into any npm script. This entry's own original text
+framed the choice as flag-vs-lint; that framing was half right, corrected here rather than
+repeated: `eslint.config.mjs` exists and defines real rules (`@typescript-eslint/naming-convention`,
+`curly`, `eqeqeq`, `no-throw-literal`, `semi`), but neither `eslint` nor `typescript-eslint` (the
+parser and plugin it imports) is present in `node_modules`, and `package.json` names neither as a
+dependency. The config cannot load — a sharper gap than "not wired into npm scripts," which
+understates it as a wiring problem rather than a missing-dependency one.
 
-**Why this matters:** the import itself is gone now (`e21aab93`, found and removed as a
-byproduct of an unrelated fix — see item 12), but the detection gap that let a dead import live
-undetected is not closed. The next dead import, dead export, or unreachable branch has the same
-free pass.
+**The count, checked rather than assumed:** `npx tsc --noEmit --noUnusedLocals
+--noUnusedParameters` found 61 findings across 25 files at the point this pass started — the 56
+this entry's own original text already recorded for `noUnusedLocals` alone, plus 5 strictly new
+from adding `noUnusedParameters`, diffed byte-for-byte to confirm nothing was lost by adding the
+second flag.
 
-**What would close it, and what it would actually cost:** either enabling `noUnusedLocals` in
-`tsconfig.json`, or wiring ESLint into the npm scripts. Checked, not assumed: `npx tsc --noEmit
---noUnusedLocals` surfaces 56 errors across 23 files, spanning `cli/`, `core/`, `engine/`,
-`llm/`, `repo/`, `roles/`, and `tools/` — a real, repo-wide backlog, confirming the "repo-wide
-fallout" concern rather than assuming it. Enabling the flag would mean clearing that backlog in
-the same change or accepting a red build; wiring lint into npm scripts changes what a green CI
-run means going forward. Either is a repo-wide change with its own fallout, which is why this
-is a ledger entry and not a drive-by fix.
+**What landed, in two commits:**
+- `3c0ab85a` fixed two of the 61 as real, established-safe regressions before the mechanical
+  sweep: `validatedStatus` (`runLlmPatchFlow.ts`) — wired correctly at introduction, silently
+  dropped 80 minutes later by a same-object-literal wording-only pass, restored with zero
+  observable effect today since `type:"validated"` has no consumer in either `sink.ts` or
+  `eventToActions.ts`; and `finalRunReport` on the `atomic_patch_failed` return
+  (`runLlmPatchFlow.ts`) — computed via `generateFinalRunReport` and discarded, matching 10
+  sibling return sites in the same function that already populate the same optional field.
+- `75bbe7ca` enabled both flags and resolved the remaining 59: 47 genuinely dead (deleted), 3
+  cosmetic positional/for-of parameters (`_`-prefixed), and 9 lines across 7 stories that read as
+  real defects rather than tidiness — left computed, marked `void x;` (not `_`-prefix, which
+  TypeScript does not exempt for a plain `const`/`let` local — confirmed by measurement before
+  applying it) plus a one-line comment naming the open question, so a later pass can pick each up
+  without re-deriving it. One of the 7 is recorded below as its own entry (item 51); the other 6
+  are recorded together as item 52.
 
-**Where the code lives:** `tsconfig.json`'s compiler options (`noUnusedLocals` absent);
-`eslint.config.mjs` (configured, not invoked by `npm test`/`npm run build`).
+**The flag's value, demonstrated rather than assumed:** deleting the dead findings surfaced a
+cascade the compiler's own single pass never shows in one run — in `patchCorrectnessValidator.ts`,
+`normalizedBefore`/`normalizedAfter` were the only callers of `normalizeForSanityCompare`, which
+was the only caller of `normalizeWhitespace` and `stripCommentsForComparison`. All four were
+verified dead independently, not assumed transitively, before deletion — a four-symbol chain the
+compiler only ever reports one link of per pass.
+
+**Flag-is-live proof:** a throwaway unused local introduced in `src/cli/colors.ts` was rejected by
+`tsc --noEmit` naming it directly (`src/cli/colors.ts(25,9): error TS6133:
+'zoneItem13FlagLiveProof' is declared but its value is never read.`), then reverted and
+re-confirmed clean.
+
+**Build and typecheck share this config:** `npm run build` runs `tsc -p tsconfig.json`; `npm run
+typecheck` runs `tsc --noEmit`, which picks up the same `tsconfig.json` implicitly from the
+working directory — one config file, two invocations, both enforcing the new flags identically.
+
+**What this closure doesn't cover:** this entry's original text named three risks — "the next dead
+import, dead export, or unreachable branch." `noUnusedLocals`/`noUnusedParameters` only ever
+catches the first. An unused *export* is invisible to this flag by design (TypeScript can't know
+whether an external consumer imports it), and neither flag does reachability analysis on branches.
+No entry exists yet for that remaining gap.
+
+**Where the code lives:** `tsconfig.json`'s compiler options (`noUnusedLocals`/
+`noUnusedParameters` both `true`); `eslint.config.mjs` (configured, still not runnable — its own
+dependencies aren't installed).
 
 ## 14. Closed — `filesModified` now tracks persisting mutations, not write attempts
 
@@ -1742,25 +1778,103 @@ directory-creation side effect rather than after it.
 **Where the code lives:** `write_file`'s handler in `toolExecutor.ts`, immediately after
 `path.join(repoPath, filePath)`. Tests in `toolExecutor.pathBoundary.test.ts`.
 
+## 51. `validatePatchCorrectness`'s size/delimiter override half is computed and discarded
+
+**What it is:** the "Minimal safe patch override" block in `validatePatchCorrectness`
+(`patchCorrectnessValidator.ts`) has a comment promising two conditions — "very small" and "does
+not worsen delimiter counts" — before allowing a `broken_import_line` block through on an
+already-broken file. The actual gate, `if (hasBrokenImport && !touchesImport)`, only ever checks
+import-region locality. `diffCountsFinal`, `noDelimiterRegression`, and `blockingCodes` are all
+computed and never referenced by the conditional — each now carries a `void` statement and a
+comment naming this gap, added when item 13 (above) enabled `noUnusedLocals`.
+
+**Present from day one, not later drift — checked with `git log -S`, not assumed.** The block, its
+promising comment, and the gate were all added together in the commit that introduced this
+function (`1123cecaf`, "ai report flow", 2026-04-25). The test added in the same commit ("does not
+block broken_import_line when patch does not touch the import region and is minimal") exercises
+only the import-region-untouched condition — despite the word "minimal" in its own title, it never
+varies patch size or delimiter counts, so nothing has ever pinned the missing half as either
+present or deliberately absent. No comment anywhere marks the gap as intentional.
+
+**`blockingCodes` folds into the same gap, not a separate one.** The `console.log` call two lines
+below the gate hardcodes `ignoredBlockingCodes: ["broken_import_line"]` as a literal instead of
+deriving it from `blockingCodes` — the same unwired value would also be the correct fix for that
+hardcoding, if a second blocking code ever needs the same override.
+
+**Why this isn't fixed here:** wiring the missing half in is a behavior change to what
+`apply_patch` accepts, not a tidiness fix — a patch that is downgraded to a warning today (any
+`broken_import_line` outside the import region, regardless of size) would revert to blocked
+whenever it also fails a newly-enforced size or delimiter check. Whether that's the right outcome
+depends on what the check would actually reject against real patch shapes, which hasn't been
+measured.
+
+**What would close it:** establish what the size/delimiter check would reject if wired in — the
+threshold values aren't specified anywhere, only implied by the comment — measure that against
+real patch shapes, then decide, the way item 41's establish measured the existing CRLF precedent
+before committing to a direction rather than assuming one.
+
+**Where the code lives:** the override block, its comment, and the gate are in
+`validatePatchCorrectness`, `patchCorrectnessValidator.ts`, immediately after the four-layer
+`runLayer` sequence.
+
+## 52. Six more computed-and-unused values the item 13 sweep found, each needing its own establish
+
+**What it is:** the same pass that closed item 13 classified 9 lines across 7 stories as
+"deferred-signal" rather than dead code — computed values that read like a real, unwired defect
+rather than leftover tidiness. One of the 7 is item 51, above. The other 6, each left `void`-marked
+with a comment naming the open question rather than fixed, are recorded together here rather than
+as separate entries, per the pass's own scope.
+
+- **`runLlmPatchFlow.ts` : `runtimeVerificationToolingFailed`** — computed, never read. A
+  `failed_environment_or_tooling` verification outcome is never distinguished from a code failure
+  anywhere downstream of where this is computed.
+- **`toolExecutor.ts` : `rawStderr`** — captured alongside `rawStdout` inside the inline syntax
+  checker, but never read; only `rawStdout` feeds `parseTscErrorPreview`, so a checker that writes
+  its error text to stderr instead of stdout has that text silently unused.
+- **`agentLoop.ts` : `antiThrashStage1Pattern`** — written at two sites, read at none. Its three
+  sibling anti-thrash trackers (`antiThrashStage1Fired`, `antiThrashStage1FiredAtIter`,
+  `antiThrashFilesModifiedAtStage1`) are all read; this one isn't compared against anything.
+- **`runLlmPatchFlow.ts` : `existingFilesSummary`** — an anti-hallucination prompt block ("use ONLY
+  these paths, do not invent new ones") built from the ranked relevant-files list, then never
+  injected into any prompt.
+- **`runLlmPatchFlow.ts` : `verificationCommand`** (the fix-retry-prompt local specifically — a
+  second, differently-scoped local of the same name elsewhere in the file is read and used) —
+  resolved immediately before a fix-retry sub-run prompt that tells the model "a verification
+  command failed" without ever naming which one.
+- **`testEngineerContext.ts` : `framework`** (parameter of `detectConfigFiles`) — every sibling
+  call at the same call site (`detectTestFiles`, `detectPageObjects`) branches on `framework`; this
+  one checks every recognized framework's config-file pattern unconditionally. Genuinely
+  undecided, not just unfixed: ambiguous whether that's deliberate (report any recognized
+  test-config file as context) or a bug (should filter to the detected framework's own pattern).
+
+**Why these are bundled as one entry, not six:** each needs its own behavior-change establish
+before being touched — the same category `validatedStatus`/`atomicReport` (item 13, above) were
+in before this session cleared them — and none has a fix specified yet, so none is individually
+actionable today. Bundling avoids six near-identical "needs its own pass" entries that would say
+nothing more than this one does per bullet.
+
+**Where the code lives:** named per finding above; all `void`-marked with an `item 13 follow-up:`
+comment at the point of computation.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 50 to find out which ones still need something. No index of
+reader the trouble of reading all 52 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (26): 6, 7, 8, 14, 20, 21, 22, 24, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49
+**Closed** (27): 6, 7, 8, 13, 14, 20, 21, 22, 24, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (11): 2 (after 16), 10, 12, 13, 15 (after 2), 16, 17, 18, 23, 25, 36
+first (10): 2 (after 16), 10, 12, 15 (after 2), 16, 17, 18, 23, 25, 36
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (2): 1, 4
 
-**Neither — a structural fact recorded, with no fix proposed** (11): 3, 5, 9, 11, 19, 27, 38, 43,
-45, 46, 50
+**Neither — a structural fact recorded, with no fix proposed** (13): 3, 5, 9, 11, 19, 27, 38, 43,
+45, 46, 50, 51, 52
 
 Items 1, 2, 12, 16, 18, and 36 are partially closed or corrected; the classification above covers
 only the portion still open, not the whole entry.
