@@ -288,8 +288,16 @@ function safeRelPath(rel: string): string {
  *   - relative input ("components/Foo.tsx")  → returns it unchanged
  *   - leading-slashed relative ("/foo/bar")  → strips the slash (legacy)
  *   - absolute matching repoPath             → returns the trailing relative form
- *   - absolute outside repoPath              → falls back to leading-slash strip;
- *                                              downstream scope guard / FS catches it
+ *   - absolute outside repoPath              → falls back to leading-slash strip
+ *   - relative traversal ("../../etc/passwd") → NOT normalized here at all; this function
+ *                                              only ever compares absolute inputs against
+ *                                              repoPath. Every caller that reaches the
+ *                                              filesystem checks the result with
+ *                                              checkPathBoundary (symlink-aware, realpaths
+ *                                              both sides) right after path.join — that is
+ *                                              the actual containment guarantee, not this
+ *                                              function. checkWriteScope is a separate,
+ *                                              plan-scope gate and is not a path boundary.
  *
  * Always emits [zone-tool-path-resolve] when the input was absolute, so the
  * smoke can prove no duplication happens after the fix.
@@ -663,25 +671,108 @@ function parseRgJsonContent(
   return { success: true, output: t.text, truncated: t.truncated };
 }
 
+// Walks upward from `p` using lstatSync — not existsSync, which follows symlinks and reports
+// false for a dangling one, letting the walk skip straight past a pre-planted broken symlink to
+// its parent instead of finding it — until it reaches a path that exists. Returns null if the
+// walk exhausts all the way to the filesystem root without finding anything statable: every real
+// POSIX root exists, so this is unreachable in practice, but the return is explicit rather than
+// an implicit fall-through, since the caller is a security check and "found nothing" must name
+// itself so the caller can reject on it, not silently inherit whatever the last `current` was.
+function nearestExistingAncestor(p: string): string | null {
+  let current = p;
+  for (;;) {
+    try {
+      fs.lstatSync(current);
+      return current;
+    } catch {
+      const parent = path.dirname(current);
+      if (parent === current) return null;
+      current = parent;
+    }
+  }
+}
+
+// Shared by every resolveAgentPath caller that touches the filesystem. Separator-safe
+// (repoReal + path.sep, not a bare prefix — a sibling directory like "<repo>-dogfood" must not
+// match) and symlink-aware: realpaths the nearest existing ancestor of the target (the target
+// itself, for an existing file — catching a symlink planted at the target; the nearest existing
+// directory, for a new file, since realpathSync throws ENOENT on a path that doesn't exist yet)
+// and compares it against repoPath's own realpath, never a raw one. repoPath is realpathed on
+// every call, not assumed canonical: process.cwd() is kernel-canonicalized on POSIX, but a
+// --repo flag through a symlink is not (path.resolve is purely lexical) — comparing a
+// realpath'd candidate against an un-realpath'd repoPath would reject every legitimate write
+// made through a symlinked --repo.
+//
+// Two failure modes besides a proven escape, both must fail closed (reject), not open:
+//   - nearestExistingAncestor found nothing (see above) — checked explicitly before any realpath
+//     call, not left to fall through into one.
+//   - realpathSync throws for a reason other than "doesn't exist yet" — EACCES on a directory in
+//     the resolution chain is live (e.g. a symlink resolving through a search-denied directory).
+//     Any such failure means containment can't be proven; an undecidable boundary check is not a
+//     passing one.
+function checkPathBoundary(abs: string, repoPath: string, toolName: string): true | "escape" {
+  const lexical = path.resolve(abs);
+  const ancestor = nearestExistingAncestor(lexical);
+  if (ancestor === null) {
+    log("[zone-path-boundary-rejected]", JSON.stringify({
+      tool: toolName, requestedPath: lexical, resolvedPath: null, repoPath, reason: "no_existing_ancestor",
+    }));
+    return "escape";
+  }
+  let repoReal: string;
+  let ancestorReal: string;
+  try {
+    repoReal = fs.realpathSync(path.resolve(repoPath));
+    ancestorReal = fs.realpathSync(ancestor);
+  } catch {
+    log("[zone-path-boundary-rejected]", JSON.stringify({
+      tool: toolName, requestedPath: lexical, resolvedPath: null, repoPath, reason: "unresolvable",
+    }));
+    return "escape";
+  }
+  if (ancestorReal !== repoReal && !ancestorReal.startsWith(repoReal + path.sep)) {
+    log("[zone-path-boundary-rejected]", JSON.stringify({
+      tool: toolName, requestedPath: lexical, resolvedPath: ancestorReal, repoPath: repoReal, reason: "outside_repo",
+    }));
+    return "escape";
+  }
+  return true;
+}
+
 function stagedWrite(staging: Map<string, string> | undefined, abs: string, content: string): boolean;
-function stagedWrite(staging: Map<string, string> | undefined, abs: string, content: string, repoPath: string): boolean | "escape";
+function stagedWrite(staging: Map<string, string> | undefined, abs: string, content: string, repoPath: string, toolName: string): boolean | "escape";
 function stagedWrite(
   staging: Map<string, string> | undefined,
   abs: string,
   content: string,
-  repoPath?: string
+  repoPath?: string,
+  toolName?: string
 ): boolean | "escape" {
-  if (!staging) return false;
   if (repoPath !== undefined) {
-    const resolved = path.resolve(abs);
-    const repoAbs = path.resolve(repoPath);
-    if (resolved !== repoAbs && !resolved.startsWith(repoAbs + path.sep)) {
-      return "escape";
-    }
+    if (checkPathBoundary(abs, repoPath, toolName ?? "unknown") === "escape") return "escape";
   }
+  if (!staging) return false;
   const key = path.resolve(abs);
   staging.set(key, content);
   return true;
+}
+
+// Every current caller (apply_patch, write_file, multi_edit) now runs its own checkPathBoundary
+// call before it ever reaches stagedWrite, which makes stagedWrite's own boundary check
+// permanently unreachable from any of them — the caller's early check always wins first. It's
+// still real code (a shared utility should be safe to call on its own, and a future caller might
+// not add an early check), but that means no executeTool()-level test can exercise stagedWrite's
+// own check in isolation; it would only ever be proving the caller's early check again. This
+// test-only export calls stagedWrite directly, bypassing every handler, so its own reordering
+// fix (repoPath check before the staging-map check) has something that actually discriminates it.
+export function _stagedWriteForTest(
+  staging: Map<string, string> | undefined,
+  abs: string,
+  content: string,
+  repoPath: string,
+  toolName: string
+): boolean | "escape" {
+  return stagedWrite(staging, abs, content, repoPath, toolName);
 }
 
 // Item 28: what a post-write rollback can honestly claim. "escape" is not a member here —
@@ -1499,6 +1590,9 @@ export async function executeTool(
       }
       onProgress?.(`[tool] Reading: ${filePath}`);
       const abs = path.join(repoPath, filePath);
+      if (checkPathBoundary(abs, repoPath, toolName) === "escape") {
+        return { success: false, output: `read_file_blocked_path_escape: "${filePath}" would escape repo` };
+      }
       const staged = stagedRead(input?.stagingFiles, abs);
       const fullContent = staged !== null ? staged : fs.readFileSync(abs, "utf8");
       const charCount = fullContent.length;
@@ -1650,6 +1744,9 @@ export async function executeTool(
       const includeIgnored = args.include_ignored === true;
       onProgress?.(`[tool] Listing: ${dirPath}`);
       const absDir = path.join(repoPath, dirPath);
+      if (checkPathBoundary(absDir, repoPath, toolName) === "escape") {
+        return { success: false, output: `list_files_blocked_path_escape: "${dirPath}" would escape repo` };
+      }
       // Not staging-aware: fast-glob reads disk; staged new files are not visible here.
       // By default excludes VCS/build dirs (.next, node_modules, dist, …) and the
       // project's .gitignore'd paths; include_ignored=true reaches into them.
@@ -1673,6 +1770,9 @@ export async function executeTool(
       const intent = intentRaw === "delete" || intentRaw === "modify" ? intentRaw : "add";
       const allowShrink = intent === "delete" || intent === "modify";
       const abs = path.join(repoPath, filePath);
+      if (checkPathBoundary(abs, repoPath, toolName) === "escape") {
+        return { success: false, output: `apply_patch_blocked_path_escape: "${filePath}" would escape repo` };
+      }
 
       // B.1: guard empty filePath — stops the loop before read-before-patch enforcement
       if (!filePath.trim()) {
@@ -2512,7 +2612,7 @@ export async function executeTool(
       }
 
       {
-        const wr = stagedWrite(input?.stagingFiles, abs, outputContent, repoPath);
+        const wr = stagedWrite(input?.stagingFiles, abs, outputContent, repoPath, toolName);
         if (wr === "escape") {
           return { success: false, output: `apply_patch_blocked_path_escape: "${filePath}" would escape repo` };
         }
@@ -2747,6 +2847,9 @@ export async function executeTool(
       const filePath = resolveAgentPath(String(args.filePath || ""), repoPath, "write_file");
       const content = String(args.content ?? "");
       const abs = path.join(repoPath, filePath);
+      if (checkPathBoundary(abs, repoPath, toolName) === "escape") {
+        return { success: false, output: `write_file_blocked_path_escape: "${filePath}" would escape repo` };
+      }
 
       // Tur P2-scope: same plan-based guard as apply_patch. Note that
       // `allowWriteFileOverwritePaths` (escalated-file override) is NOT a
@@ -2873,7 +2976,7 @@ export async function executeTool(
         // survives any abort. No prior content to protect; staging adds only loss-risk.
         fs.writeFileSync(abs, contentToWrite, "utf8");
       } else {
-        const wr = stagedWrite(input?.stagingFiles, abs, contentToWrite, repoPath);
+        const wr = stagedWrite(input?.stagingFiles, abs, contentToWrite, repoPath, toolName);
         if (wr === "escape") {
           return { success: false, output: `write_file_blocked_path_escape: "${filePath}" would escape repo` };
         }
@@ -3387,6 +3490,13 @@ export async function executeTool(
       for (const relPath of files) {
         const filePath = resolveAgentPath(String(relPath), repoPath, "multi_edit");
         const abs = path.join(repoPath, filePath);
+        if (checkPathBoundary(abs, repoPath, toolName) === "escape") {
+          return {
+            success: false,
+            output: `multi_edit_blocked_path_escape: "${filePath}" would escape repo`,
+            filesStaged,
+          };
+        }
 
         let content: string;
         try {
@@ -3416,7 +3526,7 @@ export async function executeTool(
           } else if (eolAnalysis.dominant === "cr") {
             newContent = newContent.replace(/\n/g, "\r");
           }
-          const wr = stagedWrite(input?.stagingFiles, abs, newContent, repoPath);
+          const wr = stagedWrite(input?.stagingFiles, abs, newContent, repoPath, toolName);
           if (wr === "escape") {
             return {
               success: false,
