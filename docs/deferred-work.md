@@ -465,7 +465,7 @@ working directory — one config file, two invocations, both enforcing the new f
 import, dead export, or unreachable branch." `noUnusedLocals`/`noUnusedParameters` only ever
 catches the first. An unused *export* is invisible to this flag by design (TypeScript can't know
 whether an external consumer imports it), and neither flag does reachability analysis on branches.
-No entry exists yet for that remaining gap.
+That remaining gap is recorded separately as item 53.
 
 **Where the code lives:** `tsconfig.json`'s compiler options (`noUnusedLocals`/
 `noUnusedParameters` both `true`); `eslint.config.mjs` (configured, still not runnable — its own
@@ -1856,11 +1856,49 @@ nothing more than this one does per bullet.
 **Where the code lives:** named per finding above; all `void`-marked with an `item 13 follow-up:`
 comment at the point of computation.
 
+## 53. Detecting a dead export or an unreachable branch needs new tooling — neither is installed
+
+**What it is:** item 13 (above) closed dead-*local* detection by enabling `noUnusedLocals` and
+`noUnusedParameters`. That entry's own original problem statement additionally named a dead
+*export* and an *unreachable branch* as the same class of risk; neither is caught by those two
+flags — TypeScript's unused-locals check doesn't do cross-module export-usage analysis (an
+exported symbol might be imported anywhere, so a single file's compilation can't rule that out),
+and neither flag does branch-reachability analysis at all.
+
+**Two candidate tools, checked rather than assumed — neither installed:**
+- **Dead exports:** `ts-prune` and `knip` are the usual purpose-built tools for this. Checked
+  directly: no `node_modules/ts-prune`, no `node_modules/knip`, and neither is named in
+  `package.json` or anywhere in `package-lock.json` — zero occurrences of either string.
+- **Unreachable branches:** ESLint has reachability-adjacent rules, but ESLint itself is the same
+  unusable dependency item 13 already describes. Confirmed live, not just by absence: running
+  `npx eslint <path>` against this repo silently fetches ESLint 10.8.0 from the network (no
+  prompt), then fails loading `eslint.config.mjs` with `Error [ERR_MODULE_NOT_FOUND]: Cannot find
+  package 'typescript-eslint' imported from /.../eslint.config.mjs`, exit code 2 — `typescript-eslint`
+  isn't in `package-lock.json` even transitively, so no ESLint rule, reachability or otherwise, can
+  run today. This isn't a second gap; it's item 13's own gap blocking a second use case.
+
+**Why this is a decision, not a fix — the same shape as item 36's currency half:** closing either
+half means adding new infrastructure (installing and configuring a tool), not flipping a compiler
+flag that's already part of the toolchain, the way item 13 was. Which tool, what config, and
+whether its false-positive rate is tolerable are real questions a docs-only pass shouldn't answer
+unilaterally. Recording the options and the current blocker is the decision, matching item 36's
+own precedent: name the candidates, establish why nothing is installed, and stop there rather than
+leaving the gap to be silently rediscovered.
+
+**What would close it:** install and configure `ts-prune` or `knip` for the export half; for the
+branch half, either resolve item 13's own ESLint-dependency gap first and enable a reachability
+rule, or find a narrower `tsc`-native substitute (nothing broad exists today — `tsc` has
+per-construct exhaustiveness flags like `noFallthroughCasesInSwitch`, not general unreachable-code
+detection). Whichever is picked up first should measure real findings against this repo before
+deciding to ship, the way item 36's own currency-check establish did before declining to ship it.
+
+**Where the code lives:** nowhere yet — no tool is selected, no config is written.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 52 to find out which ones still need something. No index of
+reader the trouble of reading all 53 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -1873,8 +1911,8 @@ first (10): 2 (after 16), 10, 12, 15 (after 2), 16, 17, 18, 23, 25, 36
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (2): 1, 4
 
-**Neither — a structural fact recorded, with no fix proposed** (13): 3, 5, 9, 11, 19, 27, 38, 43,
-45, 46, 50, 51, 52
+**Neither — a structural fact recorded, with no fix proposed** (14): 3, 5, 9, 11, 19, 27, 38, 43,
+45, 46, 50, 51, 52, 53
 
 Items 1, 2, 12, 16, 18, and 36 are partially closed or corrected; the classification above covers
 only the portion still open, not the whole entry.

@@ -18,7 +18,7 @@ npm run sweep         # scripts/sweep.ts — vestigial (HTTP server removed; tar
 npm run sweep:dry     # config validation only
 ```
 
-ESLint configured (`eslint.config.mjs`) but not wired to npm — use `npx eslint <path>`. The CLI runs from the *built* dist/ — rebuild after editing `src/`. `tsconfig.json` excludes `*.test.ts`, `**/__tests__/**`, `src/extension.ts` (vestigial VS Code shell); `src/test/**` is included so fixtures type-check.
+ESLint configured (`eslint.config.mjs`) but neither `eslint` nor `typescript-eslint` is installed — `npx eslint <path>` fetches ESLint from the network and then fails loading the config (`Cannot find package 'typescript-eslint'`); see `docs/deferred-work.md` item 13. The CLI runs from the *built* dist/ — rebuild after editing `src/`. `tsconfig.json` excludes `*.test.ts`, `**/__tests__/**`, `src/extension.ts` (vestigial VS Code shell); `src/test/**` is included so fixtures type-check.
 
 ## Big-picture architecture
 
