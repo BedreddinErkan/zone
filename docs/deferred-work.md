@@ -1310,7 +1310,7 @@ next publish, not retroactively.
 `src/cli/tui/__fixtures__/staticHarness.tsx` — all three unchanged, still compiling and
 type-checking exactly as before.
 
-## 38. Whether shipping 416 sourcemaps is deliberate is undecided, not wrong
+## 38. Whether shipping 416 sourcemaps is deliberate — the flag is now live; the shipping decision itself is still open
 
 **What it is:** the published tarball carries 416 `.js.map` files — one per compiled `dist/`
 module, from `tsconfig.json`'s `sourceMap: true` (present before the publish-prep pass; that
@@ -1318,20 +1318,42 @@ commit added `declaration` alongside it, unchanged). Confirmed two ways — `fin
 "*.map"` and `npm pack --dry-run`'s own file list — both agree at 416. They account for roughly
 39% of `dist/`'s own unpacked size (2.2 of 5.6 MB, measured directly) — a real, large share.
 
-**Whether this is deliberate: no stated position exists anywhere in this repo.** A grep for
-"sourcemap"/"source map" across every `*.md` file — `CLAUDE.md`, `README.md`, this file — returns
-zero hits. The publish-prep pass's own plan listed "sourcemap exclusion" under its out-of-scope
-section, but deferring a decision is not the same claim as the decision having been made either
-way; nothing commits to shipping them (e.g., for readable stack traces from user bug reports) or
-calls it unintended bloat.
+**What `a35e4e90` changed:** the maps went from generated-but-never-read to genuinely useful on
+one of Zone's two top-level error paths. `--enable-source-maps` is now set via the bin shebang —
+the only mechanism that worked. `process.setSourceMapsEnabled(true)` was tried first and measured
+to fail under Zone's actual ESM module system (it worked in an isolated CommonJS test, which is
+why it looked viable before being tested against the real, built entry point). No measurable
+startup cost: 612.9ms vs. 611.5ms mean over 20 runs each: an initial 10-run sample had shown a
+~53ms gap that didn't hold up under a larger sample.
 
-**What would close it:** an explicit decision, recorded somewhere durable, either way — kept
-deliberately with a stated reason, or excluded via a `files`/`.npmignore` pattern on `*.map`.
-`sourceMap: true` doesn't need to change regardless of which way the shipping decision goes —
-generating them for local dev and publishing them to npm are independent knobs.
+**The benefit is partial, and that's the part worth being precise about.** `sourcesContent` is
+absent from every map, and `src/` isn't in the tarball — so there's no original source text
+available anywhere in an installed copy, embedded or on disk. What the flag buys is exactly the
+`mappings` field's own contents: a correct `src/**.ts` file and line number, with no code to read
+at that location. Enough to file an accurate bug report or look the line up on GitHub; not enough
+to inspect the crashing code from the installed package itself. And it only reaches the user on
+one of two paths: the TUI (the default, no-args invocation) prints the raw `Error` object on an
+uncaught exception, and that's what gets remapped. The headless/`--print`/task-only flow's
+`formatErrorMessage` returns only `error.message` — no stack, ever — so the flag changes nothing
+there.
 
-**Where the code lives:** `tsconfig.json`'s `sourceMap` field; `package.json`'s `files` allowlist,
-which has no `*.map` exclusion today.
+**The shipping decision itself is still open, now with the real numbers instead of an unmeasured
+guess.** The tradeoff is: **~39% of package size, for file+line accuracy on one of two error
+paths, with no source text.** Three ways to close it, not two:
+- Keep shipping them as-is (today's state) — the tradeoff above, accepted explicitly.
+- Add `--inlineSources` (a `tsconfig.json` compiler option) to embed the actual source text into
+  every map, making them fully self-contained and useful on both remapping *and* reading the
+  crashing code — at a further, unmeasured size cost on top of the current 39%.
+- Exclude them from the tarball via a `files` negation (the mechanism `1a5c5b16` already proved
+  works for this exact package), which would make `a35e4e90`'s shebang change pointless — nothing
+  left to remap.
+
+`sourceMap: true` itself doesn't need to change under any of the three — local dev keeps full
+maps regardless of what the package ships.
+
+**Where the code lives:** `tsconfig.json`'s `sourceMap`/`inlineSources` fields; `package.json`'s
+`files` allowlist (no `*.map` exclusion today); the bin shebang in `src/cli/index.ts`, which is
+what actually activates the maps that already ship.
 
 ## 39. Only two of the audited devDependencies are actually unused — correcting the other two
 
