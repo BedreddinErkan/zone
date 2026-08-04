@@ -1355,34 +1355,42 @@ maps regardless of what the package ships.
 `files` allowlist (no `*.map` exclusion today); the bin shebang in `src/cli/index.ts`, which is
 what actually activates the maps that already ship.
 
-## 39. Only two of the audited devDependencies are actually unused — correcting the other two
+## 39. Closed — dompurify and marked removed; only two of the three audited suspects were real
 
-**What it is:** the publish-prep pass's reachability audit found zero `dist/` imports for
-`dompurify`, `marked`, `@vitejs/plugin-react`, and `typescript`, in service of a narrower question
-— which devDependencies are reachable from the published bin entry, the same shape of bug `undici`
-turned out to be. Re-checked against the current tree with the scope widened past `dist/` to all
-of `src/` and the root tooling configs, for the broader question of which are actually unused:
+**What it was:** the publish-prep pass's reachability audit found zero `dist/` imports for
+`dompurify`, `marked`, `@vitejs/plugin-react`, and `typescript`. Re-checked with the scope widened
+past `dist/` to all of `src/` and the root tooling configs: `dompurify`/`marked` were genuinely
+unused; `@vitejs/plugin-react`/`typescript` were not. "No import" isn't "unused" for tooling
+meant to be *run* rather than imported as a library — `@vitejs/plugin-react` is imported directly
+in `vitest.config.ts` (`plugins: [react()]`, needed for the `.tsx` component suite);
+`typescript` is invoked as the `tsc` binary by the `build`/`postbuild`/`typecheck`/`check-types`
+scripts, never via an ESM `import`. Both stayed; the entry's own original framing (four suspects,
+all flagged by the same import-reachability check) was broader than the real finding.
 
-- **`dompurify` and `marked` are genuinely unused** — zero references anywhere in `src/`,
-  `dist/`, or any root config. Both were vendored prebuilt browser bundles under the now-deleted
-  `dist/ui/` (a stale build artifact from an old, no-longer-present copy step) and were never
-  imported by anything else in the repo.
-- **`@vitejs/plugin-react` and `typescript` are not unused — they're real, active
-  devDependencies, correctly scoped.** `@vitejs/plugin-react` is imported directly in
-  `vitest.config.ts` (`plugins: [react()]`), needed for the `.tsx` component test suite.
-  `typescript` is invoked directly by `package.json`'s own `build`/`postbuild`/`typecheck`/
-  `check-types` scripts via its `tsc` binary — never via an ESM `import`, which is why the
-  import-based reachability check reported zero, but "no import found" isn't the same claim as
-  "unused" for a devDependency whose job is being run as a build tool rather than imported as a
-  library. Neither was ever a hygiene concern; their absence from `dist/`'s reachability graph is
-  by design.
+**Where the vendored bundles actually lived, corrected from this entry's original text:**
+`src/ui/vendor/marked.min.js` and `src/ui/vendor/dompurify.min.js` — added by `bac83ec6`
+("vendor marked+dompurify + self-host IBM Plex fonts"), replacing CDN `<script>` tags with
+self-hosted copies. `7df75721` ("delete old browser web UI + remove build coupling"), five days
+later, deleted the entire `src/ui/` tree — SPA, fonts, vendor bundles, prototype HTML, and four
+test files — along with `scripts/sync-zone-ui.cjs` and the build's `copy-ui` step. The
+`devDependencies` entries were never removed in that same commit; that is the actual orphaning
+event, not the much later publish-prep audit that merely noticed them. (A `dist/ui/` copy likely
+also existed locally, produced by the now-deleted sync script — plausible but unverifiable via
+git, since `dist/` has never been tracked.)
 
-**What would close it:** remove `dompurify` and `marked` from `devDependencies` — nothing in the
-current tree references either, by name or by import, anywhere. Leave `@vitejs/plugin-react` and
-`typescript` alone.
+**A search-method note worth keeping:** a broad `\bmarked\b` grep across `src/` was noisy — the
+common English word "marked" appears throughout comments and test names, unrelated to the npm
+package. An import-shaped pattern (`` from ["']marked["'] ``) cut through it cleanly. Cheap to
+repeat correctly next time, ambiguous otherwise.
 
-**Where the code lives:** `package.json`'s `devDependencies`; confirmed absent from `src/`,
-`dist/`, and every root config file (`vitest.config.ts`, `tsconfig.json`).
+**What shipped (`d8ccecfb`):** both removed from `devDependencies`. `npm install` removed three
+packages, not two — `@types/trusted-types` cascaded out as a transitive type-only dependency of
+`dompurify`'s Trusted Types API typings, with no other consumer. Verified: full suite green,
+`tsc --noEmit` clean, `npm run build` clean, and `npm pack --dry-run` unchanged at 1242 files
+before and after — `devDependencies` never ship in the `files`-allowlisted tarball, measured
+rather than assumed.
+
+**Where the code lives:** `package.json`'s `devDependencies`. `src/ui/` no longer exists.
 
 ## 40. Closed — `zone-vsextension` still type-checks after the `exports.types` repoint
 
@@ -1717,10 +1725,10 @@ priority ordering" cautions against ranking by importance, which this section do
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (24): 6, 7, 8, 14, 20, 21, 22, 24, 26, 28, 29, 30, 31, 33, 34, 35, 37, 40, 41, 42, 44, 47, 48, 49
+**Closed** (25): 6, 7, 8, 14, 20, 21, 22, 24, 26, 28, 29, 30, 31, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (13): 2 (after 16), 10, 12, 13, 15 (after 2), 16, 17, 18, 23, 25, 32, 36, 39
+first (12): 2 (after 16), 10, 12, 13, 15 (after 2), 16, 17, 18, 23, 25, 32, 36
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (2): 1, 4
 
