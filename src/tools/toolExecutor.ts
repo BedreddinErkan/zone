@@ -3490,7 +3490,7 @@ export async function executeTool(
         if (checkPathBoundary(abs, repoPath, toolName) === "escape") {
           return {
             success: false,
-            output: `multi_edit_blocked_path_escape: "${filePath}" would escape repo`,
+            output: `multi_edit_blocked_path_escape: "${filePath}" would escape repo — no files in this batch were modified`,
             filesStaged: [],
           };
         }
@@ -3514,7 +3514,7 @@ export async function executeTool(
         if (checkPathBoundary(abs, repoPath, toolName) === "escape") {
           return {
             success: false,
-            output: `multi_edit_blocked_path_escape: "${filePath}" would escape repo`,
+            output: `multi_edit_blocked_path_escape: "${filePath}" would escape repo — no files in this batch were modified`,
             filesStaged,
           };
         }
@@ -3551,7 +3551,7 @@ export async function executeTool(
           if (wr === "escape") {
             return {
               success: false,
-              output: `multi_edit_blocked_path_escape: "${filePath}" would escape repo`,
+              output: `multi_edit_blocked_path_escape: "${filePath}" would escape repo — no files in this batch were modified`,
               filesStaged,
             };
           }

@@ -288,7 +288,7 @@ describe("handleToolResult", () => {
       const ctx = makeCtx();
       const deps = makeDeps();
       const result = {
-        output: 'multi_edit_blocked_path_escape: "../outside.ts" would escape repo',
+        output: 'multi_edit_blocked_path_escape: "../outside.ts" would escape repo — no files in this batch were modified',
         success: false,
         filesStaged: ["src/a.ts"],
       };

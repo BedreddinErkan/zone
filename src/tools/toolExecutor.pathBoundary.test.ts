@@ -231,6 +231,7 @@ describe("wiring proof — multi_edit (item 47: pre-flight makes the batch atomi
       expect(result.success).toBe(false);
       expect(result.output).toContain("multi_edit_blocked_path_escape");
       expect(result.output).toContain(escapingRel);
+      expect(result.output).toContain("no files in this batch were modified");
       expect((result as { filesStaged?: string[] }).filesStaged).toEqual([]);
       expect(stagingFiles.size).toBe(0);
       expect(fs.readFileSync(abs("a.ts"), "utf8")).toBe("const target = 1;\n");
