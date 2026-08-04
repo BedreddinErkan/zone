@@ -1031,26 +1031,49 @@ single file.
 its handler in `toolExecutor.ts`; the mutation that found this is recorded in the commit history
 for `3fa62c4a`, not preserved as code anywhere.
 
-## 28. `write_file`'s rollback message is false in the unlink-survivor case
+## 28. Closed — `write_file`'s rollback message is false in the unlink-survivor case
 
-**What it is:** `write_file`'s post-write syntax/semantic-smell rollback unconditionally tells
+**What it was:** `write_file`'s post-write syntax/semantic-smell rollback unconditionally told
 the agent "The file has been reverted" — literally untrue on the one path item 14's fix added
 detection for: a new-file write whose `unlinkSync` call itself throws, leaving the broken file on
-disk. `filesStaged` now correctly reports this case as a persisting change, but the message text
-sitting right next to that correct signal still claims the opposite.
+disk. `filesStaged` correctly reported that case as a persisting change; the message sitting next
+to it claimed the opposite.
 
-**Why it wasn't fixed in `3fa62c4a`:** changing message wording risks rippling into tests that
-assert the exact output string, and auditing every such assertion was not that pass's scope.
-Recorded separately rather than folded in, so the honesty gap doesn't get lost once
-`filesStaged`'s own correctness makes it easy to assume the message is right too.
+**The existing-file path had a second gap, but not a second live falsehood.** A pre-implementation
+establish found the existing-file restore checked `stagedWrite`'s return only enough to choose a
+disk-write fallback, never to confirm that fallback succeeded. Nothing wrapped it in a swallowing
+catch the way the new-file path's `unlinkSync` had one, so a failed fallback could only throw
+uncaught — skipping the message and `filesStaged` together, not returning a false claim next to a
+correct one. The real gap was the missing guard, not a second instance of this item's defect
+already sitting there. Closing it meant adding that guard, which made a genuine third state
+(`restore_failed`) reachable for the first time.
 
-**What would close it:** a conditional message — branching on whatever detection `filesStaged`'s
-own logic already computed for this return, rather than a fresh check — plus an audit of which
-tests assert the current fixed string, so the wording change doesn't silently break them.
+**`apply_patch` carried the same unguarded-restore shape at three independent rollback sites** —
+`syntax_broken_post_write`, `semantic_smell_post_write`, and `inline_ts_syntax_error` (rendered
+through `buildApplyRolledBackMessage`, not an inline string) — each restoring separately, not four
+returns sharing one site. Fixed in the same commit; splitting it would have created exactly the
+divergence item 22 documents.
 
-**Where the code lives:** the rollback return messages are in `write_file`'s shared
-syntax/semantic-smell rollback block in `toolExecutor.ts`, the same block item 14's `filesStaged`
-detection now lives in.
+**What shipped (`a94caeb1`):** the message now derives from a three-state outcome — reverted,
+new-file-survived, or restore-failed — instead of asserting one. `filesStaged` now reports the
+file on the restore-failed path for both tools, a behavior change, not just a wording one. All
+three consumers were checked first: `didApplyPatch` and `countsTowardChainSaturation` both gate on
+`success === true`, so a failed return never reaches the `filesStaged` read for either tool;
+`filesModified` (and from there `git add`) gains a path that genuinely holds unreverted content —
+the intent, not a side effect to guard against.
+
+**Coverage was zero before this commit** — confirmed by grep across the suite, not assumed. No
+test asserted any of these messages, and no test exercised a rollback path in either tool.
+
+**`"escape"` is structurally unreachable on every restore call** — each passes the same `filePath`
+and `repoPath` already validated on the way in, so the 3-arg `stagedWrite` overload every restore
+site uses is statically `boolean`-only. The branch isn't in the restore logic; nothing further was
+needed to keep it defensive.
+
+**Where the code lives:** `attemptRestore`/`describeRestoreOutcome` in `toolExecutor.ts`, shared
+by `write_file`'s rollback block and all three `apply_patch` rollback sites;
+`buildApplyRolledBackMessage`'s `restoreFailed` parameter in `applyRollbackFeedback.ts`. Tests in
+`toolExecutor.rollbackMessage.test.ts` (new) and `applyRollbackFeedback.test.ts`.
 
 ## 29. Closed — R2 now reaches its claimed branch; `makeEntry` no longer writes
 
@@ -1510,6 +1533,33 @@ sharing an implementation and a sixth standing alone.
 in `src/engine/patchCorrectnessValidator.ts`; see item 22 for the full establish behind this
 finding.
 
+## 47. `multi_edit` has no rollback — a reachable path-escape mid-batch leaves prior files unrevertable
+
+**What it is:** found while closing item 28, whose fix covers `apply_patch`/`write_file` only.
+`multi_edit`'s handler in `toolExecutor.ts` has no restore mechanism, no post-write validation
+(`validateSyntax`/`checkSemanticSmells`), and no `rejectionReason` — it applies each file's
+find/replace and writes it, staged or direct to disk, in a loop over `files`, before moving to the
+next.
+
+**The escape check is live here, unlike on item 28's restore sites.** `resolveAgentPath` only
+strips leading slashes from a relative input — it does not block `../` traversal — so a `files`
+entry that escapes `repoPath` reaches `stagedWrite`'s 4-arg overload (the forward write passes
+`repoPath`; no restore call anywhere does) and can genuinely return `"escape"`. When it does,
+mid-loop, the tool returns immediately: `filesStaged` honestly lists the files already written
+before the escaping entry, and nothing attempts to undo them. The return value isn't dishonest the
+way item 28's was — `filesStaged` is accurate — but those files stay permanently edited with no
+path back and no message suggesting they should be.
+
+**What would close it:** capture each file's original content before writing, the way
+`write_file`/`apply_patch` already do, and restore the files already in `filesStaged` before
+returning on an early exit — or decide the partial-batch outcome is acceptable by design and say
+so explicitly in the returned message rather than leaving it unstated.
+
+**Where the code lives:** `multi_edit`'s handler in `toolExecutor.ts`, the `files` loop and its
+`stagedWrite` call. (Item 27 documents a related but distinct structural fact about the same
+handler — that `success` alone can't identify which files were touched; this item is about the
+absence of any restore path once files are touched.)
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
@@ -1520,10 +1570,10 @@ priority ordering" cautions against ranking by importance, which this section do
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (19): 6, 7, 8, 14, 20, 21, 22, 24, 26, 29, 30, 31, 33, 34, 35, 40, 41, 42, 44
+**Closed** (20): 6, 7, 8, 14, 20, 21, 22, 24, 26, 28, 29, 30, 31, 33, 34, 35, 40, 41, 42, 44
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (15): 2 (after 16), 10, 12, 13, 15 (after 2), 16, 17, 18, 23, 25, 28, 32, 36, 37, 39
+first (15): 2 (after 16), 10, 12, 13, 15 (after 2), 16, 17, 18, 23, 25, 32, 36, 37, 39, 47
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (2): 1, 4
 
