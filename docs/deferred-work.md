@@ -113,9 +113,11 @@ segmenting `parsePatchBlocks` in `agentLoop.ts` (feeding `hashPatchBlocks`'s fai
 see item 16) would leave the dedup hash disagreeing with what the applier actually did. The
 structural alternative — sidestepping the parsing question entirely — is recorded separately as
 item 17. Two sharper, related consequences of this same defect are recorded as items 15 and 16.
-Item 16 has since been corrected and now records the concrete, behavior-preserving shape this
-line-anchoring work would need — share segmentation only, leave `normalizeSmartQuotes` as a
-post-pass at the walk. Item 20 records the prerequisite that now exists for attempting either
+Item 16 has since been corrected, and — following item 18's fix — no longer needs the
+`normalizeSmartQuotes`-as-post-pass restriction it originally specified: with both walkers
+already computing identical normalized smart-quote text, sharing that logic alongside
+segmentation no longer changes any dedup key. Item 20 records the prerequisite that now exists
+for attempting either
 parser change safely: `a7f4ff03`'s characterization tests, which pin exactly the values a shared
 implementation would need to preserve and didn't exist when this constraint was first written.
 
@@ -620,17 +622,26 @@ test asserting which of the two readings is the correct one to show a user. **Re
 out**, for that reason — folding it in belongs to a pass that first decides what `DiffView`
 should show on malformed input, which this one doesn't.
 
-**What would close the real half — the two index-walkers sharing one implementation — has one
-working shape, not two.** Sharing the walk's full logic, normalization included, changes every
-existing `hashPatchBlocks` dedup key for a smart-quote-bearing patch — a deliberate behavior
-change, not an extraction (see item 18). Sharing the segmentation with normalization removed
-from both sides breaks the applier's own smart-quote tests, which require the walk to normalize
-before matching against the file. The only behavior-preserving shape is sharing the segmentation
-loop alone and leaving `normalizeSmartQuotes` as a post-pass applied at the walk's call site
-only. Note this only ever concerns smart quotes — item 18's other two normalization classes
-(line endings, the read_file prefix) live in the match-time loop this extraction doesn't touch,
-in either shape; unifying segmentation resolves at most one of item 18's three classes, not the
-divergence as a whole.
+**What would close the real half — the two index-walkers sharing one implementation — is now
+simpler than it was.** Before item 18's fix, sharing the walk's full logic, normalization
+included, would have changed every existing `hashPatchBlocks` dedup key for a smart-quote-bearing
+patch — a deliberate behavior change, not a pure extraction. That constraint is gone:
+`parsePatchBlocks` now applies the same `normalizeSmartQuotes`, in the same position, via the
+same shared module, so `hashPatchBlocks`'s dedup key already reflects normalized smart-quote
+text. Sharing the segmentation loop *and* the smart-quote call it contains is behavior-preserving
+on both sides now — the "post-pass only" restriction this paragraph used to state no longer
+applies.
+
+Item 18's other two normalization classes (line endings, the read_file prefix) live in the
+match-time loop `toolExecutor.ts` runs after segmentation — `parsePatchBlocks` has no equivalent
+of that loop and never will, since it only ever feeds `hashPatchBlocks`, not file matching.
+Unifying segmentation was never going to touch those two classes, and still doesn't — that part
+of the original framing was correct and is unchanged. What has changed: unifying segmentation now
+resolves **none** of item 18's remaining scope, not "at most one" of three. The one class
+segmentation-sharing could ever have addressed, smart quotes, is already resolved — by converging
+`parsePatchBlocks` onto a shared function, not by unifying segmentation itself. Item 16 and item
+18's remaining two classes are now fully decoupled: neither's fix depends on, or is blocked by,
+the other.
 
 **Candidate home: `core/fileDiff.ts`.** It's a genuine leaf (imports only `node:fs` and
 `node:path`), it already generates this exact format (`diffToFindReplace`, the subject of item
@@ -707,7 +718,7 @@ unbuilt, unscoped beyond this observation.
 **Where the code lives:** `multi_edit`'s schema (the precedent) and `apply_patch`'s schema
 (what would change) are both in `toolDefinitions.ts`.
 
-## 18. The applier's normalization was never mirrored into the dedup hash — corrected, three classes not one
+## 18. The applier's normalization was never mirrored into the dedup hash — partially closed, smart quotes resolved
 
 **This entry originally framed the divergence as a smart-quote defect. That framing is
 incomplete, not just narrow: it is one of three live classes, corrected below.** The original
@@ -752,17 +763,27 @@ relationship holds for `[zone-apply-patch-marker-split]`: its population is exac
 record's `blockCount > 1` slice, so this record's own count — not `read_before_patch`'s — is the
 correct denominator for marker-split's rate.
 
-**Still open — the divergence itself, for all three classes.** What would close it: normalizing
-all three in `hashPatchBlocks` — importing `normalizeSmartQuotes` and `stripReadFilePrefix` from
-`toolExecutor.ts` (`agentLoop.ts` already imports from that file; no cycle). This **changes
-every existing dedup key** for any patch that ever contained a smart quote, CRLF, or a pasted
-`read_file` prefix — a deliberate behavior change, not a silent rider on item 16's extraction.
-`a7f4ff03`'s characterization tests pin the current, unnormalized values for two of the three
-classes by name and would need deliberate edits: **T7** (smart quotes) and **T6** (line
-endings). T6 is worth flagging specifically — it was written, in the pass that added it, as a
-neutral parsing property ("CRLF line endings inside find/replace content survive unparsed"). It
-is not neutral: it pins class 2 of this same defect as correct behavior, under a comment that
-never named it as such.
+**Smart quotes are now closed (`cd02808c`).** `parsePatchBlocks` applies `normalizeSmartQuotes`
+in the same position `segmentApplyPatchBlocks` always has — after the leading/trailing-newline
+trim, on both `find` and `replace` — so `hashPatchBlocks`'s dedup key now reflects normalized
+text for this class. Direction was converge-up: the walk's own normalization was preserved, not
+removed, to close the gap. The function and its `SMART_QUOTE_MAP` moved to
+`src/utils/smartQuotes.ts`, imported by both `toolExecutor.ts` and `agentLoop.ts`. The
+bounded-staleness framing below (the resume interaction) already covers this formula change too:
+a pre-fix persisted `patchHash` fails at most one comparison per file path and self-clears on the
+next fresh-vs-fresh comparison.
+
+**Still open — two of the three classes, not all three.** What would close the rest: normalizing
+line endings and the read_file prefix in `hashPatchBlocks` — importing `stripReadFilePrefix` and
+the walk's own EOL-replace chain from `toolExecutor.ts` (`agentLoop.ts` already imports from that
+file; no cycle). This still **changes every existing dedup key** for any patch that ever
+contained a CRLF or a pasted `read_file` prefix — a deliberate behavior change, not a silent
+rider on item 16's extraction. `a7f4ff03`'s characterization tests pin the current, unnormalized
+value for the remaining class by name and would need a deliberate edit: **T6** (line endings) —
+it was written, in the pass that added it, as a neutral parsing property ("CRLF line endings
+inside find/replace content survive unparsed"). It is not neutral: it pins class 2 of this same
+defect as correct behavior, under a comment that never named it as such. **T7** (smart quotes)
+needed the same kind of edit and got it, as part of the fix that closed that class — see above.
 
 **The real cost when it fires, not previously stated.** In the coaching path
 (`CoachingController`), the demotion is label-only — every consumer of `repeatPattern` treats it
@@ -783,14 +804,19 @@ normalization-class-bearing patches produce a changed hash, and the stale-compar
 at most one comparison per file path (the next failure after a resume makes both compared
 records new-style again).
 
-**Where the code lives:** `normalizeSmartQuotes` and the walk's own EOL-replace chain are in
-`toolExecutor.ts`, inside `apply_patch`'s handler; `stripReadFilePrefix` is also there.
-`parsePatchBlocks` and `hashPatchBlocks` are in `agentLoop.ts`. The wrong "normalized" comment is
-in `antiThrash.ts`, directly above its own `patchHash` equality check; `detectRepeatedFailure`'s
-matching check is in `agentLoop.ts`. `[zone-apply-patch-normalization-parity]`'s pre-pass and
-emission sit in `apply_patch`'s handler, `toolExecutor.ts`, right after the existing smart-quote
-telemetry. The characterization tests pinning current values are in
-`agentLoop.patchBlocksCharacterization.test.ts`.
+**Where the code lives:** `normalizeSmartQuotes` is in `src/utils/smartQuotes.ts`, imported by
+both `toolExecutor.ts` (`segmentApplyPatchBlocks`) and `agentLoop.ts` (`parsePatchBlocks`). The
+walk's own EOL-replace chain and `stripReadFilePrefix` are still in `toolExecutor.ts`, inside
+`apply_patch`'s handler — the two classes that remain open. `parsePatchBlocks` and
+`hashPatchBlocks` are in `agentLoop.ts`. The wrong "normalized" comment is in `antiThrash.ts`,
+directly above its own `patchHash` equality check; `detectRepeatedFailure`'s matching check is in
+`agentLoop.ts`. `[zone-apply-patch-normalization-parity]`'s pre-pass and emission sit in
+`apply_patch`'s handler, `toolExecutor.ts`, right after the existing smart-quote telemetry — see
+item 55 for what closing this item's smart-quotes class didn't change about that marker's own
+test file's header comment. The characterization tests pinning current values are split across
+two files now: `agentLoop.patchBlocksCharacterization.test.ts` (`parsePatchBlocks`) and
+`toolExecutor.patchBlocksCharacterization.test.ts` (`segmentApplyPatchBlocks`, plus the direct
+comparison tests between the two).
 
 ## 19. Five parsers of FIND/REPLACE text exist, not three
 
@@ -2013,11 +2039,44 @@ patched stderr write untouched, calling `appendMarkerRecord` zero times.
 (`[zone-marker-sink-rotated]`) and its two failure-path warnings (see item 10) are the only
 current examples of code respecting it deliberately.
 
+## 55. `normalizationParityTelemetry`'s header comment is now only 2-of-3 accurate
+
+**What it is:** `toolExecutor.normalizationParityTelemetry.test.ts`'s header comment states a
+blanket claim: the applier's walk normalizes smart quotes, CRLF, and the read_file pasted
+line-number prefix before matching, but `hashPatchBlocks` hashes the raw, unnormalized patch
+text — so two patches the applier treats as identical can get different dedup keys. Item 18's
+partial closure (smart quotes only) makes this accurate for exactly two of the three classes now,
+not all three.
+
+**The marker itself is unaffected — checked, not assumed.** `[zone-apply-patch-normalization-
+parity]`'s payload (`blockCount`, `smartQuoteChanged`, `eolChangedBlocks`,
+`prefixStrippedBlocks`) measures `segmentApplyPatchBlocks`'s own normalization rate — it never
+references `parsePatchBlocks` or `hashPatchBlocks` at all, so it was never a comparison between
+the two paths and doesn't go silent now. What shifts is interpretation only: a
+`smartQuoteChanged: true` record used to be evidence the dedup-mismatch defect was actively
+firing for that patch; now it's just evidence the patch contained curly quotes, with no active
+mismatch implied. The payload carries no version field, so pre-fix and post-fix records are
+indistinguishable in the sink despite meaning different things. `cd02808c` is the cutoff.
+
+**Checked and found not to apply: items 1 and 4.** Both are "blocked on data," waiting on passive
+accumulation of a *different* marker — `[zone-apply-patch-marker-imbalance]` and
+`[zone-apply-patch-retry]`'s `marker_imbalance` reason field. Neither references
+`[zone-apply-patch-normalization-parity]` anywhere. This marker doesn't feed either item, so no
+accumulation cutoff is needed for them — recorded here so the question isn't re-asked.
+
+**What would close it:** rewrite the header comment to name smart quotes as resolved and scope
+the "raw, unnormalized" claim to the two remaining classes only.
+
+**Where the code lives:** the header comment is at the top of
+`toolExecutor.normalizationParityTelemetry.test.ts`. The marker's emission site is in
+`apply_patch`'s handler, `toolExecutor.ts`, right after the existing smart-quote self-validation
+telemetry.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 54 to find out which ones still need something. No index of
+reader the trouble of reading all 55 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -2026,7 +2085,7 @@ first.
 **Closed** (29): 6, 7, 8, 10, 13, 14, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (8): 2 (after 16), 12, 15 (after 2), 16, 17, 18, 23, 36
+first (9): 2 (after 16), 12, 15 (after 2), 16, 17, 18, 23, 36, 55
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (2): 1, 4
 
@@ -2334,3 +2393,34 @@ pass search outside the file it was editing" — that is a question about what a
 open-ended prescription, not a comparison between two closed sets. It belongs with the patterns
 that record lessons about this document's own process, not with the numbered items that record
 closable facts about the codebase.
+
+## A tenth pattern, beside the eighth: shared extraction makes symmetric mutations invisible to comparison assertions
+
+From the pass that converged `parsePatchBlocks` onto the shared `normalizeSmartQuotes` (item 18):
+extracting a helper into a shared module means every call site now runs the exact same code, so a
+mutation to the helper itself moves every call site together, not just one. An assertion that
+compares two call sites against each other is structurally blind to that class of mutation — both
+sides still agree, because both sides changed identically. Only an assertion against something
+outside the shared function, unreached by the mutation through either call site, catches it.
+
+The distinction is the mutation's *shape*, not its severity. A **symmetric** mutation — a change
+inside the shared function itself, reached by every caller identically — is invisible to a
+call-site-vs-call-site comparison and visible only to an external-invariant check. An
+**asymmetric** mutation — a change confined to one caller's own use of the shared function, so one
+side stops calling it or calls it differently from the other — is the reverse: it breaks the
+call-site comparison directly, since the two sides no longer agree with each other, independent
+of whether an external-invariant check would also catch it.
+
+The generalizable rule: a convergence test written after a shared extraction needs both kinds of
+assertion, because neither alone covers both mutation classes. Designing which assertion a given
+mutation *should* fire is part of the mutation-testing plan, not a read-off-the-result afterthought
+— and a mutation firing on fewer assertions than a different mutation in the same test is not
+automatically a coverage gap. It can be the correct, predicted outcome for that mutation's shape,
+and the prediction is what should be checked, not skipped past.
+
+Also worth recording: a third mutation in that same pass reordered two operations predicted,
+before running, to be commutative on disjoint inputs — reordering a character-class substitution
+against a boundary-only trim that never touches the same characters. It was run anyway rather than
+skipped on the strength of the prediction. Predicting a null result does not excuse skipping the
+run; the prediction is only trustworthy once it has been checked against something that actually
+executed.
