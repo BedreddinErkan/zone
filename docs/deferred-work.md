@@ -1263,27 +1263,52 @@ hit rather than trust the count.
 **Where the code lives:** the check is `scripts/deferredWorkSnapshot.test.ts`; the currency
 technique is recorded here only, not implemented anywhere.
 
-## 37. Two dead fixture files ship in the tarball
+## 37. Closed — dead fixture files no longer ship in the tarball, and the original count was short by one fixture
 
-**What it is:** `tsc` compiles all of `src/**` per `tsconfig.json`'s `include`, with no exception
-for test fixtures that don't happen to be named `*.test.ts` — so `src/test/fixtures/
-toolExecutorMock.ts` and `src/cli/tui/__fixtures__/staticHarness.tsx` compile into
-`dist/test/fixtures/toolExecutorMock.{js,d.ts,js.map}` and
-`dist/cli/tui/__fixtures__/staticHarness.{js,d.ts,js.map}` — six files. `package.json`'s
-`files: ["dist", "README.md", "LICENSE"]` allowlist has no exception for either path, and neither
-filename matches `*.test.*`, so both ship in the published tarball.
+**What it was:** `tsc` compiles all of `src/**` per `tsconfig.json`'s `include`, with no
+exception for test fixtures that don't happen to be named `*.test.ts` — so fixture modules
+compiled into `dist/` and shipped in the published tarball with nothing in `dist/cli/index.js`'s
+import graph ever reaching them. `package.json`'s `files: ["dist", "README.md", "LICENSE"]`
+allowlist had no exception for any of them.
 
-**Why it's deferred:** the reachability audit that added the `files` allowlist traced every
-import from `dist/cli/index.js` and confirmed nothing in that graph reaches either file — dead
-weight, not a crash risk, unlike `undici` found in the same audit. Six files, a few KB, noted and
-explicitly left unfixed in that pass's own scope.
+**The count was short by one fixture, not wrong in two directions.** This entry originally named
+two fixtures and six compiled artifacts (`toolExecutorMock`, `staticHarness`, three files each).
+The real figure, from `npm pack --dry-run` against a fresh build: **nine artifacts across three
+fixtures** — a third, `scriptedLlm.ts`, had gone unnoticed by every prior pass, including the one
+that added the `files` allowlist in the first place. Verified by a line-diff of the pack listing
+before and after the fix: exactly nine lines removed, nothing else changed, 1251 files → 1242.
 
-**What would close it:** a `dist/.npmignore` (a subdirectory-level `.npmignore` still applies even
-though the root one is overridden once `files` is set — confirmed from npm's own docs during the
-same pass) or narrowing the `files` entries to exclude these two paths specifically.
+**Deleting the sources was never on the table.** `toolExecutorMock.ts` has 47 real test-file
+importers, `scriptedLlm.ts` has 3, `staticHarness.tsx` has 1 — all real dependencies of the test
+suite. `src/test/**` is deliberately inside `tsconfig`'s `include` so fixtures type-check; the fix
+had to be packaging-only, not a source or tsconfig change.
 
-**Where the code lives:** source at `src/test/fixtures/toolExecutorMock.ts` and
-`src/cli/tui/__fixtures__/staticHarness.tsx`; the `files` field is in `package.json`.
+**Two candidate mechanisms, one measured to actually work.** A `dist/.npmignore` was ruled out
+two ways: npm's own docs (the version actually installed) state a root `.npmignore` doesn't
+override an already-set `files` field, and structurally, `tsc` regenerates `dist/` on every build
+and copies no non-source files into it, so nothing would persist a hand-placed `.npmignore`
+across a rebuild. This wasn't just reasoned through — it was placed and packed, and the file count
+didn't move. Negated glob entries directly inside `package.json`'s `files` array were the
+mechanism that worked, confirmed the same way: tested via `npm pack --dry-run` before being kept,
+not shipped on documented precedence alone.
+
+**A rename was considered and rejected.** 51 import sites total across the three fixtures for a
+change scoped as packaging-only, not a test-suite refactor — and the directory-based exclusion
+pattern already gets the same "covers every future fixture" property a naming convention would,
+without touching a single import.
+
+**Verified beyond the file count.** The packed tarball was installed into an isolated npm prefix;
+`zone --version` and `zone --help` both exited 0 with correct output — no
+`ERR_MODULE_NOT_FOUND`, the exact failure shape an over-broad exclusion pattern would produce, and
+the same check that caught the real `undici` regression before this package's first publish.
+
+**`zone-ai-agent@2.0.0` already shipped with all nine artifacts** — this fix takes effect on the
+next publish, not retroactively.
+
+**Where the code lives:** `package.json`'s `files` array. Fixture sources at
+`src/test/fixtures/toolExecutorMock.ts`, `src/test/fixtures/scriptedLlm.ts`, and
+`src/cli/tui/__fixtures__/staticHarness.tsx` — all three unchanged, still compiling and
+type-checking exactly as before.
 
 ## 38. Whether shipping 416 sourcemaps is deliberate is undecided, not wrong
 
@@ -1670,10 +1695,10 @@ priority ordering" cautions against ranking by importance, which this section do
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (23): 6, 7, 8, 14, 20, 21, 22, 24, 26, 28, 29, 30, 31, 33, 34, 35, 40, 41, 42, 44, 47, 48, 49
+**Closed** (24): 6, 7, 8, 14, 20, 21, 22, 24, 26, 28, 29, 30, 31, 33, 34, 35, 37, 40, 41, 42, 44, 47, 48, 49
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (14): 2 (after 16), 10, 12, 13, 15 (after 2), 16, 17, 18, 23, 25, 32, 36, 37, 39
+first (13): 2 (after 16), 10, 12, 13, 15 (after 2), 16, 17, 18, 23, 25, 32, 36, 39
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (2): 1, 4
 
