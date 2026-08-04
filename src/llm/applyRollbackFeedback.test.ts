@@ -199,6 +199,19 @@ describe("Phase J.4 — buildApplyRolledBackMessage (C1 shape)", () => {
     expect(msg).toContain("introduced 0 new error(s):");
     expect(msg).not.toContain("(plus");
   });
+
+  it("item 28: restoreFailed:true swaps the trailer to the could-not-restore wording", () => {
+    const msg = buildApplyRolledBackMessage({
+      filePath: "src/a.ts",
+      errors: [{ code: "TS2305", message: "missing 'baz'" }],
+      restoredFiles: [],
+      restoreFailed: true,
+    });
+    expect(msg).toContain(
+      "Disk could not be restored to the pre-apply state and may still hold the broken version. Re-read before re-attempting."
+    );
+    expect(msg).not.toContain("Disk is at the pre-apply state. Re-investigate before re-attempting.");
+  });
 });
 
 describe("Phase J.4 C2 — end-to-end heuristic on realistic tsc preview", () => {

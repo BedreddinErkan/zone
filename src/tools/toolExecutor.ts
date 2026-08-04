@@ -684,6 +684,58 @@ function stagedWrite(
   return true;
 }
 
+// Item 28: what a post-write rollback can honestly claim. "escape" is not a member here —
+// every restore call below uses the 3-arg stagedWrite overload (no repoPath), which is
+// statically boolean-only; "escape" is reachable only at the two forward-write call sites,
+// both of which already check for it explicitly.
+type RestoreOutcome = "reverted" | "new_file_survived" | "restore_failed";
+
+// Deliberately just the outcome clause, no action instruction — call sites append their own
+// existing "re-read / fix / retry" tail after this, unconditionally, since the agent needs that
+// guidance regardless of which of the three outcomes actually happened.
+function describeRestoreOutcome(outcome: RestoreOutcome, filePath: string): string {
+  switch (outcome) {
+    case "reverted":
+      return "The file has been reverted.";
+    case "new_file_survived":
+      return `The file could not be fully removed and a broken version may still be on disk at "${filePath}".`;
+    case "restore_failed":
+      return `The file could not be restored to its original content and may still hold the broken version at "${filePath}".`;
+  }
+}
+
+/**
+ * Existing-file restore, shared by write_file and all three apply_patch rollback sites.
+ * "restore_failed" only becomes reachable because this wraps the disk-write fallback in a
+ * try/catch the way the new-file unlink path already does — without it, a failed write here
+ * throws uncaught and the caller never returns a message at all.
+ *
+ * The outcome drives `filesStaged` at every call site: `success:false` already keeps
+ * didApplyPatch and countsTowardChainSaturation from reading it (both gate on `success`, not
+ * `filesStaged`, for apply_patch/write_file) — the one live consumer is handleToolResult's
+ * unconditional `filesStaged` → `filesModified` union, which is exactly how a "restore_failed"
+ * file should reach `git add`: it genuinely still holds an unreverted mutation.
+ */
+function attemptRestore(
+  staging: Map<string, string> | undefined,
+  abs: string,
+  originalContent: string,
+  filePath: string
+): "reverted" | "restore_failed" {
+  if (stagedWrite(staging, abs, originalContent)) return "reverted";
+  try {
+    fs.writeFileSync(abs, originalContent, "utf8");
+    return "reverted";
+  } catch (err) {
+    log("[zone-restore-write-failed]", JSON.stringify({
+      filePath,
+      code: (err as NodeJS.ErrnoException).code ?? null,
+      message: (err as NodeJS.ErrnoException).message,
+    }));
+    return "restore_failed";
+  }
+}
+
 export async function withStagingTempFlush<T>(
   staging: Map<string, string> | undefined,
   body: () => Promise<T>
@@ -2547,9 +2599,7 @@ export async function executeTool(
             runId: input?.runId ?? null,
           }));
           if (decision === "rejected") {
-            if (!stagedWrite(input?.stagingFiles, abs, original)) {
-              fs.writeFileSync(abs, original, "utf8");
-            }
+            const restoreOutcome = attemptRestore(input?.stagingFiles, abs, original, filePath);
             // J.4: structured rollback feedback.
             // TS path: parseTscErrorPreview for rich error parsing from stdout.
             // Python path: convert checkerParsedErrors → RolledBackError[] directly.
@@ -2570,16 +2620,18 @@ export async function executeTool(
                 message: e.message,
               }));
             }
+            const restoredFiles = restoreOutcome === "reverted" ? [filePath] : [];
             const message = buildApplyRolledBackMessage({
               filePath,
               errors,
-              restoredFiles: [filePath],
+              restoredFiles,
+              restoreFailed: restoreOutcome === "restore_failed",
             });
             log("[zone-apply-rolled-back-feedback]", JSON.stringify({
               site: "inline_ts_check",
               filePath,
               errorCount: errors.length,
-              filePathsRestored: [filePath],
+              filePathsRestored: restoredFiles,
               codes: errorCodes,
               runId: input?.runId ?? null,
             }));
@@ -2589,7 +2641,7 @@ export async function executeTool(
                 site: "inline_ts_check",
                 markerMessage: message,
                 errors,
-                filePathsRestored: [filePath],
+                filePathsRestored: restoredFiles,
                 runId: input?.runId ?? null,
               })
             ));
@@ -2597,6 +2649,8 @@ export async function executeTool(
               success: false,
               output: message,
               rejectionReason: "inline_ts_syntax_error",
+              // Item 28: see attemptRestore's docstring for why this is safe to set on failure.
+              filesStaged: restoreOutcome === "restore_failed" ? [filePath] : undefined,
             };
           }
         }
@@ -2625,17 +2679,17 @@ export async function executeTool(
       );
       if (syntaxBroken) {
         // Roll back to the original file content.
-        if (!stagedWrite(input?.stagingFiles, abs, original)) {
-          fs.writeFileSync(abs, original, "utf8");
-        }
+        const restoreOutcome = attemptRestore(input?.stagingFiles, abs, original, filePath);
         return {
           success: false,
           output:
             `Patch applied but broke file syntax ` +
             `(line ${validation.errorLine ?? "?"}, col ${validation.errorColumn ?? "?"}): ` +
             `${validation.errorMessage ?? "parse error"}. ` +
-            `The file has been reverted. Re-read the file and produce a corrected patch.`,
+            `${describeRestoreOutcome(restoreOutcome, filePath)} Re-read the file and produce a corrected patch.`,
           rejectionReason: "syntax_broken_post_write",
+          // Item 28: see attemptRestore's docstring for why this is safe to set on failure.
+          filesStaged: restoreOutcome === "restore_failed" ? [filePath] : undefined,
         };
       }
       if (semanticSmellDetected) {
@@ -2666,17 +2720,17 @@ export async function executeTool(
             filesStaged: [filePath],
           };
         }
-        if (!stagedWrite(input?.stagingFiles, abs, original)) {
-          fs.writeFileSync(abs, original, "utf8");
-        }
+        const restoreOutcome = attemptRestore(input?.stagingFiles, abs, original, filePath);
         return {
           success: false,
           output:
             `Patch applied but produced semantically broken output. ` +
             `The smell detected was: ${smellValidation.reason}.\n` +
             `${smellValidation.details ?? "A semantic post-write validation smell was detected."}\n` +
-            `The file has been reverted. Re-read the target file, remove the conflicting old code, and produce a corrected patch.`,
+            `${describeRestoreOutcome(restoreOutcome, filePath)} Re-read the target file, remove the conflicting old code, and produce a corrected patch.`,
           rejectionReason: "semantic_smell_post_write",
+          // Item 28: see attemptRestore's docstring for why this is safe to set on failure.
+          filesStaged: restoreOutcome === "restore_failed" ? [filePath] : undefined,
         };
       }
       // validation.reason === 'unsupported_extension'  → no AST check, accept write
@@ -2884,12 +2938,11 @@ export async function executeTool(
       }
 
       if (syntaxBroken || semanticSmellDetected) {
-        let newFileStillExists = false;
+        let restoreOutcome: RestoreOutcome;
         if (fileExists) {
-          if (!stagedWrite(input?.stagingFiles, abs, originalContent)) {
-            fs.writeFileSync(abs, originalContent, "utf8");
-          }
+          restoreOutcome = attemptRestore(input?.stagingFiles, abs, originalContent, filePath);
         } else {
+          let newFileStillExists = false;
           try {
             fs.unlinkSync(abs);
           } catch {
@@ -2913,6 +2966,7 @@ export async function executeTool(
             }));
             newFileStillExists = false;
           }
+          restoreOutcome = newFileStillExists ? "new_file_survived" : "reverted";
         }
 
         if (syntaxBroken) {
@@ -2922,9 +2976,10 @@ export async function executeTool(
               `Patch applied but broke file syntax ` +
               `(line ${validation.errorLine ?? "?"}, col ${validation.errorColumn ?? "?"}): ` +
               `${validation.errorMessage ?? "parse error"}. ` +
-              `The file has been reverted. Re-read the file and produce a corrected patch.`,
+              `${describeRestoreOutcome(restoreOutcome, filePath)} Re-read the file and produce a corrected patch.`,
             rejectionReason: "syntax_broken_post_write",
-            filesStaged: newFileStillExists ? [filePath] : undefined,
+            // Item 28: see attemptRestore's docstring for why this is safe to set on failure.
+            filesStaged: restoreOutcome !== "reverted" ? [filePath] : undefined,
           };
         }
 
@@ -2934,9 +2989,10 @@ export async function executeTool(
             `Patch applied but produced semantically broken output. ` +
             `The smell detected was: ${smellValidation.reason}.\n` +
             `${smellValidation.details ?? "A semantic post-write validation smell was detected."}\n` +
-            `The file has been reverted. Re-read the target file, remove the conflicting old code, and produce a corrected patch.`,
+            `${describeRestoreOutcome(restoreOutcome, filePath)} Re-read the target file, remove the conflicting old code, and produce a corrected patch.`,
           rejectionReason: "semantic_smell_post_write",
-          filesStaged: newFileStillExists ? [filePath] : undefined,
+          // Item 28: see attemptRestore's docstring for why this is safe to set on failure.
+          filesStaged: restoreOutcome !== "reverted" ? [filePath] : undefined,
         };
       }
 

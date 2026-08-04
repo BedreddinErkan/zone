@@ -192,6 +192,13 @@ export interface BuildApplyRolledBackInput {
   errors: ReadonlyArray<RolledBackError>;
   /** Absolute paths (or repo-relative) of files restored to pre-apply state. */
   restoredFiles: ReadonlyArray<string>;
+  /**
+   * Item 28: true when the restore write itself failed (disk may still hold the broken
+   * version) rather than merely finding nothing to restore. Optional and default-falsy so the
+   * end-of-run bundle-rollback caller (composer.ts, which derives restoredFiles from real
+   * discarded-staging data and never mis-claims a revert) is unaffected.
+   */
+  restoreFailed?: boolean;
 }
 
 /**
@@ -229,6 +236,9 @@ export function buildApplyRolledBackMessage(input: BuildApplyRolledBackInput): s
   const restoredJson = JSON.stringify(input.restoredFiles);
   const suggestion = pickRolledBackSuggestion(input.errors);
   const suggestionBlock = suggestion ? `\n\n${suggestion}` : "";
+  const diskStateLine = input.restoreFailed
+    ? "Disk could not be restored to the pre-apply state and may still hold the broken version. Re-read before re-attempting."
+    : "Disk is at the pre-apply state. Re-investigate before re-attempting.";
 
   return (
     `${MARKER}\n` +
@@ -237,7 +247,7 @@ export function buildApplyRolledBackMessage(input: BuildApplyRolledBackInput): s
     `${errorLines}${moreLine}\n\n` +
     `Files restored to pre-apply state: ${restoredJson}` +
     `${suggestionBlock}\n\n` +
-    `Disk is at the pre-apply state. Re-investigate before re-attempting.`
+    diskStateLine
   );
 }
 
