@@ -30,13 +30,32 @@ function markerSinkPath(): string {
 
 /** The stated bound IS the enforced bound: this is the only threshold checked. */
 export const MARKER_SINK_MAX_BYTES = 2 * 1024 * 1024;
+
+let statFailureWarned = false;
+let renameFailureWarned = false;
+
+/** Test-only reset for the once-per-process failure warnings below. */
+export function _resetMarkerSinkWarningsForTest(): void {
+  statFailureWarned = false;
+  renameFailureWarned = false;
+}
+
 /**
- * A trim packs the file down to here, not up to MAX_BYTES — guaranteeing
- * ~256KB of headroom (hence appends) between trims regardless of line size.
- * Packing all the way to MAX_BYTES would mean the very next append crosses
- * it again, so every subsequent write pays a full read+rewrite.
+ * Writes one line directly to the real stderr, bypassing appendMarkerRecord/
+ * log/console.* entirely. Deliberately must NOT start with `[tag]` or a
+ * result glyph (✓/✗/⚠) — those are exactly what stdoutShield's
+ * TELEMETRY_RE/RESULT_LINE_RE match on, and a match would swallow this line
+ * and recurse straight back into appendMarkerRecord (confirmed empirically:
+ * a `[`-less line passes through the patched stderr.write untouched and
+ * calls appendMarkerRecord zero times).
  */
-export const MARKER_SINK_TRIM_TARGET_BYTES = MARKER_SINK_MAX_BYTES / 2;
+function warnRaw(message: string): void {
+  try {
+    process.stderr.write(message);
+  } catch {
+    // stderr itself is broken; nothing left to escalate to.
+  }
+}
 
 function extractRunIdFromPayload(payload: unknown): string | undefined {
   if (
@@ -96,43 +115,75 @@ export function appendMarkerRecord(rawLine: string): void {
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     fs.appendFileSync(filePath, JSON.stringify(record) + "\n", "utf8");
 
-    if (fs.statSync(filePath).size > MARKER_SINK_MAX_BYTES) trimSink(filePath);
+    let sizeAfterAppend: number;
+    try {
+      sizeAfterAppend = fs.statSync(filePath).size;
+    } catch (err) {
+      // ENOENT can't happen in steady state (appendFileSync above just
+      // created/touched this exact path with O_CREAT, synchronously, with no
+      // other writer or deleter of this file anywhere in this codebase), but
+      // if it ever does, there is genuinely no file to size — skip silently.
+      // Any other code (EACCES, EIO, ...) means the cap can no longer be
+      // enforced and that's worth knowing about, once, without recursing
+      // back through the marker path itself (see warnRaw).
+      const code = (err as NodeJS.ErrnoException)?.code;
+      if (code !== "ENOENT" && !statFailureWarned) {
+        statFailureWarned = true;
+        warnRaw(
+          `zone marker-sink: statSync failed (${code ?? "unknown"}) — size cap not enforced until this clears\n`
+        );
+      }
+      return; // the record above is already durably appended either way.
+    }
+    if (sizeAfterAppend > MARKER_SINK_MAX_BYTES) trimSink(filePath, sizeAfterAppend);
   } catch {
     // Never throws, never logs — see the module header.
   }
 }
 
 /**
- * Read-trim-rewrite. Not atomic across processes: appends are `O_APPEND` and
- * safe under concurrent `zone` processes, but this function is read-then-
- * write, so a concurrent process's append landing between this call's
- * `readFileSync` and `writeFileSync` is lost. Narrow window (only during a
- * trim, and trims are now rare thanks to the low-water mark), not fixed with
- * locking here — named as a known limitation, not silently accepted.
+ * Append-only rotation. Not read-modify-write: `rename` is atomic within a
+ * filesystem, and `appendFileSync` opens by path fresh on every call — no
+ * cached descriptor to strand on the old inode after a rename, confirmed
+ * empirically, not assumed. A concurrent append landing during rotation
+ * lands in either the pre-rotation file (now `.1`) or the fresh
+ * post-rotation file; nothing is silently lost. Keeps exactly one rotated
+ * generation — `.1` is overwritten, not accumulated — because nothing reads
+ * this file programmatically (checked) and this repo's own ledger records
+ * why keeping N generations wasn't built (docs/deferred-work.md item 10).
  */
-function trimSink(filePath: string): void {
+function trimSink(filePath: string, priorSizeBytes: number): void {
+  const rotatedPath = filePath + ".1";
   try {
-    const lines = fs
-      .readFileSync(filePath, "utf8")
-      .split("\n")
-      .filter((l) => l.trim().length > 0);
-    if (lines.length === 0) return;
-
-    // Always keep the newest line, whatever its size — a single oversized
-    // record must not wipe every record before it just because it alone
-    // cannot fit the target. Only lines older than it are budget-checked.
-    let bytes = Buffer.byteLength(lines[lines.length - 1]!, "utf8") + 1;
-    let keepFromBytes = lines.length - 1;
-    for (let i = lines.length - 2; i >= 0; i--) {
-      const lineBytes = Buffer.byteLength(lines[i]!, "utf8") + 1;
-      if (bytes + lineBytes > MARKER_SINK_TRIM_TARGET_BYTES) break;
-      bytes += lineBytes;
-      keepFromBytes = i;
+    fs.renameSync(filePath, rotatedPath);
+  } catch (err) {
+    // Rotation didn't happen; the record appendMarkerRecord already wrote
+    // above is unaffected either way — nothing to lose here, only nothing
+    // gained. Left over cap, so the very next append will try again and
+    // fail again identically until whatever's wrong clears; warn once so
+    // that isn't silent.
+    if (!renameFailureWarned) {
+      renameFailureWarned = true;
+      const code = (err as NodeJS.ErrnoException)?.code;
+      warnRaw(
+        `zone marker-sink: rotation failed (${code ?? "unknown"}) — sink will exceed its cap until this clears\n`
+      );
     }
-    if (keepFromBytes === 0) return; // nothing to drop
-
-    fs.writeFileSync(filePath, lines.slice(keepFromBytes).join("\n") + "\n", "utf8");
+    return;
+  }
+  try {
+    // Written directly, not through appendMarkerRecord/log/console.* — this
+    // function is only ever called from inside the monkey-patched stdout/
+    // stderr write (see the module header); routing through log() would
+    // recurse back into that patch without bound.
+    const record = {
+      name: "[zone-marker-sink-rotated]",
+      ts: new Date().toISOString(),
+      payload: { priorSizeBytes, rotatedTo: rotatedPath },
+    };
+    fs.appendFileSync(filePath, JSON.stringify(record) + "\n", "utf8");
   } catch {
-    // Same rule.
+    // Rotation itself already succeeded; losing just the marker record
+    // isn't worth a second warning.
   }
 }
