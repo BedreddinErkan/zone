@@ -28,24 +28,9 @@ import { validateRunEnvironment } from "./runEnvironment.js";
 import { checkCommandSafe } from "../llm/runCommandSafe.js";
 import { hashStagingState } from "../llm/loopDetector.js";
 import { MEMORY_WARN_THRESHOLD_BYTES } from "../memory/constants.js";
+import { normalizeSmartQuotes } from "../utils/smartQuotes.js";
 
 const execAsync = promisify(exec);
-
-// Phase V Commit 2: Unicode curly-quote → ASCII normalization for FIND/REPLACE blocks.
-const SMART_QUOTE_MAP: Record<string, string> = {
-  "“": '"',
-  "”": '"',
-  "‘": "'",
-  "’": "'",
-};
-function normalizeSmartQuotes(s: string): { text: string; count: number } {
-  let count = 0;
-  const text = s.replace(/[“”‘’]/g, (ch) => {
-    count++;
-    return SMART_QUOTE_MAP[ch] ?? ch;
-  });
-  return { text, count };
-}
 
 // Ledger item 18: shared by the match-time normalization below and the detection-only
 // telemetry pre-pass, so both read the same transformation instead of two hand-maintained

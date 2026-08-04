@@ -8,7 +8,7 @@
  * behavior looks wrong (the item-2 misparse, unnormalized smart quotes), the test pins it
  * anyway with a comment saying so.
  *
- * parsePatchBlocks (agentLoop.ts:1344) is now exported and asserted on directly below — every
+ * parsePatchBlocks is now exported and asserted on directly below — every
  * parsePatchBlocks-specific claim is a plain `expect(parsePatchBlocks(x)).toEqual(...)` or a
  * real-vs-real comparison of two parsed outputs, no hash indirection. Previously the function
  * was unreachable from any test (confirmed by grep, zero hits) and every claim went through the
@@ -86,17 +86,18 @@ describe("parsePatchBlocks — direct", () => {
     expect(parsePatchBlocks(crlfPatch)).not.toEqual(parsePatchBlocks(lfPatch));
   });
 
-  it("smart quotes pass through unnormalized — diverges from the walk's normalizeSmartQuotes and from a straight-quote equivalent patch", () => {
+  it("smart quotes are now normalized — converges with the walk and with a straight-quote equivalent patch", () => {
     const curly = `${FIND}\nconst label = “hello”;\n${REPLACE}\nconst label = "world";`;
     const straight = `${FIND}\nconst label = "hello";\n${REPLACE}\nconst label = "world";`;
 
-    expect(parsePatchBlocks(curly)).toEqual([{ find: "const label = “hello”;", replace: 'const label = "world";' }]);
-    // The applier's walk normalizes curly quotes (toolExecutor.ts:41, normalizeSmartQuotes) at
-    // parse time; this parser does not (see ledger item 16). This is the defect behind the
-    // identical_patch_retried miss (detectRepeatedFailure's identical_patch_retried branch,
-    // agentLoop.ts): a model that "fixes" a failing patch only by straightening its quotes is
-    // not recognized as retrying the same patch.
-    expect(parsePatchBlocks(curly)).not.toEqual(parsePatchBlocks(straight));
+    expect(parsePatchBlocks(curly)).toEqual([{ find: 'const label = "hello";', replace: 'const label = "world";' }]);
+    // Ledger item 18: this parser now shares normalizeSmartQuotes (utils/smartQuotes.ts) with
+    // the applier's walk in toolExecutor.ts — both sides compute the same normalized text. The
+    // identical_patch_retried miss this divergence caused (detectRepeatedFailure's
+    // identical_patch_retried branch, agentLoop.ts: a model "fixing" a failing patch only by
+    // straightening its quotes was not recognized as retrying the same patch) no longer
+    // reproduces.
+    expect(parsePatchBlocks(curly)).toEqual(parsePatchBlocks(straight));
   });
 });
 

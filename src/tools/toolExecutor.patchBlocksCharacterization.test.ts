@@ -13,7 +13,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { segmentApplyPatchBlocks } from "./toolExecutor.js";
-import { parsePatchBlocks } from "../llm/agentLoop.js";
+import { parsePatchBlocks, hashPatchBlocks } from "../llm/agentLoop.js";
 
 const FIND = "--- FIND ---";
 const REPLACE = "--- REPLACE ---";
@@ -112,7 +112,7 @@ describe("segmentApplyPatchBlocks — direct", () => {
     expect(segmentApplyPatchBlocks(crlfPatch)).not.toEqual(segmentApplyPatchBlocks(lfPatch));
   });
 
-  it("the divergence from parsePatchBlocks the ledger records: smart quotes normalized here, not there", () => {
+  it("the divergence from parsePatchBlocks the ledger recorded is closed: both normalize smart quotes now", () => {
     const curly = `${FIND}\nconst label = “hello”;\n${REPLACE}\nconst label = "world";`;
 
     const walkResult = segmentApplyPatchBlocks(curly);
@@ -122,11 +122,11 @@ describe("segmentApplyPatchBlocks — direct", () => {
     expect(walkResult.sqFindTotal).toBe(2); // opening + closing curly quote, both on the FIND side
     expect(walkResult.sqReplaceTotal).toBe(0); // REPLACE already used straight quotes
 
-    expect(parseResult).toEqual([{ find: "const label = “hello”;", replace: 'const label = "world";' }]);
+    // parsePatchBlocks now shares normalizeSmartQuotes with the walk (ledger item 18) — the
+    // same normalized value, not the raw curly quotes this test used to pin.
+    expect(parseResult).toEqual([{ find: 'const label = "hello";', replace: 'const label = "world";' }]);
 
-    // The actual divergence: same input, different find value. REPLACE agrees on both sides
-    // (it had no curly quotes to normalize), so only .find is asserted to differ.
-    expect(walkResult.blocks[0]!.find).not.toBe(parseResult[0]!.find);
+    expect(walkResult.blocks[0]!.find).toBe(parseResult[0]!.find);
     expect(walkResult.blocks[0]!.replace).toBe(parseResult[0]!.replace);
   });
 
@@ -137,5 +137,25 @@ describe("segmentApplyPatchBlocks — direct", () => {
     const parseResult = parsePatchBlocks(crlfPatch);
 
     expect(walkResult.blocks).toEqual(parseResult);
+  });
+
+  it("double smart quotes converge to the same hash between the two paths — quotes on both find and replace", () => {
+    const curly = `${FIND}\nconst label = “hello”;\n${REPLACE}\nconst label = “world”;`;
+    const straight = `${FIND}\nconst label = "hello";\n${REPLACE}\nconst label = "world";`;
+
+    // Symmetric mutations (both sides call the same shared function): blind to this assertion,
+    // since segmentApplyPatchBlocks and parsePatchBlocks would still agree with each other.
+    expect(segmentApplyPatchBlocks(curly).blocks).toEqual(parsePatchBlocks(curly));
+    // What actually proves normalization happened at all: the hash of a curly-quote patch now
+    // matches the hash of its straight-quote equivalent, which has nothing to normalize.
+    expect(hashPatchBlocks({ patch: curly })).toBe(hashPatchBlocks({ patch: straight }));
+  });
+
+  it("single smart quotes converge too — a fix that only handles double quotes must fail this", () => {
+    const curly = `${FIND}\nconst label = ‘hello’;\n${REPLACE}\nconst label = ‘world’;`;
+    const straight = `${FIND}\nconst label = 'hello';\n${REPLACE}\nconst label = 'world';`;
+
+    expect(segmentApplyPatchBlocks(curly).blocks).toEqual(parsePatchBlocks(curly));
+    expect(hashPatchBlocks({ patch: curly })).toBe(hashPatchBlocks({ patch: straight }));
   });
 });

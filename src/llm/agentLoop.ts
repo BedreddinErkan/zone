@@ -6,6 +6,7 @@ import { createLLMClient } from "./factory.js";
 import { getRequestContext, withRequestContext } from "./openaiContext.js";
 import { readProjectMemoryBlock } from "../memory/projectMemory.js";
 import { log, debugLog } from "../utils/logger.js";
+import { normalizeSmartQuotes } from "../utils/smartQuotes.js";
 import { buildVerifyDiagnostic } from "../core/buildVerifyDiagnostic.js";
 import { maybeExpandScopeForVerifyDiagnostic } from "../tools/scopeGuard.js";
 import { requestEditApproval } from "../api/editApprovals.js";
@@ -1328,9 +1329,15 @@ export function parsePatchBlocks(patch: string): Array<{ find: string; replace: 
     const nextFindIdx = afterReplace.indexOf(FIND_MARKER);
     const replaceContent =
       nextFindIdx === -1 ? afterReplace : afterReplace.slice(0, nextFindIdx);
+    const normalizedFind = normalizeSmartQuotes(
+      findContent.replace(/^\r?\n/, "").replace(/\r?\n$/, "")
+    ).text;
+    const normalizedReplace = normalizeSmartQuotes(
+      replaceContent.replace(/^\r?\n/, "").replace(/\r?\n$/, "")
+    ).text;
     blocks.push({
-      find: findContent.replace(/^\r?\n/, "").replace(/\r?\n$/, ""),
-      replace: replaceContent.replace(/^\r?\n/, "").replace(/\r?\n$/, ""),
+      find: normalizedFind,
+      replace: normalizedReplace,
     });
     remaining = nextFindIdx === -1 ? "" : afterReplace.slice(nextFindIdx);
   }
