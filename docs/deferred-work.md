@@ -1533,44 +1533,117 @@ sharing an implementation and a sixth standing alone.
 in `src/engine/patchCorrectnessValidator.ts`; see item 22 for the full establish behind this
 finding.
 
-## 47. `multi_edit` has no rollback — a reachable path-escape mid-batch leaves prior files unrevertable
+## 47. `multi_edit`'s partial-batch escape leaks into `filesModified`, not disk — severity corrected
 
 **What it is:** found while closing item 28, whose fix covers `apply_patch`/`write_file` only.
-`multi_edit`'s handler in `toolExecutor.ts` has no restore mechanism, no post-write validation
-(`validateSyntax`/`checkSemanticSmells`), and no `rejectionReason` — it applies each file's
-find/replace and writes it, staged or direct to disk, in a loop over `files`, before moving to the
-next.
+`multi_edit`'s handler in `toolExecutor.ts` has no restore mechanism and no post-write validation
+(`validateSyntax`/`checkSemanticSmells`) — it applies each file's find/replace and stages it in a
+loop over `files`, before moving to the next.
 
-**The escape check is live here, unlike on item 28's restore sites.** `resolveAgentPath` only
-strips leading slashes from a relative input — it does not block `../` traversal — so a `files`
-entry that escapes `repoPath` reaches `stagedWrite`'s 4-arg overload (the forward write passes
-`repoPath`; no restore call anywhere does) and can genuinely return `"escape"`. When it does,
-mid-loop, the tool returns immediately: `filesStaged` honestly lists the files already written
-before the escaping entry, and nothing attempts to undo them. The return value isn't dishonest the
-way item 28's was — `filesStaged` is accurate — but those files stay permanently edited with no
-path back and no message suggesting they should be.
+**Corrected from this entry's original text:** the original framing said files "stay permanently
+edited" once staged, as if disk were involved. It isn't. `multi_edit` has no direct-disk-write
+fallback at all — unlike `write_file`/`apply_patch`, there is no `if (!wr) fs.writeFileSync(...)`
+anywhere in its handler; every successful write lands *only* in the in-memory staging map.
+Whatever happens to that content afterward — flushed via `finalizeStaging`, or never flushed at
+all if the run never reaches that point — is decided entirely outside this handler.
 
-**What would close it:** capture each file's original content before writing, the way
-`write_file`/`apply_patch` already do, and restore the files already in `filesStaged` before
-returning on an early exit — or decide the partial-batch outcome is acceptable by design and say
-so explicitly in the returned message rather than leaving it unstated.
+**What actually leaks: `ctx.filesModified`, not disk content.** `handleToolResult.ts` unions
+`result.filesStaged` into `ctx.filesModified` unconditionally on `result.success`
+(`for (const p of result.filesStaged ?? []) ctx.filesModified.add(p);`) — correct for
+`write_file`/`apply_patch`, where a `filesStaged` entry on a failed call means the content
+genuinely is on disk (item 28's `restore_failed` state). For `multi_edit`, the same field means
+only "staged in memory," and the union doesn't know the difference: a path-escape mid-batch
+(`resolveAgentPath` doesn't block `../` in a relative input, so `stagedWrite`'s repoPath check —
+now `checkPathBoundary`, see item 49 — is what actually rejects it) returns immediately with
+`filesStaged` correctly listing the files staged before the escaping entry, and that list flows,
+unconditionally, all the way to `git add`: `ctx.filesModified` → `loop.filesModified` →
+`filesTouched` → `fileDiffs` (`.map()`, not filtered) → `filePaths` in the TUI's post-run commit
+path → `executeCommit`'s `git add -- <paths>`. Confirmed live: `git add -- real.txt
+nonexistent.txt` exits 128 and stages *nothing*, not even `real.txt` — a single missing pathspec
+fails the whole command atomically. If the staged edit never gets flushed by the time auto-commit
+runs, that file's name in the pathspec either doesn't exist (hard failure) or exists with stale,
+pre-edit content (a silent, wrong commit) — never the mid-batch-unreverted-disk-content scenario
+this entry originally described.
+
+**This changes which fix is right.** A rollback mechanism is unnecessary — there's no disk state
+to revert. The options: preflight-validate every path in `args.files` against the repo boundary
+before writing any of them (so a batch either fully proceeds or fully doesn't touch the staging
+map), or stop unioning a partial-failure `filesStaged` into `filesModified` for this specific
+early-exit shape.
 
 **Where the code lives:** `multi_edit`'s handler in `toolExecutor.ts`, the `files` loop and its
-`stagedWrite` call. (Item 27 documents a related but distinct structural fact about the same
-handler — that `success` alone can't identify which files were touched; this item is about the
-absence of any restore path once files are touched.)
+`stagedWrite` call; the union at `handleToolResult.ts`'s Step 9; `filesTouched`/`fileDiffs` in
+`runLlmPatchFlow.ts`; `executeCommit` in `CommitModal.tsx`. (Item 27 documents a related but
+distinct structural fact about the same handler — that `success` alone can't identify which files
+were touched; this item is about what a partial `filesStaged` does once it leaves the handler.)
+
+## 48. Closed — the shared boundary check gained symlink-awareness; a check-ordering bug had let any no-staging-map write bypass it
+
+**What it is:** this item's task brief described the defect as the boundary check accepting
+sibling repositories, via a bare `abs.startsWith(repoPath)` with no separator. That's not what
+was broken. `stagedWrite`'s containment comparison already read
+`!resolved.startsWith(repoAbs + path.sep)` — separator-safe — at the commit immediately before
+this fix (`34531353`); confirmed by reading that revision directly, not assumed. The
+sibling-directory case (`/home/bedo/zone` vs `/home/bedo/zone-dogfood`) was already rejected
+correctly before this pass. Recording the real defects instead of the one the brief named.
+
+**What was actually broken:** two things, both real. First, the comparison — separator-safe as
+it was — never followed symlinks: `path.resolve` is purely lexical, so a symlink inside the repo
+pointing outside it passed the check, then the write proceeded through the link to wherever it
+actually pointed. Second, `stagedWrite` tested `if (!staging) return false` *before* the repoPath
+check, not after — so any call with no staging map (the direct-write fallback path both
+`write_file`'s existing-file branch and `apply_patch` use) skipped the boundary check entirely,
+regardless of whether the target was inside the repo.
+
+**What shipped (`6802d0c7`):** a shared `checkPathBoundary`, called by every handler right after
+it resolves a path. Symlink-safe: walks up from the target using `lstatSync` (not `existsSync`,
+which follows symlinks and would treat a dangling one as absent) to the nearest existing
+ancestor, then realpaths *that* — correct for both an existing target (realpaths the target
+itself) and a new one (realpaths the nearest existing parent, since `realpathSync` throws
+`ENOENT` on a path that doesn't exist yet). `repoPath` is realpathed on every call too, not
+assumed canonical — `--repo` resolves via `path.resolve` (purely lexical) where bare
+`process.cwd()` is kernel-canonicalized, so a symlinked `--repo` value needs the same treatment
+or every legitimate write through it would incorrectly reject. `stagedWrite` now runs the
+boundary check before the staging-map-presence check, closing the ordering bug.
+
+**Where the code lives:** `checkPathBoundary`/`nearestExistingAncestor` in `toolExecutor.ts`,
+called from `stagedWrite` and directly from `read_file`/`list_files`/`apply_patch`/`write_file`/
+`multi_edit`'s handlers. Tests in `toolExecutor.pathBoundary.test.ts`.
+
+## 49. Closed — `write_file`'s new-file branch had no boundary check at all
+
+**What it is:** this item's task brief named the defect `write_file`'s "`overwrite: true` path."
+There is no `overwrite` argument anywhere in `write_file` — the only similarly-named identifiers
+(`allowWriteFileOverwritePaths`, `overwriteOverrideAllowed`) gate the unrelated shrink guard. The
+brief's own "confirmed by probe" result was real, though, and this is the actual mechanism: the
+new-file branch (`if (!fileExists) { fs.writeFileSync(abs, contentToWrite, "utf8"); }`) never
+called `stagedWrite` — not a bypass of a weak check, the check never ran, for any new-file write,
+regardless of whether a staging map was present. This was the more serious of the two defects
+closed this pass: total absence, not a comparison weakness, and it was invisible to a
+traversal-only analysis, because that reads the check's *implementation* and this specific path
+had no call to read.
+
+**What shipped (`6802d0c7`):** one `checkPathBoundary` call, placed immediately after `write_file`
+resolves its target path — before the scope guard, the edit-approval callback, and the
+shrink-guard's own pre-read (which independently leaked existence and size of an outside-repo
+path even when the write itself would later be rejected) — so it covers both the new-file and
+existing-file branches uniformly, and runs before `fs.mkdirSync`'s unconditional
+directory-creation side effect rather than after it.
+
+**Where the code lives:** `write_file`'s handler in `toolExecutor.ts`, immediately after
+`path.join(repoPath, filePath)`. Tests in `toolExecutor.pathBoundary.test.ts`.
 
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 46 to find out which ones still need something. No index of
+reader the trouble of reading all 49 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (20): 6, 7, 8, 14, 20, 21, 22, 24, 26, 28, 29, 30, 31, 33, 34, 35, 40, 41, 42, 44
+**Closed** (22): 6, 7, 8, 14, 20, 21, 22, 24, 26, 28, 29, 30, 31, 33, 34, 35, 40, 41, 42, 44, 48, 49
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (15): 2 (after 16), 10, 12, 13, 15 (after 2), 16, 17, 18, 23, 25, 32, 36, 37, 39, 47
