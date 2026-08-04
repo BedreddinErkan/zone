@@ -264,25 +264,26 @@ above; the header comment defending it sits directly above the function. The asy
 it defends, `wasFileReadOrWritten`, sits later in the same file; `resumeStagingFiles` is seeded
 into `stagingFiles` nearby, in the same warm-resume wiring.
 
-## 7. Sticky `failureDetected` suppresses durable-resume checkpoints across tools
+## 7. Closed — the checkpoint gate now reads the current call's result, not the sticky iteration flag
 
-**What it is:** within a single agent-loop iteration, the per-iteration failure flag on the
-tool-event context is set once a write-tool fails and never reset until the next iteration.
-The durable-resume checkpoint write is gated on that same flag being clear for
-`apply_patch`/`write_file`/`multi_edit`. So one failing write-tool call silences checkpointing
-for every *later, successful* write-tool call in the same iteration.
+**What it was:** within a single agent-loop iteration, the per-iteration failure flag on the
+tool-event context was set once a write-tool failed and never reset until the next iteration. The
+durable-resume checkpoint write was gated on that same flag being clear for
+`apply_patch`/`write_file`/`multi_edit`, so one failing write-tool call silenced checkpointing for
+every later, successful write-tool call in the same iteration — measured, not assumed: 53.9% of
+real iterations run multiple tool calls, and the exact shape (four `apply_patch` calls sharing one
+iteration) occurred in recorded data.
 
-**Not created by any recent work.** Traced to the checkpoint-after-every-successful-write-tool
-feature's original commit, well before the sessions that found it.
+**Fixed by `af3125f0`, landed and never recorded here until now.** One line: the gate condition
+changed from `!toolEventCtx.failureDetected` (the sticky, iteration-wide flag) to `result.success`
+— the current call's own outcome, already in scope at the gate for something else eighteen lines
+above. No change to `ToolEventContext`, no flag reset, no new field — exactly the scoping this
+item's own text asked for, at the narrowest possible diff. 281 lines of new integration coverage
+in a dedicated file, where none existed before, including the read-before-patch variant sharing
+the same stale-flag mechanism.
 
-**What would close it:** scoping the failure flag (or the checkpoint gate) to the specific
-tool call that failed, rather than the whole iteration. Not attempted — recent work in this
-area was scoped to `multi_edit`'s own success signal, not this pre-existing cross-tool
-coupling.
-
-**Where the code lives:** the checkpoint call sits in the per-tool-call loop in
-`runAgentLoop` (`agentLoop.ts`), gated on the tool-event context's `failureDetected` field
-alongside a tool-name check for the three write tools.
+**Where the code lives:** the checkpoint call is in the per-tool-call loop in `runAgentLoop`
+(`agentLoop.ts`); the tests are in `agentLoop.checkpointGate.test.ts`.
 
 ## 8. Closed — `multi_edit`'s path-escape return now carries `filesStaged`
 
@@ -1109,35 +1110,34 @@ reads `absPath`; `path` appears exactly three times, all inside `dropNotes` mess
 two roles — "re-seeds the staging map directly" and "reconciliation key" — coexist on `absPath`;
 nothing was removed, only relocated to the field that actually has it.
 
-## 32. A `version` bump would silently drop every existing envelope
+## 32. A `version` bump would silently drop every existing envelope — partially closed
 
-**What it is:** `RunEnvelope.version` is a literal `1` type, checked at four independent sites —
+**What it was:** `RunEnvelope.version` is a literal `1` type, checked at four independent sites —
 `loadRunEnvelope`, `listResumableEnvelopes`, `pruneOldEnvelopes`, and `resolveEnvelopeId` — each
-guarding with a bare `if (env.version !== 1) return null` or `continue`. None of the four logs
-anything or surfaces a message on a mismatch; a non-matching envelope is treated identically to
-one that was never there.
+guarding with a bare `if (env.version !== 1) return null` or `continue`, none of them logging or
+surfacing anything on a mismatch.
 
-**Why this matters:** the schema-evolution hatch this codebase nominally has is, in practice, a
-silent data-loss switch. Bumping `version` to `2` for a genuinely necessary schema change would
-make every envelope written under version 1 invisible to all four functions simultaneously — no
-error, no log line, nothing printed — and the practical effect is every in-flight resumable run
-at the time of the bump loses its resume path with no visible signal that this happened, to
-either the user or whoever shipped the bump.
+**Fixed by `d1ce3dc4`, landed and never recorded here until now.** A shared
+`isSupportedEnvelopeVersion(version, site, identifier)` helper, wired into all four sites without
+changing their control flow, logs `[zone-envelope-version-mismatch]` unconditionally (`log`, not
+`debugLog`) with the actual version, expected version, an identifying key or file, and which of
+the four sites fired. Five tests, twenty-three assertions, three mutations run and reverted — the
+version-mismatch half of this item's own "what would close it" is done, tested, and confirmed
+load-bearing.
 
-**Why `ab76002f` needed this to be true:** that fix chose compare-time normalization
-(`resolve(env.repoPath, p)` at read time) specifically because it required no version bump — the
-envelopes on disk at the time both had `flushedPaths: []`, so the fix needed to keep working for
-old and new envelope shapes without a schema change forcing a discard. This entry is why that
-constraint mattered rather than being only a convenience: the alternative (bump the version,
-migrate) would have hit this exact silent-drop behavior.
+**Still open: the affected-envelope-count half was not delivered.** This item's own text asked
+for a log line "naming the version mismatch and the affected envelope count." The marker fires
+once per mismatched envelope encountered, at whichever site encounters it — there is no aggregate
+count anywhere, in the payload or as a separate summary. A reader who wants "how many envelopes
+did this affect" has to count `[zone-envelope-version-mismatch]` records themselves after the
+fact; nothing in the fix computes or surfaces that number as its own signal.
 
-**What would close it:** a loud path before any bump is ever considered — a log line or startup
-message naming the version mismatch and the affected envelope count, so a schema change becomes a
-visible migration decision instead of a silent discard.
+**What would close the rest:** a summary line — emitted once, after a given operation's own
+per-envelope calls have all run — naming how many mismatches were seen in that pass. Not
+attempted; `d1ce3dc4`'s own message only ever claims the marker.
 
-**Where the code lives:** the four checks are in `loadRunEnvelope`, `listResumableEnvelopes`,
-`pruneOldEnvelopes`, and `resolveEnvelopeId`, all in `diskRunEnvelope.ts`; the `version: 1`
-literal type is on `RunEnvelope` itself, same file.
+**Where the code lives:** `isSupportedEnvelopeVersion` and its four call sites are all in
+`diskRunEnvelope.ts`; the tests are in `diskRunEnvelope.test.ts`.
 
 ## 33. Closed — both zero-coverage branches now have a discriminating test
 
@@ -1214,6 +1214,28 @@ snapshot leaves the file silently self-contradicting, and a reader picking a nex
 would pick one that's actually done. This pass's own Change 2 verification (grep every heading,
 compare by hand against the snapshot's claim) is exactly the manual version of the check being
 proposed here.
+
+**A sharper distinction, from `d1ce3dc4` and `af3125f0` both landing without their closures ever
+being recorded:** the check this item proposes — comparing the snapshot's bucket lists against
+the `Closed —` headings — verifies the ledger's own **internal consistency**, not its **currency
+against the code**. This incident is why the distinction matters, not just a restatement of it:
+item 32's heading and the snapshot agreed with each other the whole time — both said open — and
+both were wrong; the fix had shipped commits earlier. The proposed check would have passed,
+cleanly, on a ledger that was already stale. This is the first recorded instance found where the
+internal-consistency check specifically would not have helped — searched for prior instances of
+this exact shape in the ledger's own text and found none stated precisely enough to count with
+confidence, so none is claimed here.
+
+**Whether a currency check — comparing the ledger against the code itself, not just against
+itself — is even mechanizable: checked, not assumed, and the honest answer is partial.** One
+candidate exists: grep commit messages for "item N" and diff against whether item N's current
+heading says "Closed —" — this pass's own establish did exactly that, by hand, and it is what
+found both `d1ce3dc4` and `af3125f0`. But the method has a real, structural blind spot: a commit
+that closes an item without naming it in the message is invisible to it, by construction — there
+is no way to mechanically infer "this diff closes ledger item N" from a diff that never says so.
+The check would catch every future instance of this exact mistake (a commit that says "closes
+item N" while the ledger is never told); it cannot catch the mistake of forgetting to say so in
+the commit at all.
 
 **What would close it:** a check that reads every `## N. ...` heading, classifies each by whether
 it starts with "Closed —", and compares that set against the snapshot's own "Closed" bucket —
@@ -1506,17 +1528,17 @@ priority ordering" cautions against ranking by importance, which this section do
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (18): 6, 8, 14, 20, 21, 22, 24, 26, 29, 30, 31, 33, 34, 35, 40, 41, 42, 44
+**Closed** (19): 6, 7, 8, 14, 20, 21, 22, 24, 26, 29, 30, 31, 33, 34, 35, 40, 41, 42, 44
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (16): 2 (after 16), 7, 10, 12, 13, 15 (after 2), 16, 17, 18, 23, 25, 28, 32, 36, 37, 39
+first (15): 2 (after 16), 10, 12, 13, 15 (after 2), 16, 17, 18, 23, 25, 28, 32, 36, 37, 39
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (2): 1, 4
 
 **Neither — a structural fact recorded, with no fix proposed** (10): 3, 5, 9, 11, 19, 27, 38, 43,
 45, 46
 
-Items 1, 2, 12, 16, and 18 are partially closed or corrected; the classification above covers
+Items 1, 2, 12, 16, 18, and 32 are partially closed or corrected; the classification above covers
 only the portion still open, not the whole entry.
 
 ---
