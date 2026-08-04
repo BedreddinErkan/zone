@@ -317,26 +317,48 @@ branches of `search_in_files`'s in-process path; the ripgrep-path returns are in
 `files_with_matches` and `count` branches of the same handler; the JSON-parsing one is in the
 helper the ripgrep path calls to build content-mode output. All in `toolExecutor.ts`.
 
-## 10. Sink's trim is not atomic across processes
+## 10. Closed — rotation replaced the read-trim-rewrite; the original premise was correct, and a later pass's refutation of it was not
 
-**What it is:** when `~/.zone/markers.jsonl` crosses its size cap, the sink trims it back down
-by reading the whole file, dropping the oldest lines, and rewriting it —
-read-trim-rewrite, not an atomic replace. The trim function's own header comment already
-states the consequence: a concurrent process's append landing between the read and the
-rewrite is lost.
+**What it was:** when `~/.zone/markers.jsonl` crossed its size cap, the sink trimmed it back
+down by reading the whole file, dropping the oldest lines, and rewriting it — read-trim-rewrite,
+not an atomic replace. The trim function's own header comment already stated the consequence: a
+concurrent process's append landing between the read and the rewrite was lost. Deferred as
+low-risk, since the file sat at roughly 39% of its cap.
 
-**Why it's deferred:** currently low-risk — the file sits at roughly 39% of its cap, so trims
-are rare. The risk isn't evenly distributed, though: it can only manifest exactly when the
-sink is full and multiple Zone processes are appending concurrently, which is also exactly
-when records matter most — busy, active use, the moment a rare marker is likeliest to fire.
+**A later pass in this same session reported that the trim function did not exist at all — that
+report was wrong, and the correction matters more than the fix itself.** A task brief claimed
+`trimSink` "does not exist... no cap check, no read-modify-write, no such function," that the
+sink lived at `<repo>/.zone/markers.jsonl` rather than `~/.zone/`, and that the file was
+~4.4 MB growing ~44 KB/run. None of that held up against the actual source: `trimSink` existed,
+called from `appendMarkerRecord`; `MARKER_SINK_MAX_BYTES` was referenced at three source sites
+and three test sites; the file was 820,429 bytes, unchanged since 2026-08-01. This item's original
+text, above, was accurate throughout. A ledger entry surviving a false refutation is only useful
+if the refutation is recorded too — which is why this paragraph exists rather than a silent edit.
 
-**What would close it:** either an atomic rewrite (write to a temp file, then rename over the
-original — rename is atomic on the same filesystem) or switching from in-place trim to
-append-only rotation (roll to a new file, keep N generations), removing the read-modify-write
-window entirely.
+**The same false path claim recurred a second time, in the very next brief, framed as an
+already-established fact.** Swept the whole ledger for anything that might rest on it (`rg` for
+`~/.zone` mentions and record-count/zero-record language) — nothing does. The passages that cite
+measured counts from the sink (item 18's smart-quote/normalization counts, item 21's "no records
+after 2026-08-01") were both measured at `~/.zone/markers.jsonl`, the only path this file has
+ever lived at, independently reconfirmed this session by direct, repeated measurement. The
+wrong-path claim affected two task briefs, not anything written into this document.
 
-**Where the code lives:** the trim function lives in the marker-sink module, called from the
-append function whenever a write pushes the file past its size cap.
+**What landed (`f7fd16d6`):** the read-trim-rewrite is gone. `trimSink` now renames the active
+file to `.1` — no read-modify-write window, so nothing left to be non-atomic about. Keeps
+exactly one rotated generation (nothing reads this file programmatically, checked); the 2 MB cap
+is unchanged (no growth since 2026-08-01 gave a reason to move it). A concurrent
+appender is safe under rotation because `fs.appendFileSync` opens by path fresh on every call —
+confirmed empirically, not assumed — so nothing strands on the old inode after a rename.
+
+**Two failure paths were added that the original read-trim-rewrite never had to consider,
+because it had no equivalent syscalls to fail:** a non-`ENOENT` `statSync` failure and a
+`renameSync` failure each warn once per process via a raw `process.stderr.write` — never via
+`log()`, which would recurse back through the sink's own write path (see item 54). Neither
+failure can lose the record itself: `appendMarkerRecord`'s own append already lands on disk
+before either syscall runs.
+
+**Where the code lives:** `trimSink`, `appendMarkerRecord`, `MARKER_SINK_MAX_BYTES`, and the two
+failure-path warnings are all in `src/utils/markerSink.ts`. Tests in `markerSink.test.ts`.
 
 ## 11. Sink data cannot be forced — passive accumulation only
 
@@ -1894,25 +1916,54 @@ deciding to ship, the way item 36's own currency-check establish did before decl
 
 **Where the code lives:** nowhere yet — no tool is selected, no config is written.
 
+## 54. `markerSink.ts`'s own write path cannot call `log` — a standing constraint, not a defect
+
+**What it is:** `appendMarkerRecord` and everything it calls (including `trimSink`) are only
+ever invoked from inside the monkey-patched `process.stdout.write`/`process.stderr.write`
+installed by `applyStdoutInterception`/`applyStderrInterception` (`stdoutShield.ts`). `log()`
+(`logger.ts`) is `console.log(...args)`, and `console.log` writes to `process.stdout` — the
+patched one, whenever the TUI is running. Calling `log()` from anywhere inside this module's
+write path recurses straight back into `appendMarkerRecord`, without bound.
+
+**Not a defect — the module's own header comment already states this as a constraint:** "this
+function and everything it calls must never write to either stream — doing so would re-enter
+the patch and recurse without bound. No `log()`, `debugLog()`, `errorLog()`, `console.*`, or
+`process.std*.write`, anywhere in this module or its imports." Nothing here is broken; nothing
+needs fixing.
+
+**Why it earns an entry despite having nothing to close:** this session's own task brief for
+adding a rotation marker instructed emitting it "via `log`" — a specific, concrete instance of
+exactly the trap the header warns about, caught only because the implementing pass traced the
+call chain before writing the code, not because the instruction was obviously wrong on its face.
+The safe alternative — writing the record directly via `fs.appendFileSync`, bypassing
+`console.*` and both patched streams — was confirmed safe empirically, not just by reasoning: a
+warning line that doesn't start with `[tag]` or a result glyph (✓/✗/⚠) passes through the
+patched stderr write untouched, calling `appendMarkerRecord` zero times.
+
+**Where the code lives:** the constraint and its rationale are in the header comment above
+`appendMarkerRecord`, `src/utils/markerSink.ts`. `trimSink`'s own rotation-marker write
+(`[zone-marker-sink-rotated]`) and its two failure-path warnings (see item 10) are the only
+current examples of code respecting it deliberately.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 53 to find out which ones still need something. No index of
+reader the trouble of reading all 54 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (27): 6, 7, 8, 13, 14, 20, 21, 22, 24, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49
+**Closed** (28): 6, 7, 8, 10, 13, 14, 20, 21, 22, 24, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (10): 2 (after 16), 10, 12, 15 (after 2), 16, 17, 18, 23, 25, 36
+first (9): 2 (after 16), 12, 15 (after 2), 16, 17, 18, 23, 25, 36
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (2): 1, 4
 
-**Neither — a structural fact recorded, with no fix proposed** (14): 3, 5, 9, 11, 19, 27, 38, 43,
-45, 46, 50, 51, 52, 53
+**Neither — a structural fact recorded, with no fix proposed** (15): 3, 5, 9, 11, 19, 27, 38, 43,
+45, 46, 50, 51, 52, 53, 54
 
 Items 1, 2, 12, 16, 18, and 36 are partially closed or corrected; the classification above covers
 only the portion still open, not the whole entry.
