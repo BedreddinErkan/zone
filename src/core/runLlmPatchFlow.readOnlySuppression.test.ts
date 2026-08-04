@@ -36,6 +36,21 @@ vi.mock("../repo/detectProjectStructure.js", () => ({ detectProjectStructure: de
 vi.mock("../repo/rankRelevantFiles.js", () => ({ rankRelevantFiles: rankRelevantFilesMock }));
 vi.mock("../repo/readProjectFiles.js", () => ({ readProjectFiles: readProjectFilesMock }));
 vi.mock("../llm/planPatchPreview.js", () => ({ planPatchPreviewWithLlm: planPatchPreviewWithLlmMock }));
+// Only generateExecutionPlan is overridden — isAnswerOnlyPlan must stay real. 8 of the 9 tests
+// below supply preGeneratedPlan, which sets the local executionPlan var via a DIFFERENT branch
+// (runLlmPatchFlow.ts's `if (input.preGeneratedPlan)`) and never calls generateExecutionPlan at
+// all; those 8 still reach isAnswerOnlyPlan(executionPlan) on that real, supplied plan (:5687,
+// :5954). A full-replace mock (only generateExecutionPlan, no ...actual) would leave
+// isAnswerOnlyPlan undefined for all 9 tests and crash the 8 that reach it. Only the 9th test
+// ("no approved plan") reaches generateExecutionPlan itself, and mocking it to throw stops that
+// one real outbound Anthropic call (root cause of a CI-only timeout) without touching the other 8.
+vi.mock("../llm/executionPlan.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../llm/executionPlan.js")>();
+  return {
+    ...actual,
+    generateExecutionPlan: vi.fn(async () => { throw new Error("skip"); }),
+  };
+});
 vi.mock("./runRuntimeVerification.js", () => ({ runRuntimeVerificationPlan: runRuntimeVerificationPlanMock }));
 vi.mock("../llm/agentLoop.js", () => ({
   runAgentLoop: runAgentLoopMock,
