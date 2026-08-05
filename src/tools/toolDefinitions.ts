@@ -243,8 +243,7 @@ required: ["id", "content", "description", "status"],
         "Patch an EXISTING file (write_file for new files). " +
         "Format: --- FIND --- <verbatim lines, unique> --- REPLACE --- <new content>. " +
         "FIND must match exactly — re-read if unsure. " +
-        "N edits to a file → ONE call with N blocks; all blocks apply atomically. " +
-        "intent: 'add' (default)|'modify'|'delete'.",
+        "N edits to a file → ONE call with N blocks; all blocks apply atomically.",
       parameters: {
         type: "object",
         properties: {
@@ -263,6 +262,7 @@ required: ["id", "content", "description", "status"],
           },
           intent: {
             type: ["string", "null"],
+            enum: ["add", "modify", "delete", null],
             description:
               "Patch intent: 'add' (default, insertion-only guard on), " +
               "'modify' (editing lines, guard off), " +
