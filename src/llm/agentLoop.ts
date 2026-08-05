@@ -6,7 +6,7 @@ import { createLLMClient } from "./factory.js";
 import { getRequestContext, withRequestContext } from "./openaiContext.js";
 import { readProjectMemoryBlock } from "../memory/projectMemory.js";
 import { log, debugLog } from "../utils/logger.js";
-import { normalizeSmartQuotes } from "../utils/smartQuotes.js";
+import { segmentPatchBlocks } from "../utils/patchBlocks.js";
 import { buildVerifyDiagnostic } from "../core/buildVerifyDiagnostic.js";
 import { maybeExpandScopeForVerifyDiagnostic } from "../tools/scopeGuard.js";
 import { requestEditApproval } from "../api/editApprovals.js";
@@ -1289,34 +1289,11 @@ export type FailureRecord = {
   iter: number;
 };
 
+// FIND/REPLACE segmentation walk — shared with toolExecutor.ts's segmentApplyPatchBlocks,
+// extracted to src/utils/patchBlocks.ts (ledger item 16). This wrapper discards the
+// smart-quote counts; hashPatchBlocks below only ever needed the blocks.
 export function parsePatchBlocks(patch: string): Array<{ find: string; replace: string }> {
-  const blocks: Array<{ find: string; replace: string }> = [];
-  const FIND_MARKER = "--- FIND ---";
-  const REPLACE_MARKER = "--- REPLACE ---";
-  let remaining = String(patch || "");
-  while (remaining.includes(FIND_MARKER)) {
-    const findIdx = remaining.indexOf(FIND_MARKER);
-    const afterFind = remaining.slice(findIdx + FIND_MARKER.length);
-    const repIdx = afterFind.indexOf(REPLACE_MARKER);
-    if (repIdx === -1) break;
-    const findContent = afterFind.slice(0, repIdx);
-    const afterReplace = afterFind.slice(repIdx + REPLACE_MARKER.length);
-    const nextFindIdx = afterReplace.indexOf(FIND_MARKER);
-    const replaceContent =
-      nextFindIdx === -1 ? afterReplace : afterReplace.slice(0, nextFindIdx);
-    const normalizedFind = normalizeSmartQuotes(
-      findContent.replace(/^\r?\n/, "").replace(/\r?\n$/, "")
-    ).text;
-    const normalizedReplace = normalizeSmartQuotes(
-      replaceContent.replace(/^\r?\n/, "").replace(/\r?\n$/, "")
-    ).text;
-    blocks.push({
-      find: normalizedFind,
-      replace: normalizedReplace,
-    });
-    remaining = nextFindIdx === -1 ? "" : afterReplace.slice(nextFindIdx);
-  }
-  return blocks;
+  return segmentPatchBlocks(patch).blocks;
 }
 
 export function hashPatchBlocks(args: Record<string, unknown> | null | undefined): string {
