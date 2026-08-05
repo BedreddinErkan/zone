@@ -15,17 +15,16 @@ export interface FindReplaceBlock {
  * bare-CR normalization happens later, per matched block, at match time, in `toolExecutor.ts`
  * (ledger item 18) — this function has no equivalent of that later step and never will.
  *
- * KNOWN DEFECT, NOT FIXED HERE: this walk uses the same substring-anywhere marker matching as
- * the imbalance check in `apply_patch`'s handler, so an embedded, own-line, MATCHED FIND/
- * REPLACE pair inside what should be one block's REPLACE content (e.g. a doc example showing
- * the apply_patch syntax) makes this loop split there — truncating the real block's
- * replacement short and fabricating a second, unintended block from the example text. The
- * imbalance check cannot catch this shape: a matched embedded pair raises both findMarkerCount
- * and replaceMarkerCount together, so they stay equal, the rejection branch never fires, and no
- * [zone-apply-patch-marker-imbalance] record of this can exist. Silent wrong-content write, not
- * a rejection — worse than the false positive that check addresses. Deliberately unfixed
- * pending its own pass: fixing it changes which patches get *accepted*, not just which get
- * rejected more legibly (ledger item 2).
+ * KNOWN DEFECT, NOT FIXED HERE: an embedded, own-line, MATCHED FIND/REPLACE pair inside what
+ * should be one block's REPLACE content (e.g. a doc example showing the apply_patch syntax) is
+ * textually indistinguishable from a legitimate second block, so this loop splits there —
+ * truncating the real block's replacement short and fabricating a second, unintended block from
+ * the example text. The imbalance check cannot catch this shape: a matched embedded pair raises
+ * both findMarkerCount and replaceMarkerCount together, so they stay equal, the rejection branch
+ * never fires, and no [zone-apply-patch-marker-imbalance] record of this can exist. Silent
+ * wrong-content write, not a rejection — worse than the false positive that check addresses.
+ * Deliberately unfixed pending its own pass: fixing it changes which patches get *accepted*, not
+ * just which get rejected more legibly (ledger item 2).
  */
 export function segmentPatchBlocks(patch: string): {
   blocks: FindReplaceBlock[];
