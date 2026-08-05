@@ -6,6 +6,7 @@ import {
   validateUnrelatedClaim,
   applyNoInfraVerificationOverride,
 } from "../verification/index.js";
+import { debugLog } from "../../utils/logger.js";
 import type { VerdictInput, VerdictResult } from "./types.js";
 
 export function deriveVerdict(input: VerdictInput): VerdictResult {
@@ -67,6 +68,8 @@ export function deriveVerdict(input: VerdictInput): VerdictResult {
     reason === "tests_passed" ||
     reason === "tests_skipped_no_infra" ||
     reason === "tests_failed_unrelated";
+
+  debugLog("[zone-agent-verdict-inferred-from]", JSON.stringify({ inferredFrom, reason, trigger }));
 
   return { reason, patchValidatedByAgent, inferredFrom, strippedText };
 }

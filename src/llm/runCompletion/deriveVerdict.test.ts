@@ -2,6 +2,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { deriveVerdict } from "./deriveVerdict.js";
 import type { VerdictInput } from "./types.js";
 
+const mockDebugLog = vi.hoisted(() => vi.fn());
+vi.mock("../../utils/logger.js", () => ({ debugLog: mockDebugLog }));
+
 // Minimal tool-call log entries
 const noLog: VerdictInput["toolCallLog"] = [];
 const patchLog: VerdictInput["toolCallLog"] = [
@@ -177,6 +180,66 @@ describe("deriveVerdict", () => {
       };
       const result = deriveVerdict(input);
       expect(result.reason).toBe("tests_skipped_no_infra");
+    });
+  });
+
+  describe("inferredFrom telemetry", () => {
+    beforeEach(() => {
+      mockDebugLog.mockClear();
+    });
+
+    it("emits [zone-agent-verdict-inferred-from] with inferredFrom:tag when a tag is present", () => {
+      deriveVerdict({
+        finalText: "Done [ZONE_VERIFICATION: tests_passed]",
+        trigger: "natural_completion",
+        toolCallLog: patchThenTestPass,
+        filesModified: [],
+        patchApplied: true,
+      });
+      expect(mockDebugLog).toHaveBeenCalledWith(
+        "[zone-agent-verdict-inferred-from]",
+        JSON.stringify({ inferredFrom: "tag", reason: "tests_passed", trigger: "natural_completion" })
+      );
+    });
+
+    // Mirrors the "infers from log for max_iterations" fixture above (heuristic path
+    // describe block) — no tag, trigger:max_iterations, reason genuinely computed via
+    // inferVerificationFromLog. This is the branch the telemetry exists to measure
+    // against the tag path.
+    it("emits inferredFrom:heuristic when no tag is present and trigger is max_iterations (genuine heuristic)", () => {
+      deriveVerdict({
+        finalText: "Max iter hit",
+        trigger: "max_iterations",
+        toolCallLog: patchThenTestPass,
+        filesModified: ["/repo/src/foo.ts"],
+        patchApplied: true,
+      });
+      expect(mockDebugLog).toHaveBeenCalledWith(
+        "[zone-agent-verdict-inferred-from]",
+        JSON.stringify({ inferredFrom: "heuristic", reason: "tests_passed", trigger: "max_iterations" })
+      );
+    });
+
+    // inferredFrom is `tagged ? "tag" : "heuristic"` (deriveVerdict.ts) -- a function of
+    // tagged alone, not of trigger. So this case (no tag, trigger:natural_completion) ALSO
+    // records inferredFrom:"heuristic", even though reason here is the hardcoded literal
+    // "no_verification_attempted", not the output of inferVerificationFromLog. There is no
+    // third inferredFrom value -- the type is strictly "tag"|"heuristic" -- but the
+    // "heuristic" label covers two different mechanisms. Pinned here so that distinction
+    // stays visible in the marker's own payload (same inferredFrom, different reason from
+    // the case above).
+    it("emits inferredFrom:heuristic (hardcoded default, not the heuristic function) when no tag and trigger is natural_completion", () => {
+      deriveVerdict({
+        finalText: "No tag here",
+        trigger: "natural_completion",
+        toolCallLog: noLog,
+        filesModified: [],
+        patchApplied: false,
+      });
+      expect(mockDebugLog).toHaveBeenCalledWith(
+        "[zone-agent-verdict-inferred-from]",
+        JSON.stringify({ inferredFrom: "heuristic", reason: "no_verification_attempted", trigger: "natural_completion" })
+      );
     });
   });
 });
