@@ -3,7 +3,6 @@ import {
   assembleAgentSystemPrompt,
   assembleInvestigationSystemPrompt,
 } from './agentLoop.js';
-import { parseVerificationTag } from './verification/index.js';
 
 const PATCH_INPUT = {
   agentIntro: 'You are Zone, a coding agent.',
@@ -17,13 +16,20 @@ const PATCH_INPUT = {
 };
 
 describe('UI.6.1: patch prompt FINAL SUMMARY block', () => {
-  it('contains FINAL SUMMARY heading and four section markers', () => {
+  it('patch summary is free-form: no fixed section list, headings gone, tag block untouched', () => {
+    // Scoped to the summary block itself, not the whole prompt: "## Tests" also appears
+    // legitimately and unconditionally in the BREVITY RULES block further down ("...or the
+    // ## Tests line. Brevity never touches tool payloads or verification output.") —
+    // a whole-prompt not.toContain would false-fail against that unrelated, untouched line.
     const prompt = assembleAgentSystemPrompt(PATCH_INPUT);
-    expect(prompt).toContain('FINAL SUMMARY');
-    expect(prompt).toContain('## What changed');
-    expect(prompt).toContain('## Why');
-    expect(prompt).toContain('## Tests');
-    expect(prompt).toContain('## Notes');
+    const summaryStart = prompt.indexOf('FINAL SUMMARY (required');
+    const summaryEnd = prompt.indexOf('TRUNCATED FILE SECTIONS:');
+    expect(summaryStart).toBeGreaterThan(-1);
+    const summaryBlock = prompt.slice(summaryStart, summaryEnd);
+    expect(summaryBlock).toContain('no fixed section list');
+    expect(summaryBlock).toContain('REQUIRED — every summary states');
+    expect(summaryBlock).not.toContain('## What changed');
+    expect(summaryBlock).not.toContain('## Tests');
   });
 
   it('explicitly forbids triple-backtick code fences in summary', () => {
@@ -31,30 +37,15 @@ describe('UI.6.1: patch prompt FINAL SUMMARY block', () => {
     expect(prompt).toContain('Triple-backtick code fences');
   });
 
-  it('includes natural_completion example and reference to recovery-mode examples', () => {
+  // Carries forward the one lesson from the old EXAMPLES block the REQUIRED bullets don't
+  // already cover in prose: what to WRITE when a run ends with a rolled-back patch and
+  // nothing net-applied. See buildPatchSummary's own comment in agentLoop.ts for why the
+  // other two old examples (natural_completion, max_iterations) were dropped rather than
+  // carried forward too.
+  it('carries a short example demonstrating a rolled-back/no-net-change outcome', () => {
     const prompt = assembleAgentSystemPrompt(PATCH_INPUT);
-    expect(prompt).toContain('Example 1');
-    expect(prompt).toContain('APPLY_ROLLED_BACK'); // reference line contains keyword
-    expect(prompt).toContain('final-summary-recovery-examples.md');
-  });
-
-  // CE.2.1.b: Examples 2 + 3 moved to .zone/audits/final-summary-recovery-examples.md
-  it('CE.2.1.b: Example 2 body not present in patch prompt', () => {
-    const prompt = assembleAgentSystemPrompt(PATCH_INPUT);
-    expect(prompt).not.toContain('Example 2');
-  });
-
-  it('CE.2.1.b: Example 3 body not present in patch prompt', () => {
-    const prompt = assembleAgentSystemPrompt(PATCH_INPUT);
-    expect(prompt).not.toContain('Example 3');
-  });
-
-  it('CE.2.1.b: EXAMPLES section < 600 chars after reduction', () => {
-    const prompt = assembleAgentSystemPrompt(PATCH_INPUT);
-    const examplesStart = prompt.indexOf('EXAMPLES:');
-    const examplesEnd = prompt.indexOf('TRUNCATED FILE SECTIONS:');
-    const examplesSection = prompt.slice(examplesStart, examplesEnd);
-    expect(examplesSection.length).toBeLessThan(600);
+    expect(prompt).toContain('rolled back');
+    expect(prompt).toContain('nothing applied');
   });
 });
 
@@ -76,51 +67,47 @@ describe('UI.6.2: read-only archetypes get the answer contract, patch keeps four
     expect(prompt).not.toContain('FINAL SUMMARY (required');
   });
 
-  it('patch run (default archetype) still gets the four-section contract, including the verification tag', () => {
+  it('patch run (default archetype) still gets the free-form patch contract, including the verification tag', () => {
     const prompt = assembleAgentSystemPrompt(PATCH_INPUT);
     expect(prompt).toContain('FINAL SUMMARY (required');
-    expect(prompt).toContain('## What changed');
+    expect(prompt).toContain('REQUIRED — every summary states');
     expect(prompt).not.toContain('FINAL ANSWER (required');
     expect(prompt).toContain('[ZONE_VERIFICATION: tests_passed]');
   });
 
-  it('question archetype WITH an approved plan (readOnlyPipelineSuppressed case) still gets the four-section contract', () => {
+  it('question archetype WITH an approved plan (readOnlyPipelineSuppressed case) still gets the free-form patch contract', () => {
     const prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, archetype: 'question', planApproved: true });
     expect(prompt).toContain('FINAL SUMMARY (required');
     expect(prompt).not.toContain('FINAL ANSWER (required');
   });
+
+  // isReadOnlyArchetype-based tests above only exercise the OR condition's second
+  // disjunct. Nothing previously called assembleAgentSystemPrompt with answerOnly:true
+  // directly, so a mutation that dropped `input.answerOnly ||` from the guard would very
+  // likely pass undetected — this closes that gap.
+  it('answerOnly:true selects ANSWER_SUMMARY directly, not via isReadOnlyArchetype', () => {
+    const prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, answerOnly: true });
+    expect(prompt).toContain('FINAL ANSWER (required');
+    expect(prompt).not.toContain('FINAL SUMMARY (required');
+  });
 });
 
-describe('UI.6.3: ## Tests enum stays parseable by the real parser', () => {
-  // Extracted from the real prompt text and round-tripped through the real
-  // parseVerificationTag, not compared against a copy of its internal `valid` array
-  // (function-local, not exported) — a copied list drifts silently; this cannot.
-  function extractTestsEnum(prompt: string): string[] {
-    const match = prompt.match(/One line using exactly one of: ([^.]+)\./);
-    expect(match).not.toBeNull();
-    return match![1].split(',').map((s) => s.trim());
-  }
+// UI.6.3 ("## Tests enum stays parseable by the real parser") deleted, not retargeted.
+// It protected the ## Tests heading's enum staying in sync with parseVerificationTag's
+// accepted values — a duplicate elicitation this task removed by design (deriveVerdict
+// only ever reads the [ZONE_VERIFICATION] tag; the heading never fed it). Nothing
+// comparable remains to retarget it to: the FINAL ASSESSMENT block's own 5-value list is
+// a separate, untouched contract with a different value count and purpose.
 
-  it('compact template: every enumerated value round-trips through parseVerificationTag', () => {
-    const values = extractTestsEnum(assembleAgentSystemPrompt(PATCH_INPUT));
-    // Literal, not computed from the prompt — if the enum stops being comma-delimited
-    // on one line, the regex would still match a shrunken list and this test would pass
-    // while covering less than it claims. The count catches that; the loop below only
-    // catches values that don't parse, not values that silently went missing.
-    expect(values.length).toBe(6);
-    for (const v of values) {
-      expect(parseVerificationTag(`[ZONE_VERIFICATION: ${v}]`)).toBe(v);
-    }
+describe('UI.6.4: summaryFormat interpolates both the token range and the char cap together', () => {
+  it('compact pairs 150-300 tokens with the 900-char cap', () => {
+    const prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, summaryFormat: 'compact' });
+    expect(prompt).toContain('150-300 tokens; hard cap 900 characters');
   });
 
-  it('detailed template: every enumerated value round-trips through parseVerificationTag', () => {
-    const values = extractTestsEnum(
-      assembleAgentSystemPrompt({ ...PATCH_INPUT, summaryFormat: 'detailed' })
-    );
-    expect(values.length).toBe(6);
-    for (const v of values) {
-      expect(parseVerificationTag(`[ZONE_VERIFICATION: ${v}]`)).toBe(v);
-    }
+  it('detailed pairs 300-500 tokens with the 2500-char cap', () => {
+    const prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, summaryFormat: 'detailed' });
+    expect(prompt).toContain('300-500 tokens; hard cap 2500 characters');
   });
 });
 

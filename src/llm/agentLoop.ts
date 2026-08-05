@@ -636,38 +636,40 @@ export function assembleAgentSystemPrompt(input: {
   /** "compact" = terse 900-char default; "detailed" = richer ~2500-char report. Default: compact. */
   summaryFormat?: "compact" | "detailed";
 }): string {
-  const COMPACT_SUMMARY =
+  // Free-form replacement for the old COMPACT_SUMMARY/DETAILED_SUMMARY four/five-section
+  // mandate. deriveVerdict only ever parses the [ZONE_VERIFICATION] tag (a separate,
+  // untouched block below) — never any heading — so the structural mandate and its
+  // duplicate ## Tests elicitation were never load-bearing for verification, only for
+  // prose shape. summaryFormat's only remaining differentiation is (tokenRange, charCap).
+  //
+  // Carries forward one lesson from the old EXAMPLES block, not all three: the
+  // natural_completion example (brevity/specificity calibration) and the max_iterations
+  // example (explicit hand-off framing) are both reasonably covered by the REQUIRED
+  // bullets' own prose already, and the max_iterations example's own inline text used the
+  // now-invalid not_run value regardless. The APPLY_ROLLED_BACK example taught something
+  // the REQUIRED bullets alone do not: agentLoop.ts's own APPLY_ROLLED_BACK directive
+  // (~line 819) only covers what to DO mid-run (retry) — nothing else in the prompt covers
+  // what to WRITE if a run ends in that state, where "what changed" is thin guidance for an
+  // outcome where nothing net-applied. Condensed into free-form prose here rather than
+  // carried verbatim (verbatim would have re-introduced the old template's bulleted/headed
+  // shape into a template whose whole point is "no fixed section list").
+  const buildPatchSummary = (tokenRange: string, charCap: number): string =>
     `FINAL SUMMARY (required — write this as your last response):\n` +
-    `Structure your final response as exactly four sections in this order. Do not add any other headings.\n\n` +
-    `## What changed\n` +
-    `One bullet per logical group of related changes (max 6 bullets total). When >6 files change, group by directory/area — do not enumerate every file; the diff cards above already list them. Reference files with inline backticks, e.g. \`src/foo.ts\`. Write "(none)" if no patches were applied.\n\n` +
-    `## Why\n` +
-    `One sentence. Omit if the task statement already states the goal.\n\n` +
-    `## Tests\n` +
-    `One line using exactly one of: tests_passed, tests_failed_unrelated, tests_failed_by_patch, tests_inconclusive, tests_skipped_no_infra, no_verification_attempted. Include the command when tests ran, e.g. "tests_passed (npm test -- foo)".\n\n` +
-    `## Notes\n` +
-    `Optional. Include only when there is a remaining warning, an out-of-scope item, or a concrete follow-up. Omit the heading entirely when empty.\n\n` +
+    `Report what changed and why, in whatever structure the work calls for. There is no fixed section list — a one-line change needs one or two sentences, a multi-file refactor may want short grouped bullets. Lead with a single line that would work as a commit subject.\n\n` +
+    `REQUIRED — every summary states:\n` +
+    `- What changed, grouped by intent rather than enumerated file by file (max ~6 groups; the diff cards and file list above already enumerate paths). If nothing ended up applied — e.g. the patch was rolled back after a verification failure — say so plainly; "no changes" is a complete answer when it's true, not a gap to paper over.\n` +
+    `- Why, in one sentence — omit only when the task statement already states the goal.\n` +
+    `- Any remaining warning, out-of-scope item, or concrete follow-up. Omit when there is none.\n\n` +
     `FORBIDDEN in the summary:\n` +
-    `- Triple-backtick code fences or diffs — the UI already shows the diff cards above your summary\n` +
+    `- Triple-backtick code fences or diffs — the UI already shows the diff cards above\n` +
     `- File contents, patches, or FIND/REPLACE blocks\n` +
     `- Filler phrases like "I have successfully completed..." or "In conclusion..."\n` +
-    `- Extra headings beyond the four above\n` +
-    `- Tables or decorative markdown\n` +
-    `Token budget: 150-300 tokens; hard cap 900 characters.\n\n` +
-    `EXAMPLES:\n\n` +
-    `[Example 1 — natural_completion]\n` +
-    `## What changed\n` +
-    `- Added \`omit<T, K>\` utility to \`src/utils/omit.ts\` with type-safe key removal\n` +
-    `- Updated barrel export in \`src/utils/index.ts\`\n\n` +
-    `## Why\n` +
-    `Completes the symmetry with the existing \`pick\` utility; both share the same generic signature pattern.\n\n` +
-    `## Tests\n` +
-    `tests_passed (npm test -- omit, 4 scenarios)\n\n` +
-    // CE.2.1.b: Example 2 (max_iterations) + Example 3 (APPLY_ROLLED_BACK) moved to archive.
-    // Low fire-rate (≤5% each). Reference only; full text in .zone/audits/final-summary-recovery-examples.md
-    `[Recovery-mode examples (APPLY_ROLLED_BACK, max_iterations) → .zone/audits/final-summary-recovery-examples.md]\n\n`;
+    `- Tables or decorative markdown\n\n` +
+    `[Example — rolled-back patch, nothing net-applied]\n` +
+    `Attempted to switch \`src/auth/session.ts\` to the new \`TokenProvider\` interface. The patch was rolled back — \`TokenProvider\` isn't defined yet, so nothing applied. It needs to land in a prior run before this refactor can proceed.\n\n` +
+    `Token budget: ${tokenRange} tokens; hard cap ${charCap} characters.\n\n`;
 
-  // The answer shape's output contract. The four-section templates below are patch-shaped
+  // The answer shape's output contract. The old four-section templates were patch-shaped
   // by their section names — "## What changed", "## Tests", "## Files" all presuppose
   // changes — and an approved answer-only run makes none. The measured baseline produced
   // exactly the degenerate form that forces: "## What changed / (none) — this was an
@@ -693,43 +695,6 @@ export function assembleAgentSystemPrompt(input: {
     `- Triple-backtick code fences containing file bodies, patches, or diffs\n` +
     `- Proposing edits, or describing a fix you would make — this run was approved as answer-only\n` +
     `- A "## Tests" or "## What changed" section — there are no changes to report\n`;
-
-  const DETAILED_SUMMARY =
-    `FINAL SUMMARY (required — write this as your last response):\n` +
-    `Structure your final response as five sections; the first four are required, ## Files is optional. Do not add any other headings.\n\n` +
-    `## What changed\n` +
-    `One bullet per logical group of related changes (max 6 bullets total). When >6 files change, group by directory/area — do not enumerate every file. Sub-bullets are fine within a group. Reference files with inline backticks, e.g. \`src/foo.ts\`. Write "(none)" if no patches were applied.\n\n` +
-    `## Why\n` +
-    `One sentence. Omit if the task statement already states the goal.\n\n` +
-    `## Tests\n` +
-    `One line using exactly one of: tests_passed, tests_failed_unrelated, tests_failed_by_patch, tests_inconclusive, tests_skipped_no_infra, no_verification_attempted. Include the command when tests ran, e.g. "tests_passed (npm test -- foo)".\n\n` +
-    `## Notes\n` +
-    `Optional. Include only when there is a remaining warning, an out-of-scope item, or a concrete follow-up. Omit the heading entirely when empty.\n\n` +
-    `## Files\n` +
-    `Optional. Flat list of every file touched (one path per line). Omit the heading entirely when fewer than 3 files were modified.\n\n` +
-    `FORBIDDEN in the summary:\n` +
-    `- Triple-backtick code fences or diffs — the UI already shows the diff cards above your summary\n` +
-    `- File contents, patches, or FIND/REPLACE blocks\n` +
-    `- Extra headings beyond the five above\n` +
-    `- Tables or decorative markdown\n` +
-    `Token budget: 300-500 tokens; hard cap 2500 characters.\n\n` +
-    `EXAMPLE:\n\n` +
-    `[Example — natural_completion, detailed mode]\n` +
-    `## What changed\n` +
-    `- Refactored \`src/auth/middleware.ts\` to extract token validation into a dedicated \`validateToken()\` helper, removing 60 lines of inline logic\n` +
-    `- Updated \`src/auth/index.ts\` to re-export \`validateToken\` for use by other modules\n` +
-    `- Added \`src/auth/validateToken.test.ts\` with 8 test cases covering expiry, malformed tokens, and the happy path\n\n` +
-    `## Why\n` +
-    `Extraction isolates token validation for independent testing and removes the copy-paste pattern spreading to a second endpoint.\n\n` +
-    `## Tests\n` +
-    `tests_passed (npm test -- auth, 11 scenarios)\n\n` +
-    `## Files\n` +
-    `src/auth/middleware.ts\n` +
-    `src/auth/index.ts\n` +
-    `src/auth/validateToken.test.ts\n\n` +
-    // CE.2.1.b: Example 2 (max_iterations) + Example 3 (APPLY_ROLLED_BACK) moved to archive.
-    // Low fire-rate (≤5% each). Reference only; full text in .zone/audits/final-summary-recovery-examples.md
-    `[Recovery-mode examples (APPLY_ROLLED_BACK, max_iterations) → .zone/audits/final-summary-recovery-examples.md]\n\n`;
 
   // planApproved overrides archetype entirely: the user consented to the plan's steps,
   // so no read-only preamble applies regardless of which archetype produced it. One
@@ -880,12 +845,14 @@ export function assembleAgentSystemPrompt(input: {
     `[Example B — real test failure, not pipe noise]\n` +
     `[shell] npx vitest run path/to/changed.test.ts 2>&1 → exitCode=1, "Tests 2 failed | 3 passed"\n` +
     `[agent] Real failure in target. Inspect output for cause, then retry the fix.\n\n` +
-    // Answer shape takes precedence over the compact/detailed choice, not just over
-    // COMPACT_SUMMARY: a user with /summary detailed would otherwise get DETAILED_SUMMARY,
-    // which is the same four-section patch template plus a ## Files list.
+    // Answer shape takes precedence over the compact/detailed choice: a user with
+    // /summary detailed would otherwise get the detailed (tokenRange, charCap) pair.
     ((input.answerOnly || isReadOnlyArchetype)
       ? ANSWER_SUMMARY
-      : input.summaryFormat === "detailed" ? DETAILED_SUMMARY : COMPACT_SUMMARY) +
+      : buildPatchSummary(
+          input.summaryFormat === "detailed" ? "300-500" : "150-300",
+          input.summaryFormat === "detailed" ? 2500 : 900
+        )) +
     `TRUNCATED FILE SECTIONS: if you see a ZONE_CONTEXT_TRUNCATED marker, part of the file was omitted. Do NOT include the marker line in any apply_patch FIND block; use read_file with lineRange on the same path to fetch the hidden section. Only generate FIND blocks from lines you have fully read.\n\n` +
     // Also gated: this block requires a test-verification tag of a run that cannot run a
     // patch to verify. The measured answer-only run emitted
