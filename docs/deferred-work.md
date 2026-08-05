@@ -2874,25 +2874,174 @@ the mechanism that was always going to catch it.
 open defect — normalization-class divergence, not this collision, approaching from the opposite
 direction (missed detections there, a false one here).
 
+## 65. Fifteen tool properties are "fake-optional" (nullable + required) — investigated and left as-is
+
+**What it is:** a nullable-typed property (`type: ["X","null"]`) listed in `required` still
+obligates the model to emit a key on the Anthropic path (the default provider) —
+`translateTools` casts `fn.parameters`, including `required`, wholesale into `input_schema`,
+while `fn.strict` is never read at all. Fifteen properties across nine tools have this shape:
+`run_command.cwd`, `kill_background.signal`, `read_background_output.{since_offset,max_bytes}`,
+`run_command_background.{cwd,label}`, `read_file.lineRange`,
+`list_files.{pattern,include_ignored}`,
+`apply_patch.{intent,scope,scope.symbolKind,scope.className}`, `multi_edit.wholeWord`,
+`search_in_files.fileGlob`. Confirmed by enumerating the real, compiled schema, not by reading
+source in isolation.
+
+**The schema-layer protection count this investigation started with was wrong before any fix
+landed, corrected here rather than carried forward.** Two properties were originally said to be
+protected — `kill_background.signal` by `enum`, `read_file.lineRange` by `minItems`/`maxItems`.
+Re-enumerating for this entry found `apply_patch.scope.symbolKind` already had an enum too
+(`["function","arrow","method","class","export_default","any",null]`), uncounted the first
+time — three were protected before this session's own fix to this class, not two.
+
+**The provider table — the load-bearing finding.** `strict` reaches almost no provider:
+- **Anthropic (default):** dropped entirely — `translateTools` emits only
+  `name`/`description`/`input_schema`.
+- **OpenAI Responses (`gpt-5.x`):** explicitly overwritten to `null` in
+  `responsesConvertParams`, regardless of what the tool declares.
+- **OpenAI Chat Completions (non-gpt-5 OpenAI):** passed through unchanged — the only path
+  where it does anything, reachable today only by `gpt-4o`/`gpt-4o-mini`.
+
+**Handlers already carry the validation — the schema looseness produces no wrong behavior.**
+Every one of the fifteen normalizes an empty/null value explicitly: an `""`/null/undefined
+check resolving to a stated default (`run_command.cwd` → repoPath via `resolveRunCommandCwd`;
+`list_files.pattern` → `"**/*"`), or an allowlist falling through to a safe default
+(`kill_background.signal`, `apply_patch.intent`). None trusts the schema to have done the
+validation. One dogfood report during this investigation — `read_file` rejecting a call with an
+invalid range — is a live instance of exactly this: `lineRange` is both fake-optional and one of
+the schema-protected three/four above, and the handler carries its own redundant check besides
+(`!Array.isArray(lineRange) || lineRange.length !== 2`, then `start > end`) — already covered by
+this entry, not a new finding.
+
+**The measurement that decided against a per-provider schema divergence.** Carrying the
+null-valued keys costs roughly 3-10 tokens per call (measured on five representative minimal
+calls: `read_file` +17 chars, `list_files` +38, `run_command` +11, `multi_edit` +17,
+`apply_patch` +27). Against that: `translateTools` is a single wholesale cast with no hook for a
+per-provider transform — diverging the schemas means building one. The cost doesn't justify the
+build.
+
+**The `strict: false` precedent, and its own measured regression — the strongest argument
+against the obvious alternative.** `search_in_files` is the one tool already declared
+`strict: false` (`69920ff6`, added deliberately "to allow forward-compat" for newly-added
+optional fields). The repo already recorded the cost, not just the theory:
+`toolCallIdentifyingArg.ts`'s own comment states the API "never enforces its required `pattern`
+field, so the model can and does omit it" — the one field on that tool that actually matters.
+Dropping `strict` buys genuine optionality at the cost of losing enforcement on what's genuinely
+required, empirically, not hypothetically.
+
+**What's worth doing instead, and it's free.** `enum` and bounds constraints (`minItems`,
+`minimum`/`maximum`) survive translation to every path exactly like `required` does — three of
+the fifteen already had this kind of constraint before this investigation touched anything, and
+item 66 makes a fourth.
+
+**The remaining eleven, split against the real code rather than reasoned from the names — two
+qualify, nine genuinely don't.**
+- **`read_background_output.max_bytes`** — the handler already clamps unconditionally to
+  `Math.min(Math.max(1, input.maxBytes ?? 8192), 65536)` (`backgroundProcessRegistry.ts`), a
+  fixed floor and ceiling independent of any runtime state. `minimum: 1, maximum: 65536` would
+  match the handler's own bound exactly.
+- **`read_background_output.since_offset`** — a weaker, one-sided candidate. A negative byte
+  offset is never semantically valid, so `minimum: 0` is defensible — but there's no fixed
+  maximum to pair with it: the handler compares it against `proc.ringWritten` and `RING_CAP`
+  (`256*1024`), both runtime state the schema can't know at definition time. Worth a floor, not
+  a full range.
+- **Free-form paths/strings, no closed set (six):** `run_command.cwd` and
+  `run_command_background.cwd` (same shape — any valid relative or absolute path),
+  `run_command_background.label` (any human-readable string), `list_files.pattern` and
+  `search_in_files.fileGlob` (glob patterns, effectively unbounded), `apply_patch.scope.className`
+  (any class identifier).
+- **Booleans where both values are meaningful, already as narrow as their type gets (two):**
+  `list_files.include_ignored`, `multi_edit.wholeWord`.
+- **`apply_patch.scope`** (the wrapping object itself, one) — not a scalar, so enum/bounds
+  doesn't apply the same way; already `additionalProperties: false` with its own `required`
+  list, as constrained as an object-typed parameter gets under this framing.
+
+Where a property has a closed value set or a fixed shape — the two above — constraining it
+tightens the contract on every provider at zero cost. Where it doesn't — the other nine —
+nothing here proposes a fix; the split is the answer, not a direction to chase further.
+
+**Where the code lives:** `translateTools` is in `convertParams.ts`; the `strict: null` forcing
+is in `responsesConvertParams.ts`; the fifteen properties and their handler normalization are in
+`toolDefinitions.ts`/`toolExecutor.ts`; `read_background_output`'s clamp is in
+`backgroundProcessRegistry.ts`; the `strict: false` precedent and its comment are in
+`toolDefinitions.ts` (`search_in_files`) and `toolCallIdentifyingArg.ts`.
+
+## 66. Closed — `apply_patch.intent` gained an enum
+
+**What it was:** found while investigating item 65 — `intent` was one of the fifteen
+fake-optional properties, with no enum despite both the tool's top-level description and the
+parameter's own description enumerating exactly three values in prose.
+
+**Fixed (`e53d2b98`):** `enum: ["add","modify","delete",null]` added, matching
+`kill_background.signal`/`scope.symbolKind`'s existing shape (enum alongside the nullable union,
+not instead of it). Handler allowlist left in place. The now-redundant trailing clause in the
+top-level description was dropped (288 → 245 chars, cap `<300`) — verified before trimming that
+parameter-level descriptions actually reach the model on the Anthropic path (traced
+`input_schema` end to end through `translateTools`, the cache-control mapping, and the live SDK
+call — nothing strips nested structure anywhere on that path).
+
+**What makes the change safe rather than load-bearing, confirmed by mutation, not reasoned.**
+Changing the handler's fallback so an unrecognized `intent` passes through instead of becoming
+`"add"` was mutation-tested directly — no test failed. Tracing why: no code path checks
+`intent === "add"` specifically, only `=== "delete"`/`=== "modify"`, so "becomes literally add"
+and "stays whatever unrecognized string was sent" are behaviorally identical everywhere in the
+handler. What's pinned is the safety property (unrecognized intent gets the strictest
+treatment); the fallback's literal target value is not independently observable or pinned.
+
+**Where the code lives:** the schema is in `toolDefinitions.ts`; the handler allowlist is in
+`toolExecutor.ts`; the pinning tests are in `toolExecutor.applyPatchIntentEnum.test.ts`.
+
+## 67. `search_in_files` carries both `fileGlob` and `glob`, and neither is enforced
+
+**What it is:** `fileGlob` (fake-optional: nullable, in `required`) and `glob` (genuinely
+optional, described as "Alias for fileGlob") both exist on the same tool. The handler reads
+`args.glob ?? args.fileGlob`. Looks like an incomplete migration — `glob` added as the
+preferred/newer name without `fileGlob` being retired — and `search_in_files`'s own
+`strict: false` (item 65) means neither is enforced at the schema level regardless: the model
+can omit `fileGlob` (already established to happen for `pattern` on this same tool) or supply
+both with conflicting values, silently resolved by `??` precedence.
+
+**What would close it:** decide whether `fileGlob` should be deprecated/removed now that `glob`
+exists, or whether both are meant to stay — not decided here.
+
+**Where the code lives:** both properties are in `toolDefinitions.ts`; the resolution is in
+`toolExecutor.ts`'s `search_in_files` handler.
+
+## 68. `apply_patch.scope`'s empty-`symbolName` rejection message renders the empty string literally
+
+**What it is:** `scope.symbolName` is a required string with no `minLength` — a schema-valid
+call can supply `""`. Probed directly against the compiled symbol locator: an empty or
+whitespace-only name resolves to `{ok:false, reason:"not_found"}`, matching a real symbol name
+resolves normally. Fails safe — a rejection, not a wrong write. The only defect is cosmetic: the
+rejection message interpolates the empty string directly, rendering as `Scope symbol '' (kind:
+any) not found in <file>.`
+
+**What would close it:** special-case an empty/whitespace `symbolName` before the locator call,
+with a message naming the actual problem ("scope.symbolName was empty") instead of rendering
+nothing between quotes.
+
+**Where the code lives:** the message is in `apply_patch`'s scope-handling branch,
+`toolExecutor.ts`, in the `not_found` case.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 64 to find out which ones still need something. No index of
+reader the trouble of reading all 68 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (32): 6, 7, 8, 10, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 56, 64
+**Closed** (33): 6, 7, 8, 10, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 56, 64, 66
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (6): 12, 18, 23, 36, 55, 57
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (3): 1, 4, 63
 
-**Neither — a structural fact recorded, with no fix proposed** (23): 2, 3, 5, 9, 11, 15, 17, 19,
-27, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62
+**Neither — a structural fact recorded, with no fix proposed** (26): 2, 3, 5, 9, 11, 15, 17, 19,
+27, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68
 
 Items 1, 2, 12, 17, 18, 36, and 57 are partially closed or corrected; the classification above
 covers only the portion still open, not the whole entry.
