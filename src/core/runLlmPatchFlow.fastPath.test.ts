@@ -64,6 +64,21 @@ vi.mock("../engine/patchCorrectnessValidator.js", async (importOriginal) => {
   };
 });
 
+// Only createLLMClient is overridden — ApiKeyError/ProviderRequestError/PlanRefusalError must
+// stay real, since runLlmPatchFlow.ts checks `instanceof ApiKeyError` on an unmocked path. This
+// test never supplies preGeneratedPlan and forces plan_full_patch, so both plannerStep and
+// generateExecutionPlan reach createLLMClient(); each call site already wraps the whole call in
+// try/catch, so a synchronous throw here degrades gracefully with no assertion changes needed.
+vi.mock("../llm/factory.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../llm/factory.js")>();
+  return {
+    ...actual,
+    createLLMClient: vi.fn(() => {
+      throw new Error("createLLMClient should not be called in this test");
+    }),
+  };
+});
+
 function buildRepoFile(
   path: string,
   category: RepoFile["category"] = "frontend"
