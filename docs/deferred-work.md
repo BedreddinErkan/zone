@@ -107,23 +107,23 @@ unchanged; the new marker records it under a different tag entirely, not by exte
 **Still open — the parsing defect itself, unfixed.** What would close it: line-anchoring the
 parser's own segmentation (not just the counter, which item 1 already did) — a real behavior
 change to which patches get *accepted*, deliberately out of scope for both the recount and the
-telemetry passes that touched this area. Note the ordering constraint if this is ever done:
-line-anchoring the walk in `toolExecutor.ts` without also line-anchoring the identically-
-segmenting `parsePatchBlocks` in `agentLoop.ts` (feeding `hashPatchBlocks`'s failure-dedup key —
-see item 16) would leave the dedup hash disagreeing with what the applier actually did. The
+telemetry passes that touched this area. The ordering constraint this paragraph used to warn
+about — line-anchoring the walk in `toolExecutor.ts` without also line-anchoring the
+identically-segmenting `parsePatchBlocks` in `agentLoop.ts`, leaving `hashPatchBlocks`'s
+failure-dedup key disagreeing with what the applier actually did — has not stopped being true; it
+has stopped being possible to violate. Item 16's unification means both call sites now delegate
+to the same `segmentPatchBlocks` function: a single implementation cannot desync from itself. The
 structural alternative — sidestepping the parsing question entirely — is recorded separately as
-item 17. Two sharper, related consequences of this same defect are recorded as items 15 and 16.
-Item 16 has since been corrected, and — following item 18's fix — no longer needs the
-`normalizeSmartQuotes`-as-post-pass restriction it originally specified: with both walkers
-already computing identical normalized smart-quote text, sharing that logic alongside
-segmentation no longer changes any dedup key. Item 20 records the prerequisite that now exists
-for attempting either
-parser change safely: `a7f4ff03`'s characterization tests, which pin exactly the values a shared
-implementation would need to preserve and didn't exist when this constraint was first written.
+item 17. Item 16, now closed, and item 15 record two sharper, related consequences of this same
+defect. Item 20 records the prerequisite that now exists for attempting the parser change safely:
+`a7f4ff03`'s characterization tests, which pin exactly the values the shared implementation needs
+to preserve and didn't exist when this constraint was first written.
 
-**Where the code lives:** the block-splitting walk and the comment describing this defect sit
-directly above it in `apply_patch`'s handler, `toolExecutor.ts`. The new marker's emission sites
-sit just after that walk and inside the FIND-not-found rejection branch, in the same handler.
+**Where the code lives:** the block-splitting walk and the comment describing this defect now
+live in `src/utils/patchBlocks.ts` (the shared module item 16's unification extracted them into),
+not `toolExecutor.ts`. The new marker's emission sites stay in `toolExecutor.ts`, just after the
+call to `segmentPatchBlocks(patch)` and inside the FIND-not-found rejection branch, in
+`apply_patch`'s handler.
 
 ## 3. P2, R1, R2, R3 — definitions lost
 
@@ -591,7 +591,7 @@ stop mis-splitting it.
 are all defined in `fileDiff.ts`; `buildRestageSeedBlock` is called from `agentLoop.ts`, where
 its result is threaded into the first user message on a restage.
 
-## 16. Three independent parsers of one format, two different algorithms — corrected
+## 16. Closed — the two index-walkers are one implementation now; they were already character-for-character identical, not "near-identical," before that
 
 **This entry originally overstated where the three parsers disagree. That claim is false and
 is corrected below, not softened.** The original text said the applier's walk and
@@ -658,11 +658,15 @@ example, the no-valid-blocks message and its example, and one further usage mess
 the file) all inline the text separately. Moving the two declarations centralizes 2 of 18
 functional occurrences of the string in this file, not the string itself.
 
-**A prerequisite for the real half has now landed.** The walk in `toolExecutor.ts` is no longer
-inline — it's `segmentApplyPatchBlocks`, an exported, directly callable function, pinned by ten
-characterization tests mirroring `parsePatchBlocks`'s own suite (`a7f4ff03`, `5f5f66fe`) case for
-case. Both sides of the eventual shared implementation are now pinned; before this, only
-`parsePatchBlocks` was.
+**A prerequisite for the real half had already landed before this closure, with one count to
+correct.** The walk in `toolExecutor.ts` was no longer inline — it was `segmentApplyPatchBlocks`,
+an exported, directly callable function, mirroring `parsePatchBlocks`'s own suite (`a7f4ff03`,
+`5f5f66fe` — the commits behind the suite being mirrored, checked via `git show --stat`, not this
+file's own origin) case for case. This entry previously said ten characterization tests;
+`toolExecutor.patchBlocksCharacterization.test.ts` holds eleven `it()` blocks at HEAD (`grep -c
+'^\s*it('` — twelve before the repair below deleted one), not ten — a miscount caught verifying
+this closure, not introduced by it. Both sides of the eventual shared implementation were pinned
+before extraction even started; before this prerequisite pass, only `parsePatchBlocks` was.
 
 **The divergence this entry and item 18 used to describe is now closed — and the paragraph that
 used to sit here got what that means backward.** Two comparison tests run
@@ -678,7 +682,9 @@ sides would share after unification, since neither side would have anything inde
 disagree with. That absence is the finding this paragraph should have recorded the first time. A
 guard that would actually catch a silent collapse has to compare against something that doesn't
 move when the shared function changes — an external reference, not a sibling implementation.
-That's the difference between a test that survives extraction and one that goes hollow.
+That's the difference between a test that survives extraction and one that goes hollow. The
+repair that followed built exactly this kind of guard for the one real gap it found — this was
+true when written, and is now confirmed, not merely argued; see below.
 
 **The extracted function's return shape is `{blocks, sqFindTotal, sqReplaceTotal}`, not a bare
 block array — and the two counts have to stay separate, not just present.** They feed five read
@@ -694,7 +700,9 @@ silently break; the parity marker would keep passing, masking the regression.
 candidate-home paragraph above.** `fileDiff.ts` is still verified cycle-free and is the likely
 home if unification is ever attempted, but relocating now would itself be unification-prep; the
 prerequisite pass scoped that out on purpose, leaving the actual move for whenever unification is
-attempted for real.
+attempted for real. When unification was attempted for real (`39366c54`), it used neither
+location named above: the shared function landed in a new module, `src/utils/patchBlocks.ts`,
+beside `smartQuotes.ts` — not `fileDiff.ts`. See "Where the code lives" below.
 
 **The loose end is closed (`9f6539e4`).** `agentLoop.patchBlocksCharacterization.test.ts`'s
 smart-quote test comment claimed the walk normalizes quotes "at match time" — it's parse-time,
@@ -722,47 +730,95 @@ consumes blocks alone. A wrapper preserving both existing public signatures — 
 returns `{blocks, sqFindTotal, sqReplaceTotal}`, `parsePatchBlocks` returns just `.blocks` — would
 leave every caller and all three characterization/telemetry test files passing unedited.
 
-**Four tests would need deliberate attention under a wrapper-preserving unification — precise
-about which assertion in each, not the whole test going bad:**
-- *"item 2's known misparse: an embedded matched FIND/REPLACE pair…"* — its own
-  `segmentApplyPatchBlocks(embedded).blocks` vs `parsePatchBlocks(embedded)` comparison line goes
-  tautological; the test's primary pinning assertion (the absolute expected block shape) is
-  unaffected.
-- *"the divergence from parsePatchBlocks the ledger recorded is closed: both normalize smart
-  quotes now"* — its two field-by-field comparison lines go tautological; its four absolute-value
-  assertions (the parsed shape, both smart-quote counts, the parser's own output) are unaffected.
-- *"CRLF is NOT a divergence axis…"* — wholly tautological; its only assertion is the
-  walker-to-walker comparison.
-- *"double smart quotes converge to the same hash between the two paths…"* and *"single smart
-  quotes converge too…"* — each test's own comparison line goes tautological, but each test's
-  second assertion — a hash comparison between a curly-quote patch and its straight-quote
-  equivalent — does not compare the two walkers to each other. It compares output against an
-  independently meaningful reference, one with nothing left to normalize, and stays honest after
-  unification because that reference doesn't move when the shared function does. **That shape —
-  assert against an external reference, not a sibling implementation — is the repair model for
-  the other three**, already present in this suite, not invented for this pass.
+**This list is superseded by the actual repair, not merely fulfilled.** See the closure paragraph
+below ("What the repair deleted, and where its coverage actually lives") for what happened to
+each of the five tests this list named, verified against the file rather than restated here as a
+plan.
 
-The doc comment on `segmentApplyPatchBlocks` is the only place in code that documents item 2's
-known defect and has to be carried across to wherever the shared function ends up living.
+The doc comment on `segmentApplyPatchBlocks` (now `segmentPatchBlocks`) carried across to its new
+home, `src/utils/patchBlocks.ts`, including item 2's known-defect paragraph — confirmed present
+at HEAD.
 
-**Two downstream entries this would touch, recorded here rather than edited there.** Item 55's
-header-comment problem would get worse in kind, not degree: its sentence contrasts "the applier's
-walk" against "`hashPatchBlocks` (`agentLoop.ts`)" as two paths capable of disagreeing, and after
-unification there is one path — the contrast the sentence is built on stops existing, and item
-55's own prescribed fix (rescope the claim to two of three normalization classes) would not repair
-that. Item 2's ordering-constraint paragraph describes a hazard — line-anchoring one walker
-without the other — that unification would make structurally impossible rather than merely
-something to avoid by discipline; the paragraph isn't inaccurate today (there are still two
-walkers), so it stays as it is until this entry actually closes, at which point it becomes a
-dependent edit.
+**Two downstream entries this touched, now actioned rather than left as a note.** Item 55's
+header-comment problem and item 2's ordering-constraint paragraph were both flagged here, while
+this entry was still open, as dependent edits due once unification landed. It has — see item 55
+and item 2 directly for the updated text; this entry no longer carries that substance itself, to
+avoid two copies drifting apart.
 
-**Still open — nothing has been unified.** The extraction makes the eventual fix provable rather
-than hopeful; it does not itself close this entry.
+**Closed (`39366c54`, `90b3fc11`).** The extraction landed first: `src/utils/patchBlocks.ts`, a
+new leaf module beside `smartQuotes.ts`, holds `segmentPatchBlocks` — the shared segmentation
+core, byte-for-byte the same loop body both former walkers ran, differing only in count
+bookkeeping. `toolExecutor.ts`'s `segmentApplyPatchBlocks` became `export { segmentPatchBlocks as
+segmentApplyPatchBlocks } from "../utils/patchBlocks.js"`; `agentLoop.ts`'s `parsePatchBlocks`
+became a one-line wrapper, `return segmentPatchBlocks(patch).blocks;`. Both public signatures are
+unchanged, no caller outside the two files changed, no test was edited in that commit. The repair
+followed, in `toolExecutor.patchBlocksCharacterization.test.ts`: five tests carrying a
+now-tautological walker-vs-walker comparison were repaired individually, not uniformly — three
+(*"item 2's known misparse…"*, *"the divergence from parsePatchBlocks the ledger recorded is
+closed…"*, *"double smart quotes converge to the same hash…"*) had just the comparison line(s)
+deleted, each pointing to existing absolute coverage of the same fixture; one (*"CRLF is NOT a
+divergence axis"*) was deleted whole; one (*"single smart quotes converge too…"*) had its
+comparison line replaced with two new absolute-value assertions, closing a real,
+previously-uncovered gap rather than just removing a vacuous line.
 
-**Where the code lives:** the applier's walk is `segmentApplyPatchBlocks` in `toolExecutor.ts`,
-characterized in `toolExecutor.patchBlocksCharacterization.test.ts`; `parsePatchBlocks` and
-`hashPatchBlocks` are in `agentLoop.ts`; `parseBlocks` is in `DiffView.tsx`; the candidate shared
-home, `fileDiff.ts`, already holds `diffToFindReplace`.
+**Two implementation findings worth keeping, both found live while extracting, neither
+foreseeable from reading the two walkers side by side beforehand.** A re-export does not bind the
+name into the re-exporting file's own local scope: `toolExecutor.ts`'s internal `apply_patch`
+call site needed its own separate `import { segmentPatchBlocks } from
+"../utils/patchBlocks.js"` (confirmed present at HEAD) alongside the re-export, or it fails `tsc`
+with `TS2304`, undefined name. And both files' `normalizeSmartQuotes` imports went fully dead once
+their inline loops moved into the shared module, and had to be removed under `noUnusedLocals`
+(item 13) — confirmed absent from both files at HEAD.
+
+**The repair's real finding corrects the framing this entry itself set up for the single-quote
+test, and has to be stated exactly.** The repair's own plan expected that reverting the
+single-quote test's two new absolute assertions back to its old tautological walker-comparison
+line, then re-running the drop-normalization mutation, would make the test pass again —
+confirming the repair, not something else in the same commit, was what closed the gap. It did
+not: the test still failed the mutation, at its pre-existing hash assertion
+(`hashPatchBlocks({patch: curly})` against the straight-quote equivalent) — an assertion that was
+already present before the repair touched this test, was never tautological, and was already
+independently sufficient to catch a dropped normalization on its own. The repair did not close a
+detection hole; nothing was silently passing before it landed. What the repair actually did was
+pin what *correct output* looks like for single curly quotes specifically — something the hash
+comparison confirmed convergence on but never stated outright. This entry should not be read as
+having closed a hole; it pinned exact expected output where before only convergence was pinned.
+
+**The mechanism this entry predicted is now measured, not argued.** Dropping
+`normalizeSmartQuotes` from the shared core makes the walker-to-walker comparison lines go green
+under the mutation — confirmed live, both when those lines still existed (the extraction commit's
+own mutation testing) and by the fact that nothing depending on that comparison shape remains to
+go blind now that they're deleted. The lines that were never blind — the hash comparisons, and
+(post-repair) the single-quote test's new absolute values — caught the same mutation at every
+point checked, before and after the repair. Comparison-against-a-sibling is structurally blind
+after unification; comparison-against-an-external-reference isn't. This is this entry's own prior
+claim about where real guards live after unification, now confirmed empirically rather than
+argued.
+
+**What the repair deleted, and where its coverage actually lives.** The tautological comparison
+line was deleted from *"item 2's known misparse: an embedded matched FIND/REPLACE pair (e.g. a
+doc example) truncates the real block's replace and fabricates a second block — pinned
+deliberately, not desired behavior"* and both tautological lines from *"the divergence from
+parsePatchBlocks the ledger recorded is closed: both normalize smart quotes now"* — both in
+`toolExecutor.patchBlocksCharacterization.test.ts` — each pointing, in the deletion comment, at
+the sibling file's own absolute-value test asserting the identical fixture's output, since once
+both sides delegate to one function a walker-vs-parser comparison pins nothing `tsc` doesn't
+already guarantee. The whole test *"CRLF is NOT a divergence axis"* was deleted; the property it
+checked — that CRLF sequences pass through both parsers' segmentation unaltered — is covered
+independently by *"CRLF line endings inside find/replace content survive unparsed — only the
+marker-adjacent leading/trailing newline is stripped, internal `\r\n` is untouched"* in the same
+file, and by the identically-titled CRLF test in `agentLoop.patchBlocksCharacterization.test.ts`
+on the `parsePatchBlocks` side — each asserting the same `\r\n`-bearing fixture's output as its
+own primary assertion, not incidentally to a larger fixture. Both citations were re-read and
+confirmed at HEAD before the deletion, not assumed from their titles.
+
+**Where the code lives:** the shared segmentation core, `segmentPatchBlocks`, is in
+`src/utils/patchBlocks.ts`, beside `smartQuotes.ts`. `toolExecutor.ts` re-exports it as
+`segmentApplyPatchBlocks` and separately imports it under its own name for its internal
+`apply_patch` call site; `agentLoop.ts`'s `parsePatchBlocks` wraps it, returning `.blocks` alone.
+Characterization tests: `toolExecutor.patchBlocksCharacterization.test.ts` and
+`agentLoop.patchBlocksCharacterization.test.ts`. `hashPatchBlocks` stays in `agentLoop.ts`;
+`parseBlocks`, `DiffView`'s separate third parser, stays in `DiffView.tsx`, unaffected.
 
 ## 17. `apply_patch`'s delimiter ambiguity is self-inflicted — `multi_edit` shows the alternative
 
@@ -950,8 +1006,8 @@ by running the mutation against the converted file, not inferred from the conver
 nothing else in the file called either.
 
 **Only one of the two paths this entry named was taken.** Extracting `parsePatchBlocks` into a
-shared module (item 16's own work) remains open and untouched; this closure took the export path
-only, deliberately not preempting item 16.
+shared module (item 16's own work) remained open and untouched at the time; item 16 has since
+done it. This closure took the export path only, deliberately not preempting item 16.
 
 **Where the code lives:** `parsePatchBlocks` and `hashPatchBlocks` are in `agentLoop.ts`; the
 characterization tests are in `agentLoop.patchBlocksCharacterization.test.ts`.
@@ -2130,6 +2186,20 @@ accumulation of a *different* marker — `[zone-apply-patch-marker-imbalance]` a
 `[zone-apply-patch-normalization-parity]` anywhere. This marker doesn't feed either item, so no
 accumulation cutoff is needed for them — recorded here so the question isn't re-asked.
 
+**Now worse in kind, not degree — confirmed against the actual call chain, not assumed from item
+16 alone.** `hashPatchBlocks` calls `parsePatchBlocks`, which now calls the same
+`segmentPatchBlocks` that `toolExecutor.ts`'s `segmentApplyPatchBlocks` re-exports: for
+segmentation and smart-quote normalization, "the applier's walk" and "hashPatchBlocks" — the two
+things this comment's first sentence contrasts — are not two paths that happen to produce the
+same output, they are one function called from both. The contrast the sentence is built on has
+stopped describing the code, not just become less precise. The prescribed fix below — rescoping
+"raw, unnormalized" from three classes to two — treats this as a matter of degree and would not
+repair that: CRLF and the read_file prefix genuinely remain applier-only, normalized later at
+match time, in a loop `parsePatchBlocks` has no equivalent of and never will — so a claim narrowed
+to those two classes would still be substantively true, but the sentence's own shape, a contrast
+between two implementations, would go on misdescribing the one class it no longer applies to for
+a structural reason, not a narrower one.
+
 **What would close it:** rewrite the header comment to name smart quotes as resolved and scope
 the "raw, unnormalized" claim to the two remaining classes only.
 
@@ -2592,17 +2662,17 @@ priority ordering" cautions against ranking by importance, which this section do
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (30): 6, 7, 8, 10, 13, 14, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 56
+**Closed** (31): 6, 7, 8, 10, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 56
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (10): 2 (after 16), 12, 15 (after 2), 16, 17, 18, 23, 36, 55, 57
+first (9): 2, 12, 15 (after 2), 17, 18, 23, 36, 55, 57
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (2): 1, 4
 
 **Neither — a structural fact recorded, with no fix proposed** (19): 3, 5, 9, 11, 19, 27, 38, 43,
 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61
 
-Items 1, 2, 12, 16, 18, 36, and 57 are partially closed or corrected; the classification above
+Items 1, 2, 12, 18, 36, and 57 are partially closed or corrected; the classification above
 covers only the portion still open, not the whole entry.
 
 ---
