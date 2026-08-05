@@ -85,9 +85,11 @@ describe("segmentApplyPatchBlocks — direct", () => {
       sqReplaceTotal: 0,
     });
     expect(segmentApplyPatchBlocks(embedded)).not.toEqual(segmentApplyPatchBlocks(embeddedVariant));
-    // Identical to parsePatchBlocks's own pinned value for this exact input — confirming,
-    // for this specific shape too, that segmentation itself is unchanged by extraction.
-    expect(segmentApplyPatchBlocks(embedded).blocks).toEqual(parsePatchBlocks(embedded));
+    // The walker-vs-parser comparison this test used to end with is deleted: both delegate
+    // to one shared function now (item 16), so it pinned nothing beyond what tsc already
+    // guarantees structurally. parsePatchBlocks's own "item 2's known misparse" test
+    // (agentLoop.patchBlocksCharacterization.test.ts) already asserts its exact absolute
+    // output for this identical fixture.
   });
 
   it("empty input produces no blocks and zero smart-quote counts", () => {
@@ -126,28 +128,35 @@ describe("segmentApplyPatchBlocks — direct", () => {
     // same normalized value, not the raw curly quotes this test used to pin.
     expect(parseResult).toEqual([{ find: 'const label = "hello";', replace: 'const label = "world";' }]);
 
-    expect(walkResult.blocks[0]!.find).toBe(parseResult[0]!.find);
-    expect(walkResult.blocks[0]!.replace).toBe(parseResult[0]!.replace);
+    // The two field-by-field walker-vs-parser comparisons this test used to end with are
+    // deleted: both delegate to one shared function now (item 16), so they pinned nothing
+    // beyond what tsc already guarantees structurally, and the four absolute assertions
+    // above already independently confirm both walkResult and parseResult produce the
+    // normalized text.
   });
 
-  it("CRLF is NOT a divergence axis — both functions leave it equally untouched, contrary to a brief's claim this session that the walk normalizes it", () => {
-    const crlfPatch = `${FIND}\r\nline1\r\nline2\r\n${REPLACE}\r\nline3\r\nline4`;
-
-    const walkResult = segmentApplyPatchBlocks(crlfPatch);
-    const parseResult = parsePatchBlocks(crlfPatch);
-
-    expect(walkResult.blocks).toEqual(parseResult);
-  });
+  // "CRLF is NOT a divergence axis" (walker-vs-parser comparison, its only assertion)
+  // deleted: both delegate to one shared function now (item 16), so it pinned nothing
+  // beyond what tsc already guarantees structurally. The property it was checking — CRLF
+  // sequences pass through both walkers unaltered — is independently covered on each side,
+  // verified by reading both bodies before this deletion, not assumed from their titles:
+  // segmentApplyPatchBlocks's own "CRLF line endings inside find/replace content survive
+  // unparsed…" test above asserts `{ find: "line1\r\nline2", replace: "line3\r\nline4" }`
+  // directly; parsePatchBlocks's identically-titled test in
+  // agentLoop.patchBlocksCharacterization.test.ts asserts the same \r\n-bearing fixture's
+  // output on its own side, also directly — CRLF preservation is each test's primary
+  // assertion, not incidental to a larger fixture.
 
   it("double smart quotes converge to the same hash between the two paths — quotes on both find and replace", () => {
     const curly = `${FIND}\nconst label = “hello”;\n${REPLACE}\nconst label = “world”;`;
     const straight = `${FIND}\nconst label = "hello";\n${REPLACE}\nconst label = "world";`;
 
-    // Symmetric mutations (both sides call the same shared function): blind to this assertion,
-    // since segmentApplyPatchBlocks and parsePatchBlocks would still agree with each other.
-    expect(segmentApplyPatchBlocks(curly).blocks).toEqual(parsePatchBlocks(curly));
-    // What actually proves normalization happened at all: the hash of a curly-quote patch now
-    // matches the hash of its straight-quote equivalent, which has nothing to normalize.
+    // The walker-vs-parser comparison this test used to have here is deleted, not just its
+    // framing comment: both delegate to one shared function now (item 16), so it pinned
+    // nothing beyond what tsc already guarantees structurally. The divergence-closed test
+    // above already covers this exact double-curly-quote fixture with absolute-value
+    // assertions on both sides. What's still this test's own, unique job — proving
+    // hashPatchBlocks treats normalized-equivalent patches as identical:
     expect(hashPatchBlocks({ patch: curly })).toBe(hashPatchBlocks({ patch: straight }));
   });
 
@@ -155,7 +164,19 @@ describe("segmentApplyPatchBlocks — direct", () => {
     const curly = `${FIND}\nconst label = ‘hello’;\n${REPLACE}\nconst label = ‘world’;`;
     const straight = `${FIND}\nconst label = 'hello';\n${REPLACE}\nconst label = 'world';`;
 
-    expect(segmentApplyPatchBlocks(curly).blocks).toEqual(parsePatchBlocks(curly));
+    // Unlike the double-quote test above, no absolute-value test anywhere in the suite
+    // covers single curly quotes specifically — the divergence-closed test and
+    // parsePatchBlocks's own normalization test both use double quotes only. The
+    // walker-vs-parser comparison this test used to have here would still be tautological
+    // for the same reason (item 16), so it's replaced with real absolute coverage on both
+    // sides rather than deleted outright, closing the actual gap instead of just removing
+    // the vacuous line.
+    expect(segmentApplyPatchBlocks(curly).blocks).toEqual([
+      { find: "const label = 'hello';", replace: "const label = 'world';" },
+    ]);
+    expect(parsePatchBlocks(curly)).toEqual([
+      { find: "const label = 'hello';", replace: "const label = 'world';" },
+    ]);
     expect(hashPatchBlocks({ patch: curly })).toBe(hashPatchBlocks({ patch: straight }));
   });
 });
