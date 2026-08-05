@@ -90,6 +90,30 @@ describe('UI.6.2: read-only archetypes get the answer contract, patch keeps four
     expect(prompt).toContain('FINAL ANSWER (required');
     expect(prompt).not.toContain('FINAL SUMMARY (required');
   });
+
+  // The FINAL ASSESSMENT block (the [ZONE_VERIFICATION] tag demand) used to be gated on
+  // input.answerOnly alone, independently of the summary-contract ternary immediately
+  // above it — a read-only archetype with no approved plan got ANSWER_SUMMARY (whose own
+  // FORBIDDEN list bars a "## Tests" section) while still being told to include one of
+  // five test-outcome tags. These three are new, separate tests — not additions to the
+  // three archetype tests above — so a mutation to isReadOnlyArchetype's own predicate
+  // (which also gates the summary-contract ternary) can break those existing tests as
+  // real collateral without that collateral silently becoming this gate's own evidence.
+  it('question archetype (no answer-only plan) does NOT get the verification-tag demand, and gets the answer contract\'s forbidden-Tests line', () => {
+    const prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, archetype: 'question' });
+    expect(prompt).not.toContain('[ZONE_VERIFICATION: tests_passed]');
+    expect(prompt).toContain('A "## Tests" or "## What changed" section');
+  });
+
+  it('investigation archetype (no answer-only plan) does NOT get the verification-tag demand', () => {
+    const prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, archetype: 'investigation' });
+    expect(prompt).not.toContain('[ZONE_VERIFICATION: tests_passed]');
+  });
+
+  it('question archetype WITH an approved plan still gets the verification-tag demand (planApproved nulls isReadOnlyArchetype)', () => {
+    const prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, archetype: 'question', planApproved: true });
+    expect(prompt).toContain('[ZONE_VERIFICATION: tests_passed]');
+  });
 });
 
 // UI.6.3 ("## Tests enum stays parseable by the real parser") deleted, not retargeted.

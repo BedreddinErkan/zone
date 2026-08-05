@@ -860,7 +860,7 @@ export function assembleAgentSystemPrompt(input: {
     // [ZONE_VERIFICATION: tests_skipped_no_infra] for a run that changed nothing.
     // deriveVerdict.ts:19-23 falls back to inferVerificationFromLog when the tag is
     // absent, so removing it here degrades to inference rather than breaking the verdict.
-    (input.answerOnly
+    ((input.answerOnly || isReadOnlyArchetype)
       ? ""
       : `FINAL ASSESSMENT (required) — include exactly one tag on its own line in your final response:\n` +
         `  [ZONE_VERIFICATION: tests_passed]           — suite ran, all passed\n` +
