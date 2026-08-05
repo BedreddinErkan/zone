@@ -3,6 +3,7 @@ import {
   assembleAgentSystemPrompt,
   assembleInvestigationSystemPrompt,
 } from './agentLoop.js';
+import { parseVerificationTag } from './verification/index.js';
 
 const PATCH_INPUT = {
   agentIntro: 'You are Zone, a coding agent.',
@@ -87,6 +88,39 @@ describe('UI.6.2: read-only archetypes get the answer contract, patch keeps four
     const prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, archetype: 'question', planApproved: true });
     expect(prompt).toContain('FINAL SUMMARY (required');
     expect(prompt).not.toContain('FINAL ANSWER (required');
+  });
+});
+
+describe('UI.6.3: ## Tests enum stays parseable by the real parser', () => {
+  // Extracted from the real prompt text and round-tripped through the real
+  // parseVerificationTag, not compared against a copy of its internal `valid` array
+  // (function-local, not exported) — a copied list drifts silently; this cannot.
+  function extractTestsEnum(prompt: string): string[] {
+    const match = prompt.match(/One line using exactly one of: ([^.]+)\./);
+    expect(match).not.toBeNull();
+    return match![1].split(',').map((s) => s.trim());
+  }
+
+  it('compact template: every enumerated value round-trips through parseVerificationTag', () => {
+    const values = extractTestsEnum(assembleAgentSystemPrompt(PATCH_INPUT));
+    // Literal, not computed from the prompt — if the enum stops being comma-delimited
+    // on one line, the regex would still match a shrunken list and this test would pass
+    // while covering less than it claims. The count catches that; the loop below only
+    // catches values that don't parse, not values that silently went missing.
+    expect(values.length).toBe(6);
+    for (const v of values) {
+      expect(parseVerificationTag(`[ZONE_VERIFICATION: ${v}]`)).toBe(v);
+    }
+  });
+
+  it('detailed template: every enumerated value round-trips through parseVerificationTag', () => {
+    const values = extractTestsEnum(
+      assembleAgentSystemPrompt({ ...PATCH_INPUT, summaryFormat: 'detailed' })
+    );
+    expect(values.length).toBe(6);
+    for (const v of values) {
+      expect(parseVerificationTag(`[ZONE_VERIFICATION: ${v}]`)).toBe(v);
+    }
   });
 });
 

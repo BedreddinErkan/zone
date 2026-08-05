@@ -644,7 +644,7 @@ export function assembleAgentSystemPrompt(input: {
     `## Why\n` +
     `One sentence. Omit if the task statement already states the goal.\n\n` +
     `## Tests\n` +
-    `One line using exactly one of: tests_passed, tests_failed_unrelated, tests_failed_by_patch, tests_inconclusive, tests_skipped_no_infra, not_run. Include the command when tests ran, e.g. "tests_passed (npm test -- foo)".\n\n` +
+    `One line using exactly one of: tests_passed, tests_failed_unrelated, tests_failed_by_patch, tests_inconclusive, tests_skipped_no_infra, no_verification_attempted. Include the command when tests ran, e.g. "tests_passed (npm test -- foo)".\n\n` +
     `## Notes\n` +
     `Optional. Include only when there is a remaining warning, an out-of-scope item, or a concrete follow-up. Omit the heading entirely when empty.\n\n` +
     `FORBIDDEN in the summary:\n` +
@@ -702,7 +702,7 @@ export function assembleAgentSystemPrompt(input: {
     `## Why\n` +
     `One sentence. Omit if the task statement already states the goal.\n\n` +
     `## Tests\n` +
-    `One line using exactly one of: tests_passed, tests_failed_unrelated, tests_failed_by_patch, tests_inconclusive, tests_skipped_no_infra, not_run. Include the command when tests ran, e.g. "tests_passed (npm test -- foo)".\n\n` +
+    `One line using exactly one of: tests_passed, tests_failed_unrelated, tests_failed_by_patch, tests_inconclusive, tests_skipped_no_infra, no_verification_attempted. Include the command when tests ran, e.g. "tests_passed (npm test -- foo)".\n\n` +
     `## Notes\n` +
     `Optional. Include only when there is a remaining warning, an out-of-scope item, or a concrete follow-up. Omit the heading entirely when empty.\n\n` +
     `## Files\n` +
