@@ -2072,11 +2072,149 @@ the "raw, unnormalized" claim to the two remaining classes only.
 `apply_patch`'s handler, `toolExecutor.ts`, right after the existing smart-quote self-validation
 telemetry.
 
+## 56. Five test files reach a real LLM client because generateExecutionPlan goes unmocked — partially closed, one of five fixed
+
+**What it is:** `runLlmPatchFlow.ts` calls `generateExecutionPlan` directly from two places, neither
+behind any higher-level function most orchestration-level tests already mock. The agent_loop
+branch's call site fires whenever no `preGeneratedPlan` is supplied and the ranked relevant-files
+list comes back non-empty. The plan_full_patch branch's call site has no equivalent files-length
+guard at all — it's gated only on a `pipelineCfg` value that is structurally `null` for the entire
+length of that branch, so the guard is vacuously satisfied whenever no `preGeneratedPlan` is
+supplied. A test file that mocks the surrounding orchestration (`runAgentLoop`, `taskClassifier`,
+the repo-scan helpers) but not `../llm/executionPlan.js` itself reaches a genuine, unmocked outbound
+call the moment any one of its own test cases omits `preGeneratedPlan` and lands on either branch.
+
+**Fixed (`67ef8757`), one of five files:** `runLlmPatchFlow.readOnlySuppression.test.ts` had exactly
+one test, of nine, lacking `preGeneratedPlan` — the one that reached the real call, racing a
+15-second `testTimeout` against network variance. Fixed via a partial mock (`importOriginal`,
+spreading the real module and overriding only `generateExecutionPlan`), not a full replace. That
+distinction mattered here specifically: the file's other eight tests all supply `preGeneratedPlan`,
+which sets the local plan variable through the *other* branch and never calls `generateExecutionPlan`
+at all — but those eight tests do call the module's other runtime export, `isAnswerOnlyPlan`, on
+that real, supplied plan. A full-replace mock — the shape used by the nearest same-directory sibling
+test — would have left `isAnswerOnlyPlan` undefined and broken all eight. Caught by tracing the
+import list and every read site of the resulting local variable before shipping, not by running the
+suite and finding out. See the eleventh pattern essay for the general lesson this mistake, caught
+before it shipped, is an instance of.
+
+**Four files confirmed still affected, by direct trace of each — not by mock-list inspection
+alone:**
+- `runLlmPatchFlow.fastPath.test.ts`, `__tests__/dryRun.test.ts`, `__tests__/multiFilePatch.test.ts`
+  — each forces the plan_full_patch flow via an env override, supplies `preGeneratedPlan` in none of
+  its tests, and none of their task strings are vague-shaped (checked against
+  `isVagueDeveloperTask`'s real token logic directly, not assumed from wording) — all three reach
+  the plan_full_patch branch's guard-less call site unconditionally.
+- `runLlmPatchFlow.test.ts` — confirmed affected, explicitly **not** fully scoped. The large
+  majority of its own tests never supply `preGeneratedPlan`; the file contains at least one describe
+  block forcing the plan_full_patch flow the same way the three files above do. Its natural-routing
+  tests, which would reach the *other* call site under a different guard, were not individually
+  classified this pass.
+
+**Two files confirmed safe, by different mechanisms — recorded so the question isn't re-asked:**
+- `runLlmPatchFlow.scanRepo.test.ts` — mocks the ranked-files helper to return an empty array, which
+  starves the agent_loop call site's own files-length guard before it can ever fire. Never forces
+  the plan_full_patch flow, so the other, guard-less call site is never reached either.
+- `runLlmPatchFlow.fileDiffs.reproY22.test.ts` — already mocks `../llm/executionPlan.js`,
+  full-replace shape, the same shape this fix considered and rejected for the file above. Safe today
+  only because this file never supplies `preGeneratedPlan` in any of its own tests, so the
+  `isAnswerOnlyPlan`-undefined risk this session's fix found never gets triggered here — the same
+  latent fragility, not yet a live defect, dormant on one specific fact about this file's current
+  tests rather than absent by design.
+
+**What this session's own timing measurements show, with only numbers that have a surviving
+record.** Pre-fix (the real call reached, the client-construction marker present): 1597ms on a
+whole-file run, 3373ms on an isolated single-test run. Post-fix (mocked, marker absent): 2006-2526ms
+across five isolated runs. The post-fix range sits *inside* the pre-fix range, not below it — timing
+failed to discriminate directionally between the two configurations, not merely inconclusively. What
+discriminated cleanly and consistently, every time: the stdout marker printed at real client
+construction, present in every run that reached one and absent in every run that didn't. An earlier
+diagnostic pass in this same investigation reported a different duration spread and read it as a
+network-latency signature; that figure has no surviving verbatim record in this session and is not
+carried forward here. A separate, unexplained per-test cost common to this file regardless of which
+code path a given test takes is recorded on its own footing as item 58 — it is not resolved by this
+fix, and won't be resolved when the remaining four files are either.
+
+**What would close the rest:** apply the same partial-mock fix to the four remaining files. A vitest
+setup-level network guard that fails loudly on any real outbound request would close this class
+going forward as a side effect, for every file, not just these four — see item 57 for a
+complementary, independent fix to the underlying reliability gap this class exposed, not an
+alternative to this one.
+
+**Where the code lives:** both `generateExecutionPlan` call sites are in `runLlmPatchFlow.ts` — the
+agent_loop branch's, guarded by the ranked-files length check, and the plan_full_patch branch's,
+guarded only by the always-null `pipelineCfg`. The landed fix is in
+`runLlmPatchFlow.readOnlySuppression.test.ts`'s own mock list.
+
+## 57. No explicit timeout on the LLM SDK clients — a real reliability gap, found while investigating item 56
+
+**What it is:** neither the Anthropic nor the OpenAI client construction in `factory.ts` sets an
+explicit `timeout` option. The Anthropic SDK's own documented default, unset, is ten minutes. A user
+whose network connection hangs mid-request — not fails outright, hangs — currently waits up to that
+long with no bound from any of Zone's own code, only whatever happens to sit above the call, if
+anything does.
+
+**Why this is its own entry, not folded into item 56.** The two answer different questions for
+different audiences. Item 56 is a test-suite defect: it would be entirely closed by test-side
+mocking alone, with zero production code touched, and a user who never runs this repository's own
+test suite is unaffected by it either way. This entry describes something real independent of any
+test — what actually happens to an interactive user on a slow connection today, whether or not the
+test suite exists at all. It surfaced during item 56's own investigation, not from an independent
+design review, which is exactly the shape item 43 already has in this document: a production-code
+fact discovered incidentally while investigating something else, given its own entry rather than
+absorbed into the investigation that found it. Complementary to item 56's own fix, not an
+alternative to it — closing one does nothing toward closing the other.
+
+**What would close it:** pick and set an explicit timeout value on both SDK clients. Not attempted
+here — a docs-only pass isn't where a production-facing timeout value should get chosen
+unilaterally; the value itself needs its own establish (a real request's worst-case legitimate
+duration, at whatever context size and tier this codebase's own largest real calls can reach, so the
+bound doesn't clip a slow-but-legitimate response instead of only a truly hung one).
+
+**Where the code lives:** both client constructions are in `src/llm/factory.ts`; confirmed by direct
+grep that neither passes a `timeout` option today.
+
+## 58. A roughly 2-2.5 second per-test floor in this file has no established cause
+
+**What it is:** every test in `runLlmPatchFlow.readOnlySuppression.test.ts` takes roughly 2-2.5
+seconds, including the tests that never reach `generateExecutionPlan` at all — mocked or not, before
+or after item 56's fix. Measured directly, with surviving records on both sides: a test that
+supplies `preGeneratedPlan` and never calls `generateExecutionPlan` measured 2442ms and 2712ms
+across two separate whole-file runs; the one test that does call it measured 1597ms and 3373ms
+pre-fix, 2006-2526ms post-fix. All four figures sit in the same rough band, regardless of which code
+path actually fired. This is exactly what made item 56 hard to diagnose by timing alone — a genuine
+outbound network call and a fully mocked run cost about the same wall-clock time in this file, for a
+reason unrelated to either one.
+
+**Retracted, not repeated:** an earlier report in this same investigation attributed this floor to
+`detectFramework`'s unmocked filesystem work — a reasonable first guess, since it's one of the few
+calls in this code path the file's own mock list doesn't cover. Checked directly this pass by
+reading `detectFramework` and the helper it delegates to: both are synchronous
+`fs.existsSync`/`path.join` checks against a fixed list of config filenames, with no plausible cost
+at this scale whether the target path exists or not. The attribution does not survive that read and
+is retracted here specifically so a future pass that re-derives "`detectFramework` does filesystem
+work" and stops there knows this was already checked and found wanting.
+
+**Why this is worth its own entry, not a footnote on item 56's timing section.** CI already runs
+measurably slower than local — the entire reason a 15-second `testTimeout` was tight enough to fire
+on ordinary variance in the first place (item 56). An unexplained ~2-2.5-second floor, present in
+every test of a file regardless of what that specific test exercises, is a plausible non-trivial
+share of total suite wall-clock once multiplied across however many other files carry the same
+unidentified cost — a real, if unquantified, question independent of item 56, which will eventually
+close while this stays open.
+
+**What would close it:** identify the actual source — profiling this file's own
+`beforeEach`/`runWith` setup, or a bisection across its dynamic import of the module under test,
+would locate it. Not attempted here.
+
+**Where the code lives:** `runLlmPatchFlow.readOnlySuppression.test.ts`'s own `beforeEach` and
+`runWith` helper; `detectFramework`/its helper (`src/repo/detectFramework.ts`), checked directly and
+ruled out as the cause this pass.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 55 to find out which ones still need something. No index of
+reader the trouble of reading all 58 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -2085,15 +2223,15 @@ first.
 **Closed** (29): 6, 7, 8, 10, 13, 14, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (9): 2 (after 16), 12, 15 (after 2), 16, 17, 18, 23, 36, 55
+first (11): 2 (after 16), 12, 15 (after 2), 16, 17, 18, 23, 36, 55, 56, 57
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (2): 1, 4
 
-**Neither — a structural fact recorded, with no fix proposed** (15): 3, 5, 9, 11, 19, 27, 38, 43,
-45, 46, 50, 51, 52, 53, 54
+**Neither — a structural fact recorded, with no fix proposed** (16): 3, 5, 9, 11, 19, 27, 38, 43,
+45, 46, 50, 51, 52, 53, 54, 58
 
-Items 1, 2, 12, 16, 18, and 36 are partially closed or corrected; the classification above covers
-only the portion still open, not the whole entry.
+Items 1, 2, 12, 16, 18, 36, and 56 are partially closed or corrected; the classification above
+covers only the portion still open, not the whole entry.
 
 ---
 
@@ -2424,3 +2562,53 @@ against a boundary-only trim that never touches the same characters. It was run 
 skipped on the strength of the prediction. Predicting a null result does not excuse skipping the
 run; the prediction is only trustworthy once it has been checked against something that actually
 executed.
+
+## An eleventh pattern, beside the second: a precedent's applicability lives in what makes it safe, not in what makes it similar
+
+Reusing a nearby precedent because it shares a directory, a module, or an idiom is choosing on the
+wrong axis. What makes a precedent safe to reuse is the condition that made it safe where it
+already lives — and that condition can be completely invisible from the outside, present only in
+what the precedent's own test cases happen never to exercise.
+
+This showed up directly in the pass that fixed item 56. A same-directory sibling test already
+mocked the same module with a full-replace shape — override the one function that mattered, supply
+nothing else for the rest of the module. Reusing that shape looked like the obvious choice: same
+directory, same module, same problem. It was wrong, because the sibling's safety depended on a fact
+that had nothing to do with the module or the directory: none of its own tests ever supplied a
+value that would route execution through the module's other export. The file being fixed did — most
+of its own tests did, in fact — and a full-replace mock would have silently deleted that second
+export for every one of them.
+
+The dominant pattern elsewhere in the same codebase, used by far more call sites than the nearby
+sibling, turned out to be the correct one to follow instead — not because it had more instances for
+its own sake, but because more instances meant more of the tree had already been forced to confront
+the condition the nearby-but-rarer sibling's own test shapes happened to avoid.
+
+**The rule:** before reusing a precedent, name the specific condition that makes it safe where it
+already sits, then check whether that condition holds at the new site. Surface similarity — same
+directory, same idiom, same module — is not that condition and should not be treated as a proxy for
+it. When several precedents disagree, the one satisfied by the most call sites has usually already
+been tested against the case a nearer-but-rarer one never had to face.
+
+## A twelfth pattern: one push, N commits, one signal
+
+CI's diagnostic value comes from having one result per change small enough to read. A single `git
+push` that carries many commits does not multiply that value by the commit count — GitHub Actions
+triggers once per push event, against the head commit of that push, not once per commit inside it.
+Every intermediate commit in a multi-commit push runs invisibly: it exists in history, but no
+workflow run ever checks it out on its own.
+
+This repo's own history has a direct example. One push earlier in this session carried 29 commits,
+spanning several unrelated fixes and documentation changes, in one operation. Exactly one workflow
+run exists for that push, checked out at its head commit (`0599cd7d`) — and it failed. Which of the
+29 commits, if any, caused that failure is not answerable from the run itself; the signal covers
+all 29 or none of them, never a subset.
+
+This is not a workflow-configuration gap — the trigger (`on: push` to the watched branch) fires
+correctly on every push, direct-to-branch or otherwise. It is a consequence of what "once per push"
+means when a push is large: the granularity of the signal is the granularity of the push, not the
+granularity of the commit.
+
+**The corrective:** push at the granularity worth being able to attribute. A commit meant to stand
+as its own verifiable unit of work should reach CI on its own, before the next one lands on top of
+it.
