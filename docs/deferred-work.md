@@ -2072,17 +2072,47 @@ the "raw, unnormalized" claim to the two remaining classes only.
 `apply_patch`'s handler, `toolExecutor.ts`, right after the existing smart-quote self-validation
 telemetry.
 
-## 56. Five test files reach a real LLM client because generateExecutionPlan goes unmocked — partially closed, one of five fixed
+## 56. Six test files can reach a real LLM client through any of a dozen unmocked constructors — partially closed, one of six fixed
+
+**This entry originally understated its own scope: it named one function
+(`generateExecutionPlan`) and four remaining files. Both were too narrow — recorded here, not
+silently widened.** `generateExecutionPlan` is one of **twelve** `createLLMClient` call sites in
+this codebase (`generateFinalRunReport.ts`, `embeddings/embedFile.ts`, `llm/plannerStep.ts`,
+`llm/refinePrompt.ts`, `llm/planFeature.ts`, `llm/planPatchPreview.ts`, `llm/taskClassifier.ts`,
+`llm/executionPlan.ts`, `llm/planFullPatch.ts`, `roles/runDataAnalystFlow.ts`, `llm/agentLoop.ts`,
+`roles/runTestEngineerFlow.ts` — one call site each, confirmed by grep this pass), plus a
+structurally separate thirteenth entry point, `createOpenAIClient` in `llm/openaiClient.ts`, a
+different function used by a different call chain. A sixth affected file was also missed (below).
 
 **What it is:** `runLlmPatchFlow.ts` calls `generateExecutionPlan` directly from two places, neither
 behind any higher-level function most orchestration-level tests already mock. The agent_loop
 branch's call site fires whenever no `preGeneratedPlan` is supplied and the ranked relevant-files
-list comes back non-empty. The plan_full_patch branch's call site has no equivalent files-length
-guard at all — it's gated only on a `pipelineCfg` value that is structurally `null` for the entire
-length of that branch, so the guard is vacuously satisfied whenever no `preGeneratedPlan` is
-supplied. A test file that mocks the surrounding orchestration (`runAgentLoop`, `taskClassifier`,
-the repo-scan helpers) but not `../llm/executionPlan.js` itself reaches a genuine, unmocked outbound
-call the moment any one of its own test cases omits `preGeneratedPlan` and lands on either branch.
+list comes back non-empty; it sits inside a single early-return guard clause (`if (_useAgentLoop) {
+… return {…}; }`, confirmed this pass by brace-matching rather than assumed from line
+proximity — the block has exactly one `return {` at its own nesting level, so when
+`_useAgentLoop` is true the function always returns from inside it, and nothing after the block
+runs). When `_useAgentLoop` is false, execution falls through that closed block directly into a
+shared tail: ranking, embeddings, **`plannerStep`** (`llm/plannerStep.ts`, a second, independent
+`createLLMClient` call, gated only on `!skipPlanner && !hasRealHostedContext &&
+!explicitTargetRepoFile`), and then the plan_full_patch branch's own `generateExecutionPlan` call,
+which has no files-length guard at all — it's gated only on a `pipelineCfg` value that is
+structurally `null` for the entire length of that tail, so the guard is vacuously satisfied
+whenever no `preGeneratedPlan` is supplied. A test file that forces this tail (`ZONE_FORCE_FLOW=
+plan_full_patch`) and mocks only `executionPlan.js` — the shape this entry originally
+prescribed — still leaves `plannerStep` constructing a real client on every test that reaches it.
+
+**The suite's exposure to this class is conditional on the environment, not constant — the
+central fact missing from the original entry.** A full 454-file suite run this pass (keyless, the
+way CI runs it) produced 91 client-construction markers: 82 blocked before construction
+(`source=none`, `ApiKeyError` thrown), 9 that construct but never issue a request (`source=env`,
+confined to `factory.test.ts`'s own deliberate key-setting tests), and **zero** `source=explicit`
+— and zero connection-error, 401, or retry-exhaustion strings anywhere in the run. **As CI runs
+this suite today, this entire class makes zero outbound requests.** Two independent routes
+actually trigger it, with different severity: an explicit `userApiKey` supplied in a test's own
+input is key-independent and fires in CI regardless of the environment — this is exactly why
+`readOnlySuppression.test.ts` broke CI, and why the fix below is a real one, not a
+hardening-only exercise; `ANTHROPIC_API_KEY` present in the developer's own environment fires the
+same class of construction, but only on that machine, never in CI.
 
 **Fixed (`67ef8757`), one of five files:** `runLlmPatchFlow.readOnlySuppression.test.ts` had exactly
 one test, of nine, lacking `preGeneratedPlan` — the one that reached the real call, racing a
@@ -2097,23 +2127,36 @@ import list and every read site of the resulting local variable before shipping,
 suite and finding out. See the eleventh pattern essay for the general lesson this mistake, caught
 before it shipped, is an instance of.
 
-**Four files confirmed still affected, by direct trace of each — not by mock-list inspection
+**Five files confirmed still affected, by direct trace of each — not by mock-list inspection
 alone:**
 - `runLlmPatchFlow.fastPath.test.ts`, `__tests__/dryRun.test.ts`, `__tests__/multiFilePatch.test.ts`
   — each forces the plan_full_patch flow via an env override, supplies `preGeneratedPlan` in none of
   its tests, and none of their task strings are vague-shaped (checked against
   `isVagueDeveloperTask`'s real token logic directly, not assumed from wording) — all three reach
-  the plan_full_patch branch's guard-less call site unconditionally.
-- `runLlmPatchFlow.test.ts` — confirmed affected, explicitly **not** fully scoped. The large
-  majority of its own tests never supply `preGeneratedPlan`; the file contains at least one describe
-  block forcing the plan_full_patch flow the same way the three files above do. Its natural-routing
-  tests, which would reach the *other* call site under a different guard, were not individually
-  classified this pass.
+  both `plannerStep` and the plan_full_patch branch's guard-less `generateExecutionPlan` call site
+  unconditionally. Empirically confirmed this pass: each produces exactly two client-construction
+  markers per reaching test, matching the two-constructor shape above, not one.
+- `runLlmPatchFlow.test.ts` — confirmed affected, and now fully scoped rather than left open: 39 of
+  its 65 tests construct a client (73 constructions total, attributed per test name from this pass's
+  own suite run), all within the `describe` block whose `beforeEach` sets `ZONE_FORCE_FLOW=
+  plan_full_patch`. 34 of those 39 construct twice (`plannerStep` + `generateExecutionPlan`); 5
+  construct once, from tests that exit before the second call. Its other three `describe` blocks —
+  `preGeneratedPlan forces agent-loop`, `isChitchat`, `vague-task short-circuit` — stay clean by
+  construction (a supplied plan, a pure function, and a zero-LLM-call short-circuit respectively).
+- `generateFinalRunReport.test.ts` — a sixth file, missed entirely by the original entry because it
+  reaches a client through a wholly different chain: `generateAiFinalRunReport`'s own
+  `createLLMClient()` call, nothing to do with `generateExecutionPlan` or `plannerStep`. It
+  currently **passes** — 11 of 11 — even while a real request is attempted (one construction marker
+  per suite run), which is exactly why a pass/fail-based sweep alone would never surface it; only
+  the unconditional construction marker did.
 
 **Two files confirmed safe, by different mechanisms — recorded so the question isn't re-asked:**
-- `runLlmPatchFlow.scanRepo.test.ts` — mocks the ranked-files helper to return an empty array, which
-  starves the agent_loop call site's own files-length guard before it can ever fire. Never forces
-  the plan_full_patch flow, so the other, guard-less call site is never reached either.
+- `runLlmPatchFlow.scanRepo.test.ts` — doubly safe, not by a single mechanism: it sets
+  `ZONE_FORCE_FLOW=agent_loop` explicitly (the opposite of the five affected files above, so the
+  plan_full_patch tail — `plannerStep` included — is never reached at all) **and** mocks the
+  ranked-files helper to return an empty array, which independently starves the agent_loop call
+  site's own files-length guard. Either fact alone would keep it off the reachable path; both hold,
+  confirmed by direct read this pass.
 - `runLlmPatchFlow.fileDiffs.reproY22.test.ts` — already mocks `../llm/executionPlan.js`,
   full-replace shape, the same shape this fix considered and rejected for the file above. Safe today
   only because this file never supplies `preGeneratedPlan` in any of its own tests, so the
@@ -2134,44 +2177,101 @@ carried forward here. A separate, unexplained per-test cost common to this file 
 code path a given test takes is recorded on its own footing as item 58 — it is not resolved by this
 fix, and won't be resolved when the remaining four files are either.
 
-**What would close the rest:** apply the same partial-mock fix to the four remaining files. A vitest
-setup-level network guard that fails loudly on any real outbound request would close this class
-going forward as a side effect, for every file, not just these four — see item 57 for a
-complementary, independent fix to the underlying reliability gap this class exposed, not an
-alternative to this one.
+**What would close the rest — corrected from the original prescription.** The original entry's own
+fix (mock `../llm/executionPlan.js`) is insufficient for all five remaining files: it would leave
+`plannerStep` constructing a real client in every one of them, since that constructor doesn't live
+in the module being mocked. The corrected fix is to mock `../llm/factory.js` instead — one choke
+point covering all twelve `createLLMClient` call sites (`plannerStep` included, and any future
+thirteenth site added later) — using the same `importOriginal` partial-mock pattern as the
+already-shipped fix, **not** the full-replace shape `runLlmPatchFlow.terminationReasonProbe.test.ts`
+happens to use for the same module. That distinction is load-bearing here specifically:
+`factory.js` exports `createLLMClient` alongside three error classes (`ApiKeyError`,
+`ProviderRequestError`, `PlanRefusalError`); `runLlmPatchFlow.ts` itself does `if (err instanceof
+ApiKeyError)` in a hosted-context catch block, and `executionPlan.ts` directly constructs `new
+PlanRefusalError(...)`. A full-replace mock leaves those symbols `undefined`, and `instanceof
+undefined` throws `TypeError` rather than failing the test cleanly — trading one defect for a
+worse one in exactly the case the fix exists to prevent. `terminationReasonProbe.test.ts`'s own
+full-replace mock is safe only because none of its tests route through that specific catch block —
+the same "safe by omission, not by design" shape the eleventh pattern essay already names, caught a
+second time, one level up the stack, in this pass's own establish work before it reached this
+entry. **Verified empirically, not just reasoned:** a throwaway probe this pass mocked
+`factory.js` via the `importOriginal` partial pattern, then called the real, unmocked
+`generateExecutionPlan` under conditions that make it throw a real `PlanRefusalError`, and
+confirmed the caught error passed `instanceof PlanRefusalError` against a separately-imported
+reference to the same (mocked-path) module — true class identity survives the spread, because
+every importer in a test's module graph resolves to the same cached mock object.
 
-**Where the code lives:** both `generateExecutionPlan` call sites are in `runLlmPatchFlow.ts` — the
-agent_loop branch's, guarded by the ranked-files length check, and the plan_full_patch branch's,
-guarded only by the always-null `pipelineCfg`. The landed fix is in
+A vitest setup-level network guard would close this class going forward as a side effect, for
+every file, not just these five — see item 59, not item 57 (item 57 is now scoped to the OpenAI
+timeout value alone and no longer concerns a test-side guard).
+
+**Where the code lives:** the two `generateExecutionPlan` call sites and the `plannerStep` call are
+all in `runLlmPatchFlow.ts` — the agent_loop branch's `generateExecutionPlan`, guarded by the
+ranked-files length check; and, in the shared plan_full_patch tail reached only when that branch's
+own early return doesn't fire, `plannerStep` and the second `generateExecutionPlan` call, the
+latter guarded only by the always-null `pipelineCfg`. The landed fix is in
 `runLlmPatchFlow.readOnlySuppression.test.ts`'s own mock list.
 
-## 57. No explicit timeout on the LLM SDK clients — a real reliability gap, found while investigating item 56
+## 57. No explicit timeout on the OpenAI SDK clients — a real reliability gap, found while investigating item 56 — corrected
 
-**What it is:** neither the Anthropic nor the OpenAI client construction in `factory.ts` sets an
-explicit `timeout` option. The Anthropic SDK's own documented default, unset, is ten minutes. A user
-whose network connection hangs mid-request — not fails outright, hangs — currently waits up to that
-long with no bound from any of Zone's own code, only whatever happens to sit above the call, if
-anything does.
+**This entry originally claimed neither the Anthropic nor the OpenAI client sets an explicit
+timeout. The Anthropic half is false and is corrected below, not softened.** The original text
+said "neither the Anthropic nor the OpenAI client construction in `factory.ts` sets an explicit
+`timeout` option" and that a hung connection "currently waits up to [ten minutes] with no bound
+from any of Zone's own code." Both claims were checked by grepping `factory.ts` for the string
+`timeout` and finding nothing — but `factory.ts` doesn't construct an SDK client at all; it
+constructs Zone's own `OpenAIAdapter`/`AnthropicAdapter` classes, wrapped in a
+`RecordingLLMClient`. The real SDK constructions are one layer down.
 
-**Why this is its own entry, not folded into item 56.** The two answer different questions for
-different audiences. Item 56 is a test-suite defect: it would be entirely closed by test-side
-mocking alone, with zero production code touched, and a user who never runs this repository's own
-test suite is unaffected by it either way. This entry describes something real independent of any
-test — what actually happens to an interactive user on a slow connection today, whether or not the
-test suite exists at all. It surfaced during item 56's own investigation, not from an independent
-design review, which is exactly the shape item 43 already has in this document: a production-code
-fact discovered incidentally while investigating something else, given its own entry rather than
-absorbed into the investigation that found it. Complementary to item 56's own fix, not an
-alternative to it — closing one does nothing toward closing the other.
+**What's actually true for Anthropic, read directly from `anthropicAdapter.ts` this pass:** the
+constructor passes `timeout: MIN_REQUEST_TIMEOUT_MS` (600,000ms / 10 min — a floor, per the
+file's own comment, not the operative value), `maxRetries: 0`, and a `fetchOptions.dispatcher`
+pointing at a dedicated `undici.Agent`. Every actual request additionally derives a **per-request**
+timeout from its own output budget, via `deriveRequestTimeoutMs(max_tokens)` at three separate call
+sites, clamped between that same 600,000ms floor and a 3,600,000ms (60 min) ceiling. The dedicated
+`undici.Agent` sets `headersTimeout`/`bodyTimeout` to 3,900,000ms (65 min) — deliberately five
+minutes above the 60-minute SDK ceiling, so the SDK's own `AbortController` is always the first
+thing to fire, never the transport underneath it. This is a carefully reasoned piece of the
+codebase, not an oversight — the opposite of what the original entry claimed.
 
-**What would close it:** pick and set an explicit timeout value on both SDK clients. Not attempted
-here — a docs-only pass isn't where a production-facing timeout value should get chosen
-unilaterally; the value itself needs its own establish (a real request's worst-case legitimate
-duration, at whatever context size and tier this codebase's own largest real calls can reach, so the
-bound doesn't clip a slow-but-legitimate response instead of only a truly hung one).
+**The mechanism that let the error survive review, worth naming so it isn't repeated:** the file
+grepped (`factory.ts`) doesn't implement the behavior being asked about — the absence of a string
+in the wrong file was read as evidence of absence of the behavior in the system. Compounding it:
+the asserted default (the Anthropic SDK's own documented ten minutes) happened to equal the real
+configured `MIN_REQUEST_TIMEOUT_MS` value exactly, so the number "matched" and read as
+confirmation rather than triggering a second check. See the thirteenth pattern essay for the
+general lesson.
 
-**Where the code lives:** both client constructions are in `src/llm/factory.ts`; confirmed by direct
-grep that neither passes a `timeout` option today.
+**Surviving claim, narrowed to OpenAI only — two sites, neither with any timeout of either
+kind.** `src/llm/openaiAdapter.ts` (`new OpenAI({ apiKey, baseURL: baseUrl, maxRetries: 0 })`; a
+fresh grep for `timeout` anywhere in that file returns nothing — no constructor option, no
+per-request derivation) and `src/llm/openaiClient.ts` (`new OpenAI({ apiKey })`, same gap; its
+`createOpenAIClient` is used via `runLlmPatchFlow.ts`'s hosted-inference-mode path, a separate
+entry point from `createLLMClient`). Both rely on the OpenAI SDK's own ten-minute default with no
+Zone-side override at either the constructor or the per-request level.
+
+**Why this is its own entry, not folded into item 56.** Unchanged from the original reasoning:
+item 56 is a test-suite defect, closable by test-side mocking with zero production code touched;
+this entry describes something real independent of any test, surfaced incidentally while
+investigating item 56 rather than from an independent design review — the same shape item 43
+already has in this document. Complementary to item 56's own fix, not an alternative to it.
+
+**What would close it:** pick and set an explicit timeout value on both OpenAI construction
+sites. Not attempted here, unchanged from the original reasoning — a docs-only pass isn't where a
+production-facing timeout value should get chosen unilaterally; the value itself needs its own
+establish (a real request's worst-case legitimate duration, at whatever context size and tier
+this codebase's own largest real calls can reach).
+
+**Bucket, re-decided against the definition, not inherited from the pre-correction entry:**
+"Actionable now" requires a fix specified in the entry itself with nothing new to learn first. The
+original entry already deferred the one open question (the numeric timeout value) while treating
+the *kind* of fix — add an explicit `timeout` option — as fully specified; narrowing the claim to
+OpenAI's two sites doesn't add anything that needs to be learned first beyond what was already
+deferred, and the surviving scope is smaller, not less specified. **Stays Actionable now.**
+
+**Where the code lives:** the two unbound constructions are in `src/llm/openaiAdapter.ts` and
+`src/llm/openaiClient.ts`. Anthropic's timeout configuration — constructor floor, three
+per-request derivation sites, and the dispatcher — is in `src/llm/anthropicAdapter.ts`.
 
 ## 58. A roughly 2-2.5 second per-test floor in this file has no established cause
 
@@ -2210,11 +2310,70 @@ would locate it. Not attempted here.
 `runWith` helper; `detectFramework`/its helper (`src/repo/detectFramework.ts`), checked directly and
 ruled out as the cause this pass.
 
+## 59. Whether the suite reaches a real LLM client is conditional on the developer's own environment, and CI cannot see the difference
+
+**What it is:** this suite's LLM-reaching tests do not behave the same way twice — they behave
+differently depending on whether `ANTHROPIC_API_KEY` happens to be exported in the shell that
+runs them. CI never has one set, so item 56's whole defect class is invisible to CI except through
+the one, narrower route that doesn't depend on it (an explicit `userApiKey` supplied directly in a
+test's own input, which is what actually broke CI in `readOnlySuppression.test.ts`). A developer
+running the same suite with a key exported runs a materially different suite: slower — measured
+this pass at up to 30.70s for one file (`multiFilePatch.test.ts`) that completes in a fraction of a
+second keyless — network-dependent, and capable of spending real money against a live provider by
+accident, on tests that were never meant to leave the process.
+
+**The real numbers, from this pass's own full 454-file run, keyless (the way CI runs it):** 91
+client-construction markers total; 82 blocked before construction (`ApiKeyError` thrown); 9 that
+construct without issuing a request, confined to one file's own deliberate key-setting tests; zero
+that reach a request; zero connection-error, 401, or retry-exhaustion strings anywhere in the run.
+Re-run with a key present and a dead local base URL (no real network traffic, just an instant local
+refusal standing in for a hang), the five files item 56 names reproduce the exact failure signature
+that started this investigation — `Test timed out in 15000ms` — deterministically, offline.
+
+**Found while investigating item 56, not from an independent review** — the same circumstance
+item 43 already has in this document for a different fact. It is the root cause behind both item
+56's class and the original CI timeout that started this whole investigation: not that a mock was
+missing in one file, but that this suite's own outcome depends on an environment variable nobody
+declared as part of its contract.
+
+**What would close it — a real, unresolved fork, not a design ready to build.** A vitest
+setup-level network guard would close this and item 56's class together as a side effect. Two
+things were actually checked this pass, empirically, rather than left as an unexamined sketch:
+- `expect.getState().currentTestName` stays correctly populated across three nested async layers
+  plus a real `setTimeout` macrotask, and updates correctly between tests — confirmed by a
+  throwaway probe, not assumed from the type declaration alone. A guard's failure message can
+  name the test it fired in, wherever it's installed.
+- The interception point itself cannot yet be called settled. Two structurally different designs
+  are both live candidates and neither has been compared against the other: intercepting
+  `globalThis.fetch` (reachable — neither installed SDK version bundles its own transport, both
+  resolve `fetch` dynamically, confirmed by reading the installed packages), or intercepting at
+  `createLLMClient`/`createOpenAIClient` themselves, throwing directly when a construction reaches
+  them unmocked under a test runner. The second option is arguably the better fit for this
+  specific defect — directly attributable to the constructing function with no stack-parsing
+  needed, and immune by construction to any interaction with the one test in this suite that
+  already stubs `fetch` itself (`fetchUrl.test.ts`) or the one that runs a real local server over
+  `node:http`/`ws`, not fetch (`controlServer.test.ts`) — but this establish pass only ever
+  examined the fetch-level option and never named the alternative, let alone chose between them.
+  That is a genuine fork in approach, not a missing parameter on an otherwise-settled design.
+
+**Bucket, checked against comparable entries, not the one-line definition alone.** Items 46 and 51
+are the closest existing shape: both record a real, structural finding whose own next step is
+"decide between two approaches" (46) or "measure, then decide" (51), and both sit in **Neither** —
+not because no fix was proposed, but because the *approach itself* is still open, which is a
+different and more fundamental gap than item 57's (an approach fully specified, one parameter
+value deferred). The interception-point fork above is exactly that shape. **Bucketed Neither.**
+Secondary, non-blocking note for whenever this is picked up: build it after the five files in item
+56 are fixed, so it starts silent rather than immediately red.
+
+**Where the code lives:** the twelve `createLLMClient` call sites and the separate
+`createOpenAIClient` are listed in item 56. `fetchUrl.test.ts` and `controlServer.test.ts` are the
+two existing tests any interception-point decision needs to stay compatible with.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 58 to find out which ones still need something. No index of
+reader the trouble of reading all 59 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -2227,10 +2386,10 @@ first (11): 2 (after 16), 12, 15 (after 2), 16, 17, 18, 23, 36, 55, 56, 57
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (2): 1, 4
 
-**Neither — a structural fact recorded, with no fix proposed** (16): 3, 5, 9, 11, 19, 27, 38, 43,
-45, 46, 50, 51, 52, 53, 54, 58
+**Neither — a structural fact recorded, with no fix proposed** (17): 3, 5, 9, 11, 19, 27, 38, 43,
+45, 46, 50, 51, 52, 53, 54, 58, 59
 
-Items 1, 2, 12, 16, 18, 36, and 56 are partially closed or corrected; the classification above
+Items 1, 2, 12, 16, 18, 36, 56, and 57 are partially closed or corrected; the classification above
 covers only the portion still open, not the whole entry.
 
 ---
@@ -2612,3 +2771,26 @@ granularity of the commit.
 **The corrective:** push at the granularity worth being able to attribute. A commit meant to stand
 as its own verifiable unit of work should reach CI on its own, before the next one lands on top of
 it.
+
+## A thirteenth pattern: absence of a string is not absence of a behavior, and a matching number is not a confirmation
+
+Checking whether a system does something by grepping a file for a keyword only tells you about
+that file. It says nothing about a behavior implemented one layer away, in a module whose name
+doesn't happen to match the concept being searched for. A claim about what a system does needs the
+file that actually does it — found by tracing the call, not by guessing which filename sounds
+right and grepping that one.
+
+The sharper half is what makes this failure mode survive review instead of getting caught
+immediately: when a number asserted from a known default happens to equal the number actually
+found in the code, that agreement reads as confirmation. It should read as a reason to check
+harder. Two independent facts landing on the same digit is far more often one fact being read
+twice under two different names than it is two facts that were each verified on their own.
+
+This session produced a concrete instance of both halves at once. A claim that neither of two SDK
+clients set an explicit timeout was checked by grepping a file that constructs adapter classes, not
+SDK clients — the real constructions live one file away. And the claim's own asserted default,
+the Anthropic SDK's documented ten minutes, was numerically identical to the value the codebase had
+actually configured for an unrelated reason (a floor beneath a per-request derivation, not a bare
+default left untouched). The grep found nothing because it was reading the wrong file; the number
+matched because one real ten-minute value was being compared against a restatement of itself, not
+against something independently checked.
