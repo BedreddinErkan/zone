@@ -95,6 +95,7 @@ import {
   ANTI_THRASH_BREAK_ITERS,
   ANTI_THRASH_NO_PROGRESS_ARMED,
   ANTI_THRASH_NO_PROGRESS_WINDOW,
+  NO_PATCH_HASH_SENTINEL,
   computeAntiThrashSignal,
   buildStallReflectionText,
   detectWanderingSignal,
@@ -1298,6 +1299,7 @@ export function parsePatchBlocks(patch: string): Array<{ find: string; replace: 
 
 export function hashPatchBlocks(args: Record<string, unknown> | null | undefined): string {
   const patch = String(args?.patch ?? "");
+  if (patch === "") return NO_PATCH_HASH_SENTINEL;
   const blocks = parsePatchBlocks(patch);
   const concatenated = blocks.length > 0
     ? blocks.map((b) => `${b.find}\n--\n${b.replace}`).join("\n===\n")
@@ -1392,7 +1394,14 @@ export function detectRepeatedFailure(
   const last = records[records.length - 1]!;
   const prev = records[records.length - 2]!;
 
-  if (last.trigger === prev.trigger && last.patchHash === prev.patchHash) {
+  // NO_PATCH_HASH_SENTINEL excluded: two no-patch failures share this value by
+  // construction (antiThrash.ts), and there's no patch content to confirm they're
+  // actually identical. Falls through to same_trigger_repeated_2x below, unchanged.
+  if (
+    last.patchHash !== NO_PATCH_HASH_SENTINEL &&
+    last.trigger === prev.trigger &&
+    last.patchHash === prev.patchHash
+  ) {
     return { filePath: targetFilePath, reason: "identical_patch_retried" };
   }
 

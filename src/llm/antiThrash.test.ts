@@ -14,10 +14,11 @@ import {
   ANTI_THRASH_COST_BURN_USD,
   ANTI_THRASH_NO_PROGRESS_ITER_MIN,
   ANTI_THRASH_NO_PROGRESS_WINDOW,
+  NO_PATCH_HASH_SENTINEL,
   type AntiThrashContext,
   type ErrorKeySnapshot,
 } from "./antiThrash.js";
-import type { FailureRecord } from "./agentLoop.js";
+import { detectRepeatedFailure, type FailureRecord } from "./agentLoop.js";
 
 function makeRecord(
   trigger: string,
@@ -85,6 +86,28 @@ describe("detectFailureStall — true positives", () => {
     expect(result?.detail.filePath).toBe("src/bar.ts");
   });
 
+  it("no-patch trigger reaching 3x via an interleaved other-triggered failure → trigger_repeated_3x still fires", () => {
+    // Verdict 2 has its own precondition — last.trigger !== prev.trigger — independent of
+    // the sentinel guard on Verdict 1. A straight run of identical-trigger no-patch
+    // failures never satisfies that (see the "three CONSECUTIVE" null test below); this is
+    // the narrower shape that does: the no-patch trigger reaches 3 occurrences overall, but
+    // the run is broken by one other-triggered failure, so last/prev differ.
+    const history = new Map([
+      [
+        "src/foo.ts",
+        [
+          makeRecord("apply_patch_no_valid_blocks", NO_PATCH_HASH_SENTINEL),
+          makeRecord("apply_patch_no_valid_blocks", NO_PATCH_HASH_SENTINEL),
+          makeRecord("apply_patch_find_not_found", "hash-X"),
+          makeRecord("apply_patch_no_valid_blocks", NO_PATCH_HASH_SENTINEL),
+        ],
+      ],
+    ]);
+    const result = detectFailureStall(makeCtx({ failureHistory: history }));
+    expect(result).not.toBeNull();
+    expect(result?.detail.verdict).toBe("trigger_repeated_3x");
+  });
+
   it("custom threshold: fires at coachMin=1", () => {
     const history = new Map([
       ["src/baz.ts", [makeRecord("tsc_error", "hash-A"), makeRecord("tsc_error", "hash-A")]],
@@ -137,6 +160,48 @@ describe("detectFailureStall — false-positive guards (C1)", () => {
     expect(result).toBeNull();
   });
 
+  it("two no-patch failures sharing NO_PATCH_HASH_SENTINEL → null, not identical_patch_retried", () => {
+    // Same trigger, same patchHash (both the sentinel) — would satisfy Verdict 1's raw
+    // condition, but there's no real patch content behind either hash to confirm a
+    // genuine repeat. Reachable today: apply_patch calls that omit `patch` (item 17's
+    // establish; strict mode is dropped for Anthropic).
+    const history = new Map([
+      [
+        "src/foo.ts",
+        [
+          makeRecord("apply_patch_no_valid_blocks", NO_PATCH_HASH_SENTINEL),
+          makeRecord("apply_patch_no_valid_blocks", NO_PATCH_HASH_SENTINEL),
+        ],
+      ],
+    ]);
+    const result = detectFailureStall(makeCtx({ failureHistory: history }));
+    expect(result).toBeNull();
+  });
+
+  it("three CONSECUTIVE no-patch failures, same trigger throughout → still null, no fallback reaches it", () => {
+    // Corrects a claim from this fix's own establish pass: Verdict 2 does NOT reliably
+    // catch a straight run of identical-trigger no-patch failures at 3, or at any count.
+    // Its own precondition (last.trigger !== prev.trigger, line 128) is never satisfied
+    // when every record in the run shares one trigger — last and prev are always equal.
+    // The interleaved test above shows the shape that DOES still reach it; this is the
+    // more realistic shape (the model repeatedly omits `patch` on consecutive calls),
+    // and antiThrash produces no signal for it at all, at any repeat count. Primary
+    // coaching is unaffected regardless — see detectRepeatedFailure's own tests below,
+    // which fires at exactly 2 via a fallback with no such precondition.
+    const history = new Map([
+      [
+        "src/foo.ts",
+        [
+          makeRecord("apply_patch_no_valid_blocks", NO_PATCH_HASH_SENTINEL),
+          makeRecord("apply_patch_no_valid_blocks", NO_PATCH_HASH_SENTINEL),
+          makeRecord("apply_patch_no_valid_blocks", NO_PATCH_HASH_SENTINEL),
+        ],
+      ],
+    ]);
+    const result = detectFailureStall(makeCtx({ failureHistory: history }));
+    expect(result).toBeNull();
+  });
+
   it("fewer than 2 records for a path → null", () => {
     const history = new Map([
       ["src/foo.ts", [makeRecord("tsc_error", "hash-A")]],
@@ -146,6 +211,33 @@ describe("detectFailureStall — false-positive guards (C1)", () => {
 
   it("empty failureHistory → null", () => {
     expect(detectFailureStall(makeCtx())).toBeNull();
+  });
+});
+
+// ── detectRepeatedFailure (agentLoop.ts) — the sibling this file mirrors ──────
+//
+// Same NO_PATCH_HASH_SENTINEL guard on its own Verdict 1, but a different fallback
+// shape from detectFailureStall's: same_trigger_repeated_2x has no "last/prev triggers
+// must differ" precondition, so it fires at exactly 2 records, same as
+// identical_patch_retried would have. CoachingController.routeFailure (the only real
+// caller) doesn't branch on which repeat reason fired — both route to the same
+// apply_patch_repeated_failure_same_file trigger — so guarding this site changes the
+// telemetry label only, not what the model is coached to do or when.
+describe("detectRepeatedFailure — no-patch sentinel guard", () => {
+  it("two no-patch failures sharing NO_PATCH_HASH_SENTINEL → same_trigger_repeated_2x, not identical_patch_retried", () => {
+    const history = new Map<string, FailureRecord[]>([
+      [
+        "src/foo.ts",
+        [
+          { trigger: "apply_patch_no_valid_blocks", patchHash: NO_PATCH_HASH_SENTINEL, errorLine: null, iter: 1 },
+          { trigger: "apply_patch_no_valid_blocks", patchHash: NO_PATCH_HASH_SENTINEL, errorLine: null, iter: 2 },
+        ],
+      ],
+    ]);
+    expect(detectRepeatedFailure(history, "src/foo.ts")).toEqual({
+      filePath: "src/foo.ts",
+      reason: "same_trigger_repeated_2x",
+    });
   });
 });
 

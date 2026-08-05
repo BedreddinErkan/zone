@@ -24,6 +24,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { hashPatchBlocks, parsePatchBlocks } from "./agentLoop.js";
+import { NO_PATCH_HASH_SENTINEL } from "./antiThrash.js";
 
 const FIND = "--- FIND ---";
 const REPLACE = "--- REPLACE ---";
@@ -121,20 +122,38 @@ describe("hashPatchBlocks — direct", () => {
     expect(a).toBe(b);
   });
 
-  it("{} hashes as the empty patch", () => {
-    expect(hashPatchBlocks({})).toBe("e3b0c44298fc");
+  it("{} hashes as the no-patch sentinel, not a collidable hash", () => {
+    expect(hashPatchBlocks({})).toBe(NO_PATCH_HASH_SENTINEL);
   });
 
-  it('{patch: ""} hashes as the empty patch', () => {
-    expect(hashPatchBlocks({ patch: "" })).toBe("e3b0c44298fc");
+  it('{patch: ""} hashes as the no-patch sentinel', () => {
+    expect(hashPatchBlocks({ patch: "" })).toBe(NO_PATCH_HASH_SENTINEL);
   });
 
-  it("null args hashes as the empty patch", () => {
-    expect(hashPatchBlocks(null)).toBe("e3b0c44298fc");
+  it("null args hashes as the no-patch sentinel", () => {
+    expect(hashPatchBlocks(null)).toBe(NO_PATCH_HASH_SENTINEL);
   });
 
-  it("undefined args hashes as the empty patch", () => {
-    expect(hashPatchBlocks(undefined)).toBe("e3b0c44298fc");
+  it("undefined args hashes as the no-patch sentinel", () => {
+    expect(hashPatchBlocks(undefined)).toBe(NO_PATCH_HASH_SENTINEL);
+  });
+
+  it("a realistic apply_patch call missing `patch` also hashes as the sentinel — not a category error, a live path (ledger item 17's establish): apply_patch's schema requires `patch`, but strict mode is dropped for Anthropic", () => {
+    expect(hashPatchBlocks({ filePath: "src/a.ts", intent: "modify", scope: null })).toBe(NO_PATCH_HASH_SENTINEL);
+  });
+
+  it("a second, structurally different no-patch call — different file, different intent — hashes to the SAME sentinel as the one above (deliberate: there's no content to distinguish them by)", () => {
+    expect(hashPatchBlocks({ filePath: "src/b.ts", intent: "delete", scope: null })).toBe(NO_PATCH_HASH_SENTINEL);
+  });
+
+  it("a no-patch call carrying a populated scope object still hashes as the sentinel — the sentinel depends only on `patch`, never on sibling fields", () => {
+    expect(
+      hashPatchBlocks({
+        filePath: "src/a.ts",
+        intent: "add",
+        scope: { symbolName: "foo", symbolKind: "function", className: null },
+      }),
+    ).toBe(NO_PATCH_HASH_SENTINEL);
   });
 
   it("a patch with no FIND/REPLACE markers at all hashes the raw patch text", () => {

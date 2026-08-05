@@ -77,6 +77,19 @@ export const ANTI_THRASH_COST_BURN_USD         = readEnvFloat("ZONE_ANTI_THRASH_
 export const ANTI_THRASH_NO_PROGRESS_ITER_MIN  = readEnvInt("ZONE_ANTI_THRASH_NO_PROGRESS_ITER_MIN", 8);
 export const ANTI_THRASH_NO_PROGRESS_WINDOW    = readEnvInt("ZONE_ANTI_THRASH_NO_PROGRESS_WINDOW", 2);
 
+// hashPatchBlocks returns this when there's no patch content to hash (missing or empty
+// `patch` argument — reachable today: apply_patch's schema requires `patch`, but `strict`
+// is dropped for Anthropic, so nothing stops a model from omitting it). Hashing an empty
+// string is a fixed value regardless of which other args were present, so two structurally
+// different no-patch failures would otherwise collide here and register as "the identical
+// patch retried." Excluded explicitly below (and in agentLoop.ts's detectRepeatedFailure,
+// the sibling verdict this file mirrors) rather than making hashPatchBlocks emit a
+// per-call-unique value, since a unique "hash" would misrepresent randomness as patch
+// content. Defined here, not in agentLoop.ts: agentLoop.ts already imports several values
+// (not just types) from this module, so this direction has no circular-import risk: the
+// reverse would.
+export const NO_PATCH_HASH_SENTINEL = "no_patch";
+
 // Strong-verdict detection inlined to avoid a circular import with agentLoop.ts.
 // Mirrors the identical_patch_retried and trigger_repeated_3x branches of
 // detectRepeatedFailure() — the only two verdicts that signal thrash (not persistence).
@@ -96,7 +109,13 @@ export function detectFailureStall(
 
     // Verdict 1: identical patch retried — same trigger AND same normalized patch hash.
     // Self-clears the moment the model tries a different patch → free persistence guard.
-    if (last.trigger === prev.trigger && last.patchHash === prev.patchHash) {
+    // NO_PATCH_HASH_SENTINEL excluded: two no-patch failures share this value by
+    // construction, and there's no patch content to confirm they're actually identical.
+    if (
+      last.patchHash !== NO_PATCH_HASH_SENTINEL &&
+      last.trigger === prev.trigger &&
+      last.patchHash === prev.patchHash
+    ) {
       return {
         pattern: "failure_stall",
         summaryTitle: `Repeated identical failures on ${filePath}`,
