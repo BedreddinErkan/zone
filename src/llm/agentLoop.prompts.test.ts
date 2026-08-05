@@ -2,7 +2,10 @@ import { describe, expect, it, beforeEach } from 'vitest';
 import {
   assembleAgentSystemPrompt,
   assembleInvestigationSystemPrompt,
+  buildCoachingPrompt,
+  type SelfCorrectTrigger,
 } from './agentLoop.js';
+import { ZONE_TOOLS } from '../tools/toolDefinitions.js';
 
 const PATCH_INPUT = {
   agentIntro: 'You are Zone, a coding agent.',
@@ -113,6 +116,169 @@ describe('UI.6.2: read-only archetypes get the answer contract, patch keeps four
   it('question archetype WITH an approved plan still gets the verification-tag demand (planApproved nulls isReadOnlyArchetype)', () => {
     const prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, archetype: 'question', planApproved: true });
     expect(prompt).toContain('[ZONE_VERIFICATION: tests_passed]');
+  });
+});
+
+// Full SelfCorrectTrigger union (19 values) — kept as a literal array rather than derived,
+// since TS unions aren't enumerable at runtime. If a trigger is added to the type without
+// being added here, the sweep below silently stops covering it — no compiler signal exists
+// for that gap.
+const ALL_TRIGGERS: SelfCorrectTrigger[] = [
+  'test_failed',
+  'apply_patch_find_not_found',
+  'apply_patch_multiple_matches',
+  'apply_patch_semantic_smell',
+  'apply_patch_syntax_broken_post_write',
+  'apply_patch_repeated_failure_same_file',
+  'apply_patch_pre_existing_broken',
+  'apply_patch_scope_not_found',
+  'apply_patch_replace_shorter_than_find',
+  'apply_patch_find_block_empty',
+  'apply_patch_empty_replace_no_intent',
+  'apply_patch_marker_imbalance',
+  'apply_patch_no_read_first',
+  'apply_patch_content_before_find',
+  'apply_patch_no_valid_blocks',
+  'tool_command_spawn_failure',
+  'tool_path_enoent',
+  'read_file_nonexistent',
+  'unknown',
+];
+
+const FIND_MARKER = '--- FIND ---';
+const REPLACE_MARKER = '--- REPLACE ---';
+
+interface CoachingSource {
+  label: string;
+  text: string;
+}
+
+/**
+ * Collects every distinct string buildCoachingPrompt can emit, plus the apply_patch tool's
+ * two description fields. PROVIDER_AGNOSTIC_HARDENING is gated on
+ * `!options?.model || HARDENING_TARGETS.has(options.model)` — undefined and a real
+ * HARDENING_TARGETS member both include it, any other model excludes it — so collecting
+ * under only one model value would leave the excluded variant (and, for test_failed, the
+ * variant reachable only with generatedPathDetected:true) invisible to the sweep. Dedup by
+ * exact text: most triggers don't vary by these options at all.
+ */
+function collectCoachingSources(): CoachingSource[] {
+  const modelVariants: Array<{ label: string; model: string | undefined }> = [
+    { label: 'model=undefined', model: undefined },
+    { label: 'model=gpt-4o(hardening-target)', model: 'gpt-4o' },
+    { label: 'model=claude-opus-5(non-target)', model: 'claude-opus-5' },
+  ];
+  const seen = new Map<string, string>();
+  for (const trigger of ALL_TRIGGERS) {
+    // generatedPathDetected only matters for test_failed — it gates a second branch that
+    // itself carries the hardening suffix. Sweeping it for every trigger would be harmless
+    // (inert elsewhere) but this stays explicit about why it varies here specifically.
+    const genPathStates = trigger === 'test_failed' ? [false, true] : [false];
+    for (const mv of modelVariants) {
+      for (const generatedPathDetected of genPathStates) {
+        const text = buildCoachingPrompt(trigger, '', [], { model: mv.model, generatedPathDetected });
+        if (!seen.has(text)) {
+          seen.set(text, `${trigger} (${mv.label}, generatedPathDetected=${generatedPathDetected})`);
+        }
+      }
+    }
+  }
+
+  const sources: CoachingSource[] = [...seen.entries()].map(([text, label]) => ({ label, text }));
+
+  const applyPatchTool = ZONE_TOOLS.find((t) => t.function.name === 'apply_patch');
+  const patchParamDescription = (
+    applyPatchTool?.function.parameters as { properties?: { patch?: { description?: string } } } | undefined
+  )?.properties?.patch?.description;
+  sources.push({ label: 'apply_patch tool description', text: applyPatchTool?.function.description ?? '' });
+  sources.push({ label: 'apply_patch patch parameter description', text: patchParamDescription ?? '' });
+
+  return sources;
+}
+
+/**
+ * A line carrying exactly one marker literal is block-shaped and must start at column zero.
+ * A line carrying two is the inline form (out of scope). A line carrying one marker
+ * embedded in a larger sentence — e.g. "...include them in `--- REPLACE ---`:" — is neither:
+ * found empirically while building this sweep (apply_patch_content_before_find's own,
+ * already-correct coaching text triggered a false positive under the literal one-marker
+ * rule), so "block-shaped" additionally requires the marker to be the whole line, trimmed —
+ * a prose sentence that merely names a marker inline is a third shape, not a delimiter line,
+ * and needs no anchoring.
+ */
+function findColumnZeroViolations(sources: CoachingSource[]): { violations: string[]; blockShapedLineCount: number } {
+  const violations: string[] = [];
+  let blockShapedLineCount = 0;
+  for (const { label, text } of sources) {
+    for (const line of text.split('\n')) {
+      const findCount = (line.match(/--- FIND ---/g) ?? []).length;
+      const replaceCount = (line.match(/--- REPLACE ---/g) ?? []).length;
+      if (findCount + replaceCount !== 1) continue;
+      const marker = findCount === 1 ? FIND_MARKER : REPLACE_MARKER;
+      if (line.trim() !== marker) continue; // prose mention, not a delimiter line
+      blockShapedLineCount += 1;
+      if (!line.startsWith(marker)) {
+        violations.push(`${label}: ${JSON.stringify(line)}`);
+      }
+    }
+  }
+  return { violations, blockShapedLineCount };
+}
+
+describe('patch-format teaching surfaces: no indented block-shaped FIND/REPLACE marker', () => {
+  // Measured at HEAD post-fix: 16 block-shaped marker lines across 24 distinct sources.
+  // Floor set with a margin below that, not at it — a legitimate future wording change
+  // that drops a line or two shouldn't make this test fragile, but a collection that finds
+  // near-zero real content (the vacuous-pass failure mode this control exists to catch)
+  // still fails loudly.
+  const MIN_BLOCK_SHAPED_LINES = 12;
+
+  it('every collected coaching/tool-schema source is a non-empty string', () => {
+    const sources = collectCoachingSources();
+    const empty = sources.filter((s) => s.text.length === 0).map((s) => s.label);
+    expect(empty).toEqual([]);
+  });
+
+  it('sweep finds a real, substantial number of block-shaped marker lines (plausibility floor)', () => {
+    const { blockShapedLineCount } = findColumnZeroViolations(collectCoachingSources());
+    expect(blockShapedLineCount).toBeGreaterThanOrEqual(MIN_BLOCK_SHAPED_LINES);
+  });
+
+  it('no block-shaped FIND/REPLACE marker line is indented, across every trigger and both tool-schema description fields', () => {
+    const { violations } = findColumnZeroViolations(collectCoachingSources());
+    expect(violations).toEqual([]);
+  });
+});
+
+describe('PROVIDER_AGNOSTIC_HARDENING legibility: each label is followed by a blank line before its block', () => {
+  const LABELS = ['CORRECT removal:', 'INCORRECT (comment-out is NOT a fix):'];
+
+  function hardeningText(): string {
+    // undefined model satisfies the `!options?.model` disjunct — includes the suffix.
+    return buildCoachingPrompt('apply_patch_syntax_broken_post_write', '', [], { model: undefined });
+  }
+
+  it('both labels are present in the hardening text (plausibility floor)', () => {
+    const text = hardeningText();
+    const found = LABELS.filter((label) => text.includes(label));
+    expect(found).toEqual(LABELS);
+  });
+
+  it('each label is immediately followed by a blank line before its FIND/REPLACE block', () => {
+    const text = hardeningText();
+    const lines = text.split('\n');
+    const violations: string[] = [];
+    for (const label of LABELS) {
+      const labelLineIdx = lines.findIndex((l) => l === label);
+      if (labelLineIdx === -1) {
+        violations.push(`label not found on its own line: ${JSON.stringify(label)}`);
+        continue;
+      }
+      if (lines[labelLineIdx + 1] !== '') {
+        violations.push(`no blank line after ${JSON.stringify(label)} — next line was ${JSON.stringify(lines[labelLineIdx + 1])}`);
+      }
+    }
+    expect(violations).toEqual([]);
   });
 });
 

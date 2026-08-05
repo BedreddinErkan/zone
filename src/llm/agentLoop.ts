@@ -1230,17 +1230,17 @@ const PROVIDER_AGNOSTIC_HARDENING =
   `- DELETE the line entirely (omit it from REPLACE block)\n` +
   `- DO NOT prefix with "// " — that is not a fix, the line still exists\n` +
   `- "// import X" is preserved code, not removed code\n\n` +
-  `CORRECT removal:\n` +
-  `  --- FIND ---\n` +
-  `  import { Bad } from "y";\n` +
-  `  import { Good } from "z";\n` +
-  `  --- REPLACE ---\n` +
-  `  import { Good } from "z";\n\n` +
-  `INCORRECT (comment-out is NOT a fix):\n` +
-  `  --- FIND ---\n` +
-  `  import { Bad } from "y";\n` +
-  `  --- REPLACE ---\n` +
-  `  // import { Bad } from "y";\n\n` +
+  `CORRECT removal:\n\n` +
+  `--- FIND ---\n` +
+  `import { Bad } from "y";\n` +
+  `import { Good } from "z";\n` +
+  `--- REPLACE ---\n` +
+  `import { Good } from "z";\n\n` +
+  `INCORRECT (comment-out is NOT a fix):\n\n` +
+  `--- FIND ---\n` +
+  `import { Bad } from "y";\n` +
+  `--- REPLACE ---\n` +
+  `// import { Bad } from "y";\n\n` +
   `**REPLACE ONLY SUBSTITUTES THE FIND BLOCK**\n\n` +
   `Lines that already exist BEFORE and AFTER the FIND block stay untouched. Do NOT re-copy them into REPLACE (that produces duplicates). Exception: if you are ADDING a new line adjacent to the FIND anchor (e.g. a JSDoc above a function), include BOTH the new line AND the anchor inside REPLACE — added lines must be inside the blocks, never outside.\n\n` +
   `If FIND is "import A;" and you put "import B;\\nimport A;" in REPLACE:\n` +
@@ -1609,7 +1609,7 @@ export function buildCoachingPrompt(
         `Required structure: each \`--- FIND ---\` MUST be followed by exactly one \`--- REPLACE ---\`. ` +
         `For multiple edits in one file, use multiple block pairs.\n\n` +
         `RIGHT (two FIND, two REPLACE - multi-block):\n` +
-        `  --- FIND ---\n  <region A>\n  --- REPLACE ---\n  <new A>\n  --- FIND ---\n  <region B>\n  --- REPLACE ---\n  <new B>\n\n` +
+        `--- FIND ---\n<region A>\n--- REPLACE ---\n<new A>\n--- FIND ---\n<region B>\n--- REPLACE ---\n<new B>\n\n` +
         `Next action: re-issue apply_patch with balanced markers. If only one edit is needed, use exactly one FIND/REPLACE pair.`
       );
     case "apply_patch_content_before_find":

@@ -240,8 +240,8 @@ required: ["id", "content", "description", "status"],
       name: "apply_patch",
       strict: true,
       description:
-        "Patch an EXISTING file (write_file for new files). " +
-        "Format: --- FIND --- <verbatim lines, unique> --- REPLACE --- <new content>. " +
+        "Patch an EXISTING file (write_file for new files). Format:\n" +
+        "--- FIND ---\n<verbatim lines, unique>\n--- REPLACE ---\n<new content>\n\n" +
         "FIND must match exactly — re-read if unsure. " +
         "N edits to a file → ONE call with N blocks; all blocks apply atomically.",
       parameters: {
