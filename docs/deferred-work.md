@@ -2072,7 +2072,7 @@ the "raw, unnormalized" claim to the two remaining classes only.
 `apply_patch`'s handler, `toolExecutor.ts`, right after the existing smart-quote self-validation
 telemetry.
 
-## 56. Six test files can reach a real LLM client through any of a dozen unmocked constructors — partially closed, one of six fixed
+## 56. Closed — all six files fixed; the client-contract finding narrows the full-replace danger from real to latent
 
 **This entry originally understated its own scope: it named one function
 (`generateExecutionPlan`) and four remaining files. Both were too narrow — recorded here, not
@@ -2114,7 +2114,7 @@ input is key-independent and fires in CI regardless of the environment — this 
 hardening-only exercise; `ANTHROPIC_API_KEY` present in the developer's own environment fires the
 same class of construction, but only on that machine, never in CI.
 
-**Fixed (`67ef8757`), one of five files:** `runLlmPatchFlow.readOnlySuppression.test.ts` had exactly
+**Fixed (`67ef8757`), one of six files:** `runLlmPatchFlow.readOnlySuppression.test.ts` had exactly
 one test, of nine, lacking `preGeneratedPlan` — the one that reached the real call, racing a
 15-second `testTimeout` against network variance. Fixed via a partial mock (`importOriginal`,
 spreading the real module and overriding only `generateExecutionPlan`), not a full replace. That
@@ -2127,8 +2127,8 @@ import list and every read site of the resulting local variable before shipping,
 suite and finding out. See the eleventh pattern essay for the general lesson this mistake, caught
 before it shipped, is an instance of.
 
-**Five files confirmed still affected, by direct trace of each — not by mock-list inspection
-alone:**
+**Five files then still affected, by direct trace of each — not by mock-list inspection alone —
+all five now fixed (below):**
 - `runLlmPatchFlow.fastPath.test.ts`, `__tests__/dryRun.test.ts`, `__tests__/multiFilePatch.test.ts`
   — each forces the plan_full_patch flow via an env override, supplies `preGeneratedPlan` in none of
   its tests, and none of their task strings are vague-shaped (checked against
@@ -2137,9 +2137,12 @@ alone:**
   unconditionally. Empirically confirmed this pass: each produces exactly two client-construction
   markers per reaching test, matching the two-constructor shape above, not one.
 - `runLlmPatchFlow.test.ts` — confirmed affected, and now fully scoped rather than left open: 39 of
-  its 65 tests construct a client (73 constructions total, attributed per test name from this pass's
-  own suite run), all within the `describe` block whose `beforeEach` sets `ZONE_FORCE_FLOW=
-  plan_full_patch`. 34 of those 39 construct twice (`plannerStep` + `generateExecutionPlan`); 5
+  its 82 running tests construct a client (73 constructions total, attributed per test name from this
+  pass's own suite run), all within the `describe` block whose `beforeEach` sets `ZONE_FORCE_FLOW=
+  plan_full_patch`. The file's real total is 89 (82 run, 7 skipped) — an earlier pass through this
+  entry counted 65 by grepping source lines starting `it(`, which undercounts a file using
+  `it.each`: two such blocks account for the missing 24, corrected here rather than left standing.
+  34 of the 39 constructing tests construct twice (`plannerStep` + `generateExecutionPlan`); 5
   construct once, from tests that exit before the second call. Its other three `describe` blocks —
   `preGeneratedPlan forces agent-loop`, `isChitchat`, `vague-task short-circuit` — stay clean by
   construction (a supplied plan, a pure function, and a zero-LLM-call short-circuit respectively).
@@ -2149,6 +2152,43 @@ alone:**
   currently **passes** — 11 of 11 — even while a real request is attempted (one construction marker
   per suite run), which is exactly why a pass/fail-based sweep alone would never surface it; only
   the unconditional construction marker did.
+
+**All fixed, same pattern each time (`1e24f954` — the three fastPath/dryRun/multiFilePatch files;
+`4f78ebed` — `runLlmPatchFlow.test.ts`; `aeabe1a3` — `generateFinalRunReport.test.ts`):** an
+`importOriginal` partial mock of `../llm/factory.js`, overriding only `createLLMClient` to throw,
+spreading everything else from the real module so `ApiKeyError`/`ProviderRequestError`/
+`PlanRefusalError` stay real, identity-preserved classes rather than `undefined`. Every call site
+this class reaches already wraps its `createLLMClient()` call in a try/catch that degrades
+gracefully, so the throw needed no assertion changes in any of the four commits.
+
+**A timing anomaly on `fastPath.test.ts`, measured during the session that fixed this file, no
+commit records it, and this is its first durable record:** a bounded re-run at a longer timeout
+produced two client-construction markers, matching the two-constructor shape traced above, where
+the file's default timeout had produced only one — a retry-backoff race against the timeout cutoff,
+not a different code path being taken. Closing this open question is what let the "all three
+fastPath-shaped files take the same two-constructor path" claim above stand without a caveat.
+
+**The client contract, confirmed at three separate construction sites across two commits, not
+assumed to generalize from one:** `4f78ebed`'s own mutation testing (a Proxy trap naming any
+property read on the constructed client, rather than a bare stub) found both `generateExecutionPlan`
+and `plannerStep` read `.provider` off the client — as a `getModelName(...)` argument — immediately
+after construction, before either calls `createChatCompletion`. `aeabe1a3`'s own mutation testing
+found the same read a third time, in `generateAiFinalRunReport`'s identical `getModelName(...)`
+argument construction. Three of three checked construction sites read `.provider` before anything
+else — any returning-stub mock for this client, anywhere in this codebase, needs that field at
+minimum.
+
+**The full-replace danger is real, but narrower than this entry's own fix reasoning states it —
+essay eleven's lesson a third time.** `1e24f954`'s own mutation testing against `fastPath.test.ts`
+specifically found that a full-replace mock (no `importOriginal` spread) passes that file's suite
+cleanly rather than throwing a `TypeError` from an `instanceof` check — because that file's own code
+paths never reach the one hosted-context `instanceof ApiKeyError` catch site the fix reasoning below
+is built around. Preserving the real error classes stays the correct choice regardless of any one
+file's own reachability — but the danger this entry cites as justification is, in the one file it
+was actually tested against, latent rather than live. Item 56's own text already names two earlier
+instances of this same "safe by omission, not by design" shape (`terminationReasonProbe.test.ts`'s
+own full-replace mock, safe only because its tests never route through that catch site; and the
+general pattern first named while fixing `readOnlySuppression.test.ts`). This is the third.
 
 **Two files confirmed safe, by different mechanisms — recorded so the question isn't re-asked:**
 - `runLlmPatchFlow.scanRepo.test.ts` — doubly safe, not by a single mechanism: it sets
@@ -2175,16 +2215,23 @@ diagnostic pass in this same investigation reported a different duration spread 
 network-latency signature; that figure has no surviving verbatim record in this session and is not
 carried forward here. A separate, unexplained per-test cost common to this file regardless of which
 code path a given test takes is recorded on its own footing as item 58 — it is not resolved by this
-fix, and won't be resolved when the remaining four files are either.
+fix.
 
-**What would close the rest — corrected from the original prescription.** The original entry's own
-fix (mock `../llm/executionPlan.js`) is insufficient for all five remaining files: it would leave
-`plannerStep` constructing a real client in every one of them, since that constructor doesn't live
-in the module being mocked. The corrected fix is to mock `../llm/factory.js` instead — one choke
-point covering all twelve `createLLMClient` call sites (`plannerStep` included, and any future
-thirteenth site added later) — using the same `importOriginal` partial-mock pattern as the
-already-shipped fix, **not** the full-replace shape `runLlmPatchFlow.terminationReasonProbe.test.ts`
-happens to use for the same module. That distinction is load-bearing here specifically:
+**`runLlmPatchFlow.test.ts`'s own before/after, on the same footing — measured during the session
+that fixed this file, no commit records it, and this is its first durable record:** a keyed baseline
+bounded at 300 seconds did not complete naturally (`EXIT=124`), with 38 of the file's 73 expected
+markers observed before the bound was hit; the post-fix keyed run completed in 4.08 seconds, 0
+markers, all 82 running tests passing.
+
+**What closed the rest — corrected from the original prescription before it was applied.** The
+original entry's own fix (mock `../llm/executionPlan.js`) would have been insufficient for all five
+remaining files: it would have left `plannerStep` constructing a real client in every one of them,
+since that constructor doesn't live in the module being mocked. The corrected fix, landed in all
+three later commits, mocks `../llm/factory.js` instead — one choke point covering all twelve
+`createLLMClient` call sites (`plannerStep` included, and any future thirteenth site added later) —
+using the same `importOriginal` partial-mock pattern as the first, already-shipped fix, **not** the
+full-replace shape `runLlmPatchFlow.terminationReasonProbe.test.ts` happens to use for the same
+module. That distinction was load-bearing here specifically:
 `factory.js` exports `createLLMClient` alongside three error classes (`ApiKeyError`,
 `ProviderRequestError`, `PlanRefusalError`); `runLlmPatchFlow.ts` itself does `if (err instanceof
 ApiKeyError)` in a hosted-context catch block, and `executionPlan.ts` directly constructs `new
@@ -2209,8 +2256,12 @@ timeout value alone and no longer concerns a test-side guard).
 all in `runLlmPatchFlow.ts` — the agent_loop branch's `generateExecutionPlan`, guarded by the
 ranked-files length check; and, in the shared plan_full_patch tail reached only when that branch's
 own early return doesn't fire, `plannerStep` and the second `generateExecutionPlan` call, the
-latter guarded only by the always-null `pipelineCfg`. The landed fix is in
-`runLlmPatchFlow.readOnlySuppression.test.ts`'s own mock list.
+latter guarded only by the always-null `pipelineCfg`. `generateAiFinalRunReport`'s own
+`createLLMClient()` call is in `generateFinalRunReport.ts`, an unrelated chain. The landed fix is
+each affected test file's own `../llm/factory.js` mock: `runLlmPatchFlow.readOnlySuppression.test.ts`
+(`67ef8757`); `runLlmPatchFlow.fastPath.test.ts`, `__tests__/dryRun.test.ts`,
+`__tests__/multiFilePatch.test.ts` (`1e24f954`); `runLlmPatchFlow.test.ts` (`4f78ebed`);
+`generateFinalRunReport.test.ts` (`aeabe1a3`).
 
 ## 57. No explicit timeout on the OpenAI SDK clients — a real reliability gap, found while investigating item 56 — corrected
 
@@ -2369,27 +2420,123 @@ Secondary, non-blocking note for whenever this is picked up: build it after the 
 `createOpenAIClient` are listed in item 56. `fetchUrl.test.ts` and `controlServer.test.ts` are the
 two existing tests any interception-point decision needs to stay compatible with.
 
+## 60. `generateFinalRunReport` computes a nine-field report at a dozen call sites that nothing reads
+
+**What it is:** `generateFinalRunReport` produces a `FinalRunReport` — `title`, `statusSummary`,
+`intentUnderstood`, `filesInspected`, `filesChanged`, `changesMade`, `verificationSummary`,
+`safetySummary`, `nextStep` — computed at a dozen call sites inside `runLlmPatchFlow.ts`. An AI-
+generated variant exists behind `generateAiFinalRunReport`, gated on `ZONE_AI_FINAL_REPORT`, a flag
+set nowhere in this repository — no config, no default, no test fixture outside the module's own
+tests. Established directly, not assumed: `.finalRunReport` is read in exactly three places in the
+whole codebase, and all three are test assertions, not a renderer, a serializer, or a persistence
+layer. The TUI's own final message is built from the agent loop's own summary text, a completely
+separate mechanism; the CLI's result printer reads only `decisionMode`/`warnings`/`reason`; the
+field is absent from both the on-disk run envelope and the on-disk session transcript. The module's
+own 14 tests assert only on its own output shape — nothing external depends on any of them passing.
+
+**The sharp part — not a criticism of item 13, which is already Closed and did exactly what it
+said.** Item 13's own fix propagated an already-computed `finalRunReport` value into one more
+return site specifically because ten sibling return sites already populated the same field. That
+reasoning was sound on its own terms: consistency across return sites is a real property to want.
+What makes this worth its own entry is what the consistency was achieved in service of — all eleven
+sites now write a field nothing downstream ever reads. The fix was correct; the field it was
+correct about is scaffolding for a consumer that was never built.
+
+**What would close it:** a decision between wiring the module up to an actual consumer or deleting
+it — not a small fix either way. Deleting is straightforward. Wiring it up is not yet a specified
+fix at all: it would first need a decision about what the report is *for* — a CLI flag, a TUI
+panel, a persisted artifact — before any code change could be scoped. Neither option chosen here.
+
+**Bucket, against the document's own usage, not the one-line definition alone.** Item 58 is the
+matching shape: a real, verified structural fact, a "what would close it" that names an action
+without executing it, explicitly left undecided. Both sit in **Neither** — "a structural fact
+recorded, with no fix proposed" — rather than Actionable now, because neither entry specifies a
+single fix with nothing left to learn; item 58's own next step is unstarted profiling, and this
+entry's "wire it up" option isn't a fix until something else decides its purpose first.
+**Bucketed Neither.**
+
+**Where the code lives:** `generateFinalRunReport`/`buildDeterministicFinalRunReport`/
+`generateAiFinalRunReport` are all in `generateFinalRunReport.ts`. Its dozen call sites are in
+`runLlmPatchFlow.ts`, each assigning into a `finalRunReport` field on a return object. The three
+`.finalRunReport` reads are in `runLlmPatchFlow.test.ts` and `__tests__/multiFilePatch.test.ts`,
+both test assertions.
+
+## 61. The free-form summary arc: four commits, and what they left open
+
+**Sequence, each step verified against its own commit:** the imposed four/five-section format that
+prompted this arc lived in the agent loop's own `FINAL SUMMARY` templates, not in
+`generateFinalRunReport` (item 60) — a separate, unrelated mechanism, confirmed by tracing what the
+TUI actually renders. `ANSWER_SUMMARY`, a genuinely free-form contract, already existed for
+answer-only plans but was selected only when a plan was formally shaped that way. The selector was
+extended to cover read-only archetypes directly (`dd8fb604`). A divergence between the old
+`## Tests` heading's enum and `parseVerificationTag`'s accepted values — one value the parser never
+accepted — was found and fixed (`06ab8874`). Telemetry recording whether a verdict came from a tag
+or a fallback was added to `deriveVerdict` (`e7b051eb`). The two remaining patch-shaped templates
+were then collapsed into one free-form builder taking a token-range/char-cap pair, carrying one
+condensed worked example forward from the three the old templates carried (`27c5a8eb`).
+
+**What remains open, each in its own real shape — this entry does not reduce to one fix:**
+- The FINAL ASSESSMENT block that requests the `[ZONE_VERIFICATION]` tag is still gated on
+  `answerOnly` alone, unchanged through all four commits. A read-only-archetype run with no plan —
+  exactly the case `dd8fb604` extended the summary selector to cover — still receives a demand for
+  a verification tag with nothing to verify. A specified fix exists (extend the same gate condition
+  the summary selector already uses) and was explicitly deferred each time it was noticed, not
+  built. A second surface, still open.
+- `deriveVerdict`'s `inferredFrom` field is `"tag"` or `"heuristic"`, a function of whether a tag
+  was present, not of why one wasn't. `"heuristic"` covers two different mechanisms: a real
+  inference run against the tool-call log (`trigger === "max_iterations"`), and a hardcoded default
+  reached with no inference attempted at all (any other trigger). The telemetry's own `reason`
+  field distinguishes the two in each recorded payload; a raw count of `inferredFrom` values alone
+  would not.
+- The `inferredFrom` telemetry accumulates passively, by design — nothing in this arc reads it back
+  or builds a baseline from it. No real-world tag-emission rate exists yet to compare against.
+- The new patch template's "lead with a single line that would work as a commit subject"
+  instruction is confirmed unpinned by any test, not merely un-added: a repo-wide sweep during the
+  commit that introduced it found zero references to the phrase anywhere in the test suite, and
+  removing the sentence as a mutation failed nothing. A model-behavior property no unit test can
+  verify — recorded as a known gap rather than closed with a test that couldn't have measured it.
+- What the collapse gave up, stated plainly rather than left implicit: cross-run skimmability (every
+  patch summary no longer lands in the same shape, so scanning several in sequence costs more than
+  it used to), and two of the old templates' three worked examples — a happy-path structural
+  demonstration and an explicit incomplete-work hand-off demonstration, both judged reasonably
+  covered by the new template's own REQUIRED-bullet prose instead. The third example (a patch rolled
+  back with nothing net-applied) was carried forward condensed, in free-form prose rather than its
+  old bulleted shape, because nothing else in the prompt taught that specific case.
+
+**Bucket, against the document's own usage.** Item 58 is again the closest shape: several of these
+sub-facts individually resemble other buckets in isolation (the FINAL ASSESSMENT gate has a
+specified fix, unbuilt — closer to Actionable now on its own; the missing baseline is closer to
+Blocked on data on its own) but the entry as a whole specifies no single fix with nothing left to
+learn, which is what the bucket decision is actually about. **Bucketed Neither**, each sub-fact's
+real shape kept visible in its own bullet rather than flattened to match the label.
+
+**Where the code lives:** `assembleAgentSystemPrompt`'s summary selector and `buildPatchSummary`
+are in `agentLoop.ts`, immediately followed by the still-`answerOnly`-only FINAL ASSESSMENT block.
+`inferredFrom` is computed and now logged in `deriveVerdict.ts`. The four commits'
+own test changes are in `agentLoop.prompts.test.ts`, `agentLoop.brevity.test.ts`, and
+`deriveVerdict.test.ts`.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 59 to find out which ones still need something. No index of
+reader the trouble of reading all 61 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (29): 6, 7, 8, 10, 13, 14, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49
+**Closed** (30): 6, 7, 8, 10, 13, 14, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 56
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (11): 2 (after 16), 12, 15 (after 2), 16, 17, 18, 23, 36, 55, 56, 57
+first (10): 2 (after 16), 12, 15 (after 2), 16, 17, 18, 23, 36, 55, 57
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (2): 1, 4
 
-**Neither — a structural fact recorded, with no fix proposed** (17): 3, 5, 9, 11, 19, 27, 38, 43,
-45, 46, 50, 51, 52, 53, 54, 58, 59
+**Neither — a structural fact recorded, with no fix proposed** (19): 3, 5, 9, 11, 19, 27, 38, 43,
+45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61
 
-Items 1, 2, 12, 16, 18, 36, 56, and 57 are partially closed or corrected; the classification above
+Items 1, 2, 12, 16, 18, 36, and 57 are partially closed or corrected; the classification above
 covers only the portion still open, not the whole entry.
 
 ---
@@ -2794,3 +2941,35 @@ actually configured for an unrelated reason (a floor beneath a per-request deriv
 default left untouched). The grep found nothing because it was reading the wrong file; the number
 matched because one real ten-minute value was being compared against a restatement of itself, not
 against something independently checked.
+
+## A fourteenth pattern: a test that derives its own scope can silently narrow it, and forbidding a string does not remove that string from the text
+
+A test that locates its own target text at runtime — searching for a marker, then reading whatever
+follows it — inherits a failure mode a hardcoded slice never has. When the marker is gone, the
+search does not raise an error; it returns nothing found, and everything built on top of that keeps
+running anyway. An index-of-substring lookup that fails returns negative one; a slice built from
+that value is some other, arbitrary piece of the text; a length check against that arbitrary piece
+can still pass, for a reason that has nothing to do with what the test claims to verify. The test
+reports green while testing nothing. The corrective has two parts, and neither is optional on its
+own: assert that the marker was actually found before asserting anything about what follows it, and
+pin an expected count as a literal written into the test, not derived from the same text being
+checked — a shrunken match should fail loudly, not silently satisfy a looser one.
+
+The second half is a different trap with the same underlying shape: text that forbids a string
+still contains that string. A FORBIDDEN list naming a heading as the thing not to write is itself
+text containing the literal characters of that heading — asserting that a whole block of text lacks
+the substring fails the moment any part of it legitimately mentions the phrase, including the exact
+sentence telling the model not to write it, or an entirely unrelated block elsewhere in the same
+static prompt using the same words for its own, unconnected reason. The fix is not a cleverer
+string match; it is scoping the assertion to only the block actually under test.
+
+This recurred three times within one session, working through the same handful of prompt-template
+test files, git-verified rather than recalled. The arity guard added to the old `## Tests` enum
+test was built with the first half already stated in its own comment, before it was ever needed.
+The second half then landed twice, live, each caught before the commit that introduced it shipped:
+once when a new answer-contract test asserted a whole prompt lacked `"## What changed"`, failing
+against that exact phrase sitting inside a sibling template's own FORBIDDEN list; again later in
+the same arc, when a rewritten summary test asserted a whole prompt lacked `"## Tests"`, failing
+against an unrelated, untouched brevity directive naming that same heading for a different reason
+entirely. Three instances, two different files, the same failure shape each time — which is what
+makes it a pattern here rather than a pair of unrelated bugs.
