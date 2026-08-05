@@ -57,6 +57,39 @@ describe('UI.6.1: patch prompt FINAL SUMMARY block', () => {
   });
 });
 
+describe('UI.6.2: read-only archetypes get the answer contract, patch keeps four-section', () => {
+  // "FINAL SUMMARY (required" heads both patch templates and appears in neither the answer
+  // contract nor anywhere else — the discriminator between the two. Not "## What changed":
+  // ANSWER_SUMMARY names that section in its own FORBIDDEN list, so asserting its absence
+  // would match the prompt's own forbid-instruction text against itself (same reasoning as
+  // agentLoop.readOnlySuppressionTelemetry.test.ts's existing answer-contract test).
+  it('question archetype (no answer-only plan) gets FINAL ANSWER, not the four-section contract', () => {
+    const prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, archetype: 'question' });
+    expect(prompt).toContain('FINAL ANSWER (required');
+    expect(prompt).not.toContain('FINAL SUMMARY (required');
+  });
+
+  it('investigation archetype (no answer-only plan) gets FINAL ANSWER, not the four-section contract', () => {
+    const prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, archetype: 'investigation' });
+    expect(prompt).toContain('FINAL ANSWER (required');
+    expect(prompt).not.toContain('FINAL SUMMARY (required');
+  });
+
+  it('patch run (default archetype) still gets the four-section contract, including the verification tag', () => {
+    const prompt = assembleAgentSystemPrompt(PATCH_INPUT);
+    expect(prompt).toContain('FINAL SUMMARY (required');
+    expect(prompt).toContain('## What changed');
+    expect(prompt).not.toContain('FINAL ANSWER (required');
+    expect(prompt).toContain('[ZONE_VERIFICATION: tests_passed]');
+  });
+
+  it('question archetype WITH an approved plan (readOnlyPipelineSuppressed case) still gets the four-section contract', () => {
+    const prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, archetype: 'question', planApproved: true });
+    expect(prompt).toContain('FINAL SUMMARY (required');
+    expect(prompt).not.toContain('FINAL ANSWER (required');
+  });
+});
+
 describe('WEB_SEARCH_DIRECTIVE — unconditional in both prompt modes', () => {
   it('is present in patch mode (default archetype)', () => {
     const prompt = assembleAgentSystemPrompt(PATCH_INPUT);

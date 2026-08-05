@@ -737,6 +737,14 @@ export function assembleAgentSystemPrompt(input: {
   // branch below — this also covers any archetype added later with no per-branch
   // carve-out needed.
   const effectiveArchetype = input.planApproved ? undefined : input.archetype;
+  // Same two archetypes archetypeDispatcher.ts flags readOnlyPipeline:true for
+  // (QUESTION_PIPELINE, INVESTIGATION_PIPELINE). Built from effectiveArchetype, not
+  // input.archetype directly: a run whose read-only capability filter was suppressed
+  // (readOnlyPipelineSuppressed, runLlmPatchFlow.ts — archetype classified
+  // question/investigation but a user-approved plan has real write steps) already nets
+  // effectiveArchetype to undefined via planApproved above, so this stays false for that
+  // case without a second check.
+  const isReadOnlyArchetype = effectiveArchetype === "question" || effectiveArchetype === "investigation";
 
   return (
     `${input.agentIntro}\n\n` +
@@ -875,7 +883,7 @@ export function assembleAgentSystemPrompt(input: {
     // Answer shape takes precedence over the compact/detailed choice, not just over
     // COMPACT_SUMMARY: a user with /summary detailed would otherwise get DETAILED_SUMMARY,
     // which is the same four-section patch template plus a ## Files list.
-    (input.answerOnly
+    ((input.answerOnly || isReadOnlyArchetype)
       ? ANSWER_SUMMARY
       : input.summaryFormat === "detailed" ? DETAILED_SUMMARY : COMPACT_SUMMARY) +
     `TRUNCATED FILE SECTIONS: if you see a ZONE_CONTEXT_TRUNCATED marker, part of the file was omitted. Do NOT include the marker line in any apply_patch FIND block; use read_file with lineRange on the same path to fetch the hidden section. Only generate FIND blocks from lines you have fully read.\n\n` +
