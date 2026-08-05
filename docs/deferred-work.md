@@ -2681,20 +2681,58 @@ were then collapsed into one free-form builder taking a token-range/char-cap pai
 condensed worked example forward from the three the old templates carried (`27c5a8eb`).
 
 **What remains open, each in its own real shape — this entry does not reduce to one fix:**
-- The FINAL ASSESSMENT block that requests the `[ZONE_VERIFICATION]` tag is still gated on
-  `answerOnly` alone, unchanged through all four commits. A read-only-archetype run with no plan —
-  exactly the case `dd8fb604` extended the summary selector to cover — still receives a demand for
-  a verification tag with nothing to verify. A specified fix exists (extend the same gate condition
-  the summary selector already uses) and was explicitly deferred each time it was noticed, not
-  built. A second surface, still open.
+- **Closed (`5d01d27a`) — the system-prompt surface only.** The FINAL ASSESSMENT block that
+  requests the `[ZONE_VERIFICATION]` tag was gated on `answerOnly` alone, unchanged through all
+  four commits above, so a read-only-archetype run with no plan — exactly the case `dd8fb604`
+  extended the summary selector to cover — received a demand for a verification tag alongside an
+  answer contract whose own FORBIDDEN list bars a `## Tests` section. Confirmed live in compiled
+  output for both `question` and `investigation` before the fix, not traced. The fix was the
+  one-identifier shape this bullet already predicted: the same `isReadOnlyArchetype` disjunct the
+  summary-contract selector twelve lines above already used, added to the verification gate's own
+  condition. The predicate was already in lexical scope, so nothing was threaded and no call site
+  changed. **The neighbouring explanatory comment was read and deliberately left, recorded here so
+  nobody re-litigates it as stale:** its three clauses are property-based — "a run that cannot run
+  a patch to verify", one dated measured instance, and the `deriveVerdict` fallback-safety
+  argument — and none of them names `answerOnly` as *the* condition or claims to be exhaustive, so
+  all three stay true under the widened gate. **The second surface is not closed and is not this
+  one** — see item 69, which replaces the bare phrase "a second surface, still open" that used to
+  end this bullet and named nothing findable.
 - `deriveVerdict`'s `inferredFrom` field is `"tag"` or `"heuristic"`, a function of whether a tag
   was present, not of why one wasn't. `"heuristic"` covers two different mechanisms: a real
   inference run against the tool-call log (`trigger === "max_iterations"`), and a hardcoded default
-  reached with no inference attempted at all (any other trigger). The telemetry's own `reason`
-  field distinguishes the two in each recorded payload; a raw count of `inferredFrom` values alone
-  would not.
-- The `inferredFrom` telemetry accumulates passively, by design — nothing in this arc reads it back
-  or builds a baseline from it. No real-world tag-emission rate exists yet to compare against.
+  reached with no inference attempted at all (any other trigger). **This bullet used to end by
+  claiming the payload's own `reason` field distinguishes the two. That is false. The sentence is
+  deleted rather than carried with a correction appended, because it was written into permanent
+  record and pushed before anyone checked it, and a reader who finds it re-derives a wrong
+  conclusion.** `no_verification_attempted` reaches the payload from three independent origins: the
+  hardcoded literal on `deriveVerdict`'s non-`max_iterations` branch; `inferVerificationFromLog`'s
+  own final fallthrough (reachable only when a patch did apply, tests did not run, and no infra
+  error was seen); and the model emitting it as a tag, which `parseVerificationTag` accepts and the
+  max-iterations wrapup prompt offers by name. Among `inferredFrom: "heuristic"` records the first
+  two collide, so `reason` cannot separate them; `trigger` can, and does. What made the false claim
+  plausible: `inferVerificationFromLog`'s other branches each return a distinct value, so only its
+  final fallthrough collides — the collision sits on the one line of that function a reader
+  scanning its branch list is most likely to read as unreachable filler. Compounding it, the logged
+  `reason` is the **post-override** value: `validatePassedClaim`, `validateUnrelatedClaim`, and
+  `applyNoInfraVerificationOverride` can each rewrite it between derivation and emission, so the
+  recorded value is not the raw inference output either.
+- **The telemetry this arc added does not accumulate at all, and the correction is a change in
+  kind, not a narrowing.** This bullet used to say the `inferredFrom` telemetry "accumulates
+  passively, by design" — which implies it accumulates somewhere readable. It does not:
+  `[zone-agent-verdict-inferred-from]` (`e7b051eb`, the marker this entry's own sequence names) is
+  emitted via `debugLog`, gated on `ZONE_VERBOSE_LOGS`, so no ordinary run emits the line and the
+  sink never sees it. **But the question it was added to answer is answerable from the sink anyway,
+  which is the part worth recording rather than the routing miss.** `[zone-agent-final-assessment]`
+  — on `log()`, sink-visible, and predating this arc by months — already carries `inferredFrom` on
+  both of its variants, alongside a `triggeredBy` discriminant literal (`"natural_completion"` /
+  `"max_iterations"`) that supplies exactly the field the bullet above establishes is the one that
+  separates the two heuristic mechanisms. `inferredFrom` and `triggeredBy` together, both already
+  reaching the sink, answer it cleanly. So this arc added a `debugLog`-gated marker duplicating,
+  less accessibly, information a `log()`-routed marker was already recording: the gap was never in
+  the instrumentation, it was in not checking what was already instrumented. One real wart does
+  survive in the sink-visible marker — its two variants name the same value differently
+  (`verificationReason` on the natural-completion variant, `finalVerificationReason` on the
+  max-iterations one), so a sink query grouping on either name silently drops half the records.
 - The new patch template's "lead with a single line that would work as a commit subject"
   instruction is confirmed unpinned by any test, not merely un-added: a repo-wide sweep during the
   commit that introduced it found zero references to the phrase anywhere in the test suite, and
@@ -2708,18 +2746,32 @@ condensed worked example forward from the three the old templates carried (`27c5
   back with nothing net-applied) was carried forward condensed, in free-form prose rather than its
   old bulleted shape, because nothing else in the prompt taught that specific case.
 
-**Bucket, against the document's own usage.** Item 58 is again the closest shape: several of these
-sub-facts individually resemble other buckets in isolation (the FINAL ASSESSMENT gate has a
-specified fix, unbuilt — closer to Actionable now on its own; the missing baseline is closer to
-Blocked on data on its own) but the entry as a whole specifies no single fix with nothing left to
-learn, which is what the bucket decision is actually about. **Bucketed Neither**, each sub-fact's
-real shape kept visible in its own bullet rather than flattened to match the label.
+**Bucket, re-decided after the first bullet closed rather than inherited.** The two sub-facts that
+used to pull toward other buckets are both gone: the FINAL ASSESSMENT gate is built (`5d01d27a`),
+and the "missing baseline" that read as Blocked on data was a wrong premise, not a data wait — the
+baseline is derivable from a sink-visible marker that already exists. What remains is three
+recorded structural facts with no fix proposed between them: a telemetry-shape finding, a routing
+finding, and an unpinnable model-behavior instruction. That is Neither's own definition met
+directly, not on balance — a stronger fit than before, by the same reasoning item 58 supplies.
+**Stays Neither.**
 
-**Where the code lives:** `assembleAgentSystemPrompt`'s summary selector and `buildPatchSummary`
-are in `agentLoop.ts`, immediately followed by the still-`answerOnly`-only FINAL ASSESSMENT block.
-`inferredFrom` is computed and now logged in `deriveVerdict.ts`. The four commits'
-own test changes are in `agentLoop.prompts.test.ts`, `agentLoop.brevity.test.ts`, and
-`deriveVerdict.test.ts`.
+**Heading unchanged, deliberately, and the convention checked rather than assumed.** A
+`— partially closed` suffix would be redundant here: this heading's own second clause ("and what
+they left open") already carries that signal, which no other partially-closed entry's heading does.
+Checked while deciding it, because it is easy to assume otherwise: the suffix is **not** tied to a
+bucket. Five headings carry it — items 12, 18, and 36 sit in Actionable now, item 1 in Blocked on
+data, and item 2 in Neither. Three of five sharing a bucket is a coincidence of those three, not a
+rule the document follows, so nothing about this entry's bucket argues for or against the suffix.
+The footnote under the snapshot is where partial status is tracked mechanically, and this entry is
+added to it.
+
+**Where the code lives:** `assembleAgentSystemPrompt`'s summary selector, `buildPatchSummary`, and
+the FINAL ASSESSMENT block that now shares the selector's own two-disjunct condition are all in
+`agentLoop.ts`. `inferredFrom` is computed in `deriveVerdict.ts` and logged from there via
+`debugLog`; the sink-visible `[zone-agent-final-assessment]` is emitted from
+`runCompletion/composer.ts` through `loopTelemetry.ts`'s own wrapper. The four commits' own test
+changes are in `agentLoop.prompts.test.ts`, `agentLoop.brevity.test.ts`, and
+`deriveVerdict.test.ts`; `5d01d27a`'s are in `agentLoop.prompts.test.ts`.
 
 ## 62. Line-anchoring the segmentation walk would fix mid-line and in-string markers, not item 2, at a measured cost
 
@@ -3023,11 +3075,123 @@ nothing between quotes.
 **Where the code lives:** the message is in `apply_patch`'s scope-handling branch,
 `toolExecutor.ts`, in the `not_found` case.
 
+## 69. The max-iterations wrapup asks for a verification tag with no archetype awareness at all
+
+**What it is:** the second surface of the defect item 61's first bullet closed. When the iteration
+loop exhausts, `runAgentLoopScoped` appends a final no-tool assessment message asking for a
+`[ZONE_VERIFICATION: <reason>]` tag. That request is gated on a **locally recomputed** `answerOnly`
+— derived from `isAnswerOnlyPlan(input.executionPlan)` at the wrapup site itself, mirroring the
+system-prompt call site's own derivation — and on nothing else. It never reads `archetype` or
+`planApproved`. `5d01d27a` did not touch it: that commit widened the system prompt's gate only, so
+a read-only-archetype run that exhausts its budget still gets asked, on its closing turn, for one
+of six test-outcome values.
+
+**Why the system-prompt fix cannot reach it, and why that is structural rather than an oversight.**
+The system prompt is assembled once per run, before the iteration loop opens, and is byte-stable
+across the whole run because it sits inside the Anthropic cached prefix. Any archetype-keyed prompt
+gate is therefore decided at run start. The wrapup message is a separate `role:"user"` message
+appended after the loop ends — a different string, built at a different time, from a different
+local. One gate cannot cover both.
+
+**The fix is specified, and its shape is constrained by an existing test rather than by taste.**
+Mirror the system-prompt gate: reuse the same `planApproved`-aware derivation, not the bare
+archetype field. `terminationReasonProbe.test.ts`'s CONTRAST case — *"a normal exhausted run still
+gets the verification tag instruction"* — runs with a classification whose archetype is
+`investigation` **and** a `preGeneratedPlan` carrying one real step, which `runLlmPatchFlow` turns
+into `planApproved: true`. A predicate written `planApproved`-aware leaves that test passing,
+because an approved plan with steps nets the effective archetype to undefined. A predicate written
+on the bare archetype field flips it. This is not a hypothetical: it is the one existing test that
+pins this exact message's content.
+
+**Why it is not simply applied — the coupling, which is the whole reason this is its own entry.**
+Closing this surface removes the last prompt-level demand for a tag on the max-iterations path for
+read-only runs. With no tag, `deriveVerdict` falls to `inferVerificationFromLog`, and item 70
+establishes what that returns for a run that had no write tool: `tests_failed_by_patch`. So closing
+this surface un-masks item 70 rather than completing item 61. The masking is real and load-bearing
+today, not incidental.
+
+**Bucket, against the document's own usage.** Item 59 is the matching shape: a real, verified
+structural fact whose fix is understood but whose *approach* is not settled, bucketed Neither
+explicitly because "the approach itself is still open, which is a different and more fundamental
+gap than item 57's (an approach fully specified, one parameter value deferred)." Here the deferred
+question is not a parameter but whether applying the fix is correct at all before item 70 is
+decided. That is item 59's gap, not item 57's. **Bucketed Neither.**
+
+**Where the code lives:** the wrapup message, its local `answerOnly`, and the two-armed instruction
+text are in `runAgentLoopScoped`'s post-loop max-iterations block, `agentLoop.ts`. The pinning test
+is `runLlmPatchFlow.terminationReasonProbe.test.ts`'s CONTRAST case. See item 61 for the surface
+that did close, and item 70 for what closing this one exposes.
+
+## 70. `inferVerificationFromLog` reports a broken-tests verdict for a run that had no write tool
+
+**What it is:** `inferVerificationFromLog` derives `patchApplied` from `didApplyPatch`, which
+requires a **successful** `apply_patch`, `write_file`, or `multi_edit` entry in the tool-call log. A
+read-only run is offered none of those tools by construction, so `patchApplied` is always false for
+it. Every earlier branch of the function is gated on `patchApplied` being true, so control reaches
+the bare `if (!patchApplied)` check and returns `tests_failed_by_patch` — tests failed because of
+your patch — for a run that could not have written anything. The function's own final fallthrough,
+`no_verification_attempted`, is unreachable whenever `patchApplied` is false, because that check
+returns first.
+
+**Reachable, not theoretical — the fast-paths that look like they would prevent it do not fire.**
+`finalizeRun` has two read-only fast-paths that return before `deriveVerdict` runs, both hardcoding
+`no_verification_attempted`. Both are keyed on **mode** (`isReadOnlyMode`, itself derived from
+`mode === "chat" || mode === "investigate"`), never on archetype. `agentLoop.ts` already carries a
+warning comment recording the consequence in its own words — read-only pipelines strip write tools
+but never touch mode — and every `runLlmPatchFlow` call site in `dispatch.ts` passes a patch mode
+literally. So a read-only-**archetype** run reaches `deriveVerdict` normally, and this branch with
+it.
+
+**Masked today, by the surface item 69 describes.** The max-iterations wrapup still demands a tag,
+so the model usually supplies one and the inference path is not taken. That masking is the only
+thing standing between this branch and a read-only run's recorded verdict. Closing item 69 without
+deciding this one converts a suppressed defect into a live one.
+
+**`patchValidatedByAgent` is the sibling half, re-established after `5d01d27a` rather than assumed
+closed by it.** The flag is set true whenever the post-override reason is `tests_passed`,
+`tests_skipped_no_infra`, or `tests_failed_unrelated`. Two shapes still set it true on a run that
+applied nothing, and the widening closed neither:
+- **Read-only-archetype runs on the max-iterations path**, via item 69's surviving tag demand — the
+  model picks `tests_skipped_no_infra`, nothing downstream contradicts it, and
+  `applyNoInfraVerificationOverride` cannot correct it because that override itself requires
+  `patchApplied`.
+- **Any run of any archetype that applied nothing**, which `5d01d27a` never addressed and was never
+  scoped to: a patch-archetype run whose patches all failed still receives the FINAL ASSESSMENT
+  block correctly, and can still answer with a validating value. Worth stating because the two
+  demotion paths land there too — `validatePassedClaim` with no `run_command` and a framework
+  without tests demotes `tests_passed` to `tests_skipped_no_infra`, and `validateUnrelatedClaim`
+  demotes the same way, so a *safety* demotion can produce a validated-patch flag on a run with
+  neither a patch nor a test execution.
+
+**What would close it — a decision, not data, and the candidate below is explicitly not the
+answer.** The bucket this sits in is about an observation that doesn't exist yet; nothing here is
+waiting on an observation. What is missing is a decision about what the function *should* return
+when no write tool was ever available. Returning `no_verification_attempted` for that case is a
+**candidate, recorded as an unverified inclination and not as this entry's conclusion** — it was
+suggested without the function being read, and this pass did not establish whether it is right.
+Two things a deciding pass has to weigh that the candidate does not address: `tests_failed_by_patch`
+may be load-bearing for genuine patch runs where every write failed, which is the same
+`patchApplied === false` state and is not distinguishable at this call site; and the value chosen
+feeds `patchValidatedByAgent` above, so it is not a purely cosmetic relabel.
+
+**Bucket, against the document's own usage rather than the bucket's one-line name.** Blocked on
+data is for entries waiting on an observation — items 1, 4, and 63 all wait on marker accumulation.
+This waits on a judgement, which is item 53's shape ("Why this is a decision, not a fix — the same
+shape as item 36's currency half," bucketed Neither) and item 46's ("decide either way," also
+Neither). **Bucketed Neither.**
+
+**Where the code lives:** `inferVerificationFromLog`, `validatePassedClaim`,
+`validateUnrelatedClaim`, and `applyNoInfraVerificationOverride` are all in
+`verification/classify.ts`; `didApplyPatch` is in `verification/logUtils.ts`. `patchValidatedByAgent`
+is computed in `runCompletion/deriveVerdict.ts`. The mode-keyed fast-paths and the `deriveVerdict`
+call they precede are in `runCompletion/composer.ts`; `isReadOnlyMode` and the warning comment
+naming this mode-vs-archetype split are in `agentLoop.ts`.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 68 to find out which ones still need something. No index of
+reader the trouble of reading all 70 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -3040,10 +3204,10 @@ first (6): 12, 18, 23, 36, 55, 57
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (3): 1, 4, 63
 
-**Neither — a structural fact recorded, with no fix proposed** (26): 2, 3, 5, 9, 11, 15, 17, 19,
-27, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68
+**Neither — a structural fact recorded, with no fix proposed** (28): 2, 3, 5, 9, 11, 15, 17, 19,
+27, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 69, 70
 
-Items 1, 2, 12, 17, 18, 36, and 57 are partially closed or corrected; the classification above
+Items 1, 2, 12, 17, 18, 36, 57, and 61 are partially closed or corrected; the classification above
 covers only the portion still open, not the whole entry.
 
 ---
