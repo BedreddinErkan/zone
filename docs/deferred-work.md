@@ -664,16 +664,31 @@ characterization tests mirroring `parsePatchBlocks`'s own suite (`a7f4ff03`, `5f
 case. Both sides of the eventual shared implementation are now pinned; before this, only
 `parsePatchBlocks` was.
 
-**The divergence this entry and item 18 describe is now asserted in code, not just recorded in
-prose.** Two comparison tests run `segmentApplyPatchBlocks` and `parsePatchBlocks` on the same
-input and assert the result directly — smart quotes diverge, CRLF does not. A future unification
-attempt that silently collapses the smart-quote difference now fails a test instead of shipping
-quietly. This is the ledger entry becoming executable, not just narrated.
+**The divergence this entry and item 18 used to describe is now closed — and the paragraph that
+used to sit here got what that means backward.** Two comparison tests run
+`segmentApplyPatchBlocks` and `parsePatchBlocks` on the same curly-quote input and assert
+equality — the walk's parsed block and the parser's parsed block match, field for field, because
+both now normalize smart quotes through the same shared function. A third does the same for
+CRLF, also asserting equality, which was never in dispute. **No test anywhere asserts a
+divergence, and no test currently guards against a unification silently dropping the
+`normalizeSmartQuotes` call from the shared function.** This paragraph previously claimed the
+opposite — that such a collapse "now fails a test instead of shipping quietly." It would not: a
+test that compares the two walkers against each other is structurally blind to a defect both
+sides would share after unification, since neither side would have anything independent left to
+disagree with. That absence is the finding this paragraph should have recorded the first time. A
+guard that would actually catch a silent collapse has to compare against something that doesn't
+move when the shared function changes — an external reference, not a sibling implementation.
+That's the difference between a test that survives extraction and one that goes hollow.
 
 **The extracted function's return shape is `{blocks, sqFindTotal, sqReplaceTotal}`, not a bare
-block array** — `sqFindTotal`/`sqReplaceTotal` feed four call sites downstream (self-validation
-telemetry, normalization-parity telemetry) that a `blocks`-only signature would have silently
-stopped feeding.
+block array — and the two counts have to stay separate, not just present.** They feed five read
+expressions across three downstream consumers, not four call sites: a gate check
+(`sqFindTotal + sqReplaceTotal > 0`), a mutation of a caller-supplied accumulator
+(`input.selfValidationCounts.smartQuoteFixes`), the `[zone-self-validation]` marker — which
+reports `findOccurrences`/`replaceOccurrences` independently — and the
+`[zone-apply-patch-normalization-parity]` marker, which only ever needs the boolean sum.
+`[zone-self-validation]` is the one a shared function returning a single pre-summed total would
+silently break; the parity marker would keep passing, masking the regression.
 
 **It stayed in `toolExecutor.ts`, not `fileDiff.ts`, deliberately — not an oversight of the
 candidate-home paragraph above.** `fileDiff.ts` is still verified cycle-free and is the likely
@@ -687,8 +702,59 @@ inside `segmentApplyPatchBlocks`'s own segmentation loop, not a separate later m
 way `normalizeEol`/`stripReadFilePrefix` are. Fixed in its own commit rather than bundled into a
 documentation-only pass, matching `90d39f5a`'s precedent for comment-only corrections. The
 citation alongside it, pointing at `normalizeSmartQuotes`'s own definition in `toolExecutor.ts`,
-was checked separately and found still accurate — the extraction added `segmentApplyPatchBlocks`
-as a new function elsewhere; it never moved `normalizeSmartQuotes`.
+was checked separately and found accurate at the time — the extraction added
+`segmentApplyPatchBlocks` as a new function elsewhere; it did not move `normalizeSmartQuotes`.
+**That citation is stale now, timed precisely rather than just flagged.** `9f6539e4`, the commit
+that checked and confirmed it, is a direct ancestor of `cd02808c` — confirmed with
+`git merge-base --is-ancestor`, not assumed from commit order alone. `cd02808c` is item 18's own
+convergence fix, and it is the commit that created the shared smart-quotes module and moved
+`normalizeSmartQuotes` into it — roughly an hour after `9f6539e4`, on the same day. The citation
+was correct when checked and has not been revisited since. It should now point at
+`normalizeSmartQuotes`'s real home, the shared smart-quotes utility module both
+`segmentApplyPatchBlocks` and `parsePatchBlocks` import — not `toolExecutor.ts`.
+
+**What a unification pass would actually need, established this pass, not assumed from the
+extraction alone.** The two loop bodies are byte-for-byte identical apart from the count capture
+and accumulation — every other difference (the entry-coercion form, the block-array type name,
+declaration order, the doc comment) is incidental or a documentation-transfer obligation, not a
+behavioral one. Only `toolExecutor.ts`'s own call site needs the counts; `hashPatchBlocks`
+consumes blocks alone. A wrapper preserving both existing public signatures — the shared core
+returns `{blocks, sqFindTotal, sqReplaceTotal}`, `parsePatchBlocks` returns just `.blocks` — would
+leave every caller and all three characterization/telemetry test files passing unedited.
+
+**Four tests would need deliberate attention under a wrapper-preserving unification — precise
+about which assertion in each, not the whole test going bad:**
+- *"item 2's known misparse: an embedded matched FIND/REPLACE pair…"* — its own
+  `segmentApplyPatchBlocks(embedded).blocks` vs `parsePatchBlocks(embedded)` comparison line goes
+  tautological; the test's primary pinning assertion (the absolute expected block shape) is
+  unaffected.
+- *"the divergence from parsePatchBlocks the ledger recorded is closed: both normalize smart
+  quotes now"* — its two field-by-field comparison lines go tautological; its four absolute-value
+  assertions (the parsed shape, both smart-quote counts, the parser's own output) are unaffected.
+- *"CRLF is NOT a divergence axis…"* — wholly tautological; its only assertion is the
+  walker-to-walker comparison.
+- *"double smart quotes converge to the same hash between the two paths…"* and *"single smart
+  quotes converge too…"* — each test's own comparison line goes tautological, but each test's
+  second assertion — a hash comparison between a curly-quote patch and its straight-quote
+  equivalent — does not compare the two walkers to each other. It compares output against an
+  independently meaningful reference, one with nothing left to normalize, and stays honest after
+  unification because that reference doesn't move when the shared function does. **That shape —
+  assert against an external reference, not a sibling implementation — is the repair model for
+  the other three**, already present in this suite, not invented for this pass.
+
+The doc comment on `segmentApplyPatchBlocks` is the only place in code that documents item 2's
+known defect and has to be carried across to wherever the shared function ends up living.
+
+**Two downstream entries this would touch, recorded here rather than edited there.** Item 55's
+header-comment problem would get worse in kind, not degree: its sentence contrasts "the applier's
+walk" against "`hashPatchBlocks` (`agentLoop.ts`)" as two paths capable of disagreeing, and after
+unification there is one path — the contrast the sentence is built on stops existing, and item
+55's own prescribed fix (rescope the claim to two of three normalization classes) would not repair
+that. Item 2's ordering-constraint paragraph describes a hazard — line-anchoring one walker
+without the other — that unification would make structurally impossible rather than merely
+something to avoid by discipline; the paragraph isn't inaccurate today (there are still two
+walkers), so it stays as it is until this entry actually closes, at which point it becomes a
+dependent edit.
 
 **Still open — nothing has been unified.** The extraction makes the eventual fix provable rather
 than hopeful; it does not itself close this entry.
