@@ -27,6 +27,7 @@ const toolExecutorMock = vi.hoisted(() => ({
 const mocks = vi.hoisted(() => ({
   createChatCompletion: vi.fn(),
   debugLog: vi.fn(),
+  log: vi.fn(),
 }));
 
 vi.mock("./factory.js", () => ({
@@ -39,7 +40,7 @@ vi.mock("./factory.js", () => ({
 vi.mock("../tools/toolExecutor.js", () => toolExecutorMock);
 
 vi.mock("../utils/logger.js", () => ({
-  log: vi.fn(),
+  log: mocks.log,
   debugLog: mocks.debugLog,
   errorLog: vi.fn(),
 }));
@@ -84,6 +85,7 @@ beforeEach(() => {
   resetToolExecutorMock(toolExecutorMock);
   mocks.createChatCompletion.mockReset();
   mocks.debugLog.mockReset();
+  mocks.log.mockReset();
 });
 
 afterEach(() => {
@@ -128,14 +130,24 @@ describe("F.1: truncated tool_use args → TOOL_ARGS_TRUNCATED, not {} → READ_
     expect(toolResultMsg?.content).not.toContain("MISSING_ARG");
     expect(toolResultMsg?.content).not.toContain("READ_REQUIRED");
 
-    // Telemetry fired
-    const parseFailed = mocks.debugLog.mock.calls.find(
+    // Telemetry fired via the sink-reaching `log`, not the gated `debugLog`
+    const parseFailed = mocks.log.mock.calls.find(
       (c: unknown[]) => c[0] === "[zone-tool-args-parse-failed]",
     );
     expect(parseFailed).toBeDefined();
     const payload = JSON.parse(parseFailed![1] as string) as Record<string, unknown>;
     expect(payload.tool).toBe("apply_patch");
     expect(payload.argsLen).toBeGreaterThan(0);
+    // The raw-argument preview is gone — this payload reaches a sink that persists to
+    // disk, and a preview of unparsed apply_patch/write_file args is file content.
+    expect(payload.argsPreview).toBeUndefined();
+    // Classified by message shape only; this fixture's truncation cuts off mid-string.
+    expect(payload.parseErrorClass).toBe("unterminated_string");
+    // Exact key set, not just the three fields above individually: a future field added
+    // alongside a correctly-computed parseErrorClass (e.g. a raw message carried for
+    // "more detail") would pass every assertion above unnoticed. This one fails loudly
+    // and names the new key, forcing that decision to be deliberate instead of silent.
+    expect(Object.keys(payload).sort()).toEqual(["argsLen", "parseErrorClass", "tool"]);
   });
 
   it("does NOT trigger TOOL_ARGS_TRUNCATED for legitimately empty args (ternary else path)", async () => {
@@ -167,7 +179,7 @@ describe("F.1: truncated tool_use args → TOOL_ARGS_TRUNCATED, not {} → READ_
     });
 
     // No TOOL_ARGS_TRUNCATED telemetry — the ternary else took over
-    const parseFailed = mocks.debugLog.mock.calls.find(
+    const parseFailed = mocks.log.mock.calls.find(
       (c: unknown[]) => c[0] === "[zone-tool-args-parse-failed]",
     );
     expect(parseFailed).toBeUndefined();

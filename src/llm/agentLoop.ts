@@ -1508,6 +1508,21 @@ export function classifyFailure(
   return "unknown";
 }
 
+// Classifies a JSON.parse SyntaxError by shape only. V8 embeds a snippet of the actual
+// (possibly sensitive) input in one message shape ("Unexpected token 'x', "<snippet>"...
+// is not valid JSON") — this payload reaches a sink that persists to disk, and the input
+// may be file content, so the return value MUST be a closed label set: one of the four
+// literals below, or "other". Nothing derived from `message` — no substring, no transform,
+// never the message itself — may ever be returned. No test can enforce this (a test only
+// knows the labels it asserts); this comment is the actual guard.
+function classifyJsonParseError(message: string): string {
+  if (message.startsWith("Unterminated string")) return "unterminated_string";
+  if (message.startsWith("Unexpected end of JSON input")) return "unexpected_end";
+  if (message.startsWith("Unexpected token")) return "unexpected_token";
+  if (message.startsWith("Expected")) return "expected_token";
+  return "other";
+}
+
 /** S.2.1: map SelfCorrectTrigger to a compact reason string for JSONL diagnostics. */
 export function applyPatchRetryReason(trigger: SelfCorrectTrigger | string): string {
   switch (trigger) {
@@ -4245,12 +4260,12 @@ Example:
           parsedArgs = argsString
             ? (JSON.parse(argsString) as Record<string, unknown>)
             : {};
-        } catch {
+        } catch (err) {
           _argsParseFailed = true;
-          debugLog("[zone-tool-args-parse-failed]", JSON.stringify({
+          log("[zone-tool-args-parse-failed]", JSON.stringify({
             tool: name,
             argsLen: argsString.length,
-            argsPreview: argsString.slice(0, 120),
+            parseErrorClass: classifyJsonParseError(err instanceof Error ? err.message : String(err)),
           }));
         }
         if (_argsParseFailed) {
