@@ -846,25 +846,68 @@ Characterization tests: `toolExecutor.patchBlocksCharacterization.test.ts` and
 `agentLoop.patchBlocksCharacterization.test.ts`. `hashPatchBlocks` stays in `agentLoop.ts`;
 `parseBlocks`, `DiffView`'s separate third parser, stays in `DiffView.tsx`, unaffected.
 
-## 17. `apply_patch`'s delimiter ambiguity is self-inflicted — `multi_edit` shows the alternative
+## 17. `apply_patch`'s delimiter ambiguity is self-inflicted, and a structured argument would sidestep it — corrected
 
 **What it is:** `apply_patch` packs a FIND string and a REPLACE string into one delimited blob
-and parses them back apart with a walk — which is what makes item 2 possible at all. `multi_edit`
-takes `find` and `replace` as separate JSON arguments; the model can put anything in either
-string, including literal marker text, with no delimiter to confuse it with, because there is
-no delimiter.
+and parses them back apart with a walk — which is what makes item 2 possible at all. A
+structured `blocks: [{find, replace}]` argument would sidestep this: a JSON array has no
+delimited text for a walk to mis-split in the first place.
 
-**Why this is worth recording as its own option, not just a note under item 2:** it's additive
-— a `blocks: [{find, replace}]` structured argument wouldn't change how any patch that works
-today parses, since nothing about the existing delimited format would need to be removed to add
-it. This is the only option under item 2's "what would close it" that requires no
-model-facing behavior change to any patch that isn't already hitting the defect.
+**This entry's precedent was wrong, and the correction changes what "additive" means here —
+corrected below, not softened.** The original text cited `multi_edit` as the precedent for a
+`blocks` array. Re-verified against `multi_edit`'s real schema: `{files: string[], find:
+string, replace: string, wholeWord: boolean|null}` — one find/replace pair applied across N
+files, the transpose of `apply_patch`'s own shape (N pairs against one file), not the same idea
+at a different fidelity. No tool in this repo takes a `blocks: [{find, replace}]` array. The
+real in-repo precedent for a nested structured argument is `apply_patch`'s own `scope`
+parameter — already an object with its own properties, already living in the exact schema a
+`blocks` argument would join.
 
-**What would close it:** adding a structured `blocks` argument to `apply_patch`'s schema —
-unbuilt, unscoped beyond this observation.
+**"Additive, no model-facing behavior change" does not survive the schema — checked directly,
+not assumed.** `apply_patch` is declared `strict: true`, with every property in `required` and
+optionality expressed only as a nullable union (`intent`/`scope` are `["string"/"object",
+"null"]`, still required). Adding `blocks` the same way makes every `apply_patch` call carry
+both `patch` and `blocks`, one of them null — a model-facing change to every call, not just the
+ones hitting the defect.
 
-**Where the code lives:** `multi_edit`'s schema (the precedent) and `apply_patch`'s schema
-(what would change) are both in `toolDefinitions.ts`.
+**The cost framing was unstated, and measuring it reverses the assumption a reader would
+otherwise bring.** Measured on a representative three-block same-file patch from this repo's own
+source: the structured form's full tool-call-arguments JSON is 724 characters against the
+delimited form's 752 — about 3.7% *smaller*, not larger. The delimited patch text is already a
+JSON string value on the wire, so both forms pay identical escaping; the marker text's own
+newlines cost more (33 JSON-encoded characters per block) than the structured form's scaffolding
+(25). Cost is not an argument against structured blocks — if anything, a mild argument for.
+
+**Only replacing the delimited form closes item 2 — the load-bearing finding for anyone
+planning this work.** If `patch` stays accepted alongside a new `blocks` argument,
+`segmentPatchBlocks` still runs on it, and a model that emits the delimited form with an
+embedded matched pair still gets the silent wrong-content write item 2 describes. A coexisting
+`blocks` argument makes the defect *avoidable*, not *absent* — it would rewrite item 2 into "a
+safe alternative exists; the unsafe path is still reachable," not close it.
+
+**`multi_edit` does not subsume `apply_patch`, for two independent reasons — recorded so "just
+deprecate apply_patch" isn't proposed as the smaller path.** Match semantics differ: `multi_edit`
+replaces every occurrence with no uniqueness check, while `apply_patch` requires FIND to match
+exactly once and rejects ambiguity. And arity is transposed: a single-file, three-region edit
+needs three separate `multi_edit` calls — the tool's own description says "call once per
+region" — versus one `apply_patch` call covering all three (its own description says the
+opposite: never split same-file edits across calls). Collapsing the two tools would mean
+rebuilding `apply_patch` inside `multi_edit`, not removing a redundant tool.
+
+**What would close it:** adding a structured `blocks` argument to `apply_patch`'s schema,
+replacing the delimited `patch` string rather than sitting alongside it (see above —
+coexistence doesn't close item 2). Not yet scoped as a design: whether to replace outright
+depends on data this repo doesn't have yet — see item 63.
+
+**Bucket, against the document's own usage, not the one-line definition alone.** Items 58 and 59
+are the matching shape: a real, verified structural fact, with real options and real costs, but
+a decision that depends on data this repo doesn't have yet — the bucket's own working definition
+is whether a fix is specified *and ready*, nothing left to learn, and that's not this entry's
+state. **Bucketed Neither.**
+
+**Where the code lives:** `multi_edit`'s schema (not the precedent) and `apply_patch`'s own
+`scope` parameter (the real one) are both in `toolDefinitions.ts`, alongside `apply_patch`'s own
+schema (what would change).
 
 ## 18. The applier's normalization was never mirrored into the dedup hash — partially closed, smart quotes resolved
 
@@ -2730,27 +2773,128 @@ case, both in `agentLoop.ts`; the four telemetry markers are emitted in `toolExe
 `hashPatchBlocks` and `RunEnvelope.failureHistory` are in `agentLoop.ts` and
 `src/api/diskRunEnvelope.ts` respectively.
 
+## 63. Whether to build item 17's structured argument is blocked on tool-argument parse-failure data that doesn't exist yet
+
+**What it is:** item 17's own correction found the format-ambiguity defect (item 2) can only
+close by replacing `apply_patch`'s delimited `patch` string with a structured argument, not by
+adding one alongside it. That trade moves the escaping/malformation risk from a measured parser
+defect (item 2's own trigger, characterized and pinned) to an unmeasured one: a structured
+argument's own JSON encoding, on a path where nothing enforces the schema server-side — `strict`
+is dropped entirely in the Anthropic tool-schema translation, so a malformed or truncated tool
+call reaches Zone's own `JSON.parse`, not a provider-side rejection.
+
+**The instrument this decision needs already exists and is now switched on.**
+`[zone-tool-args-parse-failed]` fires whenever a tool call's arguments fail to parse, carrying
+`tool` (which tool), `argsLen` (the raw argument string's length), and `parseErrorClass` (a
+closed five-value label classifying the parse failure by shape — never the raw message, which
+can itself embed a snippet of the input for one failure shape). Previously emitted via
+`debugLog`, gated on `ZONE_VERBOSE_LOGS`, so it never reached the marker sink in ordinary use —
+fixed in `03ee0b7e`, now on `log()`, reaching the sink like every other accumulating marker.
+
+**No data has accumulated yet — recorded here so the question isn't re-asked before the marker
+has had time to fire.** The fix landed this session; nothing has run against it in the wild.
+
+**What would close it — a threshold, a review point independent of hitting it, and what a null
+result means; items 1 and 4, the precedent for a data-wait entry, establish only the first of
+these three, and only one of them does even that.** Checked directly before writing: item 4
+states a threshold ("roughly 10-20 real records," explicitly marked as an order-of-magnitude
+estimate, not a defensible rate); item 1 states none — its own "what would close it" is a
+choice among three design options, not a record count. Neither states a review point
+independent of the threshold, and neither states what a null or near-null result would mean.
+This entry follows item 4's threshold directly rather than inventing a new number with no
+better basis, and establishes the other two conventions fresh, since no existing entry has them:
+
+- **Threshold:** roughly 10-20 `apply_patch`-specific `[zone-tool-args-parse-failed]` records —
+  item 4's own magnitude, reused rather than re-derived, since there's no stronger basis in this
+  repo for a different number. Enough to tell "doesn't happen" from "happens sometimes," not a
+  rate precise enough to schedule against.
+- **Review point, independent of the threshold:** review this entry after roughly 50 real runs
+  of ordinary dogfooding — the same scale as item 4's own 45-run sample, the only run-count
+  figure this repo has actually measured — whether or not the threshold above has been reached
+  by then. A threshold with no checkpoint has no way to distinguish "still accumulating" from
+  "won't be answered this way, at least not on this marker alone."
+- **What a null or near-null result means, stated explicitly so a future pass doesn't read zero
+  records as "still waiting":** if the marker has fired rarely or not at all by the review
+  point, that is not a stalled entry — it is the answer. It would mean tool-argument parse
+  failures are rare enough in ordinary use that the encoder-risk side of item 17's tradeoff is
+  small, which is itself the input item 17's decision needs, not an absence of one.
+
+**Where the code lives:** the marker's emission site is in `agentLoop.ts`'s tool-call parsing
+loop; `classifyJsonParseError` is defined just above it. See item 17 for the decision this data
+feeds.
+
+## 64. Closed — `hashPatchBlocks` collapsed every no-patch `apply_patch` failure to the same dedup hash
+
+**What it was:** `hashPatchBlocks` read `String(args?.patch ?? "")`, so any `apply_patch` call
+missing the `patch` argument hashed the empty string — a fixed value regardless of which other
+arguments were present. Live today, not hypothetical: `apply_patch`'s schema declares `patch`
+required, but `strict` is dropped entirely for Anthropic (see item 63), so nothing server-side
+stops a model from omitting it. `toolExecutor.ts`'s own handler falls through the same way,
+reaching the real, reachable "No valid ... blocks found in patch" rejection — fixed text, so
+`classifyFailure` maps every instance to the identical `apply_patch_no_valid_blocks` trigger
+regardless of file or intent. Two unrelated no-patch failures on the same file were
+indistinguishable from a genuine retried patch.
+
+**Exactly two comparison sites existed, confirmed by a repo-wide sweep, not assumed from one.**
+`antiThrash.ts`'s `detectFailureStall` (Verdict 1) and `agentLoop.ts`'s `detectRepeatedFailure`,
+which feeds `CoachingController`'s primary coaching decision directly. Swept every
+`patchHash`-to-`patchHash` comparison in the repo three independent ways (direct `===`/`!==`,
+every occurrence of the field, the shared verdict string) — same two sites each time. No third
+site in a worker, subagent, or extension path: subagents recurse through these same functions
+rather than reimplementing them.
+
+**Fixed (`7eb1ffaa`):** `hashPatchBlocks` now returns a sentinel (`NO_PATCH_HASH_SENTINEL`,
+`"no_patch"`) for an empty/absent patch instead of hashing it — an honest "nothing to compare"
+value, not a manufactured hash, scoped to `patch === ""` specifically so non-empty garbage text
+(which already hashed distinctly) is unaffected. Both comparison sites exclude it explicitly.
+Mutation-tested independently: removing either site's guard fails only that site's own test, not
+the other's.
+
+**A prior claim on this same investigation was wrong, corrected here rather than left
+standing.** The establish that found this collision also claimed `antiThrash.detectFailureStall`'s
+`trigger_repeated_3x` fallback would still catch three or more same-file no-patch failures "on
+trigger alone." Re-reading the actual code found that verdict has its own precondition —
+`last.trigger !== prev.trigger` — which a consecutive run of identical-trigger failures never
+satisfies, at any count. The fallback only reaches a narrower, interleaved shape (the trigger
+recurring with a *different* trigger between occurrences).
+
+**The behavior outcome, once that correction is accounted for.** `detectRepeatedFailure`'s own
+fallback (`same_trigger_repeated_2x`) has no such precondition — it fires at exactly two records
+regardless — and `CoachingController.routeFailure` doesn't branch on which repeat reason fired;
+both route to the identical `apply_patch_repeated_failure_same_file` trigger. So the primary
+coaching path is unaffected in timing or content by this fix. `antiThrash`'s own reflection
+nudge, for the realistic straight-run case, now produces no signal at all — a real, deliberate
+change, but not a loss of coaching: the model still gets coached at the same iteration, just via
+the mechanism that was always going to catch it.
+
+**Where the code lives:** the sentinel is defined in `antiThrash.ts`, imported by `agentLoop.ts`
+(the safe direction — `agentLoop.ts` already imports values, not just types, from
+`antiThrash.js`). `hashPatchBlocks` and `detectRepeatedFailure` are in `agentLoop.ts`;
+`detectFailureStall` is in `antiThrash.ts`. See item 18 for the dedup hash's other, unrelated
+open defect — normalization-class divergence, not this collision, approaching from the opposite
+direction (missed detections there, a false one here).
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 62 to find out which ones still need something. No index of
+reader the trouble of reading all 64 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (31): 6, 7, 8, 10, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 56
+**Closed** (32): 6, 7, 8, 10, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 56, 64
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (7): 12, 17, 18, 23, 36, 55, 57
+first (6): 12, 18, 23, 36, 55, 57
 
-**Blocked on data** — closing requires an observation that doesn't exist yet (2): 1, 4
+**Blocked on data** — closing requires an observation that doesn't exist yet (3): 1, 4, 63
 
-**Neither — a structural fact recorded, with no fix proposed** (22): 2, 3, 5, 9, 11, 15, 19, 27,
-38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62
+**Neither — a structural fact recorded, with no fix proposed** (23): 2, 3, 5, 9, 11, 15, 17, 19,
+27, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62
 
-Items 1, 2, 12, 18, 36, and 57 are partially closed or corrected; the classification above
+Items 1, 2, 12, 17, 18, 36, and 57 are partially closed or corrected; the classification above
 covers only the portion still open, not the whole entry.
 
 ---
