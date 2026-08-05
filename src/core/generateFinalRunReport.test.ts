@@ -1,5 +1,20 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
+// Only createLLMClient is overridden — ApiKeyError/ProviderRequestError/PlanRefusalError stay
+// real. Exactly one test reaches this call ("no static short-circuit for
+// natural_completion..."); its assertion (`r.title` truthy) is satisfied identically whether
+// construction throws or the real AI path succeeds, so a synchronous throw here changes
+// nothing about what the test exercises.
+vi.mock("../llm/factory.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../llm/factory.js")>();
+  return {
+    ...actual,
+    createLLMClient: vi.fn(() => {
+      throw new Error("createLLMClient should not be called in this test");
+    }),
+  };
+});
+
 const baseInput = {
   task: "Add a button to the patients page.",
   contextFilesMeta: [{ path: "src/a.tsx", reason: "context" }],
