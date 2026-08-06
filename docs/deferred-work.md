@@ -181,12 +181,28 @@ direction across real occurrences is answerable once enough
 routed through `log()` instead of `debugLog()` (fixed earlier); now it's purely a matter of
 accumulation.
 
-**What would close it:** roughly 10-20 real records. At 3 occurrences across 45 distinct runs
+**What would close it:** roughly 10-20 real records. Re-derived against the sink directly:
+**3 occurrences, falling in 2 distinct runs, out of 50 runs recorded**
 (`[zone-apply-patch-retry]`'s `reason: "marker_imbalance"` records, already on `log()`
-throughout) — a rate of 4.4%, but **n=3: an order-of-magnitude estimate only, not a
-measurement with a defensible confidence interval.** The resulting ~230-450-run projection is
-a sense of scale, not planning input — three events don't support a rate precise enough to
-schedule against, and could be off by a large multiple in either direction.
+throughout). Deduplication does not touch this figure — the three records are three separate
+iterations, and the count is identical raw or collapsed (item 73). Still **n=3: an
+order-of-magnitude estimate only, not a measurement with a defensible confidence interval.** The
+projection it supports — very roughly 170-330 further runs at the observed occurrence rate — is a
+sense of scale, not planning input; three events don't support a rate precise enough to schedule
+against, and could be off by a large multiple in either direction.
+
+**The rate this entry used to state, 4.4%, failed in a different way from every other sink figure
+corrected across this document, and which way matters to anyone re-checking them.** The others
+were right for the wrong key — a raw count where a deduplicated one was meant. This one was never
+a key problem: 3 over 45 is 6.7%, and 4.4% is not a rounding of it. The arithmetic was never done
+as written. **Its origin is identifiable rather than unknown**, which is why it is recorded here
+instead of quietly replaced: 2 over 45 is 4.44%, and 2 is the count of distinct *runs* carrying an
+occurrence, against 3 occurrences in total — one run fired twice, at two different iterations. The
+sentence stated an occurrence numerator and a per-run rate as though they shared a population.
+Both measures are given separately above so neither can stand in for the other; they diverge
+precisely because this trigger can repeat within a single run. A reader re-checking these figures
+against item 73's key will find this one unexplained by it — correctly, because the key was never
+involved.
 
 **Where the code lives:** nowhere yet — this is unbuilt. If the seven-site trace needs
 redoing, re-derive it starting from `[zone-apply-patch-marker-imbalance]`'s emission site,
@@ -932,10 +948,16 @@ requires replicating the transformation in `hashPatchBlocks` itself, not in the 
 "Normalize in `parsePatchBlocks`," this entry's original fix, closes exactly one of three.
 
 **Measured, with the measurement's limits stated — not assumed rare.** Smart quotes: 0
-occurrences across 24 apply_patch calls that reached the walk. A *measured* zero, not a
-structural one — the marker (`[zone-self-validation]`, `rule:"smart_quote_autofix"`) predates the
-sink's observation window by months, and its sibling rules on the same tag have 42 records in
-that same window, so the tag is live and would have recorded a hit had one occurred. Line endings
+occurrences. The zero is a *measured* zero, not a structural one — the marker
+(`[zone-self-validation]`, `rule:"smart_quote_autofix"`) predates the sink's observation window by
+months, and its sibling rules on the same tag carry **48 deduplicated records** (54 raw — item 73)
+in that window, so the tag is live and would have recorded a hit had one occurred. That figure was
+written as 42 and is corrected here by re-derivation, not by dedup alone: the sink has accumulated
+since. **The denominator this paragraph originally paired with the zero — "24 apply_patch calls
+that reached the walk" — is not re-derivable from the current sink and is dropped rather than
+restated.** No marker in it yields 24 on any key, and the population it named was never
+instrumented until the pass below created the record that counts it; the zero stands on the
+sibling-rule evidence above, which does not depend on that number. Line endings
 and the read-file prefix had **no telemetry of any kind** until the pass described below —
 "rare" for those two was a guess borrowed from the one class that happened to be instrumented,
 not a measurement.
@@ -1207,13 +1229,21 @@ option, would have discarded the target-file site's signal with nothing replacin
 **Second: "neither reaches the sink regardless... both are `debugLog`" was false, not just
 imprecise.** The stdout shield's `appendMarkerRecord` classifies a line as sink-eligible by tag
 pattern, never by which logging function emitted it — so both `debugLog` sites were, and the
-surviving one still is, sink-eligible under `ZONE_VERBOSE_LOGS=1`. The sink currently shows zero
-records for all four related tags — both former `debugLog` sites, the unrelated third, and the
-`log`-based parity marker alike — but that is because the sink has no records after 2026-08-01
-while the parity marker (`563d5b63`) landed 2026-08-02: a stale sink, not structural silence. The
-`log`-based marker reading zero alongside the `debugLog` ones is the proof — if the logging
-function were the reason, a `log` site would read differently from a `debugLog` one, and it
-doesn't.
+surviving one still is, sink-eligible under `ZONE_VERBOSE_LOGS=1`.
+
+**The evidence this paragraph originally offered has been overtaken, and both of its sentences are
+thrown out rather than annotated.** It said the sink showed zero records for all four related tags,
+and explained that away as a stale sink holding nothing after 2026-08-01 while the parity marker
+landed 2026-08-02 — then treated the shared zero as the proof, on the reasoning that a `log` site
+reading the same as a `debugLog` one rules the logging function out. Neither sentence is true now.
+The sink holds 1928 records dated after 2026-08-01 and its newest is dated 2026-08-05, so it is not
+stale; and the tags do not read zero — `[zone-apply-patch-eol]`, a `debugLog` site, carries **two
+deduplicated records**, and the `log`-based parity marker carries **two** as well (item 73's key).
+The shared zero was never strong evidence anyway: two silent tags are equally consistent with
+either explanation. **What replaces it is stronger, and confirms the same conclusion positively
+rather than by absence** — a `debugLog` site and a `log` site both carry records, in the same
+window, at the same count. Sink-eligibility demonstrably does not track which logging function
+emitted the line, which is what this paragraph set out to establish.
 
 **What landed (`c839399b`):** the CR-only site deleted outright. The target-file site left
 untouched — it answers a question nothing else does, and the parity marker has no equivalent of
@@ -3225,14 +3255,17 @@ Math.min(Math.floor(args.context_lines), 10))`, floor and ceiling both literal a
 any runtime state — and it additionally floors non-integers for a property the schema already
 types as `integer`, meaning the handler does not trust the declared type, not merely the absent
 bounds. It also sits on the most-invoked tool in the sink, while the two properties this entry
-did name sit on a tool with no recorded invocations at all. **The census this paragraph first
-carried counted sink records, not calls, and is corrected here rather than annotated:** the sink
-double-logs (item 73), so every raw per-tool figure was inflated. Deduplicated, the complete
-tool-call record is 72 calls across five tools — `search_in_files` 33, `read_file` 28,
-`run_command_readonly` 6, `apply_patch` 4, `run_command` 1. The ordinal claim survives and so does
-the zero: `search_in_files` is still the most-invoked by a clear margin, `read_background_output`
-appears nowhere in the record, and the string "background" appears on no line of the sink at all.
-Only the absolute numbers were wrong.
+did name sit on a tool with no recorded invocations at all. **This census has now been corrected
+twice, and the second correction is the instructive one.** It first stated raw sink records as
+calls. The first correction deduplicated them and gave 72 across five tools — still too high,
+because it keyed on exact record identity, which only catches duplicate pairs written in the same
+millisecond and misses the ones a millisecond or two apart (item 73). Re-derived on that entry's
+corrected key, the complete tool-call record is **64 calls across five tools** — `search_in_files`
+30, `read_file` 23, `run_command_readonly` 6, `apply_patch` 4, `run_command` 1. The ordinal claim
+survived both corrections and so did the zero: `search_in_files` is still the most-invoked by a
+clear margin, `read_background_output` appears nowhere in the record, and the string "background"
+appears on no line of the sink at all. Only the absolute numbers were ever wrong, and they were
+wrong in the same direction both times — too high, never too low.
 
 **It is still not worth building, and that is the actual finding.** By this entry's own
 resolution of `max_bytes` above, `context_lines` dies the same death: its ceiling is already in
@@ -3414,6 +3447,17 @@ Deduped, they break down as: **12** `tests_skipped_no_infra` with `patchValidate
 rather than deduped gives 15/4/3/2 — the dedup matters because the natural-completion payload
 embeds a `summaryPreview`, so identical payloads are near-certainly the same run recorded twice
 rather than two runs agreeing byte-for-byte.)
+
+**Both breakdowns were re-derived against item 73's corrected key and both are unchanged — but one
+of the four shapes cannot be found by the obvious query, and that is worth stating so a later pass
+does not "correct" a right number into a wrong one.** Only two of the three `tests_passed` records
+carry `verificationReason`. The third has no such field at all: it is the single `max_iterations`
+record counted below, and on that path the payload names the field `finalVerificationReason`
+instead. A re-derivation keying on `verificationReason` alone finds 2, concludes the entry
+overstated by one, and is wrong. That the same value travels under two different field names
+depending on which termination path emitted it is not incidental to this entry — it is another
+instance of exactly the collapse this entry is about, on the field the entry uses to read the
+others.
 
 **Those twelve are not one behaviour, and this is the same defect class item 61's second bullet
 records — a new instance, now with records behind it instead of a trace.** `inferredFrom` reports
@@ -3642,30 +3686,64 @@ out-of-glob script alone.
 
 ## 73. Every entry that counts sink records is counting a number inflated by duplication
 
-**What it is:** the marker sink carries duplicate records at scale. Measured across the whole file
-rather than sampled: 3747 records, 2933 distinct raw lines, **814 exact duplicates**, and 814
-distinct lines that appear more than once. It is not confined to one marker or one run — in an
-examined fifteen-second window every marker present appears exactly twice, including
-`[zone-agent-tool-call]`, `[zone-apply-patch-normalization-parity]`,
-`[zone-apply-patch-syntax-validation]`, and a lone `run_command` tool-call among them.
+**Carry the direction, not the figures — the figures have been revised once already and may be
+again.** Every key tried against this sink so far *under*-merges: each one fails to recognise some
+duplicate pairs and leaves them counted separately. That has a consequence worth memorising
+because it survives any further revision of the numbers below — **a count taken off this sink is
+an upper bound on real events, never a lower one.** A later correction can only move a figure
+down. So conclusions that hold at the current count — a zero, an ordinal ranking, a threshold that
+is *not* met — stay safe under revision; the only kind at risk is one needing a count to be *at
+least* something, and this document currently states none. **The signal that this direction claim
+has broken is a re-derivation producing MORE events than a prior one.** If that ever happens the
+under-merge assumption failed somewhere, and every count in this document needs re-deriving from
+scratch rather than adjusting.
 
-**The duplicates are one emission recorded twice, not two events.** For the parity marker the
-pairs are identical in every field except the timestamp, with deltas of zero and one millisecond.
-A delta of zero rules out two independent calls for anything whose work takes measurable time.
+**This entry was corrected by the process it describes, one commit after it landed.** It said the
+sink miscounts, then carried a miscount of its own — it named 814 as the duplication when 814 is a
+floor — and that was found only because a later pass re-derived the document's counts, a pass that
+ran only because this entry existed. Recorded because it bounds what the entry is good for: a
+measurement of an instrument, taken with that same instrument, is not trustworthy as a point
+value. It is trustworthy as a direction, which is why the direction is stated first.
+
+**What it is:** the marker sink carries duplicate records at scale. Measured across the whole file
+rather than sampled: 3747 records, 2933 distinct raw lines, and 814 lines that appear more than
+once — always exactly twice, never three times. **814 is a floor, not the duplication.** It counts
+only pairs whose two copies carry the identical timestamp; duplicates written a millisecond or two
+apart are byte-different and invisible to it. Grouping instead on name, run, and payload while
+ignoring the timestamp, the gaps within each group are sharply bimodal: **814 at zero, 158 at
+1-2ms, 11 at 3-10ms**, then a genuine tail — 13 under a second, 68 under a minute, 33 beyond one.
+The cluster at or under 10ms is one emission recorded twice; the tail is real repetition. The
+duplication is therefore about **983 pairs, not 814** — the exact-identity figure was roughly 16%
+short.
+
+**The key: group on name, run and payload, and collapse records within 2ms.** Bounded in both
+directions by measurement rather than judgement. Over-merging is ruled out empirically — collapsing
+within 2ms and within 10ms return the *identical* count for `[zone-agent-tool-call]`, so nothing
+genuine sits in that band; widening to a full second drops the count further, which is where real
+repeats begin being eaten. 2ms sits on a plateau, not a slope. Under-merging is the error that
+actually occurred, twice, and it is the safe direction — see the top of this entry.
+
+**The duplicates are one emission recorded twice, not two events.** For the parity marker the pairs
+are identical in every field except the timestamp, with deltas of zero and one millisecond. A delta
+of zero rules out two independent calls for anything whose work takes measurable time, and the
+1-2ms pairs are the same shape one tick later.
 
 **What it costs, concretely, and why "divide by two" is not the fix.** Any count taken straight off
-the sink is inflated, and not by a clean factor. Deduplicating `[zone-agent-tool-call]` by
-timestamp and payload gives `search_in_files` 33 from 60 raw, `read_file` 28 from 48,
-`run_command_readonly` 6 from 12, `apply_patch` 4 from 8, `run_command` 1 from 2. Sixty to
-thirty-three is not a halving — some records are singletons — so a blanket halving is wrong in the
-other direction. Every rate, denominator, and threshold comparison in this document computed from
-raw record counts is suspect until recomputed on deduplicated data.
+the sink is inflated, and not by a clean factor. On the corrected key `[zone-agent-tool-call]` gives
+**64 calls from 130 raw records** — `search_in_files` 30 from 60, `read_file` 23 from 48,
+`run_command_readonly` 6 from 12, `apply_patch` 4 from 8, `run_command` 1 from 2. Sixty to thirty is
+a halving here but twenty-three from forty-eight is not, and some records are singletons, so a
+blanket halving is wrong in the other direction. Every rate, denominator, and threshold comparison
+in this document computed from raw counts is suspect until recomputed on this key.
 
-**Two entries were already affected, and both are corrected rather than flagged.** Item 18's
-normalization-parity denominator was four records and is two calls, which halves the number it
-compares against its own 10-20 threshold. Item 65's tool-call census stated raw record counts as
-calls; its ordinal claim and its zero for `read_background_output` both survived, its absolute
-figures did not.
+**Which entries were affected, and what survived.** Item 65's tool-call census has now been
+corrected twice — raw to exact-identity to this key — and its ordinal claim and its zero survived
+both. Item 18's normalization-parity denominator is two calls, which is the same answer under
+either key and needed no second correction. Item 61 carried a claim that the sink held no recent
+records at all, now false by 1928 records, and the conclusion it supported came out stronger. Item
+4's rate was wrong for a reason that has nothing to do with this entry — stated there, so nobody
+re-checking it against this key concludes the key was applied inconsistently. Item 70's counts were
+re-derived and are unchanged.
 
 **Its own entry rather than a paragraph inside either, on item 11's precedent.** Item 11 records a
 standing structural fact about the sink as an *instrument* — that its data accumulates only
