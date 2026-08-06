@@ -2,11 +2,11 @@
  * Characterization tests for parsePatchBlocks / hashPatchBlocks (ledger item 16; exporting
  * parsePatchBlocks and asserting on it directly here closes item 20).
  *
- * These pin what the code does TODAY, byte for byte — including the known defects — so a
- * later extraction of the shared FIND/REPLACE segmentation (agentLoop.ts's parsePatchBlocks vs
- * toolExecutor.ts's inline walk) is provably behavior-preserving. Not a fix. Where current
- * behavior looks wrong (the item-2 misparse, unnormalized smart quotes), the test pins it
- * anyway with a comment saying so.
+ * These pin what the code does TODAY, byte for byte — including the known defects — so the
+ * extraction of the shared FIND/REPLACE segmentation (agentLoop.ts's parsePatchBlocks and
+ * toolExecutor.ts's segmentApplyPatchBlocks, both now wrapping the one shared segmenter) was
+ * provably behavior-preserving. Not a fix. Where current behavior looks wrong (the item-2
+ * misparse), the test pins it anyway with a comment saying so.
  *
  * parsePatchBlocks is now exported and asserted on directly below — every
  * parsePatchBlocks-specific claim is a plain `expect(parsePatchBlocks(x)).toEqual(...)` or a

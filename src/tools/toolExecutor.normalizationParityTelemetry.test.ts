@@ -1,11 +1,16 @@
 /**
- * Detection-only telemetry for ledger item 18: the applier's walk normalizes smart quotes,
- * CRLF, and read_file's pasted line-number prefix before matching, but hashPatchBlocks
- * (agentLoop.ts) hashes the raw, unnormalized patch text — so two patches the applier treats
- * as identical can get different dedup keys. [zone-apply-patch-normalization-parity] records
- * one combined payload per apply_patch call that reaches block-level normalization, so all
- * three classes get a denominator (blockCount) instead of only the one (smart quotes) that
- * happened to have telemetry already. Nothing here changes parsing, matching, or hashing.
+ * Detection-only telemetry for ledger item 18. Segmentation and smart-quote normalization are
+ * now shared: hashPatchBlocks (agentLoop.ts) reaches them through parsePatchBlocks, which wraps
+ * the same segmenter the applier uses, so the dedup key reflects normalized quotes once a patch
+ * parses into at least one block — a patch that produces none still hashes the raw string. What
+ * the applier still does alone, per matched block at match time, is strip read_file's pasted
+ * line-number prefix and normalize CRLF — hashPatchBlocks has no equivalent step for either. So
+ * two patches differing only in line endings or in that prefix are identical to the applier and
+ * still get different dedup keys. [zone-apply-patch-normalization-parity] records one combined
+ * payload per apply_patch call that reaches block-level normalization, so all three classes get
+ * a denominator (blockCount); smartQuoteChanged no longer indicates an active dedup mismatch —
+ * the class it measures is shared now — while the other two fields still do. Nothing here
+ * changes parsing, matching, or hashing.
  */
 import fs from "node:fs";
 import os from "node:os";
