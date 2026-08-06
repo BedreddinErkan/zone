@@ -216,14 +216,26 @@ export interface ToolResult {
   contentLength?: number;
   metadata?: Record<string, unknown>;
   /** Repo-relative paths of files this call left with a PERSISTING content change —
-   *  not merely an attempted one. multi_edit: files with replacement count > 0
-   *  (excludes 0-replacement / NOT-FOUND files). apply_patch/write_file: set on
-   *  their success returns; write_file also sets it on one success:false return —
-   *  a new-file write whose post-write rollback failed to unlink, leaving the
-   *  broken file on disk. Rollback returns that DID restore/remove content omit
-   *  this field: the file ends up byte-identical to its pre-call state, so nothing
-   *  persisted. undefined means the tool doesn't report staging at all — not a
-   *  claim that nothing changed. */
+   *  not merely an attempted one, and not merely an attempted match. All three
+   *  writers compare the exact bytes about to be persisted against the exact
+   *  bytes read before the call: multi_edit excludes 0-replacement/NOT-FOUND
+   *  files AND no-op replacements (find produces byte-identical output, including
+   *  after EOL re-encoding — a mixed-EOL file's homogenization to its dominant
+   *  style is a real persisted change even when the replaced text itself didn't
+   *  change); apply_patch/write_file do the same on their success returns, plus
+   *  write_file always includes a brand-new file's path even when its content is
+   *  empty (existence changed, which a content comparison alone can't see);
+   *  write_file also sets it on one success:false return — a new-file write whose
+   *  post-write rollback failed to unlink, leaving the broken file on disk.
+   *
+   *  Two different values both mean "nothing persisted" and they are not
+   *  interchangeable: `[]` is a reported, confirmed no-op — the call ran, compared
+   *  the bytes, and staged nothing. `undefined` is not reported through this field
+   *  at all — either the tool doesn't participate in this protocol, or (on a
+   *  rollback that restored/removed content) the "back to original" state is
+   *  expressed by restoration, not by this field. Rollback returns that DID
+   *  restore/remove content omit this field for that reason: the file ends up
+   *  byte-identical to its pre-call state, but that fact isn't carried here. */
   filesStaged?: string[];
 }
 
@@ -2765,7 +2777,7 @@ export async function executeTool(
           return {
             success: true,
             output: `Patch staged: ${blocks.length} block(s) in ${filePath}`,
-            filesStaged: [filePath],
+            filesStaged: outputContent !== original ? [filePath] : [],
           };
         }
         const restoreOutcome = attemptRestore(input?.stagingFiles, abs, original, filePath);
@@ -2787,7 +2799,7 @@ export async function executeTool(
       return {
         success: true,
         output: `Patch staged: ${blocks.length} block(s) in ${filePath}`,
-        filesStaged: [filePath],
+        filesStaged: outputContent !== original ? [filePath] : [],
       };
     }
 
@@ -2983,7 +2995,7 @@ export async function executeTool(
           return {
             success: true,
             output: `File staged: ${filePath} (${content.length} chars)`,
-            filesStaged: [filePath],
+            filesStaged: contentToWrite !== originalContent ? [filePath] : [],
           };
         }
       }
@@ -3052,7 +3064,9 @@ export async function executeTool(
         output: fileExists
           ? `Staged edit to ${filePath} (${content.length} chars) — applied on run completion`
           : `Created ${filePath} (${content.length} chars)`,
-        filesStaged: [filePath],
+        // !fileExists is always a persisting change even for empty content — the file's
+        // existence changed, which contentToWrite/originalContent (both "") can't see.
+        filesStaged: !fileExists || contentToWrite !== originalContent ? [filePath] : [],
       };
     }
 
@@ -3495,6 +3509,11 @@ export async function executeTool(
           } else if (eolAnalysis.dominant === "cr") {
             newContent = newContent.replace(/\n/g, "\r");
           }
+          // Compare the FINAL (post-reencode) value against the raw pre-write read, not the
+          // LF-normalized intermediate: a mixed-EOL file's homogenization to `dominant` is a
+          // real persisted byte change even when the replacement text itself was a no-op, and
+          // comparing pre-reencode would silently miss it (under-report).
+          const contentChanged = newContent !== content;
           const wr = stagedWrite(input?.stagingFiles, abs, newContent, repoPath, toolName);
           if (wr === "escape") {
             return {
@@ -3503,7 +3522,7 @@ export async function executeTool(
               filesStaged,
             };
           }
-          filesStaged.push(filePath);
+          if (contentChanged) filesStaged.push(filePath);
         }
 
         perFile.push({ path: filePath, count });

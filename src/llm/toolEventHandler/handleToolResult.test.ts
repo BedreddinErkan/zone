@@ -271,6 +271,14 @@ describe("handleToolResult", () => {
       expect(ctx.filesModified.size).toBe(0);
     });
 
+    it("does NOT add filePath to filesModified when filesStaged is [] — a reported, confirmed no-op (distinct from absent)", async () => {
+      const ctx = makeCtx();
+      const deps = makeDeps();
+      const result = { output: "ok", success: true, filesStaged: [] };
+      await handleToolResult("apply_patch", { filePath: "src/noop.ts" }, "c1", result, ctx, deps);
+      expect(ctx.filesModified.size).toBe(0);
+    });
+
     it("adds filePath to filesModified when filesStaged is populated even though success is false (write_file new-file unlink-failure shape)", async () => {
       const ctx = makeCtx();
       const deps = makeDeps();

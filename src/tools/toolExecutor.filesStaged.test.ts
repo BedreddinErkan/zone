@@ -108,6 +108,71 @@ describe("apply_patch filesStaged", () => {
     expect(readRepoFile("src/target.js")).toBe(original);
     expect(result.filesStaged).toBeUndefined();
   });
+
+  it("FIND text equal to REPLACE text on an existing file → filesStaged is [] (comparison confirms no-op, not a rejection)", async () => {
+    writeRepoFile("src/noop.ts", "const x = 1;\n");
+    const result = await executeTool(
+      "apply_patch",
+      { filePath: "src/noop.ts", patch: "--- FIND ---\nconst x = 1;\n--- REPLACE ---\nconst x = 1;", intent: "modify", scope: null },
+      repoPath, undefined, {}
+    );
+    expect(result.success).toBe(true);
+    expect(result.filesStaged).toEqual([]);
+  });
+
+  it("a real FIND/REPLACE change on an existing file still sets filesStaged to [filePath]", async () => {
+    writeRepoFile("src/realchange.ts", "const x = 1;\n");
+    const result = await executeTool(
+      "apply_patch",
+      { filePath: "src/realchange.ts", patch: "--- FIND ---\nconst x = 1;\n--- REPLACE ---\nconst x = 2;", intent: "modify", scope: null },
+      repoPath, undefined, {}
+    );
+    expect(result.filesStaged).toEqual(["src/realchange.ts"]);
+  });
+
+  // duplicate_import_statement is the one baseline-diffable smell checkSemanticSmells
+  // detects (astSyntaxValidator.ts): baselineDetected is true when beforeContent already
+  // has the identical duplicate, so a fixture that never touches the imports keeps the
+  // smell "pre-existing" across the edit either way — exercising site A specifically,
+  // not the ordinary fall-through (site B) the two tests above already cover.
+  it("pre-existing-smell branch (site A), no-op patch elsewhere in the file → filesStaged is []", async () => {
+    const original = 'import a from "dup";\nimport b from "dup";\nconst x = 1;\n';
+    writeRepoFile("src/smellnoop.ts", original);
+    const result = await executeTool(
+      "apply_patch",
+      { filePath: "src/smellnoop.ts", patch: "--- FIND ---\nconst x = 1;\n--- REPLACE ---\nconst x = 1;", intent: "modify", scope: null },
+      repoPath, undefined, {}
+    );
+    expect(result.filesStaged).toEqual([]);
+  });
+
+  it("pre-existing-smell branch (site A), a real change elsewhere in the file → filesStaged is [filePath]", async () => {
+    const original = 'import a from "dup";\nimport b from "dup";\nconst x = 1;\n';
+    writeRepoFile("src/smellreal.ts", original);
+    const result = await executeTool(
+      "apply_patch",
+      { filePath: "src/smellreal.ts", patch: "--- FIND ---\nconst x = 1;\n--- REPLACE ---\nconst x = 2;", intent: "modify", scope: null },
+      repoPath, undefined, {}
+    );
+    expect(result.filesStaged).toEqual(["src/smellreal.ts"]);
+  });
+
+  // Regression guard for the comparison point itself: analyzeLineEnding's `dominant` is
+  // always crlf/lf/cr, never mixed-preserving, so the re-encode step homogenizes every
+  // line ending to one style — a real persisted byte change even when the matched FIND
+  // text and its REPLACE are identical. outputContent-vs-original (the ground-truth
+  // comparison, unchanged from the first implementation pass) must still report this file
+  // as changed; a comparison that stopped at the pre-replace text would miss it.
+  it("mixed-EOL file, textually no-op FIND/REPLACE → filesStaged still [filePath] (EOL homogenization is a real persisted change)", async () => {
+    const original = "a\r\nb\nc\r\n";
+    writeRepoFile("src/mixedeol.ts", original);
+    const result = await executeTool(
+      "apply_patch",
+      { filePath: "src/mixedeol.ts", patch: "--- FIND ---\nb\n--- REPLACE ---\nb", intent: "modify", scope: null },
+      repoPath, undefined, {}
+    );
+    expect(result.filesStaged).toEqual(["src/mixedeol.ts"]);
+  });
 });
 
 describe("write_file filesStaged", () => {
@@ -179,6 +244,74 @@ describe("write_file filesStaged", () => {
     // check itself was inconclusive.
     expect(result.filesStaged).toBeUndefined();
     logSpy.mockRestore();
+  });
+
+  it("byte-identical content on an existing file → filesStaged is []", async () => {
+    const original = "const x = 1;\n";
+    writeRepoFile("src/wfnoop.ts", original);
+    const result = await executeTool(
+      "write_file", { filePath: "src/wfnoop.ts", content: original }, repoPath, undefined, { stagingFiles: new Map() }
+    );
+    expect(result.filesStaged).toEqual([]);
+  });
+
+  it("pre-existing-smell branch (site C), byte-identical content → filesStaged is []", async () => {
+    const original = 'import a from "dup";\nimport b from "dup";\nconst x = 1;\n';
+    writeRepoFile("src/wfsmellnoop.ts", original);
+    const result = await executeTool(
+      "write_file", { filePath: "src/wfsmellnoop.ts", content: original }, repoPath, undefined, { stagingFiles: new Map() }
+    );
+    expect(result.filesStaged).toEqual([]);
+  });
+
+  it("pre-existing-smell branch (site C), a real change elsewhere → filesStaged is [filePath]", async () => {
+    const original = 'import a from "dup";\nimport b from "dup";\nconst x = 1;\n';
+    const changed = 'import a from "dup";\nimport b from "dup";\nconst x = 2;\n';
+    writeRepoFile("src/wfsmellreal.ts", original);
+    const result = await executeTool(
+      "write_file", { filePath: "src/wfsmellreal.ts", content: changed }, repoPath, undefined, { stagingFiles: new Map() }
+    );
+    expect(result.filesStaged).toEqual(["src/wfsmellreal.ts"]);
+  });
+
+  // Regression guard for the specific defect a raw content-vs-originalContent comparison
+  // would have: write_file has its own CRLF-preserving re-encode (contentToWrite, separate
+  // from apply_patch's) that fires only when fileExists and the on-disk file's dominant
+  // style is crlf/cr. An LF-only submission that re-encodes to exactly the on-disk bytes
+  // must be excluded — comparing the raw submission would have over-reported here.
+  it("existing CRLF file, model submits identical text with LF endings → filesStaged is [] (contentToWrite re-encodes to match, not the raw submission)", async () => {
+    const originalCRLF = "const line1 = 1;\r\nconst line2 = 2;\r\n";
+    writeRepoFile("src/crlf.ts", originalCRLF);
+    const lfSubmission = "const line1 = 1;\nconst line2 = 2;\n";
+    const result = await executeTool(
+      "write_file", { filePath: "src/crlf.ts", content: lfSubmission }, repoPath, undefined, { stagingFiles: new Map() }
+    );
+    expect(result.filesStaged).toEqual([]);
+  });
+});
+
+describe("multi_edit filesStaged — no-op narrowing", () => {
+  it("find === replace on an existing file → path excluded from filesStaged", async () => {
+    writeRepoFile("src/menoop.ts", "const x = 1;\n");
+    const result = await executeTool(
+      "multi_edit", { files: ["src/menoop.ts"], find: "const x", replace: "const x" }, repoPath, undefined, {}
+    );
+    expect(result.filesStaged).toEqual([]);
+  });
+
+  // Mirrors apply_patch's mixed-EOL regression test above, and is the scenario the fix's
+  // own first implementation pass got backwards: comparing the pre-reencode intermediate
+  // (normalizedContent) against the post-replace text before the two EOL-reassignment
+  // lines would say "no change" here, while the actual write (which runs those same two
+  // lines before stagedWrite) does homogenize the lone LF to CRLF — a real persisted
+  // change the pre-reencode comparison would silently miss.
+  it("mixed-EOL file, find === replace matches but text is a no-op → path still included (EOL homogenization is a real persisted change)", async () => {
+    const original = "a\r\nb\nc\r\n";
+    writeRepoFile("src/memixed.ts", original);
+    const result = await executeTool(
+      "multi_edit", { files: ["src/memixed.ts"], find: "b", replace: "b" }, repoPath, undefined, {}
+    );
+    expect(result.filesStaged).toEqual(["src/memixed.ts"]);
   });
 });
 
