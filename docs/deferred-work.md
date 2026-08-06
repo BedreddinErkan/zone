@@ -3034,7 +3034,7 @@ the mechanism that was always going to catch it.
 open defect — normalization-class divergence, not this collision, approaching from the opposite
 direction (missed detections there, a false one here).
 
-## 65. Fifteen tool properties are "fake-optional" (nullable + required) — investigated and left as-is
+## 65. Fifteen tool properties are "fake-optional" (nullable + required) — the split was scoped to that set, and the strongest bounds candidate sits outside it
 
 **What it is:** a nullable-typed property (`type: ["X","null"]`) listed in `required` still
 obligates the model to emit a key on the Anthropic path (the default provider) —
@@ -3095,16 +3095,24 @@ the fifteen already had this kind of constraint before this investigation touche
 item 66 makes a fourth.
 
 **The remaining eleven, split against the real code rather than reasoned from the names — two
-qualify, nine genuinely don't.**
-- **`read_background_output.max_bytes`** — the handler already clamps unconditionally to
-  `Math.min(Math.max(1, input.maxBytes ?? 8192), 65536)` (`backgroundProcessRegistry.ts`), a
-  fixed floor and ceiling independent of any runtime state. `minimum: 1, maximum: 65536` would
-  match the handler's own bound exactly.
-- **`read_background_output.since_offset`** — a weaker, one-sided candidate. A negative byte
-  offset is never semantically valid, so `minimum: 0` is defensible — but there's no fixed
-  maximum to pair with it: the handler compares it against `proc.ringWritten` and `RING_CAP`
-  (`256*1024`), both runtime state the schema can't know at definition time. Worth a floor, not
-  a full range.
+qualify, nine genuinely don't. Both of the two are resolved now, and neither resolution was a
+schema addition.**
+- **`read_background_output.max_bytes` — resolved as not worth building.** The handler clamps
+  unconditionally to `Math.min(Math.max(1, input.maxBytes ?? 8192), 65536)`
+  (`backgroundProcessRegistry.ts`), a fixed floor and ceiling independent of any runtime state,
+  so `minimum: 1, maximum: 65536` would match it exactly. What that misses: the parameter's own
+  description already carries the bound in prose — "Max bytes to return. null = 8192. Cap
+  65536." — and `65536` has no named constant anywhere in `src/`, existing in production exactly
+  twice, as the clamp literal and as that sentence. A schema literal would be a third
+  uncoordinated copy of an unnamed bound, telling the model nothing it is not already told.
+  Documentation-only, and the documentation already exists.
+- **`read_background_output.since_offset` — the premise was false, and what it framed as an
+  unclaimed tightening was a live defect.** This entry read the handler's comparisons against
+  `proc.ringWritten` and `RING_CAP` and concluded that a floor was merely "defensible." Measured
+  against the compiled registry rather than read: neither of those comparisons is a floor, and
+  the branch that actually consumed a caller-supplied offset had no lower bound at all. A
+  negative offset returned empty output under `success: true` and `truncated: false` while data
+  existed. That is item 72, and it closed as a handler fix, not a schema addition.
 - **Free-form paths/strings, no closed set (six):** `run_command.cwd` and
   `run_command_background.cwd` (same shape — any valid relative or absolute path),
   `run_command_background.label` (any human-readable string), `list_files.pattern` and
@@ -3116,15 +3124,59 @@ qualify, nine genuinely don't.**
   doesn't apply the same way; already `additionalProperties: false` with its own `required`
   list, as constrained as an object-typed parameter gets under this framing.
 
-Where a property has a closed value set or a fixed shape — the two above — constraining it
-tightens the contract on every provider at zero cost. Where it doesn't — the other nine —
-nothing here proposes a fix; the split is the answer, not a direction to chase further.
+**The claim that closed this split — that constraining the two above "tightens the contract on
+every provider at zero cost" — is thrown out rather than annotated.** Neither turned out to be
+worth constraining, and the reason had nothing to do with providers: both bounds were already in
+the parameter's own prose. The provider half would not have survived scrutiny either, because
+reaching the model and being enforced are different things and the table above establishes only
+the first. Anthropic drops `strict` entirely and Responses forces `strict: null`, so a bounds
+keyword is advisory on both — but `read_background_output` declares `strict: true` and the Chat
+Completions path spreads the request wholesale, so `strict` does survive there, and whether
+OpenAI enforces numeric bounds under it is **not establishable from this repo**. Where a property
+has no closed set — the other nine — nothing here proposes a fix either.
+
+**The principle this entry states is about a class; the survey it ran covered one set.** "`enum`
+and bounds constraints … survive translation to every path exactly like `required` does" is a
+claim about schema keywords, true of any property on any tool. What was actually surveyed is the
+fifteen fake-optional (nullable and listed in `required`) properties this entry is named for.
+`search_in_files.context_lines` is nullable but **not** in `required: ["pattern", "fileGlob"]` —
+genuinely optional, therefore never among the fifteen, therefore never considered here or
+anywhere else in this document. It is a stronger bounds candidate than either of the two above on
+every axis this entry uses. Its handler fixes both bounds — `Math.max(0,
+Math.min(Math.floor(args.context_lines), 10))`, floor and ceiling both literal and independent of
+any runtime state — and it additionally floors non-integers for a property the schema already
+types as `integer`, meaning the handler does not trust the declared type, not merely the absent
+bounds. It also sits on the most-invoked tool in the sink, while the two properties this entry
+did name sit on a tool with no recorded invocations at all: the sink's complete tool-call record
+is 130 calls across five tools — `search_in_files` 60, `read_file` 48, `run_command_readonly` 12,
+`apply_patch` 8, `run_command` 2 — and `read_background_output` appears nowhere in it, nor does
+the string "background" appear anywhere in the file.
+
+**It is still not worth building, and that is the actual finding.** By this entry's own
+resolution of `max_bytes` above, `context_lines` dies the same death: its ceiling is already in
+prose — "Lines of context before/after each match. Default 2. Max 10." — `10` has no named
+constant either, and `maximum: 10` would be the third copy. Two candidates on opposite sides of
+the fake-optional boundary resolve identically, for a reason that never once referenced
+fake-optionality. The boundary this entry surveyed was orthogonal to the question it asked.
+Nothing here proposes a fix; the scope mismatch is the answer, not a direction to chase further.
+
+**Whether any model has ever sent an out-of-range value for any of these is not answerable, and
+that is absence of instrumentation rather than absence of events.** Neither clamp emits anything:
+`read()` contains no logging call at all, and the `context_lines` clamp has none either. The only
+clamp-named marker anywhere in `src/` is `[zone-effort-clamped]` — CLI effort resolution, not a
+tool argument — and it has zero sink records too. The three validation-named markers that do have
+records are `[zone-self-validation]` (whose rule is `read_before_patch`), its run summary, and
+`[zone-apply-patch-syntax-validation]`; none of the three is tool-argument validation. This
+document's thirteenth pattern is the standing warning against reading that silence as a
+behavioural fact.
 
 **Where the code lives:** `translateTools` is in `convertParams.ts`; the `strict: null` forcing
 is in `responsesConvertParams.ts`; the fifteen properties and their handler normalization are in
 `toolDefinitions.ts`/`toolExecutor.ts`; `read_background_output`'s clamp is in
 `backgroundProcessRegistry.ts`; the `strict: false` precedent and its comment are in
-`toolDefinitions.ts` (`search_in_files`) and `toolCallIdentifyingArg.ts`.
+`toolDefinitions.ts` (`search_in_files`) and `toolCallIdentifyingArg.ts`; `context_lines`'s
+schema is in `toolDefinitions.ts` and its clamp in `search_in_files`'s handler, `toolExecutor.ts`.
+See item 72 for the defect the `since_offset` candidate turned out to be sitting on.
 
 ## 66. Closed — `apply_patch.intent` gained an enum
 
@@ -3418,17 +3470,105 @@ from this commit, separately from the earlier commit that first routed them to t
 description are in `toolDefinitions.ts`; the sweep and the legibility test are in
 `agentLoop.prompts.test.ts`. See item 62 for the anchoring proposal this was found while measuring.
 
+## 72. Closed — a negative `since_offset` returned empty output with `truncated: false`, indistinguishable from "caught up"
+
+**What it was:** `read()`'s offset chain had four branches — a null offset clamped to the
+retained window; an offset older than that window clamped the same way and marked
+`truncated = true`; an offset at or past `proc.ringWritten` returning empty early; and everything
+else falling through to `from = input.sinceOffset` unchanged. That last branch had no lower bound.
+A realistic negative value never reaches the second branch, whose condition is
+`input.sinceOffset < proc.ringWritten - RING_CAP` — with `RING_CAP` at 256 KB that fires only
+below roughly `-262134` for a short-lived process — and never satisfies the third, so it lands on
+the unguarded one.
+
+**"Indistinguishable from caught up" is measured, not asserted.** Against the real pre-fix module
+driving a real ten-byte process, `since_offset: -5` returned
+`{"success": true, "output": "", "newOffset": 10, "eof": true, "exitCode": 0, "truncated": false}`
+— and the genuine caught-up call, `since_offset: 10` fed back from the previous read's
+`new_offset`, returned the same six fields in the same order with every value identical, as did
+`since_offset: 999999`. Nothing in the result separates "your offset was nonsense and ten bytes
+were dropped" from "you are up to date." The control at `since_offset: 0` returned
+`{"success": true, "output": "ABCDEFGHIJ", "newOffset": 10, "eof": true, "exitCode": 0,
+"truncated": false}`, so the bytes were there to be returned throughout.
+
+**Mechanism, traced with real numbers rather than assumed.** `from = -5` gives
+`length = proc.ringWritten - from = 15`; `readRingTail` then computes
+`startWritten = 10 - 15 = -5` and `startOffset = -5 % 262144 = -5`, because JS's `%` preserves the
+dividend's sign instead of wrapping. `Buffer.subarray` reads a negative start as an offset from
+the end (`262144 - 5 = 262139`), which exceeds the end index `10`, and slice semantics return
+length 0 rather than throwing. Silent at every layer.
+
+**Found while measuring item 65's two `read_background_output` candidates**, and its own entry
+rather than a bullet inside item 65 on the precedent item 66 already set with the same parent: a
+fix found while investigating that survey, in a different layer from what the survey proposed,
+landing as its own commit. Item 71's carve-out from item 62 is the nearer comparison in time and
+passes the same test — this is not item 65's recipe, which was a schema keyword — but it fits
+less well than it looks. Item 62's proposal survived item 71 untouched, whereas this measurement
+**refuted item 65's own sentence** about the parameter. That half is not carved out; it is
+corrected in place in item 65, per this document's convention of deleting a false sentence rather
+than annotating it.
+
+**Fixed (`b5b603ef`):** the negative case folded into the branch that already existed for an
+offset outside the retained window — `input.sinceOffset < 0 || input.sinceOffset <
+proc.ringWritten - RING_CAP` — so it reuses that branch's clamp and its `truncated = true` rather
+than introducing a new path. Chosen over returning an error because `ReadResult`'s success variant
+carries `newOffset: proc.ringWritten` unconditionally on every return path including the broken
+one: a correct recovery position was always available whichever fix landed, so what a clamp buys
+that an error does not is the current call's own data.
+
+**`truncated` was swept before that branch was reused, because reusing it sets a flag the model
+sees.** It is serialized straight into the tool result with no surrounding prose; the tool's own
+`description` never mentions it; the system prompt's only `read_background_output` mention never
+mentions it; no text anywhere says "ring" or "wrap"; and the same field name is already reused
+generically in the same handler file for `run_command`, `read_file`, and a shared text-truncation
+helper. Generic — so reusing the branch attaches no false explanation to a true flag.
+
+**The reasoning that justified the clamp's exact shape was false, and catching it before it
+reached the commit message is the part worth keeping.** The reused branch clamps to
+`Math.max(proc.ringWritten - cap, proc.ringWritten - RING_CAP, 0)`, and the argument for reusing
+that expression rather than writing a bare `0` was that a bare zero would be wrong for a
+long-running process whose ring had already wrapped. No such process exists. `cap` is
+`Math.min(…, 65536)` and `RING_CAP` is `262144`, so `cap < RING_CAP` holds for every possible
+`max_bytes`, the `RING_CAP` term can never be the maximum, and the three-term expression always
+reduces to the two-term one. A bare zero converges as well, for a sharper reason: `from` is dead
+the moment `length` is computed from it — `readRingTail` receives `proc.ringWritten` and `length`,
+never `from` — and the following `if (length > cap)` re-derives everything from `cap` alone.
+Swept across every combination of twelve `ringWritten` values and six `max_bytes` values: no
+divergence anywhere. **No test can distinguish the two shapes**, which is a structural fact about
+the function, not a fixture that was too slow to write. The reuse is a consistency choice — one
+clamp expression, in the branch that already had it — and nothing more. A future reader choosing
+between the two shapes should choose on that basis and no other.
+
+**No matching defect on the high side, established by measurement before symmetry was assumed.**
+An offset at or past `proc.ringWritten` returns empty with `truncated: false`, which is correct:
+nothing exists past the monotonic write count. The test covering it is a regression pin for
+behaviour that was already right, not evidence of anything this commit fixed, and no mutation
+exercises it.
+
+**Coverage, and what it still does not cover.** The module had no vitest coverage at all before
+this commit — no test file referenced it, and the one file that did, a spawn-and-poll script under
+`__tests__/`, carries no `.test.` segment in its name and so falls outside vitest's `include` glob
+entirely. The three tests added here spawn a real ten-byte process, because the module offers no
+seam to construct a process state without a real `start()`. They cover the offset chain only: ring
+wrap, kill escalation, group-kill, and the per-run concurrency cap remain covered by that
+out-of-glob script alone.
+
+**Where the code lives:** the offset chain, the clamp, and `readRingTail` are in
+`backgroundProcessRegistry.ts`; the tool result's `truncated` pass-through is in
+`read_background_output`'s handler, `toolExecutor.ts`; the tests are in
+`backgroundProcessRegistry.test.ts`. See item 65 for the survey this was found while measuring.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 71 to find out which ones still need something. No index of
+reader the trouble of reading all 72 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (35): 6, 7, 8, 10, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 71
+**Closed** (36): 6, 7, 8, 10, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 71, 72
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (5): 12, 18, 23, 36, 57
@@ -3438,8 +3578,8 @@ first (5): 12, 18, 23, 36, 57
 **Neither — a structural fact recorded, with no fix proposed** (28): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 69, 70
 
-Items 1, 2, 12, 17, 18, 36, 57, 61, and 62 are partially closed or corrected; the classification
-above covers only the portion still open, not the whole entry.
+Items 1, 2, 12, 17, 18, 36, 38, 57, 61, 62, and 65 are partially closed or corrected; the
+classification above covers only the portion still open, not the whole entry.
 
 ---
 
