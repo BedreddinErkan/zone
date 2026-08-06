@@ -2773,7 +2773,7 @@ the FINAL ASSESSMENT block that now shares the selector's own two-disjunct condi
 changes are in `agentLoop.prompts.test.ts`, `agentLoop.brevity.test.ts`, and
 `deriveVerdict.test.ts`; `5d01d27a`'s are in `agentLoop.prompts.test.ts`.
 
-## 62. Line-anchoring the segmentation walk would fix mid-line and in-string markers, not item 2, at a measured cost
+## 62. Line-anchoring the segmentation walk would fix mid-line and in-string markers, not item 2 — the benefit survived measurement, the cost accounting did not
 
 **What it is:** while investigating item 2's prescribed fix, line-anchoring the FIND/REPLACE
 segmentation walk was measured directly rather than assumed. It does not close item 2 (see item
@@ -2785,23 +2785,59 @@ existing anchoring rule (the counter's line-anchored recount in `toolExecutor.ts
 - **A marker appearing inside a quoted string inside REPLACE content:** same truncation today,
   same fix under anchoring.
 
-**What it would cost, each measured, not estimated:**
-- **A prompt contradiction.** Two places in `agentLoop.ts` show the model INDENTED markers (two
-  leading spaces): `PROVIDER_AGNOSTIC_HARDENING` (gated to `HARDENING_TARGETS` —
-  `gpt-4o`/`gpt-4o-mini`/`gpt-4-turbo` — or when no model is specified in options) and the
-  `apply_patch_marker_imbalance` coaching message, which is **not gated at all** and reaches any
-  model immediately after an imbalance failure. Strict anchoring against that example's own
-  indentation produces zero blocks — turning one failure into a second, prompt-caused one.
-- **Characterization-test inversions**, present on both sides
-  (`toolExecutor.patchBlocksCharacterization.test.ts` and
-  `agentLoop.patchBlocksCharacterization.test.ts`): the `FF`-shaped test ("two consecutive FIND
-  markers: the second marker's literal text is absorbed...") and the CRLF test ("CRLF line
-  endings... survive unparsed") both need deliberate inversion. CRLF specifically resists a
-  drop-in fix: normalizing CRLF globally before anchoring (the repo's own existing rule) breaks
-  the CRLF test one way; preserving CRLF and anchoring only the marker line breaks it a different
-  way (a stray trailing `\r` survives into `find`). The existing one-newline trim on block
-  content interacts with anchoring choices too — whether it survives a rewrite decides whether
-  the "trim strips exactly one newline, no more" test also needs inversion.
+**The benefit is real and stronger than this entry originally stated — re-measured against the
+compiled walk, not re-read.** Both shapes produce silently **corrupt** content, not merely
+truncated content, and that distinction is the whole severity argument. A mid-line marker inside
+a comment (`const a = 2; // see --- FIND --- docs`) yields a `replace` of `const a = 2; // see `
+— the comment cut mid-sentence and every following line dropped. An in-string marker
+(`const s = "--- FIND ---";`) yields `const s = "` — an unterminated string literal. Both are
+written to disk as a success. "Truncates REPLACE at that point" undersold this.
+
+**This entry equivocated between two different anchoring rules, using the permissive one to claim
+the benefit and the strict one to claim the cost, while calling both "the repo's own rule". The
+false sentences are deleted rather than annotated.** The repo's own rule — the line-anchored
+recount this entry cites by name — is `/^[ \t]*--- FIND ---[ \t]*$/gm`: it **tolerates leading
+whitespace** by construction. The entry's benefit paragraph correctly says its variant was "built
+from the repo's own existing anchoring rule"; its cost paragraph then said "**Strict** anchoring
+against that example's own indentation produces zero blocks." Both cannot describe one variant.
+Measured under the repo's own permissive rule, an indented block yields **one clean block**; only
+a strict column-zero rule, for which this repo has no precedent anywhere, yields zero.
+
+**Two of the three cost bullets were wrong, and the third is inverted — each re-measured against
+the real compiled walk:**
+- **The "prompt contradiction" was backwards.** Under the permissive rule an indented example
+  parses *better* than it does today: the current walk absorbs the marker line's own indentation
+  into the block, yielding `find` = `"  const a = 1;\n  "` — a trailing newline-plus-spaces that
+  cannot match any real file — where the anchored walk yields a clean `"  const a = 1;"`. The two
+  indented prompt examples were therefore never a cost of anchoring; they were a live defect under
+  the walk that already exists. That defect is now fixed — see item 71.
+- **The characterization-test inversions do not occur.** All four fixtures this entry named —
+  the `FF`-shaped test, the CRLF test, item 2's own embedded-pair fixture, and the one-newline-trim
+  test — produce **byte-identical output** under the current walk and under the repo's-rule
+  anchored variant. The CRLF case specifically was predicted to "resist a drop-in fix" with "a
+  stray trailing `\r` surviving into `find`"; it does not, because JavaScript's `m`-flag `$`
+  already treats a bare `\r` as a line terminator and the existing one-newline trim removes the
+  `\r\n` cleanly. No test needs inverting.
+- **The real cost was never on this entry's books, and has since been removed.** The one shape
+  anchoring genuinely rejects that the current walk accepts is the **inline single-line form** —
+  `--- FIND --- code --- REPLACE --- code` on one line — which yields zero blocks under *both*
+  anchored variants, permissive and strict alike. That form was what `apply_patch`'s own tool
+  description taught, on every request, via the schema. Item 71 rewrote it to block form, so this
+  cost no longer exists at HEAD either.
+
+**What this leaves, restated honestly.** After item 71, all three of this repo's block-shaped
+teaching examples parse to identical, correct output under the current walk, the permissive
+anchored rule, and strict column-zero alike — verified against the real emitted strings, not the
+source. So anchoring's prompt-side cost is now **zero**, and its test-side cost was always zero.
+The two costs that remain are genuine but proportional to the defect's own rate: the telemetry
+markers below and `hashPatchBlocks`'s dedup key only shift for patches that actually contain a
+mid-line or in-string marker — which is exactly the corrupt population, and the sink shows no
+evidence that population is non-empty (see item 63's own accumulation problem, and item 71's
+closing note). Anchoring is now a cheaper change than this entry claimed and a better-evidenced
+one, and it is still **not decided** — because "cheap and correct" is not the same as "needed",
+and nothing measures how often the trigger occurs.
+
+**The remaining cost, unchanged and still real:**
 - **Four telemetry markers whose recorded meaning shifts** because block boundaries move:
   `[zone-apply-patch-marker-split]` (`blockCount` and its own `isMultiBlockPatch` gate),
   `[zone-apply-patch-normalization-parity]` (`blockCount`, `eolChangedBlocks`,
@@ -2818,12 +2854,26 @@ existing anchoring rule (the counter's line-anchored recount in `toolExecutor.ts
 circumstance items 43 and 59 already record for other facts. Whether this robustness is worth its
 cost on its own merits is a separate decision this pass doesn't make.
 
+**Bucket, re-decided after the correction rather than inherited, and the obvious precedent only
+half fits.** Item 2 looks like the match — another entry whose prescribed fix died under
+measurement — but the two failed in opposite directions, and conflating them would teach the wrong
+lesson. Item 2's measurement was *correct*, and it is what killed item 2's own earlier recipe:
+the process working. This entry's measurement was *wrong*, and the error was equivocation between
+two variants of the thing being measured. What they share is only the outcome (a recipe that did
+not survive), not the mechanism. The bucket is unchanged for a plainer reason: no fix is specified
+here, the decision is still open, and nothing about the correction changes that. **Stays Neither.**
+
+**Heading corrected, not suffixed.** It used to end "at a measured cost" — the clause this entry
+got wrong. Dropped rather than qualified, per this document's own convention for a false claim in
+a heading.
+
 **Where the code lives:** the walk is `segmentPatchBlocks` in `src/utils/patchBlocks.ts`; the
-existing anchoring precedent is the recount in `toolExecutor.ts`'s marker-imbalance branch; the
-two prompt examples are `PROVIDER_AGNOSTIC_HARDENING` and the `apply_patch_marker_imbalance`
-case, both in `agentLoop.ts`; the four telemetry markers are emitted in `toolExecutor.ts`;
-`hashPatchBlocks` and `RunEnvelope.failureHistory` are in `agentLoop.ts` and
-`src/api/diskRunEnvelope.ts` respectively.
+existing anchoring precedent is the recount in `toolExecutor.ts`'s marker-imbalance branch, whose
+regex is the permissive rule this entry mis-stated; the four telemetry markers are emitted in
+`toolExecutor.ts`; `hashPatchBlocks` and `RunEnvelope.failureHistory` are in `agentLoop.ts` and
+`src/api/diskRunEnvelope.ts` respectively. The two prompt examples this entry used to cite as a
+cost are `PROVIDER_AGNOSTIC_HARDENING` and the `apply_patch_marker_imbalance` coaching case, both
+in `agentLoop.ts` — both de-indented by item 71, so neither reads as this entry once described it.
 
 ## 63. Whether to build item 17's structured argument is blocked on tool-argument parse-failure data that doesn't exist yet
 
@@ -3163,12 +3213,55 @@ applied nothing, and the widening closed neither:
   demotes the same way, so a *safety* demotion can produce a validated-patch flag on a run with
   neither a patch nor a test execution.
 
+**Real records now exist for the sibling half, and they show the payload cannot separate the paths
+that reach it.** `[zone-agent-final-assessment]` carries **24 raw records** over a
+2026-07-29 → 2026-08-05 window, **19 distinct payloads** after deduping on exact payload text.
+Deduped, they break down as: **12** `tests_skipped_no_infra` with `patchValidatedByAgent: true` and
+`inferredFrom: "tag"`; **3** `no_verification_attempted` with `false`/`"heuristic"`; **3**
+`tests_passed` with `true`/`"tag"`; **1** `tests_inconclusive` with `false`/`"tag"`. (Counting raw
+rather than deduped gives 15/4/3/2 — the dedup matters because the natural-completion payload
+embeds a `summaryPreview`, so identical payloads are near-certainly the same run recorded twice
+rather than two runs agreeing byte-for-byte.)
+
+**Those twelve are not one behaviour, and this is the same defect class item 61's second bullet
+records — a new instance, now with records behind it instead of a trace.** `inferredFrom` reports
+only *that* a tag was present, and `reason` is the **post-override** value (item 61's F3). So every
+path that ends at `tests_skipped_no_infra` from a tagged run collapses into one indistinguishable
+payload. Enumerated against the real code rather than the two the original framing named, there are
+**five**: the model emitting `tests_skipped_no_infra` directly; `validatePassedClaim` demoting
+`tests_passed` when no `run_command` ran or no success pattern matched and the framework has no
+tests; `validateUnrelatedClaim` demoting `tests_failed_unrelated` the same way; and
+`applyNoInfraVerificationOverride` converting either `tests_inconclusive` or
+`no_verification_attempted` when a patch did apply to a framework without tests. A clean skip and a
+rejected `tests_passed` claim are the same record.
+
+**Three sibling markers would separate them, and none reaches the sink — checked, not assumed.**
+`zone-agent-verdict-override` (which carries `originalVerdict` and the validator's own reason, the
+exact discriminator) is emitted through `onProgress` as bare JSON with no `[tag]` prefix, so the
+sink's tag-pattern classifier never matches it. `[zone-agent-no-infra-override]` and
+`[zone-agent-no-infra-verdict]` are both `debugLog`-gated on `ZONE_VERBOSE_LOGS`. All three read
+**zero records**, by three independent mechanisms.
+
+**The three heuristic records are the pre-fix baseline, not evidence the gate widening works — a
+distinction worth fixing in place before someone reads them as a measurement.** After item 61's
+first bullet closed, a read-only-archetype run completing naturally with no tag lands exactly here:
+`no_verification_attempted`, `patchValidatedByAgent: false`, `inferredFrom: "heuristic"`. So growth
+in this shape is that fix working as designed, not a regression. But every record in this sink
+predates it — the newest is dated 2026-08-05 and the gate widened the following day — so the
+current three measure the world before the change. The expectation is forward-looking; the number
+is a baseline.
+
+**One record in nineteen is `max_iterations`** (one in twenty-four raw). Recorded as the current
+observed rate because it bears directly on item 69's priority — the wrapup surface only fires on
+that path — and recorded as `n=19`, which is a rate, not a trend.
+
 **What would close it — a decision, not data, and the candidate below is explicitly not the
-answer.** The bucket this sits in is about an observation that doesn't exist yet; nothing here is
-waiting on an observation. What is missing is a decision about what the function *should* return
-when no write tool was ever available. Returning `no_verification_attempted` for that case is a
-**candidate, recorded as an unverified inclination and not as this entry's conclusion** — it was
-suggested without the function being read, and this pass did not establish whether it is right.
+answer.** Nothing above changes this: the records characterise the *sibling* payload-collapse
+problem, not the question this entry turns on. What is missing is a decision about what the
+function *should* return when no write tool was ever available. Returning
+`no_verification_attempted` for that case is a **candidate, recorded as an unverified inclination
+and not as this entry's conclusion** — it was suggested without the function being read, and this
+pass did not establish whether it is right.
 Two things a deciding pass has to weigh that the candidate does not address: `tests_failed_by_patch`
 may be load-bearing for genuine patch runs where every write failed, which is the same
 `patchApplied === false` state and is not distinguishable at this call site; and the value chosen
@@ -3180,6 +3273,13 @@ This waits on a judgement, which is item 53's shape ("Why this is a decision, no
 shape as item 36's currency half," bucketed Neither) and item 46's ("decide either way," also
 Neither). **Bucketed Neither.**
 
+**Re-checked once records arrived, since gaining data is exactly the event that would normally move
+an entry: it does not move this one.** The records answer a different question than the one this
+entry turns on. They characterise how the *payload* collapses several verdict paths together; they
+say nothing about what `inferVerificationFromLog` ought to return for a no-write-tool run, which is
+a judgement no volume of these records can settle. An entry can acquire real evidence and stay
+Neither when the evidence lands beside the open question rather than on it. **Stays Neither.**
+
 **Where the code lives:** `inferVerificationFromLog`, `validatePassedClaim`,
 `validateUnrelatedClaim`, and `applyNoInfraVerificationOverride` are all in
 `verification/classify.ts`; `didApplyPatch` is in `verification/logUtils.ts`. `patchValidatedByAgent`
@@ -3187,17 +3287,90 @@ is computed in `runCompletion/deriveVerdict.ts`. The mode-keyed fast-paths and t
 call they precede are in `runCompletion/composer.ts`; `isReadOnlyMode` and the warning comment
 naming this mode-vs-archetype split are in `agentLoop.ts`.
 
+## 71. Closed — three teaching surfaces taught a patch shape the walk corrupts
+
+**What it was:** three model-facing surfaces demonstrated a FIND/REPLACE shape that
+`segmentPatchBlocks` cannot parse cleanly. The walk locates markers by substring search and slices
+around them, so anything sharing the marker's line comes back inside the block. Two of the three
+showed markers indented two spaces — `PROVIDER_AGNOSTIC_HARDENING` and the
+`apply_patch_marker_imbalance` coaching example — which yields `find` = `"  const a = 1;\n  "`,
+a trailing newline-and-indent that matches nothing. The third was worse and reached every request:
+`apply_patch`'s own tool `description` taught the format **inline on one line**
+(`Format: --- FIND --- <content> --- REPLACE --- <content>.`), which yields `find` =
+`" const a = 1; "` — stray leading *and* trailing space. Measured against the compiled walk, not
+traced.
+
+**Found while measuring item 62's cost claims, not from an independent review** — the same
+circumstance items 43, 57, and 59 already record, and the reason this is its own entry rather than
+a bullet inside item 62: it is not item 62's recipe. Item 62 is a proposal to change the *walk*;
+this was a defect in what the *prompts* teach, live under the walk that already exists, and it
+landed as its own commit. Item 62's own carve-out from item 2 set exactly this precedent.
+
+**Fixed (`278b52ef`):** both coaching examples de-indented to column zero; `PROVIDER_AGNOSTIC_HARDENING`
+additionally gained a blank line after each of its two labels, so the label-to-block separation its
+indentation used to provide survives the de-indent; the tool description rewritten to block form at
+**zero character delta** (245 → 245).
+
+**The character figure settles nothing about cost, and is recorded as a size fact only.** That
+string lives in the cached tool-definition prefix and was deliberately compressed once before on
+token grounds. No tokenizer exists anywhere in this repo — not in `package.json`, not in
+`node_modules` — so the **token delta is not established**. Swapping spaces for newlines does not
+tokenize neutrally, and an equal character count is not evidence of an equal token count.
+
+**Three reachability facts a future prompt sweep will need, none of them obvious from reading the
+switch:**
+- **`PROVIDER_AGNOSTIC_HARDENING` is reached by a disjunction, not by either half alone:**
+  `!options?.model || HARDENING_TARGETS.has(options.model)`. An absent model includes it; a
+  hardening-target model includes it; any other model excludes it entirely. Two separate accounts
+  written during this work each named one half and were each half right.
+- **A second precondition sits underneath the model axis and is easy to miss entirely.** One
+  trigger's hardening-bearing variant lives inside a `generatedPathDetected` branch, so it is
+  unreachable no matter which model value is supplied unless that flag is set too. A sweep varying
+  only the model axis would have collected the wrong string for that trigger and reported clean.
+- **"A line containing one marker literal" is not a usable discriminator for block shape.** It
+  false-positives on prose: an already-correct coaching message contains the sentence "…include
+  them in `--- REPLACE ---`:", which carries exactly one marker and is not a delimiter line. The
+  working rule is that the **trimmed line must be entirely the marker** — found by running the
+  sweep, not by designing it.
+
+**What guards it, and why a sweep rather than three assertions.** A per-site check would have
+pinned these three and nothing else. The test collects every string `buildCoachingPrompt` can emit
+across all **19** `SelfCorrectTrigger` values (the union has 19 members, not 18) crossed with three
+model values and both `generatedPathDetected` states, plus both of `apply_patch`'s schema
+description fields, dedupes by exact text, and fails on any block-shaped marker line that does not
+start at column zero. Its positive control counts **marker lines found**, not sources examined —
+asserting "20 sources examined" against a 20-element loop is close to vacuous, while a collection
+that silently gathers the wrong strings and finds no markers at all is the real failure mode. A
+separate test guards the blank-line-after-label property, since removing a blank line moves no
+marker and the column-zero sweep is correctly blind to it. Mutation-tested: re-indenting either
+site fails the sweep naming that site; injecting an indented marker into a trigger that carries no
+marker literal at all (`read_file_nonexistent`) also fails it, which is what distinguishes a sweep
+from three spot-checks; removing a blank line fails the legibility test while leaving the sweep
+green.
+
+**What this does not establish, stated so the commit is not read as more than it is.** The taught
+shape is measured to parse badly. There is **no evidence any model actually emitted it** — the
+apply_patch-specific markers that would record such an event carry zero relevant records (item 63
+covers why that instrumentation window is only days old). This fix rests on the first fact alone.
+It also means any accumulation under those markers now spans two teaching regimes and must be dated
+from this commit, separately from the earlier commit that first routed them to the sink.
+
+**Where the code lives:** the two coaching examples are in `buildCoachingPrompt`'s switch and in
+`PROVIDER_AGNOSTIC_HARDENING`, both `agentLoop.ts`; the tool description and its `patch` parameter
+description are in `toolDefinitions.ts`; the sweep and the legibility test are in
+`agentLoop.prompts.test.ts`. See item 62 for the anchoring proposal this was found while measuring.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 70 to find out which ones still need something. No index of
+reader the trouble of reading all 71 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (33): 6, 7, 8, 10, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 56, 64, 66
+**Closed** (34): 6, 7, 8, 10, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 56, 64, 66, 71
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (6): 12, 18, 23, 36, 55, 57
@@ -3207,8 +3380,8 @@ first (6): 12, 18, 23, 36, 55, 57
 **Neither — a structural fact recorded, with no fix proposed** (28): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 69, 70
 
-Items 1, 2, 12, 17, 18, 36, 57, and 61 are partially closed or corrected; the classification above
-covers only the portion still open, not the whole entry.
+Items 1, 2, 12, 17, 18, 36, 57, 61, and 62 are partially closed or corrected; the classification
+above covers only the portion still open, not the whole entry.
 
 ---
 
