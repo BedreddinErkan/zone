@@ -454,24 +454,23 @@ scope-guard blocks and marker-imbalance rejections — real failures — counted
   Reading `resumeStagingFiles` — non-empty exactly when the prior run staged real work — would
   close this without a new field, but needs threading into `inferVerificationFromLog`, which
   today only receives a bare tool-call log.
-- **The no-op patch.** A FIND==REPLACE `apply_patch` stages byte-identical content and returns
-  `success: true`; neither `apply_patch` nor `write_file` has a no-op guard. Traced end to end
-  rather than assumed: the block gate is `countOccurrences` on the FIND text, which a
+- **The no-op patch — the field half landed in `21da1225`, the predicate half did not.** A
+  FIND==REPLACE `apply_patch` stages byte-identical content and returns `success: true`. Traced end
+  to end rather than assumed: the block gate is `countOccurrences` on the FIND text, which a
   FIND==REPLACE block passes because the text *is* present, and no content-equality check exists
-  anywhere between that gate and the success return. `write_file`'s region has none either. So the
-  case is real for both tools, not caught by an earlier branch.
-  **The second option this bullet used to offer — "a `filesStaged`-equivalent added to both write
-  tools' returns" — is thrown out: that field already exists on both.** They set
-  `filesStaged: [filePath]` unconditionally on success. What is missing is not the field but its
-  *semantics*: `multi_edit` builds the array inside an `if (count > 0)` branch, so a
-  zero-replacement file is excluded, while the two single-file tools include the path whether or
-  not the bytes moved. The field's own doc comment already states the contract those two violate —
-  "Repo-relative paths of files this call left with a PERSISTING content change — not merely an
-  attempted one" — and then spells out the divergence in the same breath, `multi_edit` gated on
-  replacement count, `apply_patch`/`write_file` "set on their success returns". **That makes the
-  remaining work smaller than this entry claimed, not larger:** narrow two returns to the meaning
-  the field is already documented to have, rather than add anything. The "bigger pass than swapping
-  a predicate" framing applied to the option that is now gone.
+  anywhere between that gate and the success return. `write_file`'s region has none either.
+  `21da1225` narrowed `filesStaged` at every success return that set it unconditionally, in both
+  single-file tools and in `multi_edit`'s per-file push, so the field now names only files whose
+  persisted bytes actually differ.
+  **Two claims this bullet used to make are thrown out, not qualified.** It called the work "two
+  success returns"; the real surface was every unconditional success return across both single-file
+  handlers plus `multi_edit`'s push — the smell-baseline suppression return in each handler is a
+  second success path the count missed. And it said `multi_edit` "already implements the narrow
+  meaning (replacement count > 0)". A replacement count is a *match* count, not a content
+  difference: `find === replace` matched, entered the `if (count > 0)` branch, and pushed the path,
+  so `multi_edit` over-reported the same way the other two did and was narrowed in the same commit.
+  The field's own doc comment stated a contract all three violated, and was rewritten in that commit
+  to describe what the code now does.
 
 **A latent hazard found while auditing this entry, kept here rather than carved out.** Two distinct
 `ToolCallLogEntry` types exist. The one in `toolEventHandler/types.ts` declares `filesStaged`; the
@@ -490,12 +489,31 @@ adjacent to the rehydration bullet above but load-bearing for it, since that bul
 signature change to `inferVerificationFromLog`, which is one of the declarations that cannot express
 the field.
 
-**Commit ordering for whatever lands, recorded because the hazard makes it structural rather than
-stylistic.** The no-op narrowing is one commit — two success returns plus the doc comment, with
-tests. The rehydration threading is a separate and larger one, and it should reconcile the two
-`ToolCallLogEntry` types first: adding `resumeStagingFiles` to a signature whose log type already
-cannot express `filesStaged` would widen the surface that depends on an undeclared property rather
-than narrow it.
+**What `21da1225` did not close, and why narrowing the field was never going to close it.**
+`didApplyPatch`'s `apply_patch`/`write_file` arm reads `e.success`, not `filesStaged` — so a
+succeeding no-op still returns `true` from the predicate exactly as before, and this entry's no-op
+half stays open. Making the field honest and making the verdict honest are separate changes; only
+the first landed. What remains, deferred together because it is all one pass over one file:
+
+- **The predicate arm itself**, in the verification log utils, with two live call paths to reason
+  about — `composer.ts` calls it directly and `inferVerificationFromLog` calls it from
+  `classify.ts`. Changing the arm to consult `filesStaged` for these two tools changes what both
+  paths report.
+- **The anomaly branch**, folded in here rather than opened as its own item because it lives in the
+  same function the predicate pass will already be editing, and splitting it would mean two passes
+  touching one file for one concern. `multiEditChangedSomething` treats an absent `filesStaged` as
+  an anomaly — returns false, emits `[zone-multi-edit-log-missing-staged]`. `21da1225` verified
+  that branch is **not exercised by any test**: its `undefined`-instead-of-`[]` mutation died
+  against a direct result assertion one layer above, in the tool-executor test file, while the log
+  utils' own test file stayed green. That kill is evidence about the result shape, not coverage of
+  the branch, and it is recorded that way so a later pass does not read it as coverage.
+- **The rehydration half**, unchanged and still gated on reconciling the two `ToolCallLogEntry`
+  declarations first: adding `resumeStagingFiles` to a signature whose log type already cannot
+  express `filesStaged` would widen the surface that depends on an undeclared property rather than
+  narrow it.
+
+**The behavior change `21da1225` did make, in one sentence:** the modified-files set no longer
+includes a file whose call succeeded but left the persisted bytes identical to what was read.
 
 **No evidence exists either way, and the silence is uninformative by construction.** No marker
 instruments this predicate's correctness at all — nothing records a `didApplyPatch` verdict against
@@ -526,11 +544,12 @@ over: `filesStaged === undefined` returns false *and* emits `[zone-multi-edit-lo
 so the arm is "success plus non-empty `filesStaged`, with the absent case marked rather than
 guessed" — the anomaly branch the hazard above would drive every `multi_edit` into.
 
-**Bucket, checked rather than inherited — stays Actionable now.** Both open halves name a fix, and
-this pass made the no-op half *more* specified and smaller, not less: narrow two returns to the
-field's documented meaning. That is what separates this entry from the four that left this bucket
-during the same sweep — items 18, 23, 36 and 57 each left for a missing prerequisite or an absent
-fix, and this one has neither. **The precedent check that settled item 36 does not fire here and a
+**Bucket, checked rather than inherited — stays Actionable now.** Both open halves still name a
+fix, and `21da1225` narrowed what remains rather than widening it: the field work is done, so the
+no-op half is now a single change to one predicate arm in one file, with the anomaly branch and the
+rehydration threading queued behind it in that same file. That is what separates this entry from
+the four that left this bucket during the same sweep — items 18, 23, 36 and 57 each left for a
+missing prerequisite or an absent fix, and this one has neither. **The precedent check that settled item 36 does not fire here and a
 future pass should not expect it to:** nothing in this document is modelled on item 12, and what it
 cites (item 1's "prose is not a data model") is cited as a shape analogy, not as a bucket model, so
 there is no placement signal to read in either direction.
@@ -2207,6 +2226,22 @@ because `detected`'s four-way partition — `crlf`/`lf`/`cr`/`mixed`/`none` — 
 three-way one don't map cleanly onto each other for the `"mixed"` case, where `detected` needs a
 value `dominant` doesn't have an equivalent of). This pass didn't establish which; recorded as
 open rather than guessed at.
+
+**Partial evidence for the second horn, from `21da1225`'s own establish — the three-way partition
+is load-bearing on the write path in a way a four-way one would have to replace, not merely
+mirror.** Because `dominant` has no `"mixed"` value, every writer that re-encodes reads it as an
+instruction to pick one style and apply it everywhere: `apply_patch`'s and `multi_edit`'s
+`replace(/\n/g, …)` arms and `write_file`'s CRLF-preserving arm all rewrite *every* line ending in
+the buffer to the single style `dominant` names. On a mixed-EOL file that is a real, intentional
+homogenization — the file comes back uniform, and the lines whose original style was the minority
+one have genuinely changed on disk. The observable consequence, measured while narrowing
+`filesStaged` (item 12): a textually no-op edit to a mixed-EOL file still persists different bytes,
+which is why that pass had to compare the final written value rather than any pre-re-encode
+intermediate. So the duplication cannot be resolved by pointing `dominant` at `detected` without
+first deciding what a `"mixed"` file should be written back as — a question the current code
+answers definitively (the plurality style) and a four-way `dominant` would reopen. That narrows
+this entry's own open question without closing it: the second horn now has evidence behind it, the
+first would need a write-path decision this entry doesn't make.
 
 **The only reason this is testable at all today** is the telemetry-observing test added during
 the same pass specifically to close this gap — before it existed, no test anywhere could have
@@ -4204,6 +4239,17 @@ in this codebase, the findings that have actually changed a decision have come d
 from running the code, and reading's load-bearing role has been to know what to run — which
 mutation, which test, which probe — not to substitute for running it.
 
+**The corollary that keeps catching this document out: a correction is a claim, and it does not
+inherit authority from being a correction.** Reasoning that arrives as a *fix to earlier reasoning*
+reads as settled — it has already survived one round of scrutiny, and rejecting it feels like
+re-litigating. It is still reasoning, and it loses to running on the same terms as anything else.
+Item 10 is the clean instance: a later pass reported that a function this document described did
+not exist at all, and the report was wrong on every particular — the function, its call site, the
+file's location and its size — while the entry it "corrected" had been right. The fifteenth pattern
+records the other direction, where a review correction proposed a comparison point, the plan
+accepted it, and the implementing pass rejected it on measurement rather than argument. In both
+cases what settled it was going and looking, not the seniority of the claim.
+
 ## A sixth pattern, following the fifth: a mutation that reroutes cannot prove suppression
 
 A guard's whole effect is suppressing an otherwise-observable signal — so a passing test that
@@ -4523,3 +4569,44 @@ the same arc, when a rewritten summary test asserted a whole prompt lacked `"## 
 against an unrelated, untouched brevity directive naming that same heading for a different reason
 entirely. Three instances, two different files, the same failure shape each time — which is what
 makes it a pattern here rather than a pair of unrelated bugs.
+
+## A fifteenth pattern: a did-anything-change comparison belongs against the bytes actually written, never against an intermediate
+
+Code that asks "did this call change anything" almost always has three values in scope, not two:
+what was read before the call, some normalized or partially-transformed intermediate the logic works
+in, and the final value handed to the writer. Comparing the first against the *last* is the only one
+of those pairings that answers the question asked, because it is definitionally the question asked —
+the bytes that were there against the bytes that replaced them. Comparing against an intermediate
+answers a narrower question that merely resembles it, and the resemblance holds right up until a
+transformation sits between the intermediate and the write.
+
+**The asymmetry is what makes the rule non-arbitrary, and it is the whole argument.** The two ways
+of being wrong here are not equally bad. Over-reporting a change that did not happen is a nuisance:
+a downstream consumer does slightly more work, names a file that did not need naming, and nothing is
+lost. Under-reporting a change that *did* happen is silent data loss — the modified-files set drops
+a file that really was rewritten, and everything built on that set is wrong with no signal. An
+intermediate comparison fails in the under-reporting direction specifically, because the
+transformations that sit after it are exactly the ones that turn "nothing changed textually" into
+"the bytes on disk are different." So the rule is not a stylistic preference between two defensible
+positions; one position can only lose information and the other cannot.
+
+This codebase produced both halves of the demonstration in a single commit (`21da1225`), narrowing a
+staged-files field across three write tools. In the batch-edit tool, comparing the post-replace text
+against its own pre-replace *normalized* form said "no change" for a file whose replacement text was
+identical — while the write that followed still re-encoded every line ending to the file's dominant
+style, persisting genuinely different bytes for any mixed-ending file. In the single-file write tool
+the same rule was broken from the other side: the incoming argument is not what gets written either,
+because a line-ending-preserving re-encode sits between the argument and the writer, so comparing
+the raw argument could both over-report (submitted text that re-encodes to exactly what was already
+there) and under-report (a mixed-ending file resubmitted unchanged, which homogenizes away from the
+original on write). One rule, two tools, two different intermediates, the same correction.
+
+**The provenance is the second thing worth keeping.** The intermediate comparison was not an
+oversight that slipped through — it arrived as a *review correction*, was reasoned about explicitly,
+and was written into an approved plan as the deliberately-chosen point, on the argument that
+comparing after the transformation risked depending on its round-trip fidelity. That argument was
+backwards: the transformation is not a round trip to be trusted or distrusted, it is part of what
+gets written, so including it is what makes the comparison exact. The implementing pass caught it by
+reading what the writer actually receives, and nothing about the correction's status as a correction
+made it more likely to be right. See the fifth pattern's own corollary — a correction is a claim,
+not authority.
