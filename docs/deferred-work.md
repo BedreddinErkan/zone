@@ -416,12 +416,12 @@ a measured 4.4%-per-run trigger rate — a single forced run is closer to a lott
 a measurement at that cost tier. Passive accumulation over ordinary use reaches the same
 records for free.
 
-## 12. `didApplyPatch`'s string-matching — partially closed
+## 12. Closed — the predicate reads structured fields for all three write tools, and a succeeding no-op no longer counts as applied
 
 `didApplyPatch` (`src/llm/verification/logUtils.ts`) decides whether a run applied anything —
 feeding the run's final reported verdict, not an internal nudge. This entry originally led with
 the rehydration link (see item 6); a fuller pass found that was the smallest of the reachable
-problems, and two load-bearing defects it didn't name are now fixed.
+problems, and the load-bearing defects it didn't name are now fixed across three commits.
 
 **What was wrong:** the predicate classified `apply_patch`/`write_file` entries by
 string-matching `result` text for "error"/"not found"/"fail", case-insensitively with no word
@@ -447,13 +447,18 @@ bare `success` is a sound proxy for those two tools but was never sufficient for
 where `success: true` survives zero replacements. Also closed: the false-positive class where
 scope-guard blocks and marker-imbalance rejections — real failures — counted as applied.
 
-**Still open, and what would close each:**
-- **Rehydrated entries still count.** Rehydration hardcodes `success: true` (item 6), and the
-  fixed predicate now reads exactly that field, so a rehydrated `apply_patch`/`write_file`
-  counts as applied regardless of what happened before interruption — unchanged by this fix.
-  Reading `resumeStagingFiles` — non-empty exactly when the prior run staged real work — would
-  close this without a new field, but needs threading into `inferVerificationFromLog`, which
-  today only receives a bare tool-call log.
+**What `e21aab93` left, and how each was settled:**
+- **Rehydrated entries still counted.** Rehydration hardcodes `success: true` (item 6), and the
+  predicate that commit shipped read exactly that field, so a rehydrated `apply_patch`/`write_file`
+  counted as applied regardless of what happened before interruption. This bullet used to propose
+  reading `resumeStagingFiles` instead, on the claim that it is non-empty exactly when the prior run
+  staged real work. **That claim is false in both directions and is thrown out rather than
+  qualified.** `stagedWrite` on the patch path is unconditional, so a run whose only write was a
+  content-identical no-op still leaves the map non-empty; and `reconcileEnvelopeStaging` restores
+  only entries whose disk hash still matches the recorded base, so a run whose work was already
+  flushed leaves it empty despite a real patch. The true predicate is narrower — non-empty exactly
+  when the prior run staged something whose base still matches disk — and it is not the one that
+  bullet needed. What settled this half instead was a rule about absence, below.
 - **The no-op patch — the field half landed in `21da1225`, the predicate half did not.** A
   FIND==REPLACE `apply_patch` stages byte-identical content and returns `success: true`. Traced end
   to end rather than assumed: the block gate is `countOccurrences` on the FIND text, which a
@@ -484,39 +489,73 @@ branch — false, plus a `[zone-multi-edit-log-missing-staged]` record. **Inside
 23's precedent rather than item 71's**: item 71 was carved out because it was a different *kind* of
 thing from its parent's recipe, in a different layer; item 23's third-phase gap stayed inside
 because it was the same defect class in the same function that the entry's own recipe already
-reached for. This is the second shape — same predicate, same field, same arm — and it is not merely
-adjacent to the rehydration bullet above but load-bearing for it, since that bullet's fix is a
-signature change to `inferVerificationFromLog`, which is one of the declarations that cannot express
-the field.
+reached for. This is the second shape — same predicate, same field, same arm. **`21cb580a` narrowed
+the hazard to `multi_edit` alone, and that narrowing is the absence rule's own consequence rather
+than a separate fix:** the other two tools' arm now resolves an absent field to *applied*, so a
+constructed log leaves them reading exactly as they did before the field existed, while `multi_edit`
+still takes the anomaly branch.
 
-**What `21da1225` did not close, and why narrowing the field was never going to close it.**
-`didApplyPatch`'s `apply_patch`/`write_file` arm reads `e.success`, not `filesStaged` — so a
-succeeding no-op still returns `true` from the predicate exactly as before, and this entry's no-op
-half stays open. Making the field honest and making the verdict honest are separate changes; only
-the first landed. What remains:
+**What `21da1225` did not close, and why narrowing the field was never going to close it.** The
+`apply_patch`/`write_file` arm read `e.success` and not `filesStaged`, so a succeeding no-op still
+returned `true` from the predicate exactly as before. Making the field honest and making the verdict
+honest are separate changes, and only the first landed there. The classify path also punished the
+second one until `ef9d0608` closed item 70: every earlier branch of `inferVerificationFromLog` is
+gated on the flag being true, so a false flag fell through to the not-applied check, which used to
+return the broken-tests verdict — this entry's own original symptom by a new route. That branch now
+returns `no_verification_attempted`.
 
-- **The predicate arm itself**, in the verification log utils, with two live call paths to reason
-  about — `composer.ts` calls it directly and `inferVerificationFromLog` calls it from
-  `classify.ts`. Changing the arm to consult `filesStaged` for these two tools changes what both
-  paths report, and the two paths do not report it the same way. On the composer path the flag
-  reaches only `applyNoInfraVerificationOverride`, so a no-op run stops being upgraded to
-  `tests_skipped_no_infra` and `patchValidatedByAgent` goes false — the intended direction. On the
-  classify path, every earlier branch is gated on the flag being true, so control falls to the bare
-  not-applied check and the run is labelled `tests_failed_by_patch`, which surfaces as a warning
-  that tests failed because of this patch — this entry's own original symptom, arriving by a new
-  route. **That prerequisite is discharged: item 70 closed in `ef9d0608`, and the branch now returns
-  `no_verification_attempted`, which is correct for a no-op-only run and for a resumed one alike.**
-  So the classify path no longer punishes this change, and this half is unblocked.
+**Closed by `21cb580a`, and the decision it turns on is about absence, not about no-ops.** The arm
+now short-circuits on the success flag, then reads the staged-files field as three distinct states:
+populated means changed, an empty array means unchanged, and an **absent** field means changed. The
+polarity on absence is deliberately the opposite of `multiEditChangedSomething`'s own absent branch,
+which marks the anomaly and reports no change. The structural reason is `agentLoop.ts`'s `REHYDRATED`
+set: `apply_patch` and `write_file` are members of it and `multi_edit` is not, so `rehydrateFileAccess`
+— whose entry shape declares no staged-files member at all — is a real production producer of
+absent-field entries for those two tools and for no others. Choosing "unchanged" there would make a
+resumed run that genuinely applied a patch report that it applied nothing, which is a wrong answer
+the old code never produced; choosing "changed" leaves that population reading exactly as it did
+before. See item 75 for the threading that would remove the guess entirely, and why it is not built.
+
+**The code comment on that arm carries only the structural half, deliberately.** It names the
+three-way meaning, the opposite polarity, and the rehydration-set membership that justifies it, then
+points here. Anything conditional — why the alternative was rejected, what the observation window
+shows, what would change the answer — lives in this entry, so a reader who wants to change the
+reasoning changes it in one place rather than finding a confident argument sitting next to code that
+has moved on.
+
+**What the change actually moved, stated narrowly because this entry previously claimed more.** It
+moves `emitAgentFinalAssessment`'s payload, which `runCompletion/composer.ts` emits *before* it calls
+`verifyAndFinalize`: a no-op run's raw verdict stops being upgraded to `tests_skipped_no_infra` and
+the validated flag it records goes false. **The sentence that used to say this was the intended
+direction for the reported result is thrown out, not qualified.** For a fresh no-op-only run the
+result field was already correct: the staged bytes equal the disk bytes, so `finalizeStaging`'s
+all-unchanged comparison returns the no-changes-made status, `deriveResultFields`'s `no_change` case
+hardcodes both the reason and the validated flag, and neither value has ever depended on this
+predicate. Telemetry and the result field are separated by exactly that override — see the sixteenth
+pattern.
+
+**It does not narrow item 74's validated-flag strand, and that is worth saying rather than leaving to
+inference.** Both shapes recorded there reach the flag through a model-supplied tag, and neither the
+tag parser nor the two demotion validators read `patchApplied` at all; only
+`applyNoInfraVerificationOverride` does. So the strand is exactly as it was, the same way item 74
+already records that `ef9d0608` changed a value its flag was already false for.
+
+**A coverage limitation the closing commit could not remove, recorded so it is not rediscovered.**
+The composer path's own fixture is observable only under a mock. A real no-op run cannot reach the
+assertion it makes, because `finalizeStaging` takes the no-change branch first and `deriveResultFields`
+then overrides the field regardless of the verdict — so the block depends on its describe-level
+`beforeEach` resolving the verification call to the applied outcome. **That dependence is stated in a
+comment above the block and not in the block's name**, which means a sweep of block names for
+mock-dependent fixtures will not find it. Recorded here for the same reason the thirteenth pattern
+exists: one surface searched, its silence read as the system's.
+
 - **The anomaly branch**, folded in here rather than opened as its own item because it lives in the
-  same function the predicate pass will already be editing. `multiEditChangedSomething` treats an
+  same function the predicate pass would already be editing. `multiEditChangedSomething` treats an
   absent `filesStaged` as an anomaly — returns false, emits `[zone-multi-edit-log-missing-staged]`.
   **It is covered**, by `agentLoop.multiEditSaturation.test.ts`'s case G, which calls the helper
   with a `multi_edit` entry carrying `success: true` and no `filesStaged`, then asserts both halves
-  — the `false` return and that the marker fired.
-- **The rehydration half.** Rehydrated entries hardcode `success: true`, so the predicate counts
-  them as applied regardless of what happened before interruption. The fix — reading
-  `resumeStagingFiles`, non-empty exactly when the prior run staged real work — needs threading into
-  `inferVerificationFromLog`, whose signature takes a bare tool-call log.
+  — the `false` return and that the marker fired. `21cb580a` left it untouched: unifying the two
+  polarities is what the absence rule exists to refuse.
 
 **This entry claimed that branch was uncovered, and the claim is thrown out. How it got there is
 the part worth keeping.** `21da1225`'s own report observed that the log utils' test file ran clean
@@ -539,18 +578,14 @@ rehydration half's stated dependency is smaller than named too: adding a paramet
 is a hygiene preference about not widening a surface that already depends on an undeclared property,
 not a compile-order constraint.
 
-**What actually forces the sequence, established against the code rather than inherited.** The
-tool-call log is not persisted in the run envelope — the envelope carries messages, staging,
-failure history and todos, and the log is rebuilt on resume by `rehydrateFileAccess`, whose own
-entry shape declares no `filesStaged` member at all and hardcodes `success: true`. So every
-rehydrated single-file entry presents the field as absent. An arm consulting the field would read
-that absence as "nothing persisted" and report every resumed run as having applied nothing. The arm
-change must therefore land with either an emission of the field on that rehydration path or an
-explicit rule for absence. **That is now the whole of what remains, and it is one commit, not two:**
-no declaration changes — `didApplyPatch`'s own parameter type already declares `filesStaged` and the
-`multi_edit` arm already reads it through that parameter at both live call sites — so the arm change
-and the rehydration decision travel together in a single edit, with item 70's branch already decided
-behind them.
+**What forced the sequence, established against the code rather than inherited.** The tool-call log
+is not persisted in the run envelope — the envelope carries messages, staging, failure history and
+todos, and the log is rebuilt on resume by `rehydrateFileAccess`, whose own entry shape declares no
+`filesStaged` member at all and hardcodes `success: true`. So every rehydrated single-file entry
+presents the field as absent, and the arm change could not land without either an emission of the
+field on that rehydration path or an explicit rule for absence. It landed with the rule, in one
+commit and with no declaration touched — `didApplyPatch`'s own parameter type already declares
+`filesStaged`, and both live call sites already forward real entries through it.
 
 **The behavior change `21da1225` did make, in one sentence:** the modified-files set no longer
 includes a file whose call succeeded but left the persisted bytes identical to what was read.
@@ -561,15 +596,16 @@ what actually happened. The one adjacent marker, `[zone-multi-edit-log-missing-s
 sink records; but the tool-call census on item 73's key shows `multi_edit` was **never invoked** in
 the recorded window (`search_in_files` 30, `read_file` 23, `run_command_readonly` 6, `apply_patch` 4,
 `run_command` 1, all upper bounds). So the zero means the path was never taken, not that it is
-sound. A reader deciding whether to build should treat both open halves as correctness arguments
-with no observation behind them.
+sound. The absence rule this entry closes on rests on the same footing: it is a correctness argument
+about which wrong answer is cheaper, with no observation behind it — item 75 records the observation
+that would settle it, and that it has not occurred.
 
 **The general lesson, past this fix:** classifying an outcome by pattern-matching
 human-readable text instead of reading a structured field meant to carry that outcome is the
 same shape of fragility that motivated the line-anchored marker recount (item 1) — prose is not
 a data model. See item 6 for the sibling defect this connects to: rehydration's hardcoded
 `success: true`, and why the read-before-patch gate it serves makes that hardcoding correct on
-its own terms even though it leaves this entry's first "still open" item unclosed.
+its own terms even though it is what forced this entry's absence rule.
 
 **Where the code lives:** `didApplyPatch` and `multiEditChangedSomething` both live in
 `src/llm/verification/logUtils.ts` (`multiEditChangedSomething` moved there from `agentLoop.ts`,
@@ -581,21 +617,19 @@ today, but a caller-sweep that stops at the two call sites above will under-coun
 `deriveVerdict.ts` imported it but never called it — that dead import is gone now too (see item
 13). `multiEditChangedSomething` has a third branch this entry's description of the fix skipped
 over: `filesStaged === undefined` returns false *and* emits `[zone-multi-edit-log-missing-staged]`,
-so the arm is "success plus non-empty `filesStaged`, with the absent case marked rather than
-guessed" — the anomaly branch the hazard above would drive every `multi_edit` into.
+so that arm is "success plus non-empty `filesStaged`, with the absent case marked rather than
+guessed" — the anomaly branch the hazard above would drive every `multi_edit` into, and the one the
+other two tools deliberately do not share.
 
-**Bucket — Actionable now, and for the first time without a caveat.** This placement previously
-rested on the rehydration half alone, because the no-op half was blocked on item 70's decision and
-no bucket described "blocked on a sibling entry's judgement." `ef9d0608` discharges that
-prerequisite, so both halves are specified with nothing left to learn first and the bucket's own bar
-is met plainly. **The caveat recorded here is retired rather than left standing:** it said an entry
-blocked on a sibling's decision has no bucket in this partition and that this was the first of that
-shape. The observation about the partition remains true, but this entry is no longer an instance of
-it, so a later pass looking for the first instance should not find one here. **The precedent
-check that settled item 36 does not fire here and a future pass should not expect it to:** nothing
-in this document is modelled on item 12, and what it cites (item 1's "prose is not a data model") is
-cited as a shape analogy, not as a bucket model, so there is no placement signal to read in either
-direction.
+**Closed, and the heading rewritten on items 32 and 56's precedent.** Both of those went from a
+`— partially closed` suffix to a `Closed — ` prefix, and both dropped the suffix outright rather than
+converting it, rewriting the whole heading around the resolution instead of the original defect. This
+entry follows that. **The same pair settles the footnote, which the snapshot test does not check:**
+each was a member of the partial-status footnote while partially closed, and each left it in the very
+commit that closed it, so this entry leaves it too. Worth deriving rather than assuming, because
+footnote membership and heading suffix are independent — item 16 left the footnote while still
+carrying a `— corrected` suffix and not being closed, and item 61 sits in the footnote carrying no
+suffix at all.
 
 ## 13. Closed — `noUnusedLocals` and `noUnusedParameters` are both enabled; 61 real findings resolved, 7 recorded as their own follow-ups
 
@@ -3237,8 +3271,14 @@ condensed worked example forward from the three the old templates carried (`27c5
   kind, not a narrowing.** This bullet used to say the `inferredFrom` telemetry "accumulates
   passively, by design" — which implies it accumulates somewhere readable. It does not:
   `[zone-agent-verdict-inferred-from]` (`e7b051eb`, the marker this entry's own sequence names) is
-  emitted via `debugLog`, gated on `ZONE_VERBOSE_LOGS`, so no ordinary run emits the line and the
-  sink never sees it. **But the question it was added to answer is answerable from the sink anyway,
+  emitted via `debugLog`, gated on `ZONE_VERBOSE_LOGS`, so no ordinary run emits the line. **This
+  bullet used to add that the sink never sees it, and that half is thrown out rather than annotated
+  — this bullet is itself this entry's record of a false claim reaching permanent record before
+  anyone checked it, so it does not get to keep one.** The sink carries records of this marker from
+  a handful of runs inside a single thirteen-minute window on 2026-08-05, when the gate was open.
+  The gating fact stands; "never" does not, and the consequence is recorded in item 74, where a
+  neighbouring zero was being explained by the same gate. **But the question it was added to answer
+  is answerable from the sink anyway,
   which is the part worth recording rather than the routing miss.** `[zone-agent-final-assessment]`
   — on `log()`, sink-visible, and predating this arc by months — already carries `inferredFrom` on
   both of its variants, alongside a `triggeredBy` discriminant literal (`"natural_completion"` /
@@ -4177,9 +4217,22 @@ rejected `tests_passed` claim are the same record.
 **Three sibling markers would separate them, and none reaches the sink — checked, not assumed.**
 `zone-agent-verdict-override` (which carries `originalVerdict` and the validator's own reason, the
 exact discriminator) is emitted through `onProgress` as bare JSON with no `[tag]` prefix, so the
-sink's tag-pattern classifier never matches it. `[zone-agent-no-infra-override]` and
-`[zone-agent-no-infra-verdict]` are both `debugLog`-gated on `ZONE_VERBOSE_LOGS`. All three read
-**zero records**, by three independent mechanisms.
+sink's tag-pattern classifier never matches it — that mechanism is untouched by what follows and
+stands. All three read **zero records**.
+
+**What was said about the other two markers' zeros is thrown out, and the zeros themselves are
+kept.** This paragraph used to attribute `[zone-agent-no-infra-override]` and
+`[zone-agent-no-infra-verdict]` reading zero to their `debugLog` gating on `ZONE_VERBOSE_LOGS`,
+counting that as an independent mechanism alongside the prefix problem above. The gating is real;
+the attribution is not. `[zone-agent-verdict-inferred-from]` is `debugLog`-gated the same way and
+sits on the same call chain — `deriveVerdict` emits it on every verdict these two markers could
+have fired beside — and it carries real records from a handful of runs inside a single
+thirteen-minute window on 2026-08-05. So the gate was demonstrably open for those runs while both
+no-infra markers stayed silent, which makes their zero a real absence across that window rather
+than an artifact of routing. It is a much weaker sample than the counts above and cannot support
+"these paths never fire"; what it does support is that the gate is not the explanation, and a later
+pass reaching for one should not reach for that. See item 61's third bullet, which carried the same
+mistaken "never reaches the sink" claim about the marker that disproves it.
 
 **The three heuristic records are the pre-fix baseline, not evidence the gate widening works — a
 distinction worth fixing in place before someone reads them as a measurement.** After item 61's
@@ -4221,27 +4274,85 @@ distinction is worth carrying.
 `patchValidatedByAgent` is computed in `runCompletion/deriveVerdict.ts`; `AgentFinalAssessmentData`
 and its emitter are in `llm/loopTelemetry.ts`, called from `runCompletion/composer.ts`.
 
+## 75. A resumed run's rehydrated write entries carry no staged-files signal, and the predicate guesses rather than knowing
+
+**What it is.** `21cb580a` closed item 12 by deciding what `didApplyPatch` should do when the
+staged-files field is absent: treat it as changed. That is a guess, chosen because it is the cheaper
+of two wrong answers, and this entry is the work that would remove the need to guess. The absence has
+exactly one production producer — `rehydrateFileAccess`, whose entry shape declares no staged-files
+member and hardcodes the success flag, rebuilding the tool-call log on resume because the envelope
+does not persist it. Emit the field there and absence stops occurring for these tools, at which point
+the arm's polarity on absence stops mattering for real runs.
+
+**It is reachable, established against the code rather than assumed.** `reconcileEnvelopeStaging`
+holds both halves of the comparison at the moment it decides to restore an entry: it reads the file's
+current content off disk and compares its hash against the recorded base hash, restoring only on a
+match. At that instant the disk content *is* the base, so comparing it against the staged content is
+an exact per-path answer to "did the prior run change this file," available with no new persistence
+and no new field on the envelope.
+
+**Two gaps come with it, and the second is the larger one.** The signal is discarded one line after
+it becomes available, because the restore writes only a path-to-content map and the base does not
+survive into the resume input — so the comparison has to be made at the reconcile site or not at all.
+And `write_file`'s new-file path bypasses staging entirely, writing straight to disk; those paths are
+recorded on the envelope but read back only to compose a line of prose in the resume context block,
+never as data reaching the loop. So a rehydrated create has no structured signal at all, and closing
+that is a second threading rather than the same one.
+
+**The trigger, on item 63's convention.** Build this when `[zone-resume-rehydrated]` and
+`[zone-agent-final-assessment]` appear on the same run id with the validated flag true — that is a
+resumed run whose applied-nothing status was guessed and then reported as validated, which is the
+only shape where the guess reaches a surface anyone reads. **It does not occur today:** across the
+sink window from 2026-07-29 to 2026-08-05 the two markers' run-id sets are disjoint, and neither
+resumed run in that window reached run completion at all, so no resumed run has reached the predicate
+yet. Both figures are upper bounds on item 73's key.
+
+**Review point, independent of the trigger:** revisit after roughly fifty real runs that include at
+least one resume reaching completion — the resume path, not the run count, is what gates this, and
+fifty ordinary runs have so far produced two resumes and no completions among them.
+
+**What a null result means, stated so a later pass does not read the silence as waiting.** If the
+co-occurrence never appears, that is the answer and not a stalled entry: it means absence never
+reaches a surface anyone reads, and the guess `21cb580a` made was right in practice as well as in
+argument. The entry would then close on the observation, not on the threading.
+
+**Why its own entry rather than inside item 12 or item 74.** Item 12 closes, and a closed entry is
+the wrong place to park live work. Item 74's three strands are all about a verdict and a payload
+failing to distinguish run shapes that already reached completion; this is about a signal missing
+from a resumed run's reconstructed input, one layer earlier and in a different subsystem. Item 6 owns
+the hardcoded success flag on that same reconstruction, but closed on the read-before-patch gate's
+own terms — a different consumer of the same shape. Item 23 is the nearest resume-path sibling and is
+about envelope id resolution, not about what the envelope carries.
+
+**Bucket — Blocked on data**, on item 63's precedent: whether to build it is gated on an observation
+that does not exist yet, which is that bucket's definition rather than an approximation of it.
+
+**Where the code lives:** `rehydrateFileAccess` and its `REHYDRATED` set are in `llm/agentLoop.ts`;
+`reconcileEnvelopeStaging` and the created-paths list are in `api/diskRunEnvelope.ts`; the resume
+input is assembled in `cli/dispatch.ts`; the arm that consumes the field is `didApplyPatch` in
+`llm/verification/logUtils.ts`.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 74 to find out which ones still need something. No index of
+reader the trouble of reading all 75 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (37): 6, 7, 8, 10, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 70, 71, 72
+**Closed** (38): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 70, 71, 72
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (2): 12, 69
+first (1): 69
 
-**Blocked on data** — closing requires an observation that doesn't exist yet (6): 1, 4, 18, 23, 57, 63
+**Blocked on data** — closing requires an observation that doesn't exist yet (7): 1, 4, 18, 23, 57, 63, 75
 
 **Neither — a structural fact recorded, with no fix proposed** (29): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74
 
-Items 1, 2, 12, 17, 18, 36, 38, 57, 61, 62, and 65 are partially closed or corrected; the
+Items 1, 2, 17, 18, 36, 38, 57, 61, 62, and 65 are partially closed or corrected; the
 classification above covers only the portion still open, not the whole entry.
 
 ---
@@ -4774,3 +4885,37 @@ gets written, so including it is what makes the comparison exact. The implementi
 reading what the writer actually receives, and nothing about the correction's status as a correction
 made it more likely to be right. See the fifth pattern's own corollary — a correction is a claim,
 not authority.
+
+## A sixteenth pattern: a claimed payoff has to be traced forward to the surface the claim names, because a downstream override can have fixed it already
+
+Tracing a value to its first consumer is the natural stopping point — that consumer is what the
+change was reasoned about, it is where the behaviour visibly differs, and once it is found the trace
+feels finished. But an entry claiming a payoff is not making a claim about the first consumer. It is
+making a claim about a surface: what the user sees, what gets recorded, what a later run reports. If
+anything between the first consumer and that surface rewrites the value unconditionally for exactly
+the population the fix targets, the claimed payoff is zero and the trace never went far enough to
+notice.
+
+This document produced the same failure twice in one arc, both against the same override. Item 70
+claimed, while open, that item 12's coming predicate fix would route every no-op-only run into its
+branch's verdict. Item 12 claimed that the same fix made a no-op run stop being upgraded and its
+validated flag go false, and called that the intended direction. Both traced correctly as far as they
+went — the flag really does reach only `applyNoInfraVerificationOverride`, and that override really
+does stop firing. Neither noticed that `deriveResultFields` hardcodes both the reason and the flag
+for the no-change outcome, nor that a no-op-only run reaches that outcome by construction, because
+its staged bytes equal the disk bytes and `finalizeStaging`'s all-unchanged comparison fires first.
+The user-visible field was already correct before either fix, and stayed correct after.
+
+**What makes this worth a pattern rather than an incident is that the two surfaces are separated by
+that override and therefore disagree by design.** The assessment telemetry is emitted before
+`verifyAndFinalize` runs; the result field is derived after it. The same run hands two different
+verdicts to two different readers, and no amount of care about *which value* is computed will settle
+which of them a claim is about. So an entry that says "this changes what is reported" is
+underspecified in this codebase, not merely imprecise — it has to name the surface, and the trace has
+to reach that surface rather than stopping where the change is easiest to see.
+
+The check is cheap and it is the same one either way: after establishing what a change does to a
+value, keep following the value until it either reaches the named surface or is overwritten. An
+overwrite is the interesting result, not the boring one — it means the payoff belongs to whatever
+still reads the pre-overwrite value, which is a real payoff and worth claiming, just not the one that
+was about to be written down.
