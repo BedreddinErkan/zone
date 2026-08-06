@@ -954,6 +954,29 @@ relationship holds for `[zone-apply-patch-marker-split]`: its population is exac
 record's `blockCount > 1` slice, so this record's own count — not `read_before_patch`'s — is the
 correct denominator for marker-split's rate.
 
+**The payload's three fields stopped measuring the same kind of thing once smart quotes closed,
+and that changes how this record can be read — not whether it can be.** `eolChangedBlocks` and
+`prefixStrippedBlocks` still indicate a live dedup gap: the applier normalized something
+`hashPatchBlocks` did not, so that patch's hash diverges from what the applier matched on.
+`smartQuoteChanged` no longer does — it now reports a normalization **both** sides perform, so it
+marks only that the patch contained curly quotes. As a denominator the record is unaffected:
+`blockCount` is what the marker-split rate divides by, and that field means exactly what it always
+did. What is affected is any attempt to read the record as a *gap* count — summing all three
+fields would over-count by every smart-quote record. `cd02808c` is the cutoff, and the payload
+carries no version field, so pre- and post-fix records are indistinguishable in the sink despite
+`smartQuoteChanged` meaning different things on either side of it.
+
+**Observed so far: zero gaps in four records — a rate at n=4, not a finding.** The sink carries
+four `[zone-apply-patch-normalization-parity]` records, all `blockCount: 1`, all three fields
+zero/false. So the measured rate for both open classes is 0 of 4, across two file paths in two
+timestamp pairs (whether that is four calls or two double-logged is **not established**). Four
+records cannot distinguish "these classes are rare" from "the observation window is too short" —
+the instrumented window here is days, and item 4's own precedent puts a usable threshold at
+roughly 10-20 records. Recorded so the number is available and so nobody reads it as evidence the
+remaining two classes don't fire. One thing it does settle structurally: `blockCount: 1` on every
+record explains `[zone-apply-patch-marker-split]`'s own zero, since that marker's population is
+exactly this record's `blockCount > 1` slice — its zero is consistent, not a silent failure.
+
 **Smart quotes are now closed (`cd02808c`).** `parsePatchBlocks` applies `normalizeSmartQuotes`
 in the same position `segmentApplyPatchBlocks` always has — after the leading/trailing-newline
 trim, on both `find` and `replace` — so `hashPatchBlocks`'s dedup key now reflects normalized
@@ -999,12 +1022,18 @@ records new-style again).
 both `toolExecutor.ts` (`segmentApplyPatchBlocks`) and `agentLoop.ts` (`parsePatchBlocks`). The
 walk's own EOL-replace chain and `stripReadFilePrefix` are still in `toolExecutor.ts`, inside
 `apply_patch`'s handler — the two classes that remain open. `parsePatchBlocks` and
-`hashPatchBlocks` are in `agentLoop.ts`. The wrong "normalized" comment is in `antiThrash.ts`,
-directly above its own `patchHash` equality check; `detectRepeatedFailure`'s matching check is in
+`hashPatchBlocks` are in `agentLoop.ts`. The imprecise "normalized" comment is in `antiThrash.ts`,
+directly above its own `patchHash` equality check ("same trigger AND same normalized patch hash")
+— **this entry used to call it flatly wrong, and that is no longer accurate: it is one-third
+right.** The hash it describes now genuinely is smart-quote normalized, and is still not EOL- or
+prefix-normalized, so the word "normalized" over-claims by exactly the two classes this entry has
+open rather than by all three. It stays unfixed and in this entry's scope: it is a production-file
+comment whose correct wording depends on which of the two remaining classes get closed, so
+rewording it now would mean writing it twice. `detectRepeatedFailure`'s matching check is in
 `agentLoop.ts`. `[zone-apply-patch-normalization-parity]`'s pre-pass and emission sit in
-`apply_patch`'s handler, `toolExecutor.ts`, right after the existing smart-quote telemetry — see
-item 55 for what closing this item's smart-quotes class didn't change about that marker's own
-test file's header comment. The characterization tests pinning current values are split across
+`apply_patch`'s handler, `toolExecutor.ts`, right after the existing smart-quote telemetry — item
+55 (now closed) records what closing this item's smart-quotes class did and did not change about
+that marker's own test-file header comment. The characterization tests pinning current values are split across
 two files now: `agentLoop.patchBlocksCharacterization.test.ts` (`parsePatchBlocks`) and
 `toolExecutor.patchBlocksCharacterization.test.ts` (`segmentApplyPatchBlocks`, plus the direct
 comparison tests between the two).
@@ -2230,24 +2259,23 @@ patched stderr write untouched, calling `appendMarkerRecord` zero times.
 (`[zone-marker-sink-rotated]`) and its two failure-path warnings (see item 10) are the only
 current examples of code respecting it deliberately.
 
-## 55. `normalizationParityTelemetry`'s header comment is now only 2-of-3 accurate
+## 55. Closed — the parity header was wrong, but not for the reason this entry gave
 
-**What it is:** `toolExecutor.normalizationParityTelemetry.test.ts`'s header comment states a
+**What it was:** `toolExecutor.normalizationParityTelemetry.test.ts`'s header comment stated a
 blanket claim: the applier's walk normalizes smart quotes, CRLF, and the read_file pasted
 line-number prefix before matching, but `hashPatchBlocks` hashes the raw, unnormalized patch
 text — so two patches the applier treats as identical can get different dedup keys. Item 18's
-partial closure (smart quotes only) makes this accurate for exactly two of the three classes now,
+partial closure (smart quotes only) made this accurate for exactly two of the three classes,
 not all three.
 
 **The marker itself is unaffected — checked, not assumed.** `[zone-apply-patch-normalization-
 parity]`'s payload (`blockCount`, `smartQuoteChanged`, `eolChangedBlocks`,
 `prefixStrippedBlocks`) measures `segmentApplyPatchBlocks`'s own normalization rate — it never
 references `parsePatchBlocks` or `hashPatchBlocks` at all, so it was never a comparison between
-the two paths and doesn't go silent now. What shifts is interpretation only: a
-`smartQuoteChanged: true` record used to be evidence the dedup-mismatch defect was actively
-firing for that patch; now it's just evidence the patch contained curly quotes, with no active
-mismatch implied. The payload carries no version field, so pre-fix and post-fix records are
-indistinguishable in the sink despite meaning different things. `cd02808c` is the cutoff.
+the two paths and doesn't go silent now. What shifted is interpretation only, and that fact now
+lives in **item 18** rather than here — the field-by-field split, the sink cutoff, and what both
+do to that marker's use as a denominator are its ongoing concern, not this closed entry's, and
+keeping one copy is this document's own rule against two that drift apart.
 
 **Checked and found not to apply: items 1 and 4.** Both are "blocked on data," waiting on passive
 accumulation of a *different* marker — `[zone-apply-patch-marker-imbalance]` and
@@ -2255,27 +2283,57 @@ accumulation of a *different* marker — `[zone-apply-patch-marker-imbalance]` a
 `[zone-apply-patch-normalization-parity]` anywhere. This marker doesn't feed either item, so no
 accumulation cutoff is needed for them — recorded here so the question isn't re-asked.
 
-**Now worse in kind, not degree — confirmed against the actual call chain, not assumed from item
-16 alone.** `hashPatchBlocks` calls `parsePatchBlocks`, which now calls the same
-`segmentPatchBlocks` that `toolExecutor.ts`'s `segmentApplyPatchBlocks` re-exports: for
-segmentation and smart-quote normalization, "the applier's walk" and "hashPatchBlocks" — the two
-things this comment's first sentence contrasts — are not two paths that happen to produce the
-same output, they are one function called from both. The contrast the sentence is built on has
-stopped describing the code, not just become less precise. The prescribed fix below — rescoping
-"raw, unnormalized" from three classes to two — treats this as a matter of degree and would not
-repair that: CRLF and the read_file prefix genuinely remain applier-only, normalized later at
-match time, in a loop `parsePatchBlocks` has no equivalent of and never will — so a claim narrowed
-to those two classes would still be substantively true, but the sentence's own shape, a contrast
-between two implementations, would go on misdescribing the one class it no longer applies to for
-a structural reason, not a narrower one.
+**This entry's own reason for urgency was false, and the paragraph making it is deleted rather
+than annotated.** It argued the comment had become wrong *in kind* — that after item 16's merge
+"the applier's walk" and "`hashPatchBlocks`" were "one function called from both," so the
+sentence's two-sided contrast had stopped describing the code at all. Measured against the real
+call chain, the merge unified **segmentation only**. The applier still performs two
+normalizations `hashPatchBlocks` has no equivalent of, applied per matched block inside a loop
+that runs after segmentation: `stripReadFilePrefix(normalizeEol(block.find).text)` and
+`normalizeEol(block.replace).text`. Neither function is called anywhere in the parse path —
+confirmed by call-site sweep, zero occurrences in either `agentLoop.ts` or the shared segmenter's
+module. So the two-sided comparison survived intact for the two open classes; the comment was
+wrong in **degree**, exactly as this entry's own title originally said before the "worse in kind"
+paragraph was added to it.
 
-**What would close it:** rewrite the header comment to name smart quotes as resolved and scope
-the "raw, unnormalized" claim to the two remaining classes only.
+**The comment was wrong on a second point this entry never identified, and that is what made its
+recipe insufficient.** `hashPatchBlocks` does not hash "the raw, unnormalized patch text" in the
+ordinary case. It has three paths: `patch === ""` returns the no-patch sentinel before the parser
+is called at all; a patch that parses to zero blocks hashes the raw string; anything that parses
+to one or more blocks hashes the **joined parsed block content**, which is already smart-quote
+normalized because it came from the shared segmenter. Only the middle path matches the old claim,
+and it is the rarest of the three. So this entry's recipe — narrow three classes to two — was
+**necessary but not sufficient**, and it named the wrong residue: a sentence narrowed to CRLF and
+the read_file prefix while still saying "raw, unnormalized patch text" would have shipped a
+differently-scoped error in place of the original one.
 
-**Where the code lives:** the header comment is at the top of
-`toolExecutor.normalizationParityTelemetry.test.ts`. The marker's emission site is in
-`apply_patch`'s handler, `toolExecutor.ts`, right after the existing smart-quote self-validation
-telemetry.
+**Closed (`4f9e3744`).** The header now states what the code does: segmentation and smart-quote
+normalization are shared through `parsePatchBlocks`, so the dedup key reflects normalized quotes
+once a patch parses into at least one block — with the zero-blocks raw-string fallback named in a
+clause rather than left implied; the prefix strip and EOL normalization remain applier-only, at
+match time; and two patches differing only in those two classes are identical to the applier and
+still get different dedup keys. The `smartQuoteChanged` field's shifted meaning (below) is
+recorded in the same comment. **Comment-only** — verified mechanically that every changed line in
+the commit sits inside a docblock; no assertion, test name, or production line moved.
+
+**A second file carried the same pre-merge framing, and this entry never scoped it.**
+`agentLoop.patchBlocksCharacterization.test.ts`'s own header described the item-16 extraction as
+still *future* ("so a later extraction … is provably behavior-preserving"), named a
+`toolExecutor.ts` "inline walk" that no longer exists, and listed "unnormalized smart quotes"
+among the defects it deliberately pins — a class item 18 closed. Fixed in the same commit, past
+tense, with the smart-quote defect dropped from the pinned list and item 2's misparse kept
+(genuinely still open). Recorded inside this entry rather than as its own numbered item: it is the
+same defect, the same cause, and the same commit, and splitting one comment-staleness finding
+across two entries because it touched two files would fragment it for no reader's benefit — the
+same reasoning item 26 used for two test files sharing one Step-9 concern.
+
+**Where the code lives:** both header comments are at the top of
+`toolExecutor.normalizationParityTelemetry.test.ts` and
+`agentLoop.patchBlocksCharacterization.test.ts`. The marker's emission site is in `apply_patch`'s
+handler, `toolExecutor.ts`, right after the existing smart-quote self-validation telemetry;
+`hashPatchBlocks`'s three paths are in `agentLoop.ts`; the two match-time normalizations are
+`stripReadFilePrefix` and `normalizeEol`, both `toolExecutor.ts`. See item 18 for the two classes
+that remain genuinely open, and for what this closure changed about that entry's own text.
 
 ## 56. Closed — all six files fixed; the client-contract finding narrows the full-replace danger from real to latent
 
@@ -3370,10 +3428,10 @@ priority ordering" cautions against ranking by importance, which this section do
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (34): 6, 7, 8, 10, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 56, 64, 66, 71
+**Closed** (35): 6, 7, 8, 10, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 71
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (6): 12, 18, 23, 36, 55, 57
+first (5): 12, 18, 23, 36, 57
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (3): 1, 4, 63
 
