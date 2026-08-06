@@ -1800,8 +1800,11 @@ idea with no single findable spot in the file, while "the R2 test" is a concrete
 ## 36. The status snapshot isn't mechanically checked against the ledger's own headings — partially closed
 
 **What it was:** nothing compared the snapshot's bucket lists against the `Closed —` prefixes on
-the headings above it, and no natural home existed for such a check — `scripts/` held only sweep
-tooling, no test read `docs/*.md`, no CI workflow touched markdown.
+the headings above it, and no natural home existed for such a check — `scripts/` held only
+sweep/probe tooling, no test read `docs/*.md`, no CI workflow touched markdown. ("Sweep/probe" is
+the pre-rewrite wording, restored: the tree at `964296ac^` held four probe scripts alongside the
+sweep files, so the rewrite's "only sweep tooling" was false. One of four errors that rewrite
+introduced, all corrected below.)
 
 **The consistency half is closed.** `scripts/deferredWorkSnapshot.test.ts` (`964296ac`) parses
 every `## N.` heading and the snapshot's own bucket lines, asserting four things: the Closed-set
@@ -1813,24 +1816,96 @@ Closed-set comparison passes cleanly, and only the coverage assertion fires: "It
 heading but appear in no snapshot bucket." The check this item originally proposed would have
 missed the one real failure that ever occurred; it was never the dimension that broke.
 
-**The currency half closes as a decision, not a fix.** A second establish pass built and ran a
-currency check — matching commit messages against item numbers, comparing against heading status
-— and it is not worth shipping. At HEAD it produces 5 flags and 0 true positives: every flag is a
-legitimate reference (a context citation, an explicit "not fixed here" disclaimer, or a
-deliberate partial closure whose heading correctly doesn't say "Closed —"). Its structural blind
-spot is real — a commit that closes an item without naming it is invisible to it by construction,
-which is exactly how items 7 and 32 went unrecorded for a session's worth of passes — but the
-opposite failure (constant false alarms on a ledger that's currently correct) is just as real and
-not tunable away. It would also need `fetch-depth: 0` added to CI's checkout (shallow by default
-today) to see history at all, and no test in this suite shells out to git — a boundary this would
-be the first to cross. Recording the technique instead: item references across this repo's
+**That claim was re-run rather than re-read, and it reproduced exactly — worth noting because it
+is the only one that did.** Replaying the test's own parsing against the `9f45989c` tree gives
+Closed-set PASS, declared-count PASS, coverage FAIL with `missing=[36]`. Across the entries audited
+in this session's passes, claims have come back confirmed, wrong, or not establishable; this is the
+one that could be *reproduced* from the artifact it names. Recorded as a small fact about this
+claim, not as a general standard the others failed. The closure itself is independently
+verifiable without trusting any commit message: the file exists, `scripts/**/*.test.ts` is inside
+vitest's `include`, and `tests.yml` runs `npm test`.
+
+**The currency half closes as a decision, not a fix** — a second establish pass built and ran a
+currency check, matching commit messages against item numbers and comparing against heading status,
+and it is not worth shipping. The decision stands. Both of the grounds it was recorded on do not,
+and they are corrected below rather than softened.
+
+**The blind-spot ground was argued from two examples that refute it, and the sentence is thrown
+out.** It read that a commit closing an item without naming it is invisible to the check by
+construction, "which is exactly how items 7 and 32 went unrecorded for a session's worth of
+passes." Both closure commits name their item: `af3125f0`'s body opens "Ledger item 7." and
+`d1ce3dc4`'s subject is "close item 32 — loud marker on envelope version mismatch." A naive
+`item N` grep finds both, so the check would have caught both — they are its strongest
+justification, cited as the case against it. **The pre-rewrite text had this right and the rewrite
+reversed it**, which is the part worth keeping: that text recorded the hand method as what "found
+both `d1ce3dc4` and `af3125f0`," then drew the line exactly — the check "would catch every future
+instance of this exact mistake (a commit that says 'closes item N' while the ledger is never told);
+it cannot catch the mistake of forgetting to say so in the commit at all." The rewrite cited the
+same two commits on the wrong side of that line. **The blind spot itself remains real in
+principle** — nothing can infer "this diff closes item N" from a diff that never says so — **but no
+instance of it is on record.** Stated as that distinction rather than dropped, because "real but
+never observed" and "demonstrated" are different claims and the entry made the second one.
+
+**The false-alarm figure was anchored to "HEAD", which moved.** It read "At HEAD it produces 5 flags
+and 0 true positives," measured when `b7902984` landed and never anchored to that commit. Fifty-one
+commits have named an item since. Reconstructing the rule this entry describes at `235e5954` gives
+**32 distinct items flagged across 185 flag events** — and that is a *reconstruction*, not a
+re-measurement: the check "is recorded here only, not implemented anywhere," so the original's exact
+counting rule is not establishable and these figures cannot be compared to the 5 as like for like.
+**What the drift does is strengthen the decision, not weaken it.** Five flags with no true positives
+was already a poor ratio; whatever the precise modern count, the false-alarm side has grown while
+the true-positive side has not. The decision survives on this ground alone, which is the shape worth
+recording: an entry can be right while both of its stated reasons need replacing.
+
+**The rewrite's other two errors were smaller and are corrected in place.** It said the check "would
+also need `fetch-depth: 0` added to CI's checkout (shallow by default today)". There are two
+workflows: **`tests.yml`**, which runs `npm test` and whose `actions/checkout@v4` sets no
+`fetch-depth`, is the one that would need it — the conclusion holds, but only for that workflow.
+`feature-agent.yml` **already sets `fetch-depth: 0`**, so a reader grepping the setting finds a hit
+and concludes this entry is wrong. Naming the workflow is what prevents that. The claim beside it —
+that no test in this suite shells out to git — is **confirmed**: five test files import
+`child_process` and all five mock it; none invokes git, so this would indeed be the first to cross
+that boundary.
+
+**A note on how these four errors arrived, which is not an essay.** All four entered in one commit
+that rewrote this entry end to end when it became partially closed; nothing was carried forward. A
+wholesale rewrite is a deletion plus an addition, and the deletion goes unreviewed — the blind-spot
+reversal above is precisely a correct sentence deleted and replaced with a wrong one. That is worth
+one instance's worth of attention and no more: item 57's correction this session also introduced an
+error, but a *new* claim in *new* text where the old text had asserted nothing, which is a different
+failure. One instance does not clear this document's bar for a pattern section, so it stays here.
+
+Recording the technique instead: item references across this repo's
 history take at least 14 distinct phrasings (`item N`, `Item N`, `ledger item N`, `items N-N`,
 `items N, N, N`, `items N/N`, and others); a naive `/item (\d+)/i` misses every plural form. A
 future hand sweep should use `/items?\s+(\d+(?:\s*[-\/,+&]\s*\d+)*)/gi` and expect to read every
 hit rather than trust the count.
 
-**Where the code lives:** the check is `scripts/deferredWorkSnapshot.test.ts`; the currency
-technique is recorded here only, not implemented anywhere.
+**Bucket, moved out of Actionable now — and the precedent pointed at the mismatch all along.** That
+bucket requires a fix specified in the entry with nothing left to learn. What remains here is the
+opposite: an explicit decision *not* to build, plus a recorded technique. **Item 46 names this
+entry's currency half as its own precedent for the decision-not-fix shape, and item 46 sits in
+Neither**; item 38 cites the same shape and is also in Neither. Two entries modelled on this one's
+remaining half were bucketed Neither while this one stayed Actionable now. **Neither.**
+
+**What remains open, in the code's own terms rather than this entry's.** Nothing in the repository
+compares ledger state against code or commit reality. The shipped test compares the ledger **only
+against itself** — headings against bucket lists, both inside one file — so it cannot detect a
+ledger that is internally consistent and uniformly stale, which is exactly what items 7 and 32 were.
+No artifact exists for that dimension and none is proposed here.
+
+**An inventory from the unanchored-`HEAD` sweep this correction prompted, recorded so a later pass
+need not re-derive it.** Eleven `HEAD` references exist in this document. Three, in the seventh
+pattern, describe git semantics rather than a moment. Five are verification statements ("confirmed
+present at HEAD") — this document's idiom for "checked when written," self-limiting by construction.
+One is a state claim in item 62. **Two carried figures anchored to a moving reference:** this
+entry's, corrected above, and item 16's "holds eleven `it()` blocks at HEAD" — re-counted during
+this sweep and still eleven, so accurate and left alone. Anchoring a figure to a commit rather than
+to `HEAD` is the cheap habit that would have made this correction unnecessary.
+
+**Where the code lives:** the check is `scripts/deferredWorkSnapshot.test.ts`, reached by vitest's
+`scripts/**/*.test.ts` include and run in CI by `tests.yml`'s `npm test`; the currency technique is
+recorded here only, not implemented anywhere.
 
 ## 37. Closed — dead fixture files no longer ship in the tarball, and the original count was short by one fixture
 
@@ -3056,11 +3131,14 @@ directly, not on balance — a stronger fit than before, by the same reasoning i
 `— partially closed` suffix would be redundant here: this heading's own second clause ("and what
 they left open") already carries that signal, which no other partially-closed entry's heading does.
 Checked while deciding it, because it is easy to assume otherwise: the suffix is **not** tied to a
-bucket. Five headings carry it, and they now sit in three different buckets — items 12 and 36 in
-Actionable now, items 1 and 18 in Blocked on data, item 2 in Neither. (This sentence read "items
-12, 18, and 36 sit in Actionable now" until item 18 moved; the reclassification only strengthened
-the point, which is why the correction is worth making rather than dropping the sentence.) No
-bucket clusters the suffix, so nothing about this entry's bucket argues for or against it.
+bucket. Five headings carry it and they are spread across three different buckets, so no bucket
+clusters the suffix and nothing about this entry's bucket argues for or against it. **The
+per-item distribution that used to sit here is deliberately gone rather than corrected a third
+time.** It named which bucket each of the five was in, which made it wrong the moment any one of
+them was reclassified — twice in two consecutive commits, as items 18 and then 36 moved. The claim
+that carries the argument is "spread across more than one bucket," and that survives any single
+reclassification; the enumeration never could. The snapshot below is where per-item placement is
+tracked, and it is mechanically checked.
 The footnote under the snapshot is where partial status is tracked mechanically, and this entry is
 added to it.
 
@@ -3907,12 +3985,12 @@ first.
 **Closed** (36): 6, 7, 8, 10, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 71, 72
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (2): 12, 36
+first (1): 12
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (6): 1, 4, 18, 23, 57, 63
 
-**Neither — a structural fact recorded, with no fix proposed** (29): 2, 3, 5, 9, 11, 15, 17, 19,
-27, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 69, 70, 73
+**Neither — a structural fact recorded, with no fix proposed** (30): 2, 3, 5, 9, 11, 15, 17, 19,
+27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 69, 70, 73
 
 Items 1, 2, 12, 17, 18, 36, 38, 57, 61, 62, and 65 are partially closed or corrected; the
 classification above covers only the portion still open, not the whole entry.
