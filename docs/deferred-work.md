@@ -493,24 +493,59 @@ the field.
 `didApplyPatch`'s `apply_patch`/`write_file` arm reads `e.success`, not `filesStaged` — so a
 succeeding no-op still returns `true` from the predicate exactly as before, and this entry's no-op
 half stays open. Making the field honest and making the verdict honest are separate changes; only
-the first landed. What remains, deferred together because it is all one pass over one file:
+the first landed. What remains:
 
 - **The predicate arm itself**, in the verification log utils, with two live call paths to reason
   about — `composer.ts` calls it directly and `inferVerificationFromLog` calls it from
   `classify.ts`. Changing the arm to consult `filesStaged` for these two tools changes what both
-  paths report.
+  paths report, and the two paths do not report it the same way. On the composer path the flag
+  reaches only `applyNoInfraVerificationOverride`, so a no-op run stops being upgraded to
+  `tests_skipped_no_infra` and `patchValidatedByAgent` goes false — the intended direction. On the
+  classify path, every earlier branch is gated on the flag being true, so control falls to the bare
+  not-applied check and the run is labelled `tests_failed_by_patch`, which surfaces as a warning
+  that tests failed because of this patch. That is this entry's own original symptom, arriving by a
+  new route — which is why the fix is blocked rather than merely sequenced. **See item 70: that
+  branch is its subject, and deciding it is a prerequisite for this half.**
 - **The anomaly branch**, folded in here rather than opened as its own item because it lives in the
-  same function the predicate pass will already be editing, and splitting it would mean two passes
-  touching one file for one concern. `multiEditChangedSomething` treats an absent `filesStaged` as
-  an anomaly — returns false, emits `[zone-multi-edit-log-missing-staged]`. `21da1225` verified
-  that branch is **not exercised by any test**: its `undefined`-instead-of-`[]` mutation died
-  against a direct result assertion one layer above, in the tool-executor test file, while the log
-  utils' own test file stayed green. That kill is evidence about the result shape, not coverage of
-  the branch, and it is recorded that way so a later pass does not read it as coverage.
-- **The rehydration half**, unchanged and still gated on reconciling the two `ToolCallLogEntry`
-  declarations first: adding `resumeStagingFiles` to a signature whose log type already cannot
-  express `filesStaged` would widen the surface that depends on an undeclared property rather than
-  narrow it.
+  same function the predicate pass will already be editing. `multiEditChangedSomething` treats an
+  absent `filesStaged` as an anomaly — returns false, emits `[zone-multi-edit-log-missing-staged]`.
+  **It is covered**, by `agentLoop.multiEditSaturation.test.ts`'s case G, which calls the helper
+  with a `multi_edit` entry carrying `success: true` and no `filesStaged`, then asserts both halves
+  — the `false` return and that the marker fired.
+- **The rehydration half.** Rehydrated entries hardcode `success: true`, so the predicate counts
+  them as applied regardless of what happened before interruption. The fix — reading
+  `resumeStagingFiles`, non-empty exactly when the prior run staged real work — needs threading into
+  `inferVerificationFromLog`, whose signature takes a bare tool-call log.
+
+**This entry claimed that branch was uncovered, and the claim is thrown out. How it got there is
+the part worth keeping.** `21da1225`'s own report observed that the log utils' test file ran clean
+under its `undefined`-instead-of-`[]` mutation and inferred the branch was untested. The inference
+was carried into a brief and then into this document by `ea5dc75b` without being checked against
+the tree. What defeats it is where the covering test sits: `multiEditChangedSomething` is defined in
+`verification/logUtils.ts` but re-exported from `agentLoop.ts`, and the test imports it from the
+re-export, so it lives beside the re-exporting module and not beside the defining one. A sweep of
+the defining module's own test file finds nothing; a sweep by symbol finds the test immediately.
+That is the thirteenth pattern's method applied to coverage rather than to call paths — see there.
+
+**The reason this entry gave for splitting the remaining work is also gone, and a different one
+replaces it.** It said the predicate change was gated on reconciling the two `ToolCallLogEntry`
+declarations. It is not: `didApplyPatch`'s own parameter type, `ToolCallLogEntryLike`, already
+declares `filesStaged`, and the `multi_edit` arm already reads the field through that parameter at
+both live call sites. An arm consulting the same field for the other two tools therefore compiles at
+both sites with no declaration touched — proven by existing construction rather than argued. The
+rehydration half's stated dependency is smaller than named too: adding a parameter to
+`inferVerificationFromLog` does not touch either `ToolCallLogEntry`, so what that bullet described
+is a hygiene preference about not widening a surface that already depends on an undeclared property,
+not a compile-order constraint.
+
+**What actually forces the sequence, established against the code rather than inherited.** The
+tool-call log is not persisted in the run envelope — the envelope carries messages, staging,
+failure history and todos, and the log is rebuilt on resume by `rehydrateFileAccess`, whose own
+entry shape declares no `filesStaged` member at all and hardcodes `success: true`. So every
+rehydrated single-file entry presents the field as absent. An arm consulting the field would read
+that absence as "nothing persisted" and report every resumed run as having applied nothing. The arm
+change must therefore land with either an emission of the field on that rehydration path or an
+explicit rule for absence — and, before either, with item 70's branch decided.
 
 **The behavior change `21da1225` did make, in one sentence:** the modified-files set no longer
 includes a file whose call succeeded but left the persisted bytes identical to what was read.
@@ -544,15 +579,23 @@ over: `filesStaged === undefined` returns false *and* emits `[zone-multi-edit-lo
 so the arm is "success plus non-empty `filesStaged`, with the absent case marked rather than
 guessed" — the anomaly branch the hazard above would drive every `multi_edit` into.
 
-**Bucket, checked rather than inherited — stays Actionable now.** Both open halves still name a
-fix, and `21da1225` narrowed what remains rather than widening it: the field work is done, so the
-no-op half is now a single change to one predicate arm in one file, with the anomaly branch and the
-rehydration threading queued behind it in that same file. That is what separates this entry from
-the four that left this bucket during the same sweep — items 18, 23, 36 and 57 each left for a
-missing prerequisite or an absent fix, and this one has neither. **The precedent check that settled item 36 does not fire here and a
-future pass should not expect it to:** nothing in this document is modelled on item 12, and what it
-cites (item 1's "prose is not a data model") is cited as a shape analogy, not as a bucket model, so
-there is no placement signal to read in either direction.
+**Bucket — stays Actionable now, but only because one half survives the blockage, and the bucket
+set has no term for what happened to the other.** The no-op half is now blocked on item 70's
+decision, which is neither an absent fix nor a missing observation: the fix is fully specified and
+what it waits on is a sibling entry's judgement. Neither of the other buckets describes that.
+Blocked on data, read against its actual membership rather than its one-line name, holds entries
+waiting on something to be *seen* — items 1, 4 and 63 on marker accumulation, items 18, 23 and 57
+on a trigger that has never fired; item 70 states that reading of the bucket in its own text.
+Neither is for entries proposing no fix, and this one proposes two. So the placement rests on the
+rehydration half, which stays genuinely actionable: its fix is named, it does not depend on item
+70's branch, and its own stated blocker turned out to be a hygiene preference rather than a
+constraint. **Recorded rather than forced:** an entry blocked on a sibling's decision has no bucket
+here, this is the first of that shape, and a later pass that finds a second should consider whether
+the partition needs a term rather than reading this placement as precedent for one. **The precedent
+check that settled item 36 does not fire here and a future pass should not expect it to:** nothing
+in this document is modelled on item 12, and what it cites (item 1's "prose is not a data model") is
+cited as a shape analogy, not as a bucket model, so there is no placement signal to read in either
+direction.
 
 ## 13. Closed — `noUnusedLocals` and `noUnusedParameters` are both enabled; 61 real findings resolved, 7 recorded as their own follow-ups
 
@@ -3731,6 +3774,22 @@ so the model usually supplies one and the inference path is not taken. That mask
 thing standing between this branch and a read-only run's recorded verdict. Closing item 69 without
 deciding this one converts a suppressed defect into a live one.
 
+**The population is wider than the read-only archetype this entry was written around, and item 12's
+open half would widen it again.** The branch fires on `patchApplied === false`, whatever produced
+that state — the read-only case above is one route to it, not the definition of it. Two more reach
+it. A patch-archetype run whose every write failed is already in this state today, which this entry
+notes further down as the reason `tests_failed_by_patch` may be load-bearing and not a pure relabel.
+And item 12's remaining fix would add two routes that do not exist yet: a run whose only writes were
+no-ops, once `didApplyPatch` consults `filesStaged` rather than the success flag; and **every resumed
+run**, because the tool-call log is not persisted in the envelope but rebuilt by
+`rehydrateFileAccess`, whose entry shape declares no `filesStaged` member — so a field-consulting arm
+would read every rehydrated write as having staged nothing. **Item 12's no-op half is therefore
+blocked on this entry's decision, and this entry's population is what its fix would enlarge — the
+edge runs both ways and is stated at both ends, as items 69 and 70 already do for each other.**
+Whichever value this branch should return for a run that could not have written anything, it has to
+be a value that is also correct for a run that wrote only no-ops and for a run that is merely
+resuming, because none of the three is distinguishable at this call site.
+
 **`patchValidatedByAgent` is the sibling half, re-established after `5d01d27a` rather than assumed
 closed by it.** The flag is set true whenever the post-override reason is `tests_passed`,
 `tests_skipped_no_infra`, or `tests_failed_unrelated`. Two shapes still set it true on a run that
@@ -3824,6 +3883,14 @@ entry turns on. They characterise how the *payload* collapses several verdict pa
 say nothing about what `inferVerificationFromLog` ought to return for a no-write-tool run, which is
 a judgement no volume of these records can settle. An entry can acquire real evidence and stay
 Neither when the evidence lands beside the open question rather than on it. **Stays Neither.**
+
+**Re-checked a second time on the widened population, with the same result and a sharper reason.**
+Learning that two more shapes reach this branch raises what the decision is worth; it does not
+supply the decision. The open question is still what the function should return when nothing could
+have been written, and the widening makes that harder to answer rather than easier, since the value
+now has to be right for three indistinguishable populations at once. Becoming more consequential is
+not the same as becoming decidable — the same distinction the first re-check drew, arriving from the
+other direction. **Stays Neither.**
 
 **Where the code lives:** `inferVerificationFromLog`, `validatePassedClaim`,
 `validateUnrelatedClaim`, and `applyNoInfraVerificationOverride` are all in
@@ -4504,6 +4571,19 @@ for `from "…/x.js"` misses `await import(...)` and a re-export does not bind a
 sweep returns only a definition and some prose, there is no call path, whatever the prose says. If
 it returns callers in a file you never grepped, the behavior lives there. The two failures are one
 habit — a string search standing in for a call-graph check — and one method retires both.
+
+**"Is this branch tested" is the same question, not an adjacent one, and it failed here the same
+way.** A test is a caller. So the sweep above answers coverage without modification: enumerate the
+callers of the symbol and the tests are among them. The instance is item 12's anomaly branch, which
+this document asserted was covered by nothing. It is covered — by a case that constructs the exact
+absent-field entry and asserts both the return value and the marker — and the assertion of absence
+came from checking the one test file sitting beside the module that *defines* the symbol, while the
+test sits beside the module that *re-exports* it. Re-export is the fourth surface the method above
+already names; the sweep was not run, a single co-located file was read instead, and its silence was
+taken for the system's. Worth stating explicitly because the coverage question feels like a
+different kind of question from the call-path one and invites a different, weaker check — opening
+the obvious test file. It is the same question with the same four surfaces, and skipping the sweep
+costs the same thing either way: a claim about the system derived from one surface of it.
 
 The sharper half is what makes this failure mode survive review instead of getting caught
 immediately: when a number asserted from a known default happens to equal the number actually
