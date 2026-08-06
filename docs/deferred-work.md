@@ -427,9 +427,11 @@ problems, and two load-bearing defects it didn't name are now fixed.
 string-matching `result` text for "error"/"not found"/"fail", case-insensitively with no word
 boundary, and never checked `multi_edit` at all.
 - **The path-name false negative.** Every write-tool success message embeds `${filePath}`. A
-  patch to any of the 16 tracked files in this repo whose path contains one of those three
-  substrings — an ordinary single-file edit to `src/core/parseVerificationError.ts`, for
-  instance — reported as having applied nothing.
+  patch to any of the 16 tracked files whose path contains one of those three substrings — an
+  ordinary single-file edit to `src/core/parseVerificationError.ts`, for instance — reported as
+  having applied nothing. (Sixteen as of `d9ca5798`, re-counted then; the figure was previously
+  anchored to nothing, which is the class item 36's sweep inventories — it will drift as files are
+  added, and the defect it illustrates does not depend on the exact number.)
 - **`multi_edit` was never checked.** A `multi_edit`-only run with real replacements and staged
   files returned `false` regardless of what actually happened.
 
@@ -453,10 +455,56 @@ scope-guard blocks and marker-imbalance rejections — real failures — counted
   close this without a new field, but needs threading into `inferVerificationFromLog`, which
   today only receives a bare tool-call log.
 - **The no-op patch.** A FIND==REPLACE `apply_patch` stages byte-identical content and returns
-  `success: true`; neither `apply_patch` nor `write_file` has a no-op guard. Closing it needs
-  either such a guard, or a `filesStaged`-equivalent added to both write tools' returns —
-  established as a bigger pass than swapping a predicate, and explicitly out of scope for the
-  fix that landed.
+  `success: true`; neither `apply_patch` nor `write_file` has a no-op guard. Traced end to end
+  rather than assumed: the block gate is `countOccurrences` on the FIND text, which a
+  FIND==REPLACE block passes because the text *is* present, and no content-equality check exists
+  anywhere between that gate and the success return. `write_file`'s region has none either. So the
+  case is real for both tools, not caught by an earlier branch.
+  **The second option this bullet used to offer — "a `filesStaged`-equivalent added to both write
+  tools' returns" — is thrown out: that field already exists on both.** They set
+  `filesStaged: [filePath]` unconditionally on success. What is missing is not the field but its
+  *semantics*: `multi_edit` builds the array inside an `if (count > 0)` branch, so a
+  zero-replacement file is excluded, while the two single-file tools include the path whether or
+  not the bytes moved. The field's own doc comment already states the contract those two violate —
+  "Repo-relative paths of files this call left with a PERSISTING content change — not merely an
+  attempted one" — and then spells out the divergence in the same breath, `multi_edit` gated on
+  replacement count, `apply_patch`/`write_file` "set on their success returns". **That makes the
+  remaining work smaller than this entry claimed, not larger:** narrow two returns to the meaning
+  the field is already documented to have, rather than add anything. The "bigger pass than swapping
+  a predicate" framing applied to the option that is now gone.
+
+**A latent hazard found while auditing this entry, kept here rather than carved out.** Two distinct
+`ToolCallLogEntry` types exist. The one in `toolEventHandler/types.ts` declares `filesStaged`; the
+one in `runCompletion/types.ts` does not — and `composer.ts` and `deriveVerdict.ts` consume the
+latter, while `inferVerificationFromLog`'s own inline log parameter omits it too. The `multi_edit`
+arm works today only because `handleToolResult` sets `filesStaged` at the push site and structural
+typing carries an undeclared property through every one of those narrower declarations. Any future
+site that *constructs* a log from the declared type instead of forwarding a real one would produce
+`filesStaged: undefined`, sending every `multi_edit` down `multiEditChangedSomething`'s anomaly
+branch — false, plus a `[zone-multi-edit-log-missing-staged]` record. **Inside this entry, on item
+23's precedent rather than item 71's**: item 71 was carved out because it was a different *kind* of
+thing from its parent's recipe, in a different layer; item 23's third-phase gap stayed inside
+because it was the same defect class in the same function that the entry's own recipe already
+reached for. This is the second shape — same predicate, same field, same arm — and it is not merely
+adjacent to the rehydration bullet above but load-bearing for it, since that bullet's fix is a
+signature change to `inferVerificationFromLog`, which is one of the declarations that cannot express
+the field.
+
+**Commit ordering for whatever lands, recorded because the hazard makes it structural rather than
+stylistic.** The no-op narrowing is one commit — two success returns plus the doc comment, with
+tests. The rehydration threading is a separate and larger one, and it should reconcile the two
+`ToolCallLogEntry` types first: adding `resumeStagingFiles` to a signature whose log type already
+cannot express `filesStaged` would widen the surface that depends on an undeclared property rather
+than narrow it.
+
+**No evidence exists either way, and the silence is uninformative by construction.** No marker
+instruments this predicate's correctness at all — nothing records a `didApplyPatch` verdict against
+what actually happened. The one adjacent marker, `[zone-multi-edit-log-missing-staged]`, has **zero**
+sink records; but the tool-call census on item 73's key shows `multi_edit` was **never invoked** in
+the recorded window (`search_in_files` 30, `read_file` 23, `run_command_readonly` 6, `apply_patch` 4,
+`run_command` 1, all upper bounds). So the zero means the path was never taken, not that it is
+sound. A reader deciding whether to build should treat both open halves as correctness arguments
+with no observation behind them.
 
 **The general lesson, past this fix:** classifying an outcome by pattern-matching
 human-readable text instead of reading a structured field meant to carry that outcome is the
@@ -469,8 +517,23 @@ its own terms even though it leaves this entry's first "still open" item unclose
 `src/llm/verification/logUtils.ts` (`multiEditChangedSomething` moved there from `agentLoop.ts`,
 which re-exports it for existing importers). Called from `composer.ts`
 (`src/llm/runCompletion/`) directly, and from `inferVerificationFromLog` in `classify.ts`
-(`src/llm/verification/`). `deriveVerdict.ts` imported it but never called it — that dead import
-is gone now too (see item 13).
+(`src/llm/verification/`). **A third export surface this section used to miss:**
+`verification/index.ts` re-exports `didApplyPatch` as well — nothing imports it by that route
+today, but a caller-sweep that stops at the two call sites above will under-count the surface.
+`deriveVerdict.ts` imported it but never called it — that dead import is gone now too (see item
+13). `multiEditChangedSomething` has a third branch this entry's description of the fix skipped
+over: `filesStaged === undefined` returns false *and* emits `[zone-multi-edit-log-missing-staged]`,
+so the arm is "success plus non-empty `filesStaged`, with the absent case marked rather than
+guessed" — the anomaly branch the hazard above would drive every `multi_edit` into.
+
+**Bucket, checked rather than inherited — stays Actionable now.** Both open halves name a fix, and
+this pass made the no-op half *more* specified and smaller, not less: narrow two returns to the
+field's documented meaning. That is what separates this entry from the four that left this bucket
+during the same sweep — items 18, 23, 36 and 57 each left for a missing prerequisite or an absent
+fix, and this one has neither. **The precedent check that settled item 36 does not fire here and a
+future pass should not expect it to:** nothing in this document is modelled on item 12, and what it
+cites (item 1's "prose is not a data model") is cited as a shape analogy, not as a bucket model, so
+there is no placement signal to read in either direction.
 
 ## 13. Closed — `noUnusedLocals` and `noUnusedParameters` are both enabled; 61 real findings resolved, 7 recorded as their own follow-ups
 
