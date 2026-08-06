@@ -503,9 +503,10 @@ the first landed. What remains:
   `tests_skipped_no_infra` and `patchValidatedByAgent` goes false — the intended direction. On the
   classify path, every earlier branch is gated on the flag being true, so control falls to the bare
   not-applied check and the run is labelled `tests_failed_by_patch`, which surfaces as a warning
-  that tests failed because of this patch. That is this entry's own original symptom, arriving by a
-  new route — which is why the fix is blocked rather than merely sequenced. **See item 70: that
-  branch is its subject, and deciding it is a prerequisite for this half.**
+  that tests failed because of this patch — this entry's own original symptom, arriving by a new
+  route. **That prerequisite is discharged: item 70 closed in `ef9d0608`, and the branch now returns
+  `no_verification_attempted`, which is correct for a no-op-only run and for a resumed one alike.**
+  So the classify path no longer punishes this change, and this half is unblocked.
 - **The anomaly branch**, folded in here rather than opened as its own item because it lives in the
   same function the predicate pass will already be editing. `multiEditChangedSomething` treats an
   absent `filesStaged` as an anomaly — returns false, emits `[zone-multi-edit-log-missing-staged]`.
@@ -545,7 +546,11 @@ entry shape declares no `filesStaged` member at all and hardcodes `success: true
 rehydrated single-file entry presents the field as absent. An arm consulting the field would read
 that absence as "nothing persisted" and report every resumed run as having applied nothing. The arm
 change must therefore land with either an emission of the field on that rehydration path or an
-explicit rule for absence — and, before either, with item 70's branch decided.
+explicit rule for absence. **That is now the whole of what remains, and it is one commit, not two:**
+no declaration changes — `didApplyPatch`'s own parameter type already declares `filesStaged` and the
+`multi_edit` arm already reads it through that parameter at both live call sites — so the arm change
+and the rehydration decision travel together in a single edit, with item 70's branch already decided
+behind them.
 
 **The behavior change `21da1225` did make, in one sentence:** the modified-files set no longer
 includes a file whose call succeeded but left the persisted bytes identical to what was read.
@@ -579,19 +584,14 @@ over: `filesStaged === undefined` returns false *and* emits `[zone-multi-edit-lo
 so the arm is "success plus non-empty `filesStaged`, with the absent case marked rather than
 guessed" — the anomaly branch the hazard above would drive every `multi_edit` into.
 
-**Bucket — stays Actionable now, but only because one half survives the blockage, and the bucket
-set has no term for what happened to the other.** The no-op half is now blocked on item 70's
-decision, which is neither an absent fix nor a missing observation: the fix is fully specified and
-what it waits on is a sibling entry's judgement. Neither of the other buckets describes that.
-Blocked on data, read against its actual membership rather than its one-line name, holds entries
-waiting on something to be *seen* — items 1, 4 and 63 on marker accumulation, items 18, 23 and 57
-on a trigger that has never fired; item 70 states that reading of the bucket in its own text.
-Neither is for entries proposing no fix, and this one proposes two. So the placement rests on the
-rehydration half, which stays genuinely actionable: its fix is named, it does not depend on item
-70's branch, and its own stated blocker turned out to be a hygiene preference rather than a
-constraint. **Recorded rather than forced:** an entry blocked on a sibling's decision has no bucket
-here, this is the first of that shape, and a later pass that finds a second should consider whether
-the partition needs a term rather than reading this placement as precedent for one. **The precedent
+**Bucket — Actionable now, and for the first time without a caveat.** This placement previously
+rested on the rehydration half alone, because the no-op half was blocked on item 70's decision and
+no bucket described "blocked on a sibling entry's judgement." `ef9d0608` discharges that
+prerequisite, so both halves are specified with nothing left to learn first and the bucket's own bar
+is met plainly. **The caveat recorded here is retired rather than left standing:** it said an entry
+blocked on a sibling's decision has no bucket in this partition and that this was the first of that
+shape. The observation about the partition remains true, but this entry is no longer an instance of
+it, so a later pass looking for the first instance should not find one here. **The precedent
 check that settled item 36 does not fire here and a future pass should not expect it to:** nothing
 in this document is modelled on item 12, and what it cites (item 1's "prose is not a data model") is
 cited as a shape analogy, not as a bucket model, so there is no placement signal to read in either
@@ -3217,15 +3217,19 @@ condensed worked example forward from the three the old templates carried (`27c5
   claiming the payload's own `reason` field distinguishes the two. That is false. The sentence is
   deleted rather than carried with a correction appended, because it was written into permanent
   record and pushed before anyone checked it, and a reader who finds it re-derives a wrong
-  conclusion.** `no_verification_attempted` reaches the payload from three independent origins: the
+  conclusion.** `no_verification_attempted` reaches the payload from **four** independent origins: the
   hardcoded literal on `deriveVerdict`'s non-`max_iterations` branch; `inferVerificationFromLog`'s
   own final fallthrough (reachable only when a patch did apply, tests did not run, and no infra
-  error was seen); and the model emitting it as a tag, which `parseVerificationTag` accepts and the
-  max-iterations wrapup prompt offers by name. Among `inferredFrom: "heuristic"` records the first
-  two collide, so `reason` cannot separate them; `trigger` can, and does. What made the false claim
-  plausible: `inferVerificationFromLog`'s other branches each return a distinct value, so only its
-  final fallthrough collides — the collision sits on the one line of that function a reader
-  scanning its branch list is most likely to read as unreachable filler. Compounding it, the logged
+  error was seen); that same function's not-patch-applied branch, which `ef9d0608` changed to this
+  value and which is reachable only when a patch did **not** apply; and the model emitting it as a
+  tag, which `parseVerificationTag` accepts and the max-iterations wrapup prompt offers by name.
+  Among `inferredFrom: "heuristic"` records the first three collide, so `reason` cannot separate
+  them; `trigger` separates the first from the rest and nothing separates the middle two.
+  **This bullet counted three origins and said only the final fallthrough collides among that
+  function's branches — `ef9d0608` falsified both halves, and they are corrected here rather than
+  left to be re-derived.** Two of its branches now return this value, deliberately: see item 70 for
+  why the not-patch-applied branch is kept explicit even though it returns exactly what the
+  fallthrough returns. Compounding it, the logged
   `reason` is the **post-override** value: `validatePassedClaim`, `validateUnrelatedClaim`, and
   `applyNoInfraVerificationOverride` can each rewrite it between derivation and emission, so the
   recorded value is not the raw inference output either.
@@ -3730,35 +3734,75 @@ because an approved plan with steps nets the effective archetype to undefined. A
 on the bare archetype field flips it. This is not a hypothetical: it is the one existing test that
 pins this exact message's content.
 
-**Why it is not simply applied — the coupling, which is the whole reason this is its own entry.**
-Closing this surface removes the last prompt-level demand for a tag on the max-iterations path for
-read-only runs. With no tag, `deriveVerdict` falls to `inferVerificationFromLog`, and item 70
-establishes what that returns for a run that had no write tool: `tests_failed_by_patch`. So closing
-this surface un-masks item 70 rather than completing item 61. The masking is real and load-bearing
-today, not incidental.
+**The coupling that made this its own entry is now discharged.** Closing this surface removes the
+last prompt-level demand for a tag on the max-iterations path for read-only runs. With no tag,
+`deriveVerdict` falls to `inferVerificationFromLog` — and while item 70 was open, what that returned
+for a run with no write tool was `tests_failed_by_patch`, so closing this surface would have
+un-masked a live defect rather than completing item 61. **`ef9d0608` closed item 70: that branch now
+returns `no_verification_attempted`, correct for every population reaching it.** Un-masking is
+therefore harmless, and this entry no longer waits on anything outside itself.
 
-**Bucket, against the document's own usage.** Item 59 is the matching shape: a real, verified
-structural fact whose fix is understood but whose *approach* is not settled, bucketed Neither
-explicitly because "the approach itself is still open, which is a different and more fundamental
-gap than item 57's (an approach fully specified, one parameter value deferred)." Here the deferred
-question is not a parameter but whether applying the fix is correct at all before item 70 is
-decided. That is item 59's gap, not item 57's. **Bucketed Neither.**
+**Bucket — Neither to Actionable now, on the coupling's discharge rather than on a new fix.** The
+Neither placement was argued as item 59's shape, where "the approach itself is still open" — but the
+approach here was never the open part. This entry's own text specifies the fix (mirror the
+system-prompt gate, reusing the `planApproved`-aware derivation rather than the bare archetype
+field) and names the existing test that constrains its shape. What was open was "whether applying
+the fix is correct at all before item 70 is decided," and item 70 is decided. That is the Actionable
+bar met exactly: a fix specified in the entry, nothing new to learn first. **Moved as a consequence
+of `ef9d0608`, not because anything about this entry's own analysis changed.**
 
 **Where the code lives:** the wrapup message, its local `answerOnly`, and the two-armed instruction
 text are in `runAgentLoopScoped`'s post-loop max-iterations block, `agentLoop.ts`. The pinning test
 is `runLlmPatchFlow.terminationReasonProbe.test.ts`'s CONTRAST case. See item 61 for the surface
 that did close, and item 70 for what closing this one exposes.
 
-## 70. `inferVerificationFromLog` reports a broken-tests verdict for a run that had no write tool
+## 70. Closed — the broken-tests verdict for a run that had no write tool, and why the branch that replaced it cannot be tested
 
-**What it is:** `inferVerificationFromLog` derives `patchApplied` from `didApplyPatch`, which
+**What it was:** `inferVerificationFromLog` derives `patchApplied` from `didApplyPatch`, which
 requires a **successful** `apply_patch`, `write_file`, or `multi_edit` entry in the tool-call log. A
-read-only run is offered none of those tools by construction, so `patchApplied` is always false for
-it. Every earlier branch of the function is gated on `patchApplied` being true, so control reaches
-the bare `if (!patchApplied)` check and returns `tests_failed_by_patch` — tests failed because of
-your patch — for a run that could not have written anything. The function's own final fallthrough,
-`no_verification_attempted`, is unreachable whenever `patchApplied` is false, because that check
-returns first.
+read-only run is offered none of those tools by construction, so `patchApplied` was always false for
+it. Every earlier branch of the function is gated on `patchApplied` being true, so control reached
+the bare `if (!patchApplied)` check and returned `tests_failed_by_patch` — tests failed because of
+your patch — for a run that could not have written anything.
+
+**Fixed (`ef9d0608`):** that branch returns `no_verification_attempted`. The population is wider
+than the read-only archetype this entry was written around — the branch fires on
+`patchApplied === false` however that arose, so it also caught runs whose every write failed,
+`multi_edit` runs that matched nothing, and empty or read-only tool logs — and the new value is
+correct for all of them, which is what made a single change sufficient.
+
+**What the deciding pass settled, and why it made the decision possible rather than merely
+informing it.** Two findings, each checked against the code rather than argued. First, the verdict
+was false for **every** population reaching the branch, on two independent counts: the branch fires
+exactly when no write tool succeeded, so no patch was applied and none could have caused anything;
+and it never consulted `testsRan`, so it asserted a test failure on runs where tests never ran.
+That ruled out narrowing the guard — there was no sub-population the old value described correctly,
+so the answer had to be a different value, not a smaller branch. Second, nothing branches on the
+value for control flow: `runLlmPatchFlow`'s reason-to-decision mapping returns `safe_to_apply` for
+this reason and for its neighbours alike, and `patchValidatedByAgent` is false for the old value and
+the new one, so no gate, retry, or escalation moves. What changed is a warning line the CLI prints
+and a value recorded in telemetry.
+
+**The replacement branch is documentation, not behaviour, and that is deliberate.** It returns
+exactly what the function's own final fallthrough returns, so deleting it or inverting its guard
+changes no input's output — a `patchApplied === false` case that stops reaching the explicit branch
+falls straight through to a fallthrough returning the identical string. **No test can pin it**, and
+the guard-inversion mutation survives by construction rather than for want of coverage; that was
+predicted before running and confirmed across the verdict, `deriveVerdict`, and log-utils suites.
+It is kept explicit because every other terminal case in that function is spelled out by its own
+named condition, and because a reader tracing this run shape should find it named rather than
+reconstruct it from two failed guards and a fallthrough below them. The comment on the branch
+carries that reasoning to whoever runs the next dead-code sweep, since a sweep has every mechanical
+reason to remove a line no test defends. The tenth pattern already states the general form: a
+mutation surviving is not automatically a coverage gap when survival is the predicted outcome for
+that mutation's shape.
+
+**The old value is not dead, which is worth stating because a closed entry invites the assumption.**
+Three producers survive untouched: `parseVerificationTag` still accepts it as one of eight tag
+literals, so a model-supplied tag still yields it; `validateUnrelatedClaim` still demotes to it on
+its own condition; and `deriveRuntimeVerificationReason` in `runLlmPatchFlow.ts` — an unrelated
+function keyed on a `code_failed` verification status — still returns it. This entry never claimed
+otherwise and no finding here rested on the branch being its only producer.
 
 **Reachable, not theoretical — the fast-paths that look like they would prevent it do not fire.**
 `finalizeRun` has two read-only fast-paths that return before `deriveVerdict` runs, both hardcoding
@@ -3769,128 +3813,51 @@ but never touch mode — and every `runLlmPatchFlow` call site in `dispatch.ts` 
 literally. So a read-only-**archetype** run reaches `deriveVerdict` normally, and this branch with
 it.
 
-**Masked today, by the surface item 69 describes.** The max-iterations wrapup still demands a tag,
-so the model usually supplies one and the inference path is not taken. That masking is the only
-thing standing between this branch and a read-only run's recorded verdict. Closing item 69 without
-deciding this one converts a suppressed defect into a live one.
+**Masked while it was open, by the surface item 69 describes — and that masking no longer has to
+hold.** The max-iterations wrapup demands a tag, so the model usually supplied one and the
+inference path was not taken; while this entry was open, that was the only thing standing between
+the branch and a read-only run's recorded verdict, and closing item 69 first would have converted a
+suppressed defect into a live one. `ef9d0608` removes that constraint: the branch is now correct for
+every population that reaches it, so un-masking it is harmless. **Item 69 is unblocked — see there.**
+Measured while the question was still open, the branch's entry condition never held once in the
+sink's window: of the collapsed `[zone-agent-final-assessment]` records on item 73's key, exactly
+one carried `triggeredBy: "max_iterations"` and it also carried a tag, so `inferredFrom: "heuristic"`
+never co-occurred with that trigger. That is a statement about how rare the max-iterations path is,
+not evidence the branch was harmless.
 
-**The population is wider than the read-only archetype this entry was written around, and item 12's
-open half would widen it again.** The branch fires on `patchApplied === false`, whatever produced
-that state — the read-only case above is one route to it, not the definition of it. Two more reach
-it. A patch-archetype run whose every write failed is already in this state today, which this entry
-notes further down as the reason `tests_failed_by_patch` may be load-bearing and not a pure relabel.
-And item 12's remaining fix would add two routes that do not exist yet: a run whose only writes were
-no-ops, once `didApplyPatch` consults `filesStaged` rather than the success flag; and **every resumed
-run**, because the tool-call log is not persisted in the envelope but rebuilt by
-`rehydrateFileAccess`, whose entry shape declares no `filesStaged` member — so a field-consulting arm
-would read every rehydrated write as having staged nothing. **Item 12's no-op half is therefore
-blocked on this entry's decision, and this entry's population is what its fix would enlarge — the
-edge runs both ways and is stated at both ends, as items 69 and 70 already do for each other.**
-Whichever value this branch should return for a run that could not have written anything, it has to
-be a value that is also correct for a run that wrote only no-ops and for a run that is merely
-resuming, because none of the three is distinguishable at this call site.
+**One route this entry claimed item 12's fix would add is masked before it reaches the result, and
+the overstated sentence is thrown out rather than qualified.** It said that fix would route *every
+resumed run* and *every no-op-only run* into this branch's verdict. Resumed runs, yes — the
+tool-call log is not persisted in the envelope but rebuilt by `rehydrateFileAccess`, whose entry
+shape declares no `filesStaged` member, so a field-consulting arm reads every rehydrated write as
+having staged nothing. **No-op-only runs, no.** A run whose staged content matches disk produces a
+verification status of `no_changes_made`, which `deriveFinalizeBranch` maps to the `no_change`
+outcome, and `deriveResultFields` overrides the verdict for that outcome to `no_changes_made`
+before it reaches the result field. The branch's value never survives to the result for that
+population.
 
-**`patchValidatedByAgent` is the sibling half, re-established after `5d01d27a` rather than assumed
-closed by it.** The flag is set true whenever the post-override reason is `tests_passed`,
-`tests_skipped_no_infra`, or `tests_failed_unrelated`. Two shapes still set it true on a run that
-applied nothing, and the widening closed neither:
-- **Read-only-archetype runs on the max-iterations path**, via item 69's surviving tag demand — the
-  model picks `tests_skipped_no_infra`, nothing downstream contradicts it, and
-  `applyNoInfraVerificationOverride` cannot correct it because that override itself requires
-  `patchApplied`.
-- **Any run of any archetype that applied nothing**, which `5d01d27a` never addressed and was never
-  scoped to: a patch-archetype run whose patches all failed still receives the FINAL ASSESSMENT
-  block correctly, and can still answer with a validating value. Worth stating because the two
-  demotion paths land there too — `validatePassedClaim` with no `run_command` and a framework
-  without tests demotes `tests_passed` to `tests_skipped_no_infra`, and `validateUnrelatedClaim`
-  demotes the same way, so a *safety* demotion can produce a validated-patch flag on a run with
-  neither a patch nor a test execution.
+**The asymmetry that creates is the part a later reader will trip on, so it is stated rather than
+implied: the override does not reach telemetry.** `emitAgentFinalAssessment` fires in
+`runCompletion/composer.ts` before `deriveResultFields` runs, and it records the raw `verdict.reason`.
+So for a no-op-only run the recorded assessment and the recorded result field disagree by
+construction — the marker carries what the branch returned, the result carries `no_changes_made`.
+Anyone reconciling the two sources for this population is comparing a pre-override value against a
+post-override one.
 
-**Real records now exist for the sibling half, and they show the payload cannot separate the paths
-that reach it.** `[zone-agent-final-assessment]` carries **24 raw records** over a
-2026-07-29 → 2026-08-05 window, **19 distinct payloads** after deduping on exact payload text.
-Deduped, they break down as: **12** `tests_skipped_no_infra` with `patchValidatedByAgent: true` and
-`inferredFrom: "tag"`; **3** `no_verification_attempted` with `false`/`"heuristic"`; **3**
-`tests_passed` with `true`/`"tag"`; **1** `tests_inconclusive` with `false`/`"tag"`. (Counting raw
-rather than deduped gives 15/4/3/2 — the dedup matters because the natural-completion payload
-embeds a `summaryPreview`, so identical payloads are near-certainly the same run recorded twice
-rather than two runs agreeing byte-for-byte.)
+**With this entry decided, item 12's no-op half is unblocked — see there.** The value this branch
+returns is correct for a run that wrote only no-ops and for a run that is merely resuming, which is
+what the blocking question was waiting on.
 
-**Both breakdowns were re-derived against item 73's corrected key and both are unchanged — but one
-of the four shapes cannot be found by the obvious query, and that is worth stating so a later pass
-does not "correct" a right number into a wrong one.** Only two of the three `tests_passed` records
-carry `verificationReason`. The third has no such field at all: it is the single `max_iterations`
-record counted below, and on that path the payload names the field `finalVerificationReason`
-instead. A re-derivation keying on `verificationReason` alone finds 2, concludes the entry
-overstated by one, and is wrong. That the same value travels under two different field names
-depending on which termination path emitted it is not incidental to this entry — it is another
-instance of exactly the collapse this entry is about, on the field the entry uses to read the
-others.
 
-**Those twelve are not one behaviour, and this is the same defect class item 61's second bullet
-records — a new instance, now with records behind it instead of a trace.** `inferredFrom` reports
-only *that* a tag was present, and `reason` is the **post-override** value (item 61's F3). So every
-path that ends at `tests_skipped_no_infra` from a tagged run collapses into one indistinguishable
-payload. Enumerated against the real code rather than the two the original framing named, there are
-**five**: the model emitting `tests_skipped_no_infra` directly; `validatePassedClaim` demoting
-`tests_passed` when no `run_command` ran or no success pattern matched and the framework has no
-tests; `validateUnrelatedClaim` demoting `tests_failed_unrelated` the same way; and
-`applyNoInfraVerificationOverride` converting either `tests_inconclusive` or
-`no_verification_attempted` when a patch did apply to a framework without tests. A clean skip and a
-rejected `tests_passed` claim are the same record.
-
-**Three sibling markers would separate them, and none reaches the sink — checked, not assumed.**
-`zone-agent-verdict-override` (which carries `originalVerdict` and the validator's own reason, the
-exact discriminator) is emitted through `onProgress` as bare JSON with no `[tag]` prefix, so the
-sink's tag-pattern classifier never matches it. `[zone-agent-no-infra-override]` and
-`[zone-agent-no-infra-verdict]` are both `debugLog`-gated on `ZONE_VERBOSE_LOGS`. All three read
-**zero records**, by three independent mechanisms.
-
-**The three heuristic records are the pre-fix baseline, not evidence the gate widening works — a
-distinction worth fixing in place before someone reads them as a measurement.** After item 61's
-first bullet closed, a read-only-archetype run completing naturally with no tag lands exactly here:
-`no_verification_attempted`, `patchValidatedByAgent: false`, `inferredFrom: "heuristic"`. So growth
-in this shape is that fix working as designed, not a regression. But every record in this sink
-predates it — the newest is dated 2026-08-05 and the gate widened the following day — so the
-current three measure the world before the change. The expectation is forward-looking; the number
-is a baseline.
-
-**One record in nineteen is `max_iterations`** (one in twenty-four raw). Recorded as the current
-observed rate because it bears directly on item 69's priority — the wrapup surface only fires on
-that path — and recorded as `n=19`, which is a rate, not a trend.
-
-**What would close it — a decision, not data, and the candidate below is explicitly not the
-answer.** Nothing above changes this: the records characterise the *sibling* payload-collapse
-problem, not the question this entry turns on. What is missing is a decision about what the
-function *should* return when no write tool was ever available. Returning
-`no_verification_attempted` for that case is a **candidate, recorded as an unverified inclination
-and not as this entry's conclusion** — it was suggested without the function being read, and this
-pass did not establish whether it is right.
-Two things a deciding pass has to weigh that the candidate does not address: `tests_failed_by_patch`
-may be load-bearing for genuine patch runs where every write failed, which is the same
-`patchApplied === false` state and is not distinguishable at this call site; and the value chosen
-feeds `patchValidatedByAgent` above, so it is not a purely cosmetic relabel.
-
-**Bucket, against the document's own usage rather than the bucket's one-line name.** Blocked on
-data is for entries waiting on an observation — items 1, 4, and 63 all wait on marker accumulation.
-This waits on a judgement, which is item 53's shape ("Why this is a decision, not a fix — the same
-shape as item 36's currency half," bucketed Neither) and item 46's ("decide either way," also
-Neither). **Bucketed Neither.**
-
-**Re-checked once records arrived, since gaining data is exactly the event that would normally move
-an entry: it does not move this one.** The records answer a different question than the one this
-entry turns on. They characterise how the *payload* collapses several verdict paths together; they
-say nothing about what `inferVerificationFromLog` ought to return for a no-write-tool run, which is
-a judgement no volume of these records can settle. An entry can acquire real evidence and stay
-Neither when the evidence lands beside the open question rather than on it. **Stays Neither.**
-
-**Re-checked a second time on the widened population, with the same result and a sharper reason.**
-Learning that two more shapes reach this branch raises what the decision is worth; it does not
-supply the decision. The open question is still what the function should return when nothing could
-have been written, and the widening makes that harder to answer rather than easier, since the value
-now has to be right for three indistinguishable populations at once. Becoming more consequential is
-not the same as becoming decidable — the same distinction the first re-check drew, arriving from the
-other direction. **Stays Neither.**
+**Bucket — Closed.** This entry's own stated closure condition was "a decision about what the
+function should return when no write tool was ever available," and `ef9d0608` makes it. The
+sibling material this entry accumulated — the validated-patch flag, the assessment records, and the
+markers that would separate the paths — is not that question, as this entry said itself while open
+("the records characterise the *sibling* payload-collapse problem, not the question this entry turns
+on"). It moves to item 74 rather than closing with this one or holding this one open. **Precedent:
+item 71's carve-out from item 62** — a finding of a different kind from its parent's subject gets
+its own entry rather than being absorbed; here the parent closes and the different-kind material is
+what survives, which is the same rule read from the other end.
 
 **Where the code lives:** `inferVerificationFromLog`, `validatePassedClaim`,
 `validateUnrelatedClaim`, and `applyNoInfraVerificationOverride` are all in
@@ -4137,25 +4104,142 @@ counting and it is not a fix.
 `markerSink.ts`; the interception that routes marker-shaped writes into it is the same shield item
 11 describes. The file itself is `markers.jsonl` under the user-level `.zone` directory.
 
+## 74. Several run shapes that applied nothing are indistinguishable downstream, and one of them is reported as validated
+
+**What it is:** the material item 70 accumulated while open, which its own closure names as a
+different question from the one it turned on. Three strands, all still open, all about the same
+thing — a run that applied nothing is not one behaviour, and nothing downstream can tell the shapes
+apart.
+
+**Strand one: the verdict is correct but coarse.** `ef9d0608` made
+`inferVerificationFromLog`'s not-patch-applied branch return `no_verification_attempted`, which is
+true for every population that reaches it — read-only-archetype runs, runs whose every write failed,
+`multi_edit` runs that matched nothing, and empty or read-only tool logs. Giving the every-write-
+failed population a distinct verdict was considered during that pass and deliberately not built: it
+needs an input the function does not receive — whether any write was attempted, or whether write
+tools were offered at all — so it changes `inferVerificationFromLog`'s signature and its call site
+in `deriveVerdict`, which is not confined to one module the way the value change was. Separable, and
+separated on purpose so the correctness fix could land without waiting on it.
+
+**Strand two: `patchValidatedByAgent` is set true on runs that applied nothing.** Re-established
+after `5d01d27a` rather than assumed closed by it, and untouched by `ef9d0608` — that commit changed
+a value the flag was already false for, so the flag's own defect is exactly as it was.
+
+**`patchValidatedByAgent` is the sibling half, re-established after `5d01d27a` rather than assumed
+closed by it.** The flag is set true whenever the post-override reason is `tests_passed`,
+`tests_skipped_no_infra`, or `tests_failed_unrelated`. Two shapes still set it true on a run that
+applied nothing, and the widening closed neither:
+- **Read-only-archetype runs on the max-iterations path**, via item 69's surviving tag demand — the
+  model picks `tests_skipped_no_infra`, nothing downstream contradicts it, and
+  `applyNoInfraVerificationOverride` cannot correct it because that override itself requires
+  `patchApplied`.
+- **Any run of any archetype that applied nothing**, which `5d01d27a` never addressed and was never
+  scoped to: a patch-archetype run whose patches all failed still receives the FINAL ASSESSMENT
+  block correctly, and can still answer with a validating value. Worth stating because the two
+  demotion paths land there too — `validatePassedClaim` with no `run_command` and a framework
+  without tests demotes `tests_passed` to `tests_skipped_no_infra`, and `validateUnrelatedClaim`
+  demotes the same way, so a *safety* demotion can produce a validated-patch flag on a run with
+  neither a patch nor a test execution.
+
+**Real records now exist for the sibling half, and they show the payload cannot separate the paths
+that reach it.** `[zone-agent-final-assessment]` carries **24 raw records** over a
+2026-07-29 → 2026-08-05 window, **19 distinct payloads** after deduping on exact payload text.
+Deduped, they break down as: **12** `tests_skipped_no_infra` with `patchValidatedByAgent: true` and
+`inferredFrom: "tag"`; **3** `no_verification_attempted` with `false`/`"heuristic"`; **3**
+`tests_passed` with `true`/`"tag"`; **1** `tests_inconclusive` with `false`/`"tag"`. (Counting raw
+rather than deduped gives 15/4/3/2 — the dedup matters because the natural-completion payload
+embeds a `summaryPreview`, so identical payloads are near-certainly the same run recorded twice
+rather than two runs agreeing byte-for-byte.)
+
+**Both breakdowns were re-derived against item 73's corrected key and both are unchanged — but one
+of the four shapes cannot be found by the obvious query, and that is worth stating so a later pass
+does not "correct" a right number into a wrong one.** Only two of the three `tests_passed` records
+carry `verificationReason`. The third has no such field at all: it is the single `max_iterations`
+record counted below, and on that path the payload names the field `finalVerificationReason`
+instead. A re-derivation keying on `verificationReason` alone finds 2, concludes the entry
+overstated by one, and is wrong. That the same value travels under two different field names
+depending on which termination path emitted it is not incidental to this entry — it is another
+instance of exactly the collapse this entry is about, on the field the entry uses to read the
+others.
+
+**Those twelve are not one behaviour, and this is the same defect class item 61's second bullet
+records — a new instance, now with records behind it instead of a trace.** `inferredFrom` reports
+only *that* a tag was present, and `reason` is the **post-override** value (item 61's F3). So every
+path that ends at `tests_skipped_no_infra` from a tagged run collapses into one indistinguishable
+payload. Enumerated against the real code rather than the two the original framing named, there are
+**five**: the model emitting `tests_skipped_no_infra` directly; `validatePassedClaim` demoting
+`tests_passed` when no `run_command` ran or no success pattern matched and the framework has no
+tests; `validateUnrelatedClaim` demoting `tests_failed_unrelated` the same way; and
+`applyNoInfraVerificationOverride` converting either `tests_inconclusive` or
+`no_verification_attempted` when a patch did apply to a framework without tests. A clean skip and a
+rejected `tests_passed` claim are the same record.
+
+**Three sibling markers would separate them, and none reaches the sink — checked, not assumed.**
+`zone-agent-verdict-override` (which carries `originalVerdict` and the validator's own reason, the
+exact discriminator) is emitted through `onProgress` as bare JSON with no `[tag]` prefix, so the
+sink's tag-pattern classifier never matches it. `[zone-agent-no-infra-override]` and
+`[zone-agent-no-infra-verdict]` are both `debugLog`-gated on `ZONE_VERBOSE_LOGS`. All three read
+**zero records**, by three independent mechanisms.
+
+**The three heuristic records are the pre-fix baseline, not evidence the gate widening works — a
+distinction worth fixing in place before someone reads them as a measurement.** After item 61's
+first bullet closed, a read-only-archetype run completing naturally with no tag lands exactly here:
+`no_verification_attempted`, `patchValidatedByAgent: false`, `inferredFrom: "heuristic"`. So growth
+in this shape is that fix working as designed, not a regression. But every record in this sink
+predates it — the newest is dated 2026-08-05 and the gate widened the following day — so the
+current three measure the world before the change. The expectation is forward-looking; the number
+is a baseline.
+
+**One record in nineteen is `max_iterations`** (one in twenty-four raw). Recorded as the current
+observed rate because it bears directly on item 69's priority — the wrapup surface only fires on
+that path — and recorded as `n=19`, which is a rate, not a trend.
+
+**Strand three: the assessment payload cannot separate any of this, and could not before
+`ef9d0608` either.** `AgentFinalAssessmentData`'s `max_iterations` variant carries
+`finalVerificationReason`, `inferredFrom`, and `patchValidatedByAgent` — no tool names, no
+write-attempt count, nothing naming which shape produced the record. So all four run shapes above
+emit an identical payload, and did so under the old verdict too; this is a pre-existing
+observability gap that the fix neither caused nor widened. Recorded here rather than as its own
+entry because it is the same concern as strand one seen from the reading end: strand one is that the
+verdict cannot distinguish them, strand three is that the record cannot either.
+
+**Why here rather than in item 61, which owns the neighbouring ground.** Item 61's second bullet
+records the payload-collapse defect class and item 70 named it as such while open. But item 61's
+bullet is about `inferredFrom` and `reason` failing to separate *verdict-derivation paths*; this is
+about the payload failing to separate *run shapes* that share one verdict. Related, not the same,
+and item 61 is a closed-arc retrospective rather than a live defect entry. The correction
+`ef9d0608` forced in item 61 is made there, in place.
+
+**What would close it — a decision, and it is genuinely open.** Whether these shapes need to be
+distinguished at all depends on what anyone would do differently knowing which one occurred, and no
+consumer today branches on the distinction. Adding a discriminating field to the assessment payload
+is the cheapest candidate and is not proposed here, because nothing yet establishes that the
+distinction is worth carrying.
+
+**Where the code lives:** `inferVerificationFromLog`, `validatePassedClaim`,
+`validateUnrelatedClaim`, and `applyNoInfraVerificationOverride` are in `verification/classify.ts`;
+`patchValidatedByAgent` is computed in `runCompletion/deriveVerdict.ts`; `AgentFinalAssessmentData`
+and its emitter are in `llm/loopTelemetry.ts`, called from `runCompletion/composer.ts`.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 73 to find out which ones still need something. No index of
+reader the trouble of reading all 74 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (36): 6, 7, 8, 10, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 71, 72
+**Closed** (37): 6, 7, 8, 10, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 70, 71, 72
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (1): 12
+first (2): 12, 69
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (6): 1, 4, 18, 23, 57, 63
 
-**Neither — a structural fact recorded, with no fix proposed** (30): 2, 3, 5, 9, 11, 15, 17, 19,
-27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 69, 70, 73
+**Neither — a structural fact recorded, with no fix proposed** (29): 2, 3, 5, 9, 11, 15, 17, 19,
+27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74
 
 Items 1, 2, 12, 17, 18, 36, 38, 57, 61, 62, and 65 are partially closed or corrected; the
 classification above covers only the portion still open, not the whole entry.
