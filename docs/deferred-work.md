@@ -1320,6 +1320,14 @@ is whichever order the filesystem happens to enumerate, not a deliberate newest/
 choice — the same silent-arbitrary-match defect class the session-side lookup (`loadSessionById`,
 item added this pass) exists to close.
 
+**The defect sits in two of the three phases, not one — this entry originally described only the
+first of them.** The third phase, the sessionId content scan, walks the same unsorted
+`envelopeFiles` and stops at its first `env.sessionId.startsWith` hit, differing only in that item
+32's summary refactor turned its early `return` into `found = …; break`. Identical
+arbitrary-first-match, identical cause. Any recipe naming only the prefix phase closes half the
+defect, and the half it leaves open is the one the migration guarantee routes through — the path a
+user takes when they type a sessionId they remember from a toast or an older note.
+
 **Why it's higher-priority than it looks.** `cli/index.ts`'s `--continue`/`--resume` routing —
 the block marked `// --continue / --resume: envelope-first routing.` — resolves the envelope
 FIRST, and on a hit drives the entire resume: `pendingEnvelopeResume` supplies the staged files,
@@ -1340,16 +1348,70 @@ newest-match-wins) and `resolveEnvelopeId`'s is not — precisely why the envelo
 arbitrary half left standing, and the consequential one, since it is the envelope resume that
 decides which staged work actually continues, not the session lookup.
 
-**What would close it:** give `resolveEnvelopeId`'s prefix phase the same "sort candidates, take
-newest" treatment this pass gives `loadSessionById`. Not immediate: envelope filenames are
-`<sessionId>.envelope.json`, no ISO prefix to sort by, so a chronological ordering would need an
-mtime stat or a timestamp field read from each candidate — a real cost the session-side fix
-avoided by having `listAllSessionFilenames` already sort lexicographically. Not attempted here —
-the envelope layer's own resolution is explicitly out of scope for this pass.
+**And the two sides are further apart than "one deterministic, one not" — for the prefix phase
+they are not even ordering the same identifiers.** Since the cutover, the envelope's filename key
+is its runId, so the prefix phase tests a typed prefix against **runIds** while the session lookup
+tests it against **sessionIds**. One `--resume <prefix>` therefore runs two searches over two
+different id spaces, and the two can select unrelated records without either one being "wrong" —
+which is a sharper statement of this entry's own argument than the one above, not a separate
+concern. It is specific to the prefix phase: the third phase matches `env.sessionId`, so it does
+share the session side's namespace. Stated per-phase because the recipe below targets the prefix
+one, and the mismatch is a property of that phase rather than of the resolver.
 
-**Where the code lives:** `resolveEnvelopeId`, `diskRunEnvelope.ts` — specifically its
-filename-prefix phase (`// Filename prefix match`). Routing precedence is `cli/index.ts`'s
-envelope-first routing block (`// --continue / --resume: envelope-first routing.`).
+**What would close it:** give **both** arbitrary phases the same "sort candidates, take newest"
+treatment `loadSessionById` has. The sentence that used to sit here — that envelope filenames are
+`<sessionId>.envelope.json` with no ISO prefix to sort by, so ordering would need an mtime stat or
+a timestamp read, a cost the session side avoided — is thrown out rather than qualified: it is
+false in both halves. The key is the **runId** (`envelopeKeyFor`, `env.runId ?? env.sessionId`);
+sessionId naming survives only on pre-cutover files, and a test pins exactly that. And the timestamp
+already exists — `RunEnvelope` carries `createdAt` and `updatedAt` — while `listResumableEnvelopes`,
+exported from the same file so no new import is needed, already ends with
+`results.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))`. That is the structural analogue of
+`listAllSessionFilenames` this entry claimed the envelope layer lacked.
+
+**One real constraint, and one inversion that decides the shape of the fix.** The constraint:
+`listResumableEnvelopes` also drops entries failing `isResumable` and, when given a `repoPath`,
+entries from other repos — filters `resolveEnvelopeId` deliberately does not apply, since it must
+resolve any envelope by key. **Its comparator is reusable; the function is not.** The inversion:
+the expensive part of ordering is loading every body to read `updatedAt`. The prefix phase loads
+none today and the content scan already loads them until its first hit, so one load can serve both
+phases — while fixing only the prefix phase *adds* a full load that the content scan then repeats.
+**The complete fix is cheaper than the partial one**, which is the opposite of how this entry
+framed the work.
+
+**A cross-file obligation, recorded here so it is not discovered mid-implementation.**
+`loadSessionById`'s doc comment in `diskSessions.ts` states the session side is "Deliberately NOT
+mirroring its ambiguity rule: that phase walks raw, unsorted readdir output and returns the first
+startsWith match, which is filesystem-order luck, not a decision." Closing this makes that sentence
+false. The edit belongs in the same commit as the fix, in a file the fix does not otherwise touch.
+
+**This entry deferred for a reason that was false, and was right to defer anyway for one it never
+gave.** The cost argument above did not survive contact with the code. What does hold is evidence,
+and it is the thing a later reader deciding whether the threshold is met should weigh:
+
+- **The trigger is currently unreachable, not merely unobserved.** Ambiguity needs two envelopes
+  sharing a typed prefix. Envelopes are deleted on graceful success — `runLlmPatchFlow.ts` says so
+  in as many words, "deleteRunEnvelope is only ever called on graceful success" — so only
+  interrupted runs accumulate, under a retention policy of `maxAgeDays 30` and `maxCount 200`. At
+  the moment of writing, 2026-08-06, the envelopes directory holds **one** file. That is an
+  observation at a moment, not a standing property: the policy permits far more, and a stretch of
+  interrupted runs would change it.
+- **Nothing instruments prefix resolution, so silence here is not evidence.** No marker fires on a
+  prefix match, ambiguous or otherwise; a sink zero would be uninformative rather than a measured
+  zero. The two related tags carry, as upper bounds on item 73's key, `[zone-envelope-cleanup]` at
+  1 and `[zone-resume-rehydrated]` at 2 — and both rehydrate payloads carry full runIds and
+  sessionIds, so there is **no recorded instance of anyone resuming by prefix at all**.
+- Keys are UUIDs, so an eight-character prefix collision needs two of them agreeing across eight
+  hex characters, which at any plausible population is negligible even before the count above.
+
+**Where the code lives:** `resolveEnvelopeId`, `diskRunEnvelope.ts` — both arbitrary phases: the
+filename-prefix phase (`// Filename prefix match`) and the sessionId content scan below it. The
+reusable comparator is `listResumableEnvelopes`'s trailing `updatedAt` sort, same file. The comment
+the fix falsifies is `loadSessionById`'s doc in `diskSessions.ts`. Routing precedence is
+`cli/index.ts`'s envelope-first routing block (`// --continue / --resume: envelope-first
+routing.`), whose resume threading is covered by `index.resume.test.ts`'s Fix A and Fix B blocks —
+both confirmed present at HEAD, since an unchecked reference inside a corrected entry is the shape
+this document keeps catching.
 
 ## 24. Closed — `saveSession`'s failure at exit is no longer silent, on either path
 
@@ -3774,9 +3836,9 @@ first.
 **Closed** (36): 6, 7, 8, 10, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 71, 72
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (4): 12, 23, 36, 57
+first (3): 12, 36, 57
 
-**Blocked on data** — closing requires an observation that doesn't exist yet (4): 1, 4, 18, 63
+**Blocked on data** — closing requires an observation that doesn't exist yet (5): 1, 4, 18, 23, 63
 
 **Neither — a structural fact recorded, with no fix proposed** (29): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 69, 70, 73
