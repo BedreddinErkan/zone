@@ -256,7 +256,7 @@ export function read(input: ReadInput): ReadResult {
   let from: number;
   if (input.sinceOffset == null) {
     from = Math.max(proc.ringWritten - cap, proc.ringWritten - RING_CAP, 0);
-  } else if (input.sinceOffset < proc.ringWritten - RING_CAP) {
+  } else if (input.sinceOffset < 0 || input.sinceOffset < proc.ringWritten - RING_CAP) {
     truncated = true;
     from = Math.max(proc.ringWritten - cap, proc.ringWritten - RING_CAP, 0);
   } else if (input.sinceOffset >= proc.ringWritten) {
