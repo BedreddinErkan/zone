@@ -2513,9 +2513,17 @@ silently widened.** `generateExecutionPlan` is one of **twelve** `createLLMClien
 this codebase (`generateFinalRunReport.ts`, `embeddings/embedFile.ts`, `llm/plannerStep.ts`,
 `llm/refinePrompt.ts`, `llm/planFeature.ts`, `llm/planPatchPreview.ts`, `llm/taskClassifier.ts`,
 `llm/executionPlan.ts`, `llm/planFullPatch.ts`, `roles/runDataAnalystFlow.ts`, `llm/agentLoop.ts`,
-`roles/runTestEngineerFlow.ts` — one call site each, confirmed by grep this pass), plus a
-structurally separate thirteenth entry point, `createOpenAIClient` in `llm/openaiClient.ts`, a
-different function used by a different call chain. A sixth affected file was also missed (below).
+`roles/runTestEngineerFlow.ts` — one call site each, confirmed by grep this pass). A sixth
+affected file was also missed (below).
+
+**A thirteenth entry point named here was thrown out rather than qualified: it does not exist.**
+This paragraph used to add `createOpenAIClient` in `llm/openaiClient.ts` as "a structurally separate
+thirteenth entry point, a different function used by a different call chain." A caller sweep by
+symbol, by module name, and for dynamic imports finds **no production caller at all** — every
+production importer of that module takes `getModelName` or `getInferenceMode`, and the only thing
+naming the function outside its own definition is a stale doc comment. The same false sentence
+reached item 57 in the same commit and is corrected there too; the closure this entry records —
+all six files fixed — never depended on it, so the entry stays closed.
 
 **What it is:** `runLlmPatchFlow.ts` calls `generateExecutionPlan` directly from two places, neither
 behind any higher-level function most orchestration-level tests already mock. The agent_loop
@@ -2718,27 +2726,73 @@ minutes above the 60-minute SDK ceiling, so the SDK's own `AbortController` is a
 thing to fire, never the transport underneath it. This is a carefully reasoned piece of the
 codebase, not an oversight — the opposite of what the original entry claimed.
 
+**The code is less certain about itself than this entry was about it, and the difference is worth
+carrying.** Directly above `TRANSPORT_TIMEOUT_MS` sits an `@unverified-probe(transport:long-request)`
+annotation: the derivation and the dispatcher "are unit-tested, but no live call has yet been
+observed running past ten minutes and completing… whether the vendor's edge holds a silent
+connection for thirty minutes is not something Zone's configuration can establish on its own." The
+reasoning is careful; what it has not had is a long-request observation. Calling the design sound
+and calling its far end verified are different claims, and only the first is supported.
+
 **The mechanism that let the error survive review, worth naming so it isn't repeated:** the file
 grepped (`factory.ts`) doesn't implement the behavior being asked about — the absence of a string
-in the wrong file was read as evidence of absence of the behavior in the system. Compounding it:
-the asserted default (the Anthropic SDK's own documented ten minutes) happened to equal the real
-configured `MIN_REQUEST_TIMEOUT_MS` value exactly, so the number "matched" and read as
-confirmation rather than triggering a second check. See the thirteenth pattern essay for the
-general lesson.
+in the wrong file was read as evidence of absence of the behavior in the system.
 
-**Surviving claim, narrowed to OpenAI only — two sites, neither with any timeout of either
-kind.** `src/llm/openaiAdapter.ts` (`new OpenAI({ apiKey, baseURL: baseUrl, maxRetries: 0 })`; a
-fresh grep for `timeout` anywhere in that file returns nothing — no constructor option, no
-per-request derivation) and `src/llm/openaiClient.ts` (`new OpenAI({ apiKey })`, same gap; its
-`createOpenAIClient` is used via `runLlmPatchFlow.ts`'s hosted-inference-mode path, a separate
-entry point from `createLLMClient`). Both rely on the OpenAI SDK's own ten-minute default with no
-Zone-side override at either the constructor or the per-request level.
+**The compounding half was described here as a coincidence. It was not one, and the correction
+matters because the thirteenth essay generalizes from this sentence.** The text used to say the
+asserted default "happened to equal" the configured `MIN_REQUEST_TIMEOUT_MS`. Nothing happened to.
+That constant's own doc comment reads "Floor: the SDK's own DEFAULT_TIMEOUT, so small requests
+behave exactly as before" — the value was *chosen to be* the SDK default, so the two were never
+independent and will keep agreeing for as long as that intent holds. A reader told "coincidence"
+watches for luck and stops; a reader told "deliberate alignment" knows the match carries no
+information at all. **And the same number appears a third time, inside this entry's own surviving
+claim below**: the OpenAI SDK's default is also 600,000 (verified in the installed package, as was
+Anthropic's). Anyone auditing the OpenAI half meets exactly the configuration that misled the first
+pass — no `timeout` string, and a matching documented default. Flagged here rather than left for
+them to walk into.
+
+**The same entry then produced the mirror error, one pass later and in the opposite direction —
+which is what makes this worth generalizing rather than just fixing.** The correction read the
+*presence* of a name in a doc comment as evidence that a call path existed, exactly as the original
+read the *absence* of a string as evidence that behaviour did not. Both came from one habit: a
+string search standing in for a call-graph check. The thirteenth pattern essay carries the check a
+reader should run instead, in both directions; it is stated there rather than here so the two
+copies cannot drift apart.
+
+**Surviving claim, narrowed again — one live site, not two.** `src/llm/openaiAdapter.ts`
+(`new OpenAI({ apiKey, baseURL: baseUrl, maxRetries: 0 })`) is the only reachable OpenAI SDK
+construction; a grep for `timeout` anywhere in that file returns nothing — no constructor option,
+no per-request derivation — so it relies on the SDK's own ten-minute default with no Zone-side
+override at either level. **The sentence that made this two sites is thrown out.** It said
+`src/llm/openaiClient.ts`'s `createOpenAIClient` was reached "via `runLlmPatchFlow.ts`'s
+hosted-inference-mode path, a separate entry point from `createLLMClient`." That function has **no
+production caller**. What the correcting pass actually found in `runLlmPatchFlow.ts` was a doc
+comment — "Passed through to runAgentLoop → createOpenAIClient" — and the comment is itself stale:
+`agentLoop.ts` calls `createLLMClient({ apiKey: input.userApiKey, provider: input.provider })`, so
+the key reaches the factory and never that function. Its `new OpenAI({ apiKey })` is unreachable
+today.
+
+**What that does to the recipe, stated so it is not discovered mid-implementation.** "Set an
+explicit timeout on both OpenAI construction sites" targets one live file and one dead one — half
+the prescribed work executes on no path. The recipe also names two obligations it does not carry:
+**no test asserts anything about OpenAI timeouts** (`anthropicAdapter.timeout.test.ts` is the only
+timeout test file in the repo, Anthropic-only, ten intent tests covering the floor, the crossover,
+monotonicity, the SDK ceiling, the dispatcher and the per-request derivation), so the fix would need
+new tests rather than edited ones; and the stale `runLlmPatchFlow.ts` comment should be corrected by
+whatever pass touches this, or it will mislead a third time.
+
+**Not established: whether `createOpenAIClient` is dead or reserved.** Nothing in the repo states an
+intent either way. Three test files mock the export, which is consistent both with a function
+retained for a future hosted path and with mocks outliving the caller they were written for.
+Recorded as an open question rather than resolved by assumption — deleting it is a separate pass
+with its own establish.
 
 **Why this is its own entry, not folded into item 56.** Unchanged from the original reasoning:
-item 56 is a test-suite defect, closable by test-side mocking with zero production code touched;
-this entry describes something real independent of any test, surfaced incidentally while
-investigating item 56 rather than from an independent design review — the same shape item 43
-already has in this document. Complementary to item 56's own fix, not an alternative to it.
+item 56 **was** a test-suite defect, closable by test-side mocking with zero production code
+touched, and has since closed on exactly that; this entry describes something real independent of
+any test, surfaced incidentally while investigating it rather than from an independent design
+review — the same shape item 43 already has in this document. The present tense here outlived item
+56's closure and is corrected.
 
 **What would close it:** pick and set an explicit timeout value on both OpenAI construction
 sites. Not attempted here, unchanged from the original reasoning — a docs-only pass isn't where a
@@ -2746,16 +2800,31 @@ production-facing timeout value should get chosen unilaterally; the value itself
 establish (a real request's worst-case legitimate duration, at whatever context size and tier
 this codebase's own largest real calls can reach).
 
-**Bucket, re-decided against the definition, not inherited from the pre-correction entry:**
-"Actionable now" requires a fix specified in the entry itself with nothing new to learn first. The
-original entry already deferred the one open question (the numeric timeout value) while treating
-the *kind* of fix — add an explicit `timeout` option — as fully specified; narrowing the claim to
-OpenAI's two sites doesn't add anything that needs to be learned first beyond what was already
-deferred, and the surviving scope is smaller, not less specified. **Stays Actionable now.**
+**Nothing here has ever been observed, and that is recorded as a decision rather than a wait.** No
+marker instruments request timeouts at all, so a sink zero on this would be uninformative by
+construction rather than a measured zero — the document's own thirteenth pattern. What the sink does
+carry, as upper bounds on item 73's key: two `[zone-llm-retry-attempt]` records, both `class=network`
+and both on the Anthropic path, neither a timeout; and a longest recorded request duration anywhere
+of 227,673 ms, roughly 3.8 minutes — 38% of the bound, and again not on the OpenAI path. That
+independently corroborates the code's own `@unverified-probe` note above. The argument for a bound
+is clean and the gap is real; nobody has hit it. Deferred on evidence, not on knowledge.
 
-**Where the code lives:** the two unbound constructions are in `src/llm/openaiAdapter.ts` and
-`src/llm/openaiClient.ts`. Anthropic's timeout configuration — constructor floor, three
-per-request derivation sites, and the dispatcher — is in `src/llm/anthropicAdapter.ts`.
+**Bucket, re-decided twice now: Actionable now → Blocked on data.** The earlier re-decision argued
+the *kind* of fix was fully specified with only the numeric value deferred, and that narrowing the
+scope made it smaller rather than less specified. Two things it did not know: the narrowed scope
+included a site no path reaches, and the deferred value is not a detail but the entry's own stated
+prerequisite — "the value itself needs its own establish." That is something to be learned first,
+which is the exact bar "Actionable now" sets. Items 18 and 23 made this same move for the same
+reason: a recipe settled in kind, a trigger never observed. It stays out of Neither for the reason
+this document already recorded when contrasting it with item 59 — the *approach* is settled here,
+which is precisely what item 59 lacks.
+
+**Where the code lives:** the one live unbound construction is in `src/llm/openaiAdapter.ts`; the
+unreachable one, and the open question about it, are in `src/llm/openaiClient.ts`. The stale doc
+comment naming that function sits on `runLlmPatchFlow`'s `userApiKey` field, and the call it
+misdescribes is `agentLoop.ts`'s `createLLMClient`. Anthropic's timeout configuration — constructor
+floor, three per-request derivation sites, the dispatcher, and the `@unverified-probe` annotation —
+is in `src/llm/anthropicAdapter.ts`; its only tests are `anthropicAdapter.timeout.test.ts`.
 
 ## 58. A roughly 2-2.5 second per-test floor in this file has no established cause
 
@@ -2987,9 +3056,11 @@ directly, not on balance — a stronger fit than before, by the same reasoning i
 `— partially closed` suffix would be redundant here: this heading's own second clause ("and what
 they left open") already carries that signal, which no other partially-closed entry's heading does.
 Checked while deciding it, because it is easy to assume otherwise: the suffix is **not** tied to a
-bucket. Five headings carry it — items 12, 18, and 36 sit in Actionable now, item 1 in Blocked on
-data, and item 2 in Neither. Three of five sharing a bucket is a coincidence of those three, not a
-rule the document follows, so nothing about this entry's bucket argues for or against the suffix.
+bucket. Five headings carry it, and they now sit in three different buckets — items 12 and 36 in
+Actionable now, items 1 and 18 in Blocked on data, item 2 in Neither. (This sentence read "items
+12, 18, and 36 sit in Actionable now" until item 18 moved; the reclassification only strengthened
+the point, which is why the correction is worth making rather than dropping the sentence.) No
+bucket clusters the suffix, so nothing about this entry's bucket argues for or against it.
 The footnote under the snapshot is where partial status is tracked mechanically, and this entry is
 added to it.
 
@@ -3836,9 +3907,9 @@ first.
 **Closed** (36): 6, 7, 8, 10, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 71, 72
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (3): 12, 36, 57
+first (2): 12, 36
 
-**Blocked on data** — closing requires an observation that doesn't exist yet (5): 1, 4, 18, 23, 63
+**Blocked on data** — closing requires an observation that doesn't exist yet (6): 1, 4, 18, 23, 57, 63
 
 **Neither — a structural fact recorded, with no fix proposed** (29): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 69, 70, 73
@@ -4226,13 +4297,26 @@ granularity of the commit.
 as its own verifiable unit of work should reach CI on its own, before the next one lands on top of
 it.
 
-## A thirteenth pattern: absence of a string is not absence of a behavior, and a matching number is not a confirmation
+## A thirteenth pattern: a string's presence or absence is evidence about the text, not about the behavior, and a matching number is not a confirmation
 
 Checking whether a system does something by grepping a file for a keyword only tells you about
 that file. It says nothing about a behavior implemented one layer away, in a module whose name
 doesn't happen to match the concept being searched for. A claim about what a system does needs the
 file that actually does it — found by tracing the call, not by guessing which filename sounds
 right and grepping that one.
+
+**The same error runs in the other direction, and reads as even more convincing.** Finding a
+function's name written down is not evidence that anything calls it. Prose names functions freely —
+a doc comment describing a path, an entry in this document, a header explaining an argument's
+journey — and prose goes stale silently while code around it moves. A name in a comment is a claim
+to verify, not a citation.
+
+**The check that answers both, and the one worth running instead of either grep:** enumerate the
+real callers — by symbol, by module name, and for dynamic imports and re-exports, since a search
+for `from "…/x.js"` misses `await import(...)` and a re-export does not bind a name locally. If the
+sweep returns only a definition and some prose, there is no call path, whatever the prose says. If
+it returns callers in a file you never grepped, the behavior lives there. The two failures are one
+habit — a string search standing in for a call-graph check — and one method retires both.
 
 The sharper half is what makes this failure mode survive review instead of getting caught
 immediately: when a number asserted from a known default happens to equal the number actually
@@ -4242,12 +4326,30 @@ twice under two different names than it is two facts that were each verified on 
 
 This session produced a concrete instance of both halves at once. A claim that neither of two SDK
 clients set an explicit timeout was checked by grepping a file that constructs adapter classes, not
-SDK clients — the real constructions live one file away. And the claim's own asserted default,
-the Anthropic SDK's documented ten minutes, was numerically identical to the value the codebase had
-actually configured for an unrelated reason (a floor beneath a per-request derivation, not a bare
-default left untouched). The grep found nothing because it was reading the wrong file; the number
-matched because one real ten-minute value was being compared against a restatement of itself, not
-against something independently checked.
+SDK clients — the real constructions live one file away. And the claim's own asserted default, the
+Anthropic SDK's documented ten minutes, was numerically identical to the value the codebase had
+configured. The grep found nothing because it was reading the wrong file; the number matched because
+one real ten-minute value was being compared against a restatement of itself, not against something
+independently checked.
+
+**Why the two values were the same is stronger than this essay first said, and the first account is
+thrown out rather than softened.** It read "configured for an unrelated reason," which contradicts
+the sentence immediately before it: a restatement of itself is not an unrelated value. The
+configured floor's own doc comment says it is "the SDK's own DEFAULT_TIMEOUT, so small requests
+behave exactly as before" — chosen to be the default, deliberately. So the agreement was not
+coincidence and not near-coincidence; it was one number written twice under two names, and it will
+keep agreeing indefinitely. That makes the general rule sharper, not weaker. Two facts landing on
+the same digit are worth checking not because coincidences are rare, but because a codebase
+deliberately adopting a vendor's value is common — and once it has, the match can never be evidence
+of anything again.
+
+**The mirror instance arrived one pass later, from the same entry.** Correcting the above, a pass
+recorded that a second construction site was reachable "via a hosted-inference-mode path" — on the
+strength of a doc comment naming that function. The function has no caller; the comment was stale.
+The original error read an absence of a string as an absence of behavior; its own correction read
+the presence of a name as the presence of a call. Two passes, opposite signs, one habit. That
+symmetry is why the check above is stated as a method rather than as a caution: nothing about
+"grep more carefully" would have caught either one.
 
 ## A fourteenth pattern: a test that derives its own scope can silently narrow it, and forbidding a string does not remove that string from the text
 
