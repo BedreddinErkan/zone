@@ -12,6 +12,35 @@ afterEach(() => {
 });
 
 describe("agent loop framework-aware verdicts", () => {
+  it("a read-only run with no write tool in the log no longer reports a patch-caused test failure", () => {
+    const result = inferVerificationFromLog([
+      { tool: "read_file", args: {}, result: "file contents", success: true },
+      { tool: "search_in_files", args: {}, result: "3 matches", success: true },
+    ]);
+
+    expect(result).toBe("no_verification_attempted");
+  });
+
+  it("an empty tool-call log no longer reports a patch-caused test failure", () => {
+    const result = inferVerificationFromLog([]);
+
+    expect(result).toBe("no_verification_attempted");
+  });
+
+  it("a multi_edit run that staged nothing no longer reports a patch-caused test failure", () => {
+    const result = inferVerificationFromLog([
+      {
+        tool: "multi_edit",
+        args: {},
+        result: "multi_edit: 0 replacement(s) across 1 file(s).",
+        success: true,
+        filesStaged: [],
+      },
+    ]);
+
+    expect(result).toBe("no_verification_attempted");
+  });
+
   it("infers tests_skipped_no_infra when a patch was applied without runnable tests", () => {
     const result = inferVerificationFromLog(
       [

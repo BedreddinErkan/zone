@@ -165,7 +165,10 @@ export function inferVerificationFromLog(
   );
   if (patchApplied && testsRan) return "tests_passed";
   if (patchApplied && hasInfraError) return "tests_inconclusive";
-  if (!patchApplied) return "tests_failed_by_patch";
+  // No write tool ever succeeded, so no patch could have caused a test failure — the
+  // fallthrough below already returns this same value; kept explicit so this run shape
+  // is named here rather than left to fall through silently.
+  if (!patchApplied) return "no_verification_attempted";
   return "no_verification_attempted";
 }
 
