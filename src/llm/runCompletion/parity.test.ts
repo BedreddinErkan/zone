@@ -183,6 +183,32 @@ describe("finalizeRun — parity tests", () => {
       const result = await finalizeRun(input);
       expect(result.verificationReason).toBe("tests_skipped_no_infra");
     });
+
+    // Relies on this describe block's beforeEach default (mockVerifyAndFinalize
+    // resolved to APPLIED_OUTCOME) rather than overriding it — that default is
+    // what makes this reachable at all. A real single-entry no-op run never
+    // produces outcome.kind:"applied": finalizeStaging's allUnchanged check
+    // (verification/staging.ts) would take the no_change branch first, and
+    // deriveResultFields hardcodes verificationReason:"no_changes_made" for
+    // that outcome kind regardless of what the verdict computed. This fixture
+    // exists to observe the pre-mask verdict, which production masks here.
+    it("item 12: an apply_patch no-op (empty filesStaged) leaves the override's patchApplied gate closed, so the tagged reason is not upgraded", async () => {
+      const input = makeInput({
+        trigger: "natural_completion",
+        finalText: "Done [ZONE_VERIFICATION: tests_inconclusive]",
+        toolCallLog: [
+          { id: "1", tool: "apply_patch", args: {}, result: "ok", success: true, filesStaged: [] },
+        ],
+        framework: {
+          language: "typescript" as const,
+          testCommand: "",
+          hasTests: false,
+          testFilesDetected: false,
+        },
+      });
+      const result = await finalizeRun(input);
+      expect(result.verificationReason).toBe("tests_inconclusive");
+    });
   });
 
   describe("discardedStaging threading", () => {

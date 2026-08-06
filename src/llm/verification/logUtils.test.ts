@@ -108,3 +108,65 @@ describe("didApplyPatch — structured success/filesStaged, not prose", () => {
     expect(didApplyPatch([])).toBe(false);
   });
 });
+
+// item 12's remaining half: a succeeding apply_patch/write_file that staged
+// byte-identical content (a FIND==REPLACE no-op) still reported "applied"
+// because the arm read only `success`. These four fixtures pin the field's
+// three-way meaning: absent, empty, populated.
+describe("didApplyPatch — apply_patch/write_file no-op detection via filesStaged", () => {
+  it("apply_patch success:true with empty filesStaged does not count", () => {
+    const result = didApplyPatch([
+      {
+        tool: "apply_patch",
+        args: {},
+        result: "Patch staged: 1 block(s) in src/x.ts",
+        success: true,
+        filesStaged: [],
+      },
+    ]);
+    expect(result).toBe(false);
+  });
+
+  it("write_file success:true with empty filesStaged does not count", () => {
+    const result = didApplyPatch([
+      {
+        tool: "write_file",
+        args: {},
+        result: "Wrote src/x.ts (42 chars)",
+        success: true,
+        filesStaged: [],
+      },
+    ]);
+    expect(result).toBe(false);
+  });
+
+  // Load-bearing: a later sweep unifying this arm's absent-field polarity
+  // with multiEditChangedSomething's (which marks-and-returns-false on
+  // absent) must fail here rather than pass silently. apply_patch/write_file
+  // have a real absent-field producer — rehydrateFileAccess on resume
+  // (agentLoop.ts) — that multi_edit does not.
+  it("apply_patch success:true with filesStaged absent still counts (absent means changed, not multi_edit's polarity)", () => {
+    const result = didApplyPatch([
+      {
+        tool: "apply_patch",
+        args: {},
+        result: "Patch staged: 1 block(s) in src/x.ts",
+        success: true,
+      },
+    ]);
+    expect(result).toBe(true);
+  });
+
+  it("apply_patch success:true with populated filesStaged counts", () => {
+    const result = didApplyPatch([
+      {
+        tool: "apply_patch",
+        args: {},
+        result: "Patch staged: 1 block(s) in src/a.ts",
+        success: true,
+        filesStaged: ["src/a.ts"],
+      },
+    ]);
+    expect(result).toBe(true);
+  });
+});

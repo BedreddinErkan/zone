@@ -41,6 +41,23 @@ describe("agent loop framework-aware verdicts", () => {
     expect(result).toBe("no_verification_attempted");
   });
 
+  it("an apply_patch no-op (success:true, empty filesStaged) is not upgraded to tests_skipped_no_infra", () => {
+    const result = inferVerificationFromLog(
+      [
+        {
+          tool: "apply_patch",
+          args: {},
+          result: "Patch staged: 1 block(s) in src/x.ts",
+          success: true,
+          filesStaged: [],
+        },
+      ],
+      { hasTests: false, testFilesDetected: false }
+    );
+
+    expect(result).toBe("no_verification_attempted");
+  });
+
   it("infers tests_skipped_no_infra when a patch was applied without runnable tests", () => {
     const result = inferVerificationFromLog(
       [

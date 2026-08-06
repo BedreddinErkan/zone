@@ -29,12 +29,21 @@ export function multiEditChangedSomething(entry: ToolCallLogEntryLike): boolean 
 
 /**
  * Returns true if the tool call log shows at least one apply_patch or
- * write_file that succeeded, or a multi_edit that succeeded and staged at
- * least one file.
+ * write_file that succeeded and staged real content (filesStaged absent or
+ * non-empty), or a multi_edit that succeeded and staged at least one file.
  */
 export function didApplyPatch(toolCallLog: ToolCallLogEntryLike[]): boolean {
   return toolCallLog.some((e) => {
-    if (e.tool === "apply_patch" || e.tool === "write_file") return e.success === true;
+    if (e.tool === "apply_patch" || e.tool === "write_file") {
+      if (e.success !== true) return false;
+      // filesStaged: absent means changed, [] means unchanged, populated
+      // means changed. Opposite polarity from multiEditChangedSomething's
+      // absent branch below — apply_patch/write_file ARE in agentLoop.ts's
+      // REHYDRATED set, multi_edit is not, so only these two tools have an
+      // absent-field producer. Reasoning: docs/deferred-work.md item 12.
+      if (e.filesStaged === undefined) return true;
+      return e.filesStaged.length > 0;
+    }
     if (e.tool === "multi_edit") return e.success === true && multiEditChangedSomething(e);
     return false;
   });
