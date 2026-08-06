@@ -966,16 +966,23 @@ fields would over-count by every smart-quote record. `cd02808c` is the cutoff, a
 carries no version field, so pre- and post-fix records are indistinguishable in the sink despite
 `smartQuoteChanged` meaning different things on either side of it.
 
-**Observed so far: zero gaps in four records — a rate at n=4, not a finding.** The sink carries
-four `[zone-apply-patch-normalization-parity]` records, all `blockCount: 1`, all three fields
-zero/false. So the measured rate for both open classes is 0 of 4, across two file paths in two
-timestamp pairs (whether that is four calls or two double-logged is **not established**). Four
-records cannot distinguish "these classes are rare" from "the observation window is too short" —
-the instrumented window here is days, and item 4's own precedent puts a usable threshold at
-roughly 10-20 records. Recorded so the number is available and so nobody reads it as evidence the
-remaining two classes don't fire. One thing it does settle structurally: `blockCount: 1` on every
-record explains `[zone-apply-patch-marker-split]`'s own zero, since that marker's population is
-exactly this record's `blockCount > 1` slice — its zero is consistent, not a silent failure.
+**Observed so far: zero gaps in two calls, not four records — this entry's own open question is
+resolved now, and it resolves against the entry.** The sink carries four
+`[zone-apply-patch-normalization-parity]` records, but they are **two calls logged twice**: two
+distinct payloads, each pair identical in every field except the timestamp. "Whether that is four
+calls or two double-logged" was recorded here as not established. It is established now, and it
+halves this entry's own denominator. Both calls carry `blockCount: 1` with all three fields
+zero, so the measured rate for both open classes is 0 of 2. The instrumented window is not short
+in time — the marker landed 2026-08-02 and the sink's newest record of any kind is dated
+2026-08-05, roughly four days — but both qualifying calls fall inside a single fifteen-second
+burst on the last of those days, so the window is sparse rather than brief, which is the weaker
+of the two shapes. Two calls cannot distinguish "these classes are rare" from "almost nothing
+exercised this path at all"; item 4's own precedent puts a usable threshold at roughly 10-20
+records. Recorded so nobody reads it as evidence the remaining two classes don't fire. One thing
+it does settle structurally: `blockCount: 1` on every record explains
+`[zone-apply-patch-marker-split]`'s own zero, since that marker's population is exactly this
+record's `blockCount > 1` slice — its zero is consistent, not a silent failure. The double-logging
+itself is not this marker's defect and is not this entry's to fix — it is sink-wide; see item 73.
 
 **Smart quotes are now closed (`cd02808c`).** `parsePatchBlocks` applies `normalizeSmartQuotes`
 in the same position `segmentApplyPatchBlocks` always has — after the leading/trailing-newline
@@ -992,12 +999,56 @@ line endings and the read_file prefix in `hashPatchBlocks` — importing `stripR
 the walk's own EOL-replace chain from `toolExecutor.ts` (`agentLoop.ts` already imports from that
 file; no cycle). This still **changes every existing dedup key** for any patch that ever
 contained a CRLF or a pasted `read_file` prefix — a deliberate behavior change, not a silent
-rider on item 16's extraction. `a7f4ff03`'s characterization tests pin the current, unnormalized
-value for the remaining class by name and would need a deliberate edit: **T6** (line endings) —
-it was written, in the pass that added it, as a neutral parsing property ("CRLF line endings
-inside find/replace content survive unparsed"). It is not neutral: it pins class 2 of this same
-defect as correct behavior, under a comment that never named it as such. **T7** (smart quotes)
-needed the same kind of edit and got it, as part of the fix that closed that class — see above.
+rider on item 16's extraction.
+
+**The claim that a characterization test needs a deliberate edit to close this is false, and the
+sentence is thrown out rather than qualified.** This entry named **T6** (line endings) as pinning
+the unnormalized value and therefore requiring a knowing edit — by analogy with **T7** (smart
+quotes), which genuinely did need one and got it when that class closed. The analogy does not
+hold, because the two fixes land in different functions. T7's fix ran through the segmenter, which
+is what `parsePatchBlocks` returns; T6's assertions both target `parsePatchBlocks`, and its sibling
+on the applier's re-export targets `segmentApplyPatchBlocks` — **neither calls `hashPatchBlocks`
+at all**. A normalization confined to `hashPatchBlocks`, which is what this entry prescribes,
+leaves both tests passing untouched. Sharper, and the part that actually matters: **no test
+anywhere asserts a hash value for a CRLF-bearing or prefix-bearing patch.** Every existing
+`hashPatchBlocks` assertion uses a fixture with neither. So this fix would break nothing and is
+guarded by nothing — the work is writing new tests, not editing old ones, which is the opposite
+of the obligation this entry recorded. Both CRLF tests are intent, not characterization-by-
+accident: each deliberately pins non-normalization *at segmentation time*, and each stays correct
+after a hash-level fix.
+
+**Three things the recipe does not state, each of which would produce a defect if an implementer
+followed it literally.**
+- **The prefix stripper applies to `find` only; EOL applies to both.** The applier's match-time
+  pair is `stripReadFilePrefix(normalizeEol(block.find).text)` against
+  `normalizeEol(block.replace).text`. The recipe says only "importing `stripReadFilePrefix` and
+  the walk's own EOL-replace chain" and never mentions the asymmetry. Stripping both sides would
+  open a **new divergence in the opposite direction** — two patches the applier treats as
+  different, because they differ only in a `replace`-side prefix, would collide in the hash.
+- **The normalization must stay on the parsed blocks, and item 64 is what makes that
+  load-bearing.** `hashPatchBlocks` guards `patch === ""` on the raw argument before parsing, and
+  returns the no-patch sentinel there. Applied to the raw patch *ahead of* that guard, a
+  non-empty patch can collapse to empty and take the sentinel: measured, a lone line-number
+  prefix (`"   1"` followed by a tab) strips to the empty string. That is item 64's closed
+  collision defect reopening by a different route. Confined to the blocks, the guard is untouched.
+- **Neither function is exported.** `normalizeEol` and `stripReadFilePrefix` are both
+  module-private in `toolExecutor.ts`. The import direction is safe — `agentLoop.ts` already
+  imports from that file — but the recipe's "importing … from `toolExecutor.ts`" requires an
+  export change it never mentions, and that is arguably the wrong move anyway: the class that
+  already closed did not export from `toolExecutor.ts`, it moved the function to a shared leaf
+  module (`src/utils/smartQuotes.ts`, beside `patchBlocks.ts`). The recipe contradicts the
+  precedent set by its own closed class.
+
+**`stripReadFilePrefix`'s own properties, measured, because the recipe hands it to a second
+caller and nobody has recorded them.** It is **total** — every input returns a string, nothing
+throws. It is **not idempotent**: nested line-numbered content strips twice, each pass removing
+one layer, so applying it to already-stripped text is not a no-op. And it **alters content that
+was never a pasted prefix**: a tab-separated fixture whose every line begins with digits and a
+tab is indistinguishable to it from a `read_file` dump and is stripped. The all-or-nothing rule
+narrows that false-positive class but does not close it. In the applier these properties are
+bounded — one call, on `find`, against text the model just pasted. A second caller inside the
+dedup hash widens the blast radius to every patch that ever gets hashed, which is why they are
+recorded here rather than left at the definition.
 
 **The real cost when it fires, not previously stated.** In the coaching path
 (`CoachingController`), the demotion is label-only — every consumer of `repeatPattern` treats it
@@ -1008,6 +1059,33 @@ is worse: Verdict 1 misses on the hash, and Verdict 2 is excluded by its own
 trigger), so the `failure_stall` signal is **skipped outright for that comparison, not
 relabelled to a weaker verdict**. Self-clearing on the next failure, once both compared records
 are hash-consistent again.
+
+**What closing it buys, and why the collision it creates is the point rather than a cost.** Swept
+every `patchHash` consumer in the repo: the two equality comparisons named above, one copy into
+the run envelope, one persisted field, two producers. It is **never a map or set key** — nothing
+indexes by it, and no path depends on two hashes staying distinct for any reason beyond the
+pairwise comparison itself. So making an EOL-only or prefix-only resubmission collide is not a
+side effect to be weighed against a benefit: the collision **is** the fix, and it lands only where
+the applier already treats the two patches as the same text.
+
+**It also closes a second thing, at one site rather than two.** Exactly one comment in the repo
+calls the value a "normalized patch hash" — `antiThrash.ts`'s, sitting directly above its own
+equality check. `detectRepeatedFailure`'s mirror branch carries no such wording, so there is no
+second copy to drift. Today the word is one-third true; after both classes close it is accurate,
+on the honest reading "normalized the same way the applier normalizes," `find`-only asymmetry
+included.
+
+**Not built and cannot be built are different states, and this document's bucket names do not
+distinguish them — so it is recorded here as a decision.** After the corrections above the recipe
+is fully understood and the fix is small: two normalizations, on the parsed blocks, `find`-only
+for the prefix, plus the tests that do not exist yet. Nothing further needs to be *learned* to
+build it. What is missing is evidence: across the only two calls ever instrumented, neither class
+fired. Deferred on motivation, not on knowledge. That moves this entry out of "actionable now,"
+whose bar is that a fix is specified and nothing new must be learned — both true here, and still
+not sufficient — and into "blocked on data," on item 63's precedent: that entry is likewise a
+*whether to build* question parked on records that do not exist yet, not a *what to build* one.
+Item 4, whose 10-20 threshold this entry already cites, sits in the same bucket for the same
+reason. The bucket name is the closest fit the document has, not an exact one.
 
 **The resume interaction.** `failureHistory` persists `patchHash` into the run envelope
 (`FailureRecordLite`) with no version marker on the value itself — only the envelope's own
@@ -3147,10 +3225,14 @@ Math.min(Math.floor(args.context_lines), 10))`, floor and ceiling both literal a
 any runtime state — and it additionally floors non-integers for a property the schema already
 types as `integer`, meaning the handler does not trust the declared type, not merely the absent
 bounds. It also sits on the most-invoked tool in the sink, while the two properties this entry
-did name sit on a tool with no recorded invocations at all: the sink's complete tool-call record
-is 130 calls across five tools — `search_in_files` 60, `read_file` 48, `run_command_readonly` 12,
-`apply_patch` 8, `run_command` 2 — and `read_background_output` appears nowhere in it, nor does
-the string "background" appear anywhere in the file.
+did name sit on a tool with no recorded invocations at all. **The census this paragraph first
+carried counted sink records, not calls, and is corrected here rather than annotated:** the sink
+double-logs (item 73), so every raw per-tool figure was inflated. Deduplicated, the complete
+tool-call record is 72 calls across five tools — `search_in_files` 33, `read_file` 28,
+`run_command_readonly` 6, `apply_patch` 4, `run_command` 1. The ordinal claim survives and so does
+the zero: `search_in_files` is still the most-invoked by a clear margin, `read_background_output`
+appears nowhere in the record, and the string "background" appears on no line of the sink at all.
+Only the absolute numbers were wrong.
 
 **It is still not worth building, and that is the actual finding.** By this entry's own
 resolution of `max_bytes` above, `context_lines` dies the same death: its ceiling is already in
@@ -3558,11 +3640,54 @@ out-of-glob script alone.
 `read_background_output`'s handler, `toolExecutor.ts`; the tests are in
 `backgroundProcessRegistry.test.ts`. See item 65 for the survey this was found while measuring.
 
+## 73. Every entry that counts sink records is counting a number inflated by duplication
+
+**What it is:** the marker sink carries duplicate records at scale. Measured across the whole file
+rather than sampled: 3747 records, 2933 distinct raw lines, **814 exact duplicates**, and 814
+distinct lines that appear more than once. It is not confined to one marker or one run — in an
+examined fifteen-second window every marker present appears exactly twice, including
+`[zone-agent-tool-call]`, `[zone-apply-patch-normalization-parity]`,
+`[zone-apply-patch-syntax-validation]`, and a lone `run_command` tool-call among them.
+
+**The duplicates are one emission recorded twice, not two events.** For the parity marker the
+pairs are identical in every field except the timestamp, with deltas of zero and one millisecond.
+A delta of zero rules out two independent calls for anything whose work takes measurable time.
+
+**What it costs, concretely, and why "divide by two" is not the fix.** Any count taken straight off
+the sink is inflated, and not by a clean factor. Deduplicating `[zone-agent-tool-call]` by
+timestamp and payload gives `search_in_files` 33 from 60 raw, `read_file` 28 from 48,
+`run_command_readonly` 6 from 12, `apply_patch` 4 from 8, `run_command` 1 from 2. Sixty to
+thirty-three is not a halving — some records are singletons — so a blanket halving is wrong in the
+other direction. Every rate, denominator, and threshold comparison in this document computed from
+raw record counts is suspect until recomputed on deduplicated data.
+
+**Two entries were already affected, and both are corrected rather than flagged.** Item 18's
+normalization-parity denominator was four records and is two calls, which halves the number it
+compares against its own 10-20 threshold. Item 65's tool-call census stated raw record counts as
+calls; its ordinal claim and its zero for `read_background_output` both survived, its absolute
+figures did not.
+
+**Its own entry rather than a paragraph inside either, on item 11's precedent.** Item 11 records a
+standing structural fact about the sink as an *instrument* — that its data accumulates only
+passively — once, rather than restating it in every entry that reads the sink. This is the same
+kind of fact about the same instrument, it invalidates arithmetic rather than any one finding, and
+it applies to entries that do not exist yet. Item 54 is a second instance of that shape.
+
+**The cause is not established.** That the duplication happens is measured; why is not. Two capture
+points on one write path, a sink invoked both directly and through the stdout interception shield,
+or something else — no investigation was run and none is prescribed here. Deduplicating by
+timestamp and payload at read time is what both corrections above did; it is sufficient for
+counting and it is not a fix.
+
+**Where the code lives:** the sink's append path, its size cap, and its rotation are in
+`markerSink.ts`; the interception that routes marker-shaped writes into it is the same shield item
+11 describes. The file itself is `markers.jsonl` under the user-level `.zone` directory.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 72 to find out which ones still need something. No index of
+reader the trouble of reading all 73 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -3571,12 +3696,12 @@ first.
 **Closed** (36): 6, 7, 8, 10, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 71, 72
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (5): 12, 18, 23, 36, 57
+first (4): 12, 23, 36, 57
 
-**Blocked on data** — closing requires an observation that doesn't exist yet (3): 1, 4, 63
+**Blocked on data** — closing requires an observation that doesn't exist yet (4): 1, 4, 18, 63
 
-**Neither — a structural fact recorded, with no fix proposed** (28): 2, 3, 5, 9, 11, 15, 17, 19,
-27, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 69, 70
+**Neither — a structural fact recorded, with no fix proposed** (29): 2, 3, 5, 9, 11, 15, 17, 19,
+27, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 69, 70, 73
 
 Items 1, 2, 12, 17, 18, 36, 38, 57, 61, 62, and 65 are partially closed or corrected; the
 classification above covers only the portion still open, not the whole entry.
