@@ -22,6 +22,9 @@ vi.mock("../utils/logger.js", () => ({
 
 import { generateExecutionPlan, tryParseExecutionPlan, isNoChangePlan, isCannotVerifyPlan, isAnswerOnlyPlan, planTerminalShape, formatExecutionPlanForPrompt, buildApprovedPlanBlock, formatPlanRevisedNote, synthesizeMinimalPlan } from "./executionPlan.js";
 import type { ExecutionPlan } from "./executionPlan.js";
+// buildPrompt is pure and synchronous (no LLM call) — real, unmocked import is safe here;
+// this file mocks no part of planInvestigation.js.
+import { buildPrompt } from "./planInvestigation.js";
 
 function mockPlanResponse(plan: unknown) {
   mocks.createChatCompletion.mockResolvedValueOnce({
@@ -861,5 +864,95 @@ describe("formatPlanRevisedNote", () => {
     expect(note.startsWith("Plan revised — 2 steps.")).toBe(true);
     expect(note).toContain("Objective: Revised objective");
     expect(note).toContain("Revised scope.");
+  });
+});
+
+// Removed instructions ("concise", "briefly", the two advisory-cap statements, the
+// "short approach"/"1-3 sentences" clauses) vs. kept ones (the caps' own overrun marker
+// stays untouched — see the [zone-plan-field-over-advisory-cap] describe above — "concrete",
+// the title-restatement clause, "Return JSON only", "Identify risks", and the investigation
+// template's own iteration-budget instruction). docs/deferred-work.md item 78.
+//
+// Absence assertions below deliberately avoid bare digits ("160"/"200"): a number can
+// appear in a built prompt for reasons that have nothing to do with the cap it used to
+// state (seeded file content, a path, a count elsewhere), so not.toContain on a bare
+// digit is fragile in the direction of a false failure. Each absence check below targets
+// a multi-word (or word+symbol) phrase unique to the removed clause, verified unique via
+// grep before use. Presence assertions don't need the same care — a distinctive phrase
+// being present is a strong signal on its own, since nothing else in either prompt would
+// produce it by coincidence. That asymmetry (absence needs a precise target; presence
+// tolerates a looser one) is why the two halves below are built differently.
+async function buildLexicalPrompt(overrides: {
+  seededFileContents?: string;
+} = {}): Promise<string> {
+  mocks.createChatCompletion.mockResolvedValueOnce({
+    choices: [{
+      message: {
+        content: JSON.stringify({
+          objective: "X",
+          steps: [{ title: "T", description: "D", filesLikely: [] }],
+          riskHints: [],
+          scopeSummary: "S",
+        }),
+      },
+    }],
+  });
+  await generateExecutionPlan({
+    task: "add a helper",
+    repoSummary: "a webapp",
+    relevantFiles: ["src/a.ts"],
+    ...overrides,
+  });
+  return String(mocks.createChatCompletion.mock.calls[0]?.[0]?.messages?.[0]?.content ?? "");
+}
+
+describe("plan-generation prompts — brevity instructions removed, caps lifted (item 78)", () => {
+  it("lexical template, unseeded: removed wording and the scopeSummary cap are absent", async () => {
+    const prompt = await buildLexicalPrompt();
+    expect(prompt).not.toContain("concise");
+    expect(prompt).not.toContain("briefly");
+    expect(prompt).not.toContain("short approach");
+    expect(prompt).not.toContain("1-3 sentences");
+    expect(prompt).not.toContain("scopeSummary under");
+  });
+
+  it("lexical template, seeded: the scopeNotes cap is absent, the no-padding guard survives", async () => {
+    const prompt = await buildLexicalPrompt({ seededFileContents: "=== src/a.ts ===\nconst x = 1;\n" });
+    expect(prompt).not.toContain("scopeNotes ≤");
+    expect(prompt).toContain("Omit if nothing notable");
+    expect(prompt).toContain("already implemented");
+  });
+
+  it("lexical template: kept instructions survive — the discriminating half, since a mutation deleting the whole Rules block would still pass every absence check above", async () => {
+    const prompt = await buildLexicalPrompt();
+    expect(prompt).toContain("concrete, not a restatement of the title");
+    expect(prompt).toContain("Return JSON only");
+    expect(prompt).toContain("Identify risks");
+  });
+
+  it("investigation template: removed wording and both caps are absent", () => {
+    const prompt = buildPrompt("add a helper", ["src/a.ts"], true);
+    expect(prompt).not.toContain('"scopeSummary": "string (≤');
+    expect(prompt).not.toContain("optional, ≤");
+    expect(prompt).not.toContain("short approach");
+    expect(prompt).not.toContain("1-3 sentences");
+  });
+
+  it("investigation template: kept instructions survive, including the out-of-scope iteration-budget instruction", () => {
+    const prompt = buildPrompt("add a helper", ["src/a.ts"], true);
+    expect(prompt).toContain("concrete, not a restatement of the title");
+    expect(prompt).toContain("already done / out of scope");
+    expect(prompt).toContain("Terminate as soon as you have enough information");
+    expect(prompt).toContain("do not over-investigate");
+  });
+
+  it("the two templates' description field spec are identical — nothing else in this suite compares them to each other", async () => {
+    const lexicalPrompt = await buildLexicalPrompt();
+    const investigationPrompt = buildPrompt("add a helper", ["src/a.ts"], true);
+    const DESC_SPEC_RE = /"description":\s*"(<[^"]*>)"/;
+    const lexicalSpec = DESC_SPEC_RE.exec(lexicalPrompt)?.[1];
+    const investigationSpec = DESC_SPEC_RE.exec(investigationPrompt)?.[1];
+    expect(lexicalSpec).toBeDefined();
+    expect(lexicalSpec).toBe(investigationSpec);
   });
 });

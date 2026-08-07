@@ -200,11 +200,13 @@ function normalizeExecutionPlanSteps(
 
 /** Parse the last ```json block in `text` as an ExecutionPlan.
  *  Returns null if no block found, JSON is invalid, or schema validation fails. */
-/** Advisory caps stated to the model in BOTH plan prompts — planInvestigation.ts:101-102
- *  and this file's own :320/:340 — and enforced in NEITHER schema (scopeSummary and
- *  scopeNotes are bare z.string()). Deliberately not turned into z.max(): these are the
- *  only uncapped prose carriers a plan has, and truncating one would clamp an answer
- *  rather than measure it. The marker below records the divergence instead. */
+/** Advisory caps — no longer stated to the model in either plan prompt (the prompt-side
+ *  instructions were removed; docs/deferred-work.md item 78) and enforced in NEITHER
+ *  schema either (scopeSummary and scopeNotes are bare z.string()). Deliberately not
+ *  turned into z.max(): these are the only uncapped prose carriers a plan has, and
+ *  truncating one would clamp an answer rather than measure it. The marker below now
+ *  measures organic field length, not compliance with an instruction that no longer
+ *  exists. */
 const SCOPE_SUMMARY_ADVISORY_CAP = 160;
 const SCOPE_NOTES_ADVISORY_CAP = 200;
 
@@ -360,11 +362,11 @@ export async function generateExecutionPlan(input: {
   const seededRule = input.seededFileContents
     ? `- Examine SEEDED FILE CONTENTS above; populate scopeNotes with any ` +
       `observations about what is already implemented, partially done, or out ` +
-      `of scope. Keep scopeNotes ≤ 200 chars; omit if nothing notable.\n`
+      `of scope. Omit if nothing notable.\n`
     : "";
 
   const prompt = `
-${feedbackSection}Create a concise execution plan for a code patch.
+${feedbackSection}Create an execution plan for a code patch.
 
 TASK
 ${input.task}
@@ -379,8 +381,7 @@ ${seededSection}Rules:
 - Break the task into 3-8 implementation steps.
 - Estimate affected files by path/name when possible.
 - For \`filesLikely\`, copy paths VERBATIM from the RELEVANT FILES list above when the file is clearly affected by the step. Never alter or guess extensions (.ts vs .tsx, .js vs .jsx, etc.). ${input.archetype === "refactor" || input.archetype === "complex_multi_file" ? "Do NOT estimate or invent paths — if a file is not in RELEVANT FILES, omit it from filesLikely and note the gap in the step description." : "Only estimate a path when no matching file appears in RELEVANT FILES."}
-- Identify risks briefly.
-- Keep scopeSummary under 160 characters.
+- Identify risks.
 - Return JSON only.
 ${seededRule}
 Subagent eligibility (Phase Q.3 / Q.6):
@@ -425,7 +426,7 @@ JSON shape:
   "steps": [
     {
       "title": "string",
-      "description": "<short approach: what this step does to which code + the key decision/edit, 1-3 sentences, concrete, not a restatement of the title>",
+      "description": "<what this step does to which code + the key decision/edit, concrete, not a restatement of the title>",
       "filesLikely": ["string"],
       "subagentEligible": true | false,
       "subagentType": "worker" | "explore"

@@ -93,15 +93,15 @@ JSON shape:
   "steps": [
     {
       "title": "string",
-      "description": "<short approach: what this step does to which code + the key decision/edit, 1-3 sentences, concrete, not a restatement of the title>",
+      "description": "<what this step does to which code + the key decision/edit, concrete, not a restatement of the title>",
       "filesLikely": ["string"],
       "subagentEligible": true | false,
       "subagentType": "worker" | "explore"
     }
   ],
   "riskHints": ["string"],
-  "scopeSummary": "string (≤160 chars)",
-  "scopeNotes": "string (optional, ≤200 chars — what is already done / out of scope)",
+  "scopeSummary": "string",
+  "scopeNotes": "string (optional — what is already done / out of scope)",
   "noChangeReason": "string (optional — set when reproduce command ran and exited 0; steps MUST be [])",
   "cannotVerifyReason": "string (optional — set when reproduce command did NOT run; steps MUST be [])"${allowAnswerOnly ? `,
   "answerOnlyReason": "string (optional — set when the investigation concluded the current behavior is correct and deliberate and no code change is warranted; steps MUST be [])"` : ""}
