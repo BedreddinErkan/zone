@@ -4526,6 +4526,19 @@ wrong. Item 61 records the same class one instance over: its sink-visible marker
 one value two ways, so a query grouping on either name silently drops half the records. A name that
 looks like one thing and is two, in both cases; neither carries a proposed fix.
 
+**A third artifact carries the same name, and reading it as a defect is the mistake the name
+invites — recorded because a later pass made it.** The usage tracker appends a per-run record under a
+sentinel model name that also reads as a run summary, in a different file, consumed by the metrics
+aggregator rather than by the feedback report. Every one of its token and cost fields is zero across
+the whole log, and an establish pass in this session reported that as an inert aggregate — a real
+observation with a wrong conclusion attached. **The zeros are deliberate and documented at the
+writer**, whose own comment says it appends a zero-cost record carrying latency and termination
+reason without affecting cost or token totals, precisely so the record cannot double-count against
+the per-call rows it sits beside. Nothing is broken. What the episode demonstrates is this
+paragraph's own point at one more remove: three unrelated artifacts share a name, a grep returns all
+three, and the third one's correct-by-design zeros read as a fault to anyone who arrives at them
+through the name.
+
 **Bucket — Neither, judged on the Actionable-now bar rather than by elimination.** That bucket asks
 for a fix specified in the entry with nothing left to learn, and this entry fails it in three places:
 the selecting condition is not written down, the value that would select on it is not in the
@@ -4650,11 +4663,132 @@ predicates and the terminal-shape discriminator are in `llm/executionPlan.ts`, a
 derivation that reads emptiness downstream of the gate is in `core/runLlmPatchFlow.ts`. See item 76
 for the shared-tag class strand C belongs to.
 
+## 78. Plan content: the prompt asks for brevity in several places, the investigation's own reads are dropped at its return boundary, and the marker that would price a fix measures on inconsistent bases
+
+**What it is:** three strands around what a plan actually *says* to the user approving it, found by
+one pass and recorded together because the second and third are the feasibility and cost questions
+the first cannot be decided without. Item 77 owns the approval **cycle** — which actions exist and
+what each does. This is the plan's **content**, a different subject, and nothing in this document
+covered it before this entry.
+
+**Strand one — the generation prompts ask for less output in several places, and the schema has
+nowhere to put a reason.** Recorded by shape rather than by quotation, since the templates are long:
+the lexical template opens by asking for a *concise* plan, has a rule asking for risks *briefly*,
+states a character cap for each of the two free-prose fields, and specifies the per-step description
+inline as a *short* approach of one to three sentences — five instructions asking for less, of which
+the investigation template repeats three. The output ceiling those five sit under is the shared
+auxiliary-call cap, which a plan does not come close to, so length is not what is binding. **Neither
+schema field nor prompt asks why a step is needed or what was considered and rejected**: a step
+carries a title, a description, a likely-files list and two optional subagent hints, and the plan
+carries an objective, risk hints, a scope summary, an optional scope note and the three mutually
+exclusive terminal reasons. There is no field a rationale could go in.
+
+**The two character caps are stated to the model and enforced nowhere.** Both prose fields are bare
+strings in the schema — no maximum — and the caps exist only as constants feeding a marker that fires
+when a field overruns the number its own prompt asked for. That marker has fired, so the divergence
+is observed rather than hypothetical, and its own comment already frames the open question correctly:
+whether the model is ignoring the cap or the cap is wrong for the job that field actually does.
+
+**A constraint any fix inherits, and it is a correctness constraint rather than a preference.** The
+investigation reads at most a handful of ranked files and is instructed to stop as soon as it can
+write the plan. A field inviting the model to say what it *considered and rejected* invites it to
+describe files it never opened — and a plan is a surface a user approves on, not a note a later pass
+audits. This document already records the same failure in its own text: the seventeenth pattern is
+about entries written at the end of the pass that found something, generalizing past what was
+actually read, and caught only by whoever read the code next. In a plan there is no next reader
+before approval. **So any added field has to be answerable from what the model actually read**, and
+the honest version of "what was rejected" is narrower than the phrase invites.
+
+**Two mechanical facts a fix pass will hit immediately.** The two templates carry near-identical
+JSON-shape blocks — same field names, same inline description specification — so a schema addition
+has to move both in one commit or they drift into describing different plans. And the function that
+renders an approved plan *into* the execution prompt has its output pinned by exact-substring
+assertions, step line included, so any new field that must survive into execution changes that
+format and those assertions with it.
+
+**Strand two — the investigation's own reads are dropped at the function's return boundary.** The
+loop result carries every tool call's name, arguments, result text and success flag.
+`runPlanInvestigation` reads the summary, the refusal, the cost, the iteration count, the token usage
+and the termination reason, and never the call log, because its return type is the plan alone.
+**Nothing is lost for generation** — the plan is parsed out of the loop's own final message, so the
+model holds every file it read in context at the moment it writes. What is lost is any *later* use:
+per-step detail generated lazily when a user expands a step would need a second full investigation
+rather than a lookup, because the material was in hand one line before the function returned and is
+unreachable one line after.
+
+**The lazy path has a second, independent blocker, and both would have to move together.** The plan
+is drawn as a committed transcript entry inside a region that writes each item exactly once, keyed on
+a generation counter. Expanding a plan already drawn means bumping that key, which redraws the whole
+transcript. Retaining the call log without changing the render surface buys nothing, and changing the
+render surface without retaining the log leaves nothing to expand into.
+
+**A prior conclusion about carrying content forward rests on a premise that no longer holds.** An
+out-of-document audit dated 2026-06-02 dropped a proposal to pre-seed plan-read file content into the
+executor, on two grounds, one being that ranked-file content was garbage-collected before anything
+could use it. That is no longer true on the plan path: the quick path reads file bodies and seeds them
+into generation under an explicit per-file and total character cap. The fact is stated here in its own
+terms rather than as a pointer, because that audit is not in this repository and a reader of this
+document cannot open it — a pointer would be a dangling one.
+
+**Strand three — the marker that would price any of the above measures cost and tokens on
+inconsistent bases.** Before `fc26fda3` the plan-investigation completion marker carried a token
+total only; that commit added input, output and cache-read fields beside it, without renaming or
+removing the total. The total sums input and output. **Cache-write tokens reach neither** — they are
+not merged into the cache field, they are never read into the usage type at any field. So dividing
+the cost this marker reports by the tokens it reports still yields a rate that prices nothing real,
+which is the same defect the added fields were meant to address, one level down.
+
+**The next step is sized and, unusually for this document, has no branch to choose.** The meter that
+populates the usage type already computes the full read-and-write split on every call, into a
+different accumulator, and simply never copies it across. Closing it means widening the usage type,
+extending the meter's accumulation, and updating the empty and normalize helpers — plus every literal
+built against today's shape, test fixtures included. One remedy, no options, not built.
+
+**Records predating `fc26fda3` carry the total and not the three new fields**, so any analysis
+spanning that commit must treat them as absent rather than zero. Defaulting them to zero understates
+the earlier window and overstates what the change did.
+
+**What plan generation costs today, which is why this is a decision rather than an obvious yes.**
+Measured from the completion marker over a window running 2026-07-29 to 2026-08-01, collapsed on item
+73's key and therefore an upper bound on real events rather than a lower one: generation costs a mean
+of `$0.0977` per plan, ranging from about `$0.026` to about `$0.166`. Joined against the archetype
+marker — and noting that the investigation loop emits its own archetype-less record, which is what
+makes the join easy to get wrong — **roughly a third of the cost of a run that goes on to execute is
+spent before the user has approved anything**; the per-run share ranges from under a fifth to nearly
+three fifths. **About half the measured runs never executed at all**, matching the recorded decision
+mix, and for those plan generation is the whole of the spend. A change that makes plans longer is
+therefore not a change to a small number.
+
+**Bucket — Neither, and the rule is carried deliberately while the precedent is not.** Item 77
+established one commit ago that a multi-strand entry is bucketed on what remains across its parts
+rather than on its readiest one, because promoting for the readiest strand alone would retroactively
+mis-bucket the entries that rule was drawn from. That reasoning applies here unchanged. **Its
+citations do not.** Item 77 leaned on item 46 and item 38, whose remaining work is choosing between
+named options — and strand three has no options to choose between, so those precedents do not reach
+it. The one that does is **item 74**: three strands, all open, one of them a specified change that
+was deliberately separated rather than built because it moves a signature and its call site. That is
+strand three's shape exactly, and item 74 sits in Neither holding it. What would cite this entry: any
+later entry whose most-ready strand is specified with no remedy to pick. Promoting on that basis
+would mis-bucket item 74 by the same argument item 77 made about its own precedents. Strand one is a
+design decision nobody has made, strand two is blocked on it and on a second change besides.
+**Neither.**
+
+**Where the code lives:** the lexical template, the plan schema, both advisory-cap constants, the
+overrun marker, and the approved-plan renderer whose output is pinned are all in
+`llm/executionPlan.ts`; the investigation template, the iteration and file caps, and the completion
+marker are in `llm/planInvestigation.ts`; the loop result's call log is declared on `AgentLoopResult`
+in `llm/agentLoop.ts`; the usage type and its empty and normalize helpers are in `llm/subagents.ts`,
+and the meter that populates it — along with the accumulator that already holds the read-and-write
+split — is in `llm/tokenBudget/TokenBudgetMeter.ts`. The plan's rendering component and the
+committing transcript region that draws it are in the TUI's components directory, and the file-body
+seeding with its caps is in `runOneShotInner`, `cli/dispatch.ts`. See item 77 for the approval cycle
+this content is presented through, and item 73 for why the figures above are upper bounds.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 77 to find out which ones still need something. No index of
+reader the trouble of reading all 78 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -4667,8 +4801,8 @@ first (0):
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (7): 1, 4, 18, 23, 57, 63, 75
 
-**Neither — a structural fact recorded, with no fix proposed** (31): 2, 3, 5, 9, 11, 15, 17, 19,
-27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77
+**Neither — a structural fact recorded, with no fix proposed** (32): 2, 3, 5, 9, 11, 15, 17, 19,
+27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, and 65 are partially closed or corrected; the
 classification above covers only the portion still open, not the whole entry.
@@ -5322,6 +5456,32 @@ consumer's output, not because the reasoning covered it. **A conclusion that hap
 not evidence its argument was** — the argument is what a later pass inherits and reuses, and this one
 would have carried a false generalization about there being a single consumer into whatever came
 next.
+
+**A fourth instance, and the first where the mechanism named did not exist at all — which is what
+makes it worth adding rather than folding into the three above.** The first two failed by stopping
+early; the third by tracing one member of a set. This one traced a mechanism that was never there.
+The hypothesis behind the plan-content pass (item 78) held that plan generation runs an investigation
+whose findings are *discarded* before the plan is written, so most of the material for a richer plan
+was already paid for and thrown away — making the feature mostly a plumbing problem. **The conclusion
+was right and the mechanism was invented.** The findings are not discarded before planning: the plan
+is parsed out of the investigation loop's own final message, so the model holds every file it read in
+context at the moment it writes. Nothing is paid for twice and there is nothing to rescue.
+
+**What makes this sharper than the earlier three is that the mechanism was the actionable part.** A
+trace that stops early still points at real code; a hypothesis about a mechanism that does not exist
+points at work to do. Acting on this one as stated would have built plumbing to carry findings
+forward across a boundary they never crossed — real effort, cleanly implemented, solving nothing —
+and the pass would have felt vindicated throughout, because the conclusion it was serving was
+correct. The true reason is a different fix in a different file: the material is already in context,
+so what limits the plan is the prompt and the schema.
+
+**The rule this adds to the closing line above.** "A conclusion that happens to be right is not
+evidence its argument was" is stated there as a caution about what a later pass inherits. This
+instance makes it operational: when a hypothesis names both an outcome and a mechanism, **the
+mechanism is the part that decides what gets built, so it is the part that has to be checked first** —
+and confirming the outcome is not a check on it. The cheap version is the same one the essay already
+prescribes, run in the other direction: before believing something is lost, find the line that loses
+it.
 
 ## A seventeenth pattern: a freshly written entry is the least-checked text in this document, not the most current
 
