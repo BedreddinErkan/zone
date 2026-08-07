@@ -4550,11 +4550,111 @@ and `llm/verification/classify.ts`, or supplied by a model tag that `parseVerifi
 See item 69 for the change that widened this population, item 70 for the branch `ef9d0608` corrected,
 and item 60 for the entry this one is bucketed beside but not for its reason.
 
+## 77. The plan-approval cycle: an advertised action set that disagrees with the accepted one, a replan that can degrade a plan unseen, and a decision marker with two payloads
+
+**What it is:** three strands around the plan-first approval gate, found by one trace and recorded
+together because none of them causes any other. The gate is a loop inside `runOneShotInner` that
+calls `requestPlanApproval` and switches on the decision it returns; exactly one arm continues the
+loop, the rest end it or abort the run. Everything below is established against `79c317f6`, the last
+commit to touch that file.
+
+**Strand A — the answer-shaped footer advertises two actions and the key handler accepts four.**
+`PlanActionPrompt` chooses its footer with a ternary on the proposal's answer-only reason: an
+answer-shaped proposal is offered a read-only action, a plan-a-fix action, and cancel. Its
+`useInput` handler does not read that field at all — every numbered branch is live for every
+proposal. So two options are reachable and unadvertised, and they do different things. One enters
+feedback mode carrying the approve-and-run decision, whose dispatch arm builds its replan with
+`forceSteps` inferred from the current plan's own shape, true for exactly this proposal: the answer
+plan is force-stepped into a patch run. The other sends the manual decision, which ends the loop
+with the stepless plan untouched and hands it to execution as-is. **The component holds two
+independent copies of "which actions exist"** — the footer's ternary and the handler's branch list —
+neither derived from the other and neither derived from a shared table, so a change to one leaves
+the other exactly as it was. The dispatch arm's own comment acknowledges the force-stepping one
+("just without the footer telling the user that's what's about to happen") and says nothing about
+the other.
+
+**This strand meets the Actionable-now bar while the entry does not, which is stated here rather
+than resolved by promoting the entry.** Reconciling the two copies is a change to one component,
+its own test file is already shaped for it, and nothing has to be learned first. What is not settled
+is which copy moves: gating the two branches makes the keys inert, extending the footer makes them
+advertised, and the two have opposite user-facing outcomes with nothing in the code or the tests
+naming an intent. Item 36's treatment is the precedent followed — a specified fix kept inside an
+entry whose bucket is decided by what remains, with the mismatch said plainly and the footnote left
+as the mechanism that flags a mixed entry.
+
+**The inverse of the usual guard warning: tightening the component does not tighten the protocol.**
+A guard relaxed for one shape is relaxed for every shape reaching it, and the reflex is to check
+what else the guard covers. Here the reflex points the wrong way. The remote-control adapter's plan
+case casts the decision straight off the wire and hands it to `resolvePlanApproval` with no
+plan-shape check of any kind, so gating the keystrokes closes the shape for the terminal and leaves
+it open for any remote client. Whatever fix lands has to say which of the two surfaces it covers.
+
+**Strand B — a replan can degrade a plan to stepless and nothing is re-shown.** Three things
+normally guarantee non-empty steps before the loop begins: the two early returns for a
+problem-asserting task whose plan came back cannot-verify or no-change, and the safety net that
+regenerates with forced steps and then falls back to a synthesized minimal plan. All three sit
+above the loop and none re-runs on a replan, so a schema-valid stepless-with-reason response
+produced inside the loop carries forward. The looping arm shows it — the user sees the degraded
+plan on the next pass — and the approve-and-run arm does not.
+
+**That arm's non-return to the gate is its specification, not a defect, and it is recorded plainly
+so a later reader does not "fix" it.** The decision type's own comment reads that it regenerates
+once and then executes; the project docs call it feedback-and-run; the arm's own inline comment
+states it does not loop back; and an existing assertion pins a stepped plan through it showing the
+gate exactly once. What is undecided is narrower and genuinely open: whether a replan that *degrades*
+the plan should re-gate, which is a different question from whether the arm should re-gate in
+general.
+
+**No decision has been made and the instrument that would inform it is empty.**
+`[zone-plan-empty-approval]` fires unconditionally through the sink-reaching logger and carries a
+`reviewed` field separating the two arms — true for the looping one, false for the approve-and-run
+one, which is the count it exists to measure. The sink holds **zero records** of it across the
+window it covers, 2026-07-29 to 2026-08-05. **Zero means the path was not walked in that window,
+not that it is sound.** The more useful fact sits beside it: over the same window
+`[zone-plan-decision]` carries twenty-six records and the decisions appearing in them are reject,
+accept-all, feedback and timeout — **the approve-and-run decision has never been exercised in this
+sink at all**, so strand A is unmeasured because nobody has pressed the key, which is a different
+kind of silence from a path that runs and stays clean.
+
+**Strand C — the decision marker carries two payload shapes on two channels.** The plan-first loop
+emits `[zone-plan-decision]` through the sink-reaching logger at every terminal arm, with a payload
+naming the run, the plan, the decision, the attempt number, and whether a modal was actually shown.
+The staged-checkpoint path emits the same tag through the verbose-gated logger at its own two exits,
+with a payload naming a mode, a decision, and a refine count — no field in common but the decision.
+So a sink query on the tag returns only the first family, since the second never reaches the sink
+unless verbose logging is on, and the project docs describe the second shape only. Item 76 records
+the same class one instance over, where an unrelated payload shares the `run_summary` type string;
+this is the sharper version, because there the two payloads at least travel on different mechanisms,
+and here they share a tag *and* differ in channel, so a reader who finds the documented shape and
+queries for it gets an empty result that looks like an unused feature.
+
+**Bucket — Neither, decided on what remains across the strands rather than on the readiest one, and
+checked in both directions.** What it cites: item 46 is the matching shape for strand A, an entry
+whose remaining work is choosing between two named, fully-specified options and which sits in
+Neither on exactly that ground; item 38 is the same with three options. Item 61 supplies the
+multi-strand rule — an entry carrying bullets of mixed readiness is bucketed on what is left over
+all of them, and that entry stayed Neither while holding a closed bullet. What would cite it: any
+later multi-strand entry with one shippable part. **That direction is what settles it** — promoting
+this entry for strand A alone would make items 61 and 74 retroactively mis-bucketed, since neither
+was promoted for its most-ready part, and a rule that only applies to the newest entry is not a
+rule. Strand B is an open decision, strand C an observation with no fix proposed. **Neither.**
+
+**Where the code lives:** the approval loop, its decision switch, the two early returns, the
+forced-steps safety net, and both `[zone-plan-decision]` emitter families are all in
+`runOneShotInner`, `cli/dispatch.ts`; the accumulated feedback is appended to the task there too,
+just above the flow call, so what the user typed does reach execution even when the plan it produced
+is never shown. `PlanDecision`, `requestPlanApproval`, and `emitPlanEmptyApproval` are in
+`llm/planApprovals.ts`; the footer ternary and the key handler are both in `PlanActionPrompt.tsx`;
+the wire-side resolver is the plan case in `remote/remoteControlAdapter.ts`. The stepless
+predicates and the terminal-shape discriminator are in `llm/executionPlan.ts`, and the approved-steps
+derivation that reads emptiness downstream of the gate is in `core/runLlmPatchFlow.ts`. See item 76
+for the shared-tag class strand C belongs to.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 76 to find out which ones still need something. No index of
+reader the trouble of reading all 77 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -4567,8 +4667,8 @@ first (0):
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (7): 1, 4, 18, 23, 57, 63, 75
 
-**Neither — a structural fact recorded, with no fix proposed** (30): 2, 3, 5, 9, 11, 15, 17, 19,
-27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76
+**Neither — a structural fact recorded, with no fix proposed** (31): 2, 3, 5, 9, 11, 15, 17, 19,
+27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, and 65 are partially closed or corrected; the
 classification above covers only the portion still open, not the whole entry.
@@ -4603,6 +4703,49 @@ marker tag, a symbol name. None of it goes stale when the file around it does; i
 instead, per the note above, if the shape itself is ever renamed away — including in this
 document's own item 23, originally written with line numbers despite this section, found on a
 later pass and converted to shape references the same way this section asks of everything else.
+
+**A later instance, from the plan-approval establish pass (item 77) — and its counter-instance,
+which is the more useful half.** One test file's header cites five constructs in the dispatch module
+by line: the two early returns, the forced-steps safety net's range, and each of the two replan arms.
+Every one of them misses at the tree this was found in. Two miss into a neighbouring construct
+entirely — the safety-net range starts inside the guard above it, and the citation for the
+approve-and-run arm lands on the last statement of the *other* arm, in the same switch the comment
+is explaining. Three inline comments in the same file cite the initial plan-generation call by a
+line holding an opening brace in an unrelated loop, and a second test file cites two ranges for a
+read-only-mode predicate that lives hundreds of lines from either. A source comment in the flow
+module does the same to its own classifier call. **The counter-instance is a third file citing the
+same neighbourhood three times, two of which still resolve exactly and one of which is off by two
+into its own comment block.** So the drift is not uniform even within one subject: some citations
+survive, some die, and nothing distinguishes them from the outside, which is why "check whether the
+number still resolves" is not a maintenance strategy — it is a per-citation cost with no batch form.
+
+**What this instance does *not* show, checked rather than assumed.** The pass that found these had
+just edited two source files and a script, and the natural reading is that its own edits moved the
+lines. They did not: the file holding every cited construct has not been touched since the commit
+that introduced the shape, and the two files the session did edit took their insertions below every
+line cited into them. The drift predates the pass that found it by a long way. Worth stating because
+the sharp version of this lesson at the top of the section — a citation wrong on arrival — is the
+memorable one, and it makes the ordinary case easy to misattribute to whatever change happened to be
+in progress when someone finally looked.
+
+**A qualification on this section's own promise, from the same pass.** The claim above is that a
+shape reference "fails loudly if the shape itself is ever renamed away." That holds when *code*
+names the shape — a deleted symbol stops compiling. It does not hold in comments, which is the only
+place this document asks anyone to put shape references. The plan-approval gate was once conditional
+on an environment variable; a design note at the repo root records the decision to remove the
+conditional and make the new flow unconditional, and the production read is gone. Comments in two
+modules still describe the gate as firing when that variable is set, and a group of test files still
+deletes it in cleanup. Nothing failed loudly, nothing broke, and a reader who greps the name finds
+enough hits to conclude the gate is still opt-in. **Recorded as a qualification and not a reversal:**
+a comment naming a removed shape is still better than a line number, because the name is searchable
+and its absence is provable in a single grep — which is exactly how this one was found. A stale line
+number cannot be falsified that cheaply, because it resolves to *something* every time. The finding
+is left here rather than given a numbered entry: the variable having no reader is uninteresting on
+its own, since removing it was the design's stated intent and that intent was carried out, and what
+survives is three comments describing a gate that no longer exists. Items 43, 52 and 53 were read as
+candidates and none fits — the first is a live function whose return value has no consumer, the
+second is computed-and-unused values, the third is about the absence of detection tooling rather
+than any instance of what it would detect.
 
 ## A second pattern, a few commits apart: self-reference defeats a mutation test
 
