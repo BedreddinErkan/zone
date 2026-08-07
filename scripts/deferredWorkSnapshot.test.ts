@@ -57,7 +57,11 @@ function parseSnapshotBuckets(lines: string[]): Bucket[] {
   }
   if (current.length) paragraphs.push(current.join(" "));
 
-  const bucketRe = /^\*\*(.+?)\*\*.*?\((\d+)\):\s*(.+)$/;
+  // Trailing capture is `.*`, not `.+`: a bucket can legitimately be empty (e.g. "(0):"
+  // with nothing after the colon, the natural minimal edit when its last item is
+  // removed by hand). With `.+` that paragraph failed to match at all and the whole
+  // bucket silently vanished from the parsed set — see docs/deferred-work.md item 36.
+  const bucketRe = /^\*\*(.+?)\*\*.*?\((\d+)\):\s*(.*)$/;
   const buckets: Bucket[] = [];
   for (const p of paragraphs) {
     const m = bucketRe.exec(p);
@@ -80,6 +84,38 @@ function parseSnapshotBuckets(lines: string[]): Bucket[] {
   return buckets;
 }
 
+const REQUIRED_BUCKETS = ["Closed", "Actionable now", "Blocked on data", "Neither"];
+
+/** Names which of the four required buckets did not parse at all — an empty bucket
+ *  that failed to match `bucketRe` looks identical to a bucket that was never written,
+ *  which is exactly why item 36 calls the old generic array-diff unhelpful here. */
+function findMissingBuckets(buckets: Bucket[]): string[] {
+  const present = new Set(buckets.map((b) => b.label));
+  return REQUIRED_BUCKETS.filter((label) => !present.has(label));
+}
+
+/** Verbatim lift of the declared-vs-actual check so a fixture test can exercise it
+ *  without touching the real ledger; the message text is unchanged from before the
+ *  lift. */
+function findCountMismatches(buckets: Bucket[]): string[] {
+  return buckets
+    .filter((b) => b.declared !== b.items.length)
+    .map(
+      (b) =>
+        `"${b.label}" declares (${b.declared}) but lists ${b.items.length} item(s): ` +
+        `${b.items.join(", ")}`
+    );
+}
+
+/** Which heading numbers appear in no bucket's item list at all. Presence-only, so a
+ *  Set suffices here even though the "no duplicates" check below still needs the
+ *  fuller per-item bucket-label tracking and keeps its own copy of that loop. */
+function computeMissingItems(headings: Heading[], buckets: Bucket[]): number[] {
+  const seen = new Set<number>();
+  for (const b of buckets) for (const n of b.items) seen.add(n);
+  return headings.map((h) => h.n).filter((n) => !seen.has(n));
+}
+
 describe("docs/deferred-work.md status snapshot mechanical check (ledger item 36)", () => {
   const raw = fs.readFileSync(LEDGER_PATH, "utf8");
   const lines = raw.split("\n");
@@ -88,9 +124,8 @@ describe("docs/deferred-work.md status snapshot mechanical check (ledger item 36
 
   it("parses at least one heading and all four expected buckets", () => {
     expect(headings.length).toBeGreaterThan(0);
-    expect(buckets.map((b) => b.label)).toEqual(
-      expect.arrayContaining(["Closed", "Actionable now", "Blocked on data", "Neither"])
-    );
+    const missing = findMissingBuckets(buckets);
+    expect(missing, `Bucket(s) not found in the snapshot: ${missing.join(", ")}`).toEqual([]);
   });
 
   it('the "Closed" bucket matches exactly the items whose heading starts "Closed —"', () => {
@@ -119,13 +154,7 @@ describe("docs/deferred-work.md status snapshot mechanical check (ledger item 36
   });
 
   it("every bucket's declared count matches its actual list length", () => {
-    const mismatches = buckets
-      .filter((b) => b.declared !== b.items.length)
-      .map(
-        (b) =>
-          `"${b.label}" declares (${b.declared}) but lists ${b.items.length} item(s): ` +
-          `${b.items.join(", ")}`
-      );
+    const mismatches = findCountMismatches(buckets);
     expect(mismatches, mismatches.join("\n")).toEqual([]);
   });
 
@@ -142,12 +171,103 @@ describe("docs/deferred-work.md status snapshot mechanical check (ledger item 36
     const duplicated = [...seen.entries()]
       .filter(([, labels]) => labels.length > 1)
       .map(([n, labels]) => `item ${n} appears in ${labels.length} buckets: ${labels.join(", ")}`);
-    const missing = headings.map((h) => h.n).filter((n) => !seen.has(n));
+    const missing = computeMissingItems(headings, buckets);
 
     expect(duplicated, duplicated.join("\n")).toEqual([]);
     expect(
       missing,
       `Item(s) ${missing.join(", ")} have a heading but appear in no snapshot bucket.`
     ).toEqual([]);
+  });
+});
+
+/** Builds a minimal snapshot-section fixture — heading lines, then the bucket
+ *  paragraphs framed exactly as parseSnapshotBuckets requires (a "## Status snapshot"
+ *  marker, blank-line-separated paragraphs, a terminating "---"). Never touches
+ *  LEDGER_PATH or the real ledger file. */
+function buildSnapshotLines(headingLines: string[], bucketParagraphs: string[]): string[] {
+  return [
+    ...headingLines,
+    "",
+    "## Status snapshot",
+    "",
+    ...bucketParagraphs.flatMap((p) => [p, ""]),
+    "---",
+  ];
+}
+
+describe("fixture-driven: empty buckets and named failures", () => {
+  it("all four buckets empty, zero headings — parses cleanly", () => {
+    const lines = buildSnapshotLines(
+      [],
+      [
+        "**Closed** (0):",
+        "**Actionable now** (0):",
+        "**Blocked on data** (0):",
+        "**Neither** (0):",
+      ]
+    );
+    const buckets = parseSnapshotBuckets(lines);
+
+    expect(buckets.find((b) => b.label === "Neither")).toEqual({
+      label: "Neither",
+      declared: 0,
+      items: [],
+    });
+    expect(findMissingBuckets(buckets)).toEqual([]);
+    expect(findCountMismatches(buckets)).toEqual([]);
+  });
+
+  // Part 1 of this commit makes an empty bucket parse instead of vanishing. The risk
+  // that creates is a false negative: an item that belongs nowhere could in principle
+  // go unreported if an empty-but-now-valid bucket were mistaken for "this item is
+  // accounted for." This block is the regression guard on that risk, not a test of
+  // orphan-detection itself — computeMissingItems already existed in spirit as
+  // assertion 4's inline logic; what's new here is confirming it still fires when
+  // every bucket in the document is the newly-legal empty shape.
+  it("an item with no bucket is still reported missing when every bucket is empty", () => {
+    const lines = buildSnapshotLines(
+      ["## 6. Some entry"],
+      [
+        "**Closed** (0):",
+        "**Actionable now** (0):",
+        "**Blocked on data** (0):",
+        "**Neither** (0):",
+      ]
+    );
+    const headings = parseHeadings(lines);
+    const buckets = parseSnapshotBuckets(lines);
+
+    expect(computeMissingItems(headings, buckets)).toEqual([6]);
+    // Isolates the failure to item membership, not bucket presence — all four
+    // buckets did parse, they just don't happen to list item 6.
+    expect(findMissingBuckets(buckets)).toEqual([]);
+  });
+
+  it("a non-empty bucket's declared count disagreeing with its list names the bucket and both numbers", () => {
+    const lines = buildSnapshotLines(
+      ["## 1. First", "## 2. Second", "## 3. Third"],
+      [
+        "**Closed** (0):",
+        "**Actionable now** (0):",
+        "**Blocked on data** (4): 1, 2, 3",
+        "**Neither** (0):",
+      ]
+    );
+    const buckets = parseSnapshotBuckets(lines);
+
+    expect(findCountMismatches(buckets)).toEqual([
+      '"Blocked on data" declares (4) but lists 3 item(s): 1, 2, 3',
+    ]);
+  });
+
+  it("a required bucket missing from the snapshot text entirely is named", () => {
+    const lines = buildSnapshotLines(
+      ["## 1. First"],
+      ["**Closed** (1): 1", "**Actionable now** (0):", "**Blocked on data** (0):"]
+    );
+    const buckets = parseSnapshotBuckets(lines);
+
+    expect(findMissingBuckets(buckets)).toEqual(["Neither"]);
   });
 });
