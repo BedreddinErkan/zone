@@ -218,10 +218,17 @@ export async function runPlanInvestigation(
 
   const plan = tryParseExecutionPlan(summaryText);
 
+  // cachedTokens is cache-READ tokens only — SubagentTokenUsage has no cache-write
+  // figure at all (not merged into cached, simply never populated), so tokensUsed
+  // (input+output) and cachedTokens together still omit cache-write tokens entirely.
+  // Per-token cost arithmetic from this payload is still unsound until that gap closes.
   log("[zone-plan-investigation-complete]", JSON.stringify({
     runId: runId || null,
     iterCount: loop.iterCount ?? 0,
     tokensUsed: loop.tokenUsage?.total ?? 0,
+    inputTokens: loop.tokenUsage?.input ?? 0,
+    outputTokens: loop.tokenUsage?.output ?? 0,
+    cachedTokens: loop.tokenUsage?.cached ?? 0,
     costUsd: loop.costUsd ?? 0,
     terminationReason: loop.terminationReason ?? "success",
     fallbackUsed: !plan,

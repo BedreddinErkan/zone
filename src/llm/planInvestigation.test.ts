@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   runAgentLoop: vi.fn(),
   generateExecutionPlan: vi.fn(),
   tryParseExecutionPlan: vi.fn(),
+  log: vi.fn(),
 }));
 
 vi.mock("./agentLoop.js", () => ({ runAgentLoop: mocks.runAgentLoop }));
@@ -12,7 +13,7 @@ vi.mock("./executionPlan.js", () => ({
   generateExecutionPlan: mocks.generateExecutionPlan,
   tryParseExecutionPlan: mocks.tryParseExecutionPlan,
 }));
-vi.mock("../utils/logger.js", () => ({ log: vi.fn(), debugLog: vi.fn(), errorLog: vi.fn() }));
+vi.mock("../utils/logger.js", () => ({ log: mocks.log, debugLog: vi.fn(), errorLog: vi.fn() }));
 
 import { runPlanInvestigation, buildPrompt, PLAN_INVESTIGATION_ITER_CAP, PLAN_INVESTIGATION_MAX_FILES } from "./planInvestigation.js";
 
@@ -32,7 +33,7 @@ function makeDoneLoop(summary = "") {
     patchValidatedByAgent: false,
     verificationReason: "skipped" as const,
     iterCount: 2,
-    tokenUsage: { total: 1000, input: 800, output: 200 },
+    tokenUsage: { total: 1000, input: 800, output: 200, cached: 150 },
     costUsd: 0.004,
     terminationReason: "natural_completion" as const,
   };
@@ -110,6 +111,58 @@ describe("runPlanInvestigation — parse success path", () => {
     mocks.tryParseExecutionPlan.mockReturnValue(planWithScope);
     const result = await runPlanInvestigation(BASE_INPUT);
     expect(result.scopeNotes).toBe("auth already done");
+  });
+});
+
+// SubagentTokenUsage's four numeric fields (input/output/cached/total) are all
+// REQUIRED on the interface (subagents.ts) — no `?`. That is not enforced at this
+// mock boundary: mocks.runAgentLoop is an untyped vi.fn(), so mockResolvedValue
+// accepts any shape (the default makeDoneLoop fixture was already missing `cached`
+// before this file's own change and compiled cleanly). Block 3 below constructs a
+// tokenUsage object missing three of those four required fields with NO cast —
+// none is needed here, though a real (typed) caller boundary could still reject it.
+describe("runPlanInvestigation — [zone-plan-investigation-complete] token breakdown", () => {
+  function findMarkerPayload(): Record<string, unknown> {
+    const call = mocks.log.mock.calls.find(
+      (c: unknown[]) => c[0] === "[zone-plan-investigation-complete]"
+    );
+    if (!call) throw new Error("[zone-plan-investigation-complete] was not logged");
+    return JSON.parse(call[1] as string) as Record<string, unknown>;
+  }
+
+  it("carries each field from the usage object at its own distinct value — not recomputed, not swapped", async () => {
+    await runPlanInvestigation(BASE_INPUT);
+    expect(findMarkerPayload()).toMatchObject({
+      tokensUsed: 1000,
+      inputTokens: 800,
+      outputTokens: 200,
+      cachedTokens: 150,
+    });
+    expect(
+      mocks.log.mock.calls.filter((c: unknown[]) => c[0] === "[zone-plan-investigation-complete]")
+    ).toHaveLength(1);
+  });
+
+  it("tokenUsage entirely absent — all four fields default to 0, no throw", async () => {
+    mocks.runAgentLoop.mockResolvedValue({ ...makeDoneLoop(), tokenUsage: undefined });
+    await expect(runPlanInvestigation(BASE_INPUT)).resolves.toBeDefined();
+    expect(findMarkerPayload()).toMatchObject({
+      tokensUsed: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedTokens: 0,
+    });
+  });
+
+  it("tokenUsage partially populated (total only) — missing fields default to 0, nothing backfilled from total", async () => {
+    mocks.runAgentLoop.mockResolvedValue({ ...makeDoneLoop(), tokenUsage: { total: 500 } });
+    await expect(runPlanInvestigation(BASE_INPUT)).resolves.toBeDefined();
+    expect(findMarkerPayload()).toMatchObject({
+      tokensUsed: 500,
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedTokens: 0,
+    });
   });
 });
 
