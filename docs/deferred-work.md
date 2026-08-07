@@ -2062,17 +2062,38 @@ entry's, corrected above, and item 16's "holds eleven `it()` blocks at HEAD" —
 this sweep and still eleven, so accurate and left alone. Anchoring a figure to a commit rather than
 to `HEAD` is the cheap habit that would have made this correction unnecessary.
 
-**A latent trap in the shipped check, found by nearly hitting it and verified against the real
-regex rather than reasoned about.** The check cannot express an empty bucket. Its bucket pattern
-requires at least one character after the count's colon, so a bucket rendered with a zero count and
-nothing following does not match at all — it vanishes from the parsed set, and the failure surfaces
-as the unrelated "all four buckets present" assertion. Rendering a placeholder word instead does
-match, and then throws on the item parser's own digit check. **Two different failure modes, neither
-naming the real cause**, and both wait for whichever pass first empties a bucket. Item 69's closure
-came within one entry of being that pass: it vacated Actionable now, and only the new entry landing
-there kept the bucket populated. Recorded rather than fixed because the check is under `scripts/`
-and the commit that found this was scoped to this document — the fix is a parser that treats a zero
-count as a valid empty list, which is smaller than this paragraph.
+**The latent trap recorded here is discharged (`a3cbe763`).** The check could not express an empty
+bucket: its bucket pattern required at least one character after the count's colon, so a bucket
+rendered with a zero count and nothing following did not match at all, vanished from the parsed set,
+and surfaced as the unrelated "all four buckets present" assertion — while rendering a placeholder
+word instead did match and then threw on the item parser's own digit check. The pattern's trailing
+capture now accepts an empty tail, so a bare zero count parses to an empty item list through the
+existing split-and-filter chain with **no new branch**, and the bucket-presence assertion names which
+required bucket failed to parse instead of rendering an array diff. Fixture-driven blocks now drive
+the parsing functions against constructed lines rather than the real document, which nothing in the
+file had done before even though both functions were already pure. The pass that discharged it is the
+one that needed it: the reclassification of item 76 empties Actionable now, and item 69's closure had
+already come within one entry of being that pass.
+
+**What the fix did not cover, recorded as a live successor rather than a closed question.** A bucket
+whose tail is non-empty but unparseable — a stray note, a half-deleted list, a typo where an item
+number should be — still matches the pattern, still reaches the item parser's digit check, and still
+throws. That throw happens where the document is read and parsed, in the enclosing `describe` body
+rather than inside any `it()`, so it is a **collection-time** exception: the file fails to load, the
+raw error is what surfaces, and no test result is produced at all. That is worse than one red test,
+because a suite reporting nothing for a file reads as a harness problem rather than as a document
+problem, and the two get investigated differently. Moving it inside an assertion means the parse
+function has to collect its errors and return them rather than throwing, which changes its signature
+and every call site — the real-document block and each fixture block alike. Not attempted in that
+commit and not attempted here.
+
+**Kept inside this entry rather than carved into its own, with the counter-argument stated.** This
+entry already owns the check by name below, the successor is the residue of the paragraph above it,
+and a separate entry would put two halves of one subject in two places. Against that: the successor's
+fix *is* specified, which is the Actionable-now bar, and a specified fix inside a Neither entry is
+harder to find. It loses to this document's own practice — item 61 carries a closed bullet inside a
+Neither entry, and this entry has carried a closed half and a decided half side by side since it
+became partially closed. The footnote below the snapshot is the mechanism that flags exactly this.
 
 **Where the code lives:** the check is `scripts/deferredWorkSnapshot.test.ts`, reached by vitest's
 `scripts/**/*.test.ts` include and run in CI by `tests.yml`'s `npm test`; the currency technique is
@@ -4422,7 +4443,7 @@ that does not exist yet, which is that bucket's definition rather than an approx
 input is assembled in `cli/dispatch.ts`; the arm that consumes the field is `didApplyPatch` in
 `llm/verification/logUtils.ts`.
 
-## 76. The run summary's verification note has no arm for a run that neither patched nor errored, and says the run errored
+## 76. The run summary's verification note falls through to a patch-or-error choice, and both of its arms are false for shapes that reach it
 
 **What it is:** `deriveAgentVerificationSummary` maps a verification reason to the note that travels
 on the run summary. Each of its five named arms keys on a reason a model-supplied tag produces —
@@ -4435,44 +4456,99 @@ always the error one. A run that was never offered a write tool and simply exhau
 budget is described as having encountered errors during execution. Both fallthrough arms name a
 patch or an error; neither describes a run that did neither.
 
-**Why it surfaced now, and why it is not item 69's problem.** `29230a1b` removed the tag demand for
-read-only-archetype runs at max iterations, so that population now reaches the fallthrough where it
-previously carried a tag into a named arm. Item 69's closure records this as the second consumer its
-own un-masking reasoning missed. The demand's removal is correct; it made an existing gap reachable
-rather than creating one — the fallthrough was already wrong for any untagged max-iterations run,
-which is why this is its own entry rather than a cost recorded inside that closure.
+**More than one shape reaches the fallthrough, and one of them lands in the arm that claims
+success — this entry first recorded a single shape and that was wrong.** The reasons that reach it
+are the ones no named arm keys on: `no_verification_attempted`, `verification_warnings`,
+`verification_failed_staged`, and `no_changes_made`. `verification_regressed` reaches it too but
+never surfaces, because the call site replaces both the note and the decision mode whenever the
+reason is that value. **`no_changes_made` is the sharp one, and it lands in the opposite arm from
+the one this entry was written about.** `finalizeStaging` returns it when every staged file's bytes
+already equal the disk bytes, `deriveResultFields` hardcodes it for the no-change outcome, and the
+fallthrough's success arm then reports that a patch was applied with no test verification — a run
+that wrote nothing is told a patch was applied. `verification_warnings` reaches the same arm and
+loses the warnings the run did surface. A single new arm cannot cover these: they differ in what
+actually happened, not in one missing case, which is why closing this is not one commit.
 
-**It is emitted, not merely computed — the fact that separates this from item 60.** `assembleRunSummary`
-places the note on the run summary payload's verification block and the surrounding code emits that
-payload as a `run_summary` event on the bus. It crosses the boundary and the current consumer ignores
-it: the TUI's own handler for that event reads the cost total and nothing else, and the headless
-printer renders only warnings and the decision mode. Item 60's report never leaves the process at all
-— its only readers in the whole tree are test assertions — and its own closure needs a delete-or-wire
-decision made first. This one needs no such decision: the string is already being produced and
-shipped on every agent-loop run, and it is wrong for a reachable population.
+**Which commit created the population, and which shapes predate all of them.** `ef9d0608` created
+it: before that commit `inferVerificationFromLog`'s not-patch-applied branch returned
+`tests_failed_by_patch`, which is a named arm — wrong for the run, but not a fallthrough — and after
+it the branch returns `no_verification_attempted`, which no named arm keys on. `29230a1b` widened
+it, by removing the tag demand from read-only-archetype runs at max iterations so that population
+reaches the inference untagged; item 69's closure records this as the second consumer its own
+un-masking reasoning missed. `21cb580a` changed `didApplyPatch`, which that same inference calls,
+and did **not** touch this: for the shape it moved — a write that succeeded and staged bytes equal
+to disk — `deriveResultFields` hardcodes the no-change reason before the note is derived, so the
+note's input is the same value either side of it. **The `no_changes_made` and `verification_warnings`
+shapes predate all three and were touched by none of them** — both are produced in `staging.ts` and
+`deriveResultFields.ts`, and no commit in that arc opened either file. That is what makes this an
+old defect surfaced rather than one the arc introduced.
 
-**What would close it:** an arm for the shape both fallthrough arms miss — a run with no applied
-patch and no command failure — saying so rather than reporting an error. Specifiable without deciding
-anything about consumers, which is the whole of the distinction above.
+**It is emitted, and it does leave the process — the entry's original claim of a single consumer
+that ignores it was wrong in the one case that matters.** `assembleRunSummary` places the note on the
+run summary payload's verification block and the surrounding code emits that payload as a
+`run_summary` event on the bus. **Three consumers subscribe.** The TUI's own handler reads the cost
+total and nothing else. The CLI sink reads the cost total and the changed-file list. The third is
+`toWireFrame`, which copies the whole verification block — note included — onto the remote-control
+wire frame, and the remote adapter broadcasts every frame it produces, so on that path the note
+reaches a client outside the process. That path is opt-in rather than absent: the adapter is
+constructed only inside the handler that starts the remote-control server on an explicit user
+request, so a session that never issues that request never builds it and the note reaches nobody.
 
-**What would make it urgent, and what a null result means.** Urgency is contingent on a reader
-appearing for the note on a rendered surface; today there is none, which is why the wrong text has
-cost nothing so far. If no reader ever appears, that does not close this entry — it folds it into
-item 60's own question, since an emitted-but-never-rendered field is that entry's subject even though
-this one's is not. Recorded so a later pass does not read "nothing renders it" as "nothing to do."
+**The headless printer was named here among the renderers that ignore the event; it never receives
+the event at all.** `printResult` takes the flow's own result object and reads its decision mode,
+warnings, and reason off it — it is not a subscriber. Both facts are true separately and were run
+together as one: the result object carries no note, and the event that carries the note has no
+printer reading it. Item 60's report, for contrast, never crosses any boundary — its only readers in
+the whole tree are test assertions.
 
-**Bucket — Actionable now**, on the bar's own terms rather than by elimination: the fix is specified
-above, and nothing needs to be learned first because the note's production is not in question, only
-its text for one shape. **Deliberately not Neither on item 60's precedent** — that entry sits there
-because its "wire it up" option is not a fix until something else decides the report's purpose, and
-this entry has no equivalent prior decision blocking it.
+**What is not specified, which is the reason this is not one commit.** The condition an arm would
+select on is not written down here, and the value it would need is not in the function's scope:
+`deriveAgentVerificationSummary` receives a verification reason, the loop's success flag, and a
+run-command-failure flag, and nothing that says whether a write ever reached disk. Naming "a run with
+no applied patch" as the selector describes an outcome the function cannot observe. Closing this needs
+a decision about which of the reasons above earn their own arms and where the applied-or-not signal
+comes from — a different kind of work from adding a branch.
+
+**What survives the corrections, stated as a scope rather than a payoff.** Nothing persists the note:
+the on-disk run envelope, the session transcript writer, and the cost log each carry no verification
+block at all. So in the default configuration the wrong text is produced on every agent-loop run,
+crosses a boundary, and is discarded by both readers that are there. Fixing it is a correctness fix
+with no locally observable effect, and the one path that would make it observable has to be turned on
+first. Urgency is contingent on that path being used, or on a local renderer appearing for the note;
+neither holds in an untouched session today, which is why the wrong text has cost nothing so far.
+
+**The type string is shared with an unrelated payload, which is why the consumer count was easy to
+get wrong.** `costLogger.ts` appends a JSON line to the usage log whose type is also `run_summary`,
+carrying a model name, an iteration count, a cost total, and a cache-hit ratio — and no verification
+block — and `buildFeedbackReport.ts` reads that line back out. A grep for the type string returns it
+alongside the three bus subscribers, and that is how the first enumeration written here came out
+wrong. Item 61 records the same class one instance over: its sink-visible marker's two variants name
+one value two ways, so a query grouping on either name silently drops half the records. A name that
+looks like one thing and is two, in both cases; neither carries a proposed fix.
+
+**Bucket — Neither, judged on the Actionable-now bar rather than by elimination.** That bucket asks
+for a fix specified in the entry with nothing left to learn, and this entry fails it in three places:
+the selecting condition is not written down, the value that would select on it is not in the
+function's scope, and the entry named one shape where the fallthrough has several. Learning what to
+do is the work, which is Neither's own definition.
+
+**The precedent is item 60's bucket and not item 60's reason, and this document has no way to say so
+outside the entry itself.** Item 60 sits in Neither because a prior decision blocks it — nothing can
+be specified until someone decides what its report is *for*. This entry has no decision waiting on
+it; it is blocked on an action having been named without being specified. Two different failures of
+the same bar, landing in the same list, because the snapshot groups by mechanical status only and has
+no finer axis. Recorded here rather than flattened into a shared reason the two do not share.
 
 **Where the code lives:** `deriveAgentVerificationSummary` and `assembleRunSummary` are both in
 `core/runLlmPatchFlow.ts`, as is the `run_summary` emission that carries the payload; the success
-flag it reads is computed in `llm/runCompletion/composer.ts`; the renderers that ignore it are
-`printResult` in `cli/dispatch.ts` and the `run_summary` case in the TUI's `eventToActions.ts`. See
-item 69 for the change that made this population reach it, and item 60 for the entry it will merge
-into if no reader ever appears.
+flag it reads is computed in `llm/runCompletion/composer.ts`. The three subscribers are the
+`run_summary` case in the TUI's `eventToActions.ts`, the same case in `cli/sink.ts`, and the
+lifecycle group in `remote/toWireFrame.ts` that `remote/remoteControlAdapter.ts` broadcasts;
+`printResult` in `cli/dispatch.ts` reads the result object, not the event. The reasons that reach the
+fallthrough are produced in `llm/verification/staging.ts`, `llm/runCompletion/deriveResultFields.ts`,
+and `llm/verification/classify.ts`, or supplied by a model tag that `parseVerificationTag` accepts.
+See item 69 for the change that widened this population, item 70 for the branch `ef9d0608` corrected,
+and item 60 for the entry this one is bucketed beside but not for its reason.
 
 ## Status snapshot — a partition, not a priority ordering
 
@@ -4487,12 +4563,12 @@ first.
 **Closed** (39): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (1): 76
+first (0):
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (7): 1, 4, 18, 23, 57, 63, 75
 
-**Neither — a structural fact recorded, with no fix proposed** (29): 2, 3, 5, 9, 11, 15, 17, 19,
-27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74
+**Neither — a structural fact recorded, with no fix proposed** (30): 2, 3, 5, 9, 11, 15, 17, 19,
+27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, and 65 are partially closed or corrected; the
 classification above covers only the portion still open, not the whole entry.
@@ -4788,6 +4864,20 @@ pins. **Nothing but running it could have told the two apart**: it is green eith
 the right file, and its name asserted the coupling it does not have. A pin that passes before the
 change is a characterization test wearing a regression test's name, and the whole cost of finding
 that out is one run against the tree you already have.
+
+**The membership rule from the unpredicted-killer side: a fixture written after a fix adopts the
+fixed syntax everywhere, including where it is not the subject.** `a3cbe763` made the snapshot
+check's bucket pattern accept an empty bucket and added fixture blocks for it. Reverting the pattern
+as a mutation was predicted to kill the two blocks whose subject *is* the empty bucket; it killed a
+third, whose subject is a required bucket missing from the text entirely. The cause is in the
+fixture, not in the code: that block declares its other buckets with the same bare zero-count syntax
+the fix had just made legal, because once a syntax works it is the one anyone writes. Everything
+above is about a predicted killer surviving; this is the mirror, an unpredicted killer appearing, and
+it degrades the same property — the kill set stops being a map of what each block pins, because a
+block can die for a fixture-construction reason its name says nothing about. Nothing here is wrong
+enough to change: giving those buckets content would make the fixture less like the document it
+stands in for. The prediction was wrong for a nameable reason, and the divergence was reported rather
+than reconciled to the prediction, which is the only part that was ever in the pass's control.
 
 ## A ninth pattern, beside the seventh: a ledger entry that prescribes a check does not cause the check to happen
 
@@ -5089,3 +5179,37 @@ consumer's output, not because the reasoning covered it. **A conclusion that hap
 not evidence its argument was** — the argument is what a later pass inherits and reuses, and this one
 would have carried a false generalization about there being a single consumer into whatever came
 next.
+
+## A seventeenth pattern: a freshly written entry is the least-checked text in this document, not the most current
+
+The instinct is that a recent entry is the more trustworthy one — written against the current tree,
+by someone who had just read the code. The opposite holds here, for a mechanical reason. An old entry
+has been read by every pass that cited it, and each of those readings was an opportunity for a false
+sentence to be caught; some were. A one-commit-old entry has had none of them. Recency is a fact
+about when text was written, not about how much scrutiny it has survived, and this document keeps
+treating the first as evidence of the second.
+
+Item 76 is the clearest instance. It was written in the same commit that closed item 69, by the pass
+that discovered it, and it entered permanent record carrying three false claims: that the note it is
+about has one consumer, when three subscribe to that event and one of them copies the whole
+verification block onto a wire frame that leaves the process; that a single missing arm describes the
+defect, when several reasons reach the fallthrough and one of them is told a patch was applied on a
+run that wrote nothing; and a bucket argument that rested on the first of those. All three were
+caught by the very next pass, and caught the same way — by reading the code the entry names instead
+of reading the entry.
+
+**What makes this a pattern rather than an incident is how ordinary the mechanism is.** The pass that
+finds a defect understands it least well, because understanding it is what the pass was for; the
+entry gets written at the end of that pass, out of the trace that found the thing, and a trace good
+enough to find something is not an enumeration of what surrounds it. The failure concentrates in
+exactly the sentences that generalize from that trace — counts of consumers, of shapes, of origins —
+because those are the claims a single successful trace feels like it has already established. This
+document has thrown out bullets for it before, in entries that name themselves as having pushed a
+claim before anyone checked it, and item 36 recorded a neighbouring version — errors entering in one
+wholesale rewrite — while declining to generalize from one instance. There are enough now.
+
+**The corrective is not "write fewer entries," it is knowing where the checking happens.** An entry
+written in the same commit as its own subject cannot be checked by that commit; there is no later
+pass yet, and reading it back and finding it coherent proves only that it is coherent. So the check
+belongs to the next pass that touches the entry, and it has to be a re-derivation from the code
+rather than a re-reading of the prose — enumerations first, since those are where this fails.
