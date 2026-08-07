@@ -5394,6 +5394,14 @@ Example:
   // isAnswerOnlyPlan(...) : false) — not hoisted, since that site is the only other
   // place this run shape's answerOnly is needed before now.
   const answerOnly = input.executionPlan ? isAnswerOnlyPlan(input.executionPlan) : false;
+  // Item 69: mirrors assembleAgentSystemPrompt's own effectiveArchetype/
+  // isReadOnlyArchetype locals (agentLoop.ts:705,713) verbatim, duplicated rather than
+  // shared because those locals live inside that function's own scope and are not
+  // reachable here. Without this, a read-only-archetype run (question/investigation,
+  // no approved plan) that exhausts its budget was asked for a [ZONE_VERIFICATION] tag
+  // on a run that was never offered a write tool — see docs/deferred-work.md item 69.
+  const effectiveArchetype = input.planApproved ? undefined : input.taskClassification?.archetype;
+  const isReadOnlyArchetype = effectiveArchetype === "question" || effectiveArchetype === "investigation";
   try {
     const finalAssessmentModel = escalatedModel ?? getModelName("high", client.provider, requestCtx?.modelOverride);
     const assessmentResponse = await client.createChatCompletion({
@@ -5409,6 +5417,11 @@ Example:
                 "before running out of iterations. Do not use tables or recap details already " +
                 "visible above. Do NOT include a [ZONE_VERIFICATION] tag — this run answers a " +
                 "question and changed nothing, so there is nothing to verify."
+              : isReadOnlyArchetype
+              ? "Provide a 60-80 word final summary of what you found. " +
+                "Do not use tables or recap details already visible above. " +
+                "Do NOT include a [ZONE_VERIFICATION] tag — no write tools were available " +
+                "this run, so there is nothing to verify."
               : // P3: output reduction - cap the fallback assessment summary too.
                 "Provide a 60-80 word final summary and include exactly one " +
                 "[ZONE_VERIFICATION: <reason>] tag. " +

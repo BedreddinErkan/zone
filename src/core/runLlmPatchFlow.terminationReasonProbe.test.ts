@@ -91,6 +91,18 @@ const NORMAL_PLAN = {
   riskHints: [],
 };
 
+/** No answerOnlyReason (isAnswerOnlyPlan requires both empty steps AND that field,
+ *  executionPlan.ts:60 — steps:[] alone is not enough) and no steps (hasApprovedSteps
+ *  false, runLlmPatchFlow.ts:5750, so planApproved stays false). The fixture for item
+ *  69: a read-only-archetype run that exhausted its budget without ever being approved
+ *  as answer-only — distinct from both ANSWER_ONLY_PLAN and NORMAL_PLAN above. */
+const READONLY_UNAPPROVED_PLAN = {
+  objective: "Explain the marker sink",
+  steps: [] as Array<{ title: string; description: string; filesLikely: string[] }>,
+  scopeSummary: "Explain the marker sink",
+  riskHints: [],
+};
+
 type CapturedMessage = { role: string; content: unknown };
 
 /** Distinct filePath per call: four identical tool+args hashes trip the loop detector
@@ -261,6 +273,64 @@ describe("PROBE: an answer-only run's real exhaustion, through the production ca
     expect(lastCallContent()).toContain(ASSESSMENT_CALL_PREFIX);
     // Same discriminator as the answer-only test's not.toContain, for a direct comparison.
     expect(lastCallContent()).toContain("[ZONE_VERIFICATION: <reason>]");
+  });
+
+  it("item 69: a read-only-archetype run with no approved plan does not get the verification-tag demand, and keeps the summary framing", async () => {
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    await runLlmPatchFlow({
+      task: "why does the marker sink write where it does",
+      repoPath: "/tmp/fake-repo",
+      runId: "run-readonly-unapproved-probe",
+      onProgress: () => undefined,
+      abortSignal: new AbortController().signal,
+      userApiKey: "sk-fake",
+      provider: "anthropic",
+      mode: "patch",
+      preGeneratedPlan: READONLY_UNAPPROVED_PLAN,
+    });
+
+    // Same positive control as both blocks above, for the same reason: prove the
+    // captured call is the assessment call before trusting what it does or doesn't
+    // contain.
+    expect(lastCallContent()).toContain(ASSESSMENT_CALL_PREFIX);
+    // The tag demand item 69 targets.
+    expect(lastCallContent()).not.toContain("[ZONE_VERIFICATION: <reason>]");
+    // Guards a future collapse of this arm into the answer-only arm's contract — OUT
+    // of scope for that fix. "final summary" is a contingent, not logical, discriminator
+    // from arm one's "final answer": checked at HEAD that arm one's text does not
+    // contain this substring, so it is not implied by the tag assertion above.
+    expect(lastCallContent()).toContain("final summary");
+    // The explicit prohibition is its own invariant, independent of the tag's absence:
+    // silence would also satisfy both assertions above. Checked at HEAD that this exact
+    // substring appears in neither the answer-only arm (which says the same words but
+    // is unreachable for this fixture) in a way that matters here nor the tag-demanding
+    // arm (which never says "NOT include" — it says "include exactly one").
+    expect(lastCallContent()).toContain("Do NOT include a [ZONE_VERIFICATION] tag");
+  });
+
+  // Characterization, not a pin on item 69's fix: the mock in this file's beforeEach
+  // returns a tool-call response for every createChatCompletion call, including the
+  // assessment call itself, regardless of what the assessment prompt asked for — so
+  // this passes identically whether or not the tag is demanded in the prompt above.
+  // It fills a real, separately-verified gap (nothing in this tree previously drove an
+  // untagged assessment response through to a verdict), but the prompt has no causal
+  // path to this assertion; do not read a future failure here as the tag demand having
+  // come back.
+  it("an untagged final assessment response still infers no_verification_attempted, independent of what the prompt demanded", async () => {
+    const { runLlmPatchFlow } = await import("./runLlmPatchFlow.js");
+    const result = await runLlmPatchFlow({
+      task: "why does the marker sink write where it does",
+      repoPath: "/tmp/fake-repo",
+      runId: "run-readonly-unapproved-verdict-probe",
+      onProgress: () => undefined,
+      abortSignal: new AbortController().signal,
+      userApiKey: "sk-fake",
+      provider: "anthropic",
+      mode: "patch",
+      preGeneratedPlan: READONLY_UNAPPROVED_PLAN,
+    });
+
+    expect(result.verificationReason).toBe("no_verification_attempted");
   });
 
   it("CONTRAST: the readonly tail yields max_iterations, and only a mode this path never has reaches it", async () => {
