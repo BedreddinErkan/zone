@@ -2062,6 +2062,18 @@ entry's, corrected above, and item 16's "holds eleven `it()` blocks at HEAD" —
 this sweep and still eleven, so accurate and left alone. Anchoring a figure to a commit rather than
 to `HEAD` is the cheap habit that would have made this correction unnecessary.
 
+**A latent trap in the shipped check, found by nearly hitting it and verified against the real
+regex rather than reasoned about.** The check cannot express an empty bucket. Its bucket pattern
+requires at least one character after the count's colon, so a bucket rendered with a zero count and
+nothing following does not match at all — it vanishes from the parsed set, and the failure surfaces
+as the unrelated "all four buckets present" assertion. Rendering a placeholder word instead does
+match, and then throws on the item parser's own digit check. **Two different failure modes, neither
+naming the real cause**, and both wait for whichever pass first empties a bucket. Item 69's closure
+came within one entry of being that pass: it vacated Actionable now, and only the new entry landing
+there kept the bucket populated. Recorded rather than fixed because the check is under `scripts/`
+and the commit that found this was scoped to this document — the fix is a parser that treats a zero
+count as a valid empty list, which is smaller than this paragraph.
+
 **Where the code lives:** the check is `scripts/deferredWorkSnapshot.test.ts`, reached by vitest's
 `scripts/**/*.test.ts` include and run in CI by `tests.yml`'s `npm test`; the currency technique is
 recorded here only, not implemented anywhere.
@@ -3746,15 +3758,15 @@ nothing between quotes.
 **Where the code lives:** the message is in `apply_patch`'s scope-handling branch,
 `toolExecutor.ts`, in the `not_found` case.
 
-## 69. The max-iterations wrapup asks for a verification tag with no archetype awareness at all
+## 69. Closed — the max-iterations wrapup gained a third arm, so a run that was never offered a write tool is no longer asked to verify tests
 
-**What it is:** the second surface of the defect item 61's first bullet closed. When the iteration
+**What it was:** the second surface of the defect item 61's first bullet closed. When the iteration
 loop exhausts, `runAgentLoopScoped` appends a final no-tool assessment message asking for a
-`[ZONE_VERIFICATION: <reason>]` tag. That request is gated on a **locally recomputed** `answerOnly`
+`[ZONE_VERIFICATION: <reason>]` tag. That request was gated on a **locally recomputed** `answerOnly`
 — derived from `isAnswerOnlyPlan(input.executionPlan)` at the wrapup site itself, mirroring the
-system-prompt call site's own derivation — and on nothing else. It never reads `archetype` or
+system-prompt call site's own derivation — and on nothing else. It never read `archetype` or
 `planApproved`. `5d01d27a` did not touch it: that commit widened the system prompt's gate only, so
-a read-only-archetype run that exhausts its budget still gets asked, on its closing turn, for one
+a read-only-archetype run that exhausted its budget was still asked, on its closing turn, for one
 of six test-outcome values.
 
 **Why the system-prompt fix cannot reach it, and why that is structural rather than an oversight.**
@@ -3764,37 +3776,95 @@ gate is therefore decided at run start. The wrapup message is a separate `role:"
 appended after the loop ends — a different string, built at a different time, from a different
 local. One gate cannot cover both.
 
-**The fix is specified, and its shape is constrained by an existing test rather than by taste.**
-Mirror the system-prompt gate: reuse the same `planApproved`-aware derivation, not the bare
-archetype field. `terminationReasonProbe.test.ts`'s CONTRAST case — *"a normal exhausted run still
-gets the verification tag instruction"* — runs with a classification whose archetype is
-`investigation` **and** a `preGeneratedPlan` carrying one real step, which `runLlmPatchFlow` turns
-into `planApproved: true`. A predicate written `planApproved`-aware leaves that test passing,
-because an approved plan with steps nets the effective archetype to undefined. A predicate written
-on the bare archetype field flips it. This is not a hypothetical: it is the one existing test that
-pins this exact message's content.
+**The fix's shape was constrained by an existing test rather than by taste, and that held.**
+`terminationReasonProbe.test.ts`'s CONTRAST case — *"a normal exhausted run still gets the
+verification tag instruction"* — runs with a classification whose archetype is `investigation`
+**and** a `preGeneratedPlan` carrying one real step, which `runLlmPatchFlow` turns into
+`planApproved: true`. A predicate written `planApproved`-aware leaves that test passing, because an
+approved plan with steps nets the effective archetype to undefined; a predicate written on the bare
+archetype field flips it. It is the one test in the tree that pins this exact message's content, and
+the mutation dropping the plan condition killed exactly it and nothing else.
 
-**The coupling that made this its own entry is now discharged.** Closing this surface removes the
-last prompt-level demand for a tag on the max-iterations path for read-only runs. With no tag,
-`deriveVerdict` falls to `inferVerificationFromLog` — and while item 70 was open, what that returned
-for a run with no write tool was `tests_failed_by_patch`, so closing this surface would have
-un-masked a live defect rather than completing item 61. **`ef9d0608` closed item 70: that branch now
-returns `no_verification_attempted`, correct for every population reaching it.** Un-masking is
-therefore harmless, and this entry no longer waits on anything outside itself.
+**Closed by `29230a1b`, as a third arm rather than a mirrored gate — and the structure is why.**
+The message was a single `answerOnly ? A : B` conditional with the tag demand *and* the
+framework-hint string welded into its else branch, so there was no room to keep the summary framing
+while dropping the tag; mirroring the system prompt's own gate would have handed this population the
+answer-only arm's short-answer contract, which is a different contract for a different population.
+The third arm gives a read-only-archetype run a summary contract plus an explicit tag prohibition —
+explicit rather than silent, because the existing answer-only arm is explicit and a bare omission
+invites the model to emit a tag from habit. The `answerOnly` arm and the tag-demanding arm are both
+byte-unchanged.
 
-**Bucket — Neither to Actionable now, on the coupling's discharge rather than on a new fix.** The
-Neither placement was argued as item 59's shape, where "the approach itself is still open" — but the
-approach here was never the open part. This entry's own text specifies the fix (mirror the
-system-prompt gate, reusing the `planApproved`-aware derivation rather than the bare archetype
-field) and names the existing test that constrains its shape. What was open was "whether applying
-the fix is correct at all before item 70 is decided," and item 70 is decided. That is the Actionable
-bar met exactly: a fix specified in the entry, nothing new to learn first. **Moved as a consequence
-of `ef9d0608`, not because anything about this entry's own analysis changed.**
+**The derivation is duplicated rather than shared, and the justification expires.**
+`effectiveArchetype`/`isReadOnlyArchetype` are re-derived at the wrapup because
+`assembleAgentSystemPrompt`'s own copies are locals inside that function and unreachable from
+`runAgentLoopScoped`, and because the neighbouring `answerOnly` local already established that
+precedent for exactly this situation. **That is a site-count argument, so it has an expiry: a third
+consumer of this predicate is the trigger to extract a shared helper**, at which point all three
+sites should move together. Recorded here rather than in the code comment because the comment
+carries only the structural half — see item 12's closure for the same split.
 
-**Where the code lives:** the wrapup message, its local `answerOnly`, and the two-armed instruction
-text are in `runAgentLoopScoped`'s post-loop max-iterations block, `agentLoop.ts`. The pinning test
-is `runLlmPatchFlow.terminationReasonProbe.test.ts`'s CONTRAST case. See item 61 for the surface
-that did close, and item 70 for what closing this one exposes.
+**What actually changed, stated narrowly.** For a read-only-archetype run with no approved plan that
+exhausts its budget, the verdict now comes from `inferVerificationFromLog`'s inference instead of a
+model-supplied tag, landing on `no_verification_attempted` — the value `ef9d0608` made correct for
+exactly this shape — and `patchValidatedByAgent` goes from a false `true` to `false`. **Neither
+reaches a rendered surface:** `printResult` renders only `warnings` and `decisionMode`, and the
+headless JSON envelope carries neither field, taking its `summary` from `decisionMode`/`finalState`.
+The payoff is a telemetry field, not anything a user sees.
+
+**A coverage limitation of the harness, not of the fix, recorded so the passing block is not
+mistaken for coverage of the gate.** No test pins the prompt-to-verdict causal chain. The outcome
+assertion `29230a1b` added passes against unmodified source — verified by running it before the fix
+rather than inferred — because the probe file's own `beforeEach` returns the same tool-call response
+to every completion call including the final assessment, so the assessment text stays at its
+untagged default no matter what the prompt demanded. The block is named for what it actually pins,
+the untagged-response path, which the tree genuinely lacked. Pinning the chain itself needs a
+prompt-sensitive mock, which is a test-infrastructure change nobody has scoped.
+
+**The coupling that made this its own entry is discharged.** Closing this surface removes the
+last prompt-level demand for a tag on the max-iterations path for read-only runs — checked rather
+than assumed, since the test-failure coaching also carries tag instructions, but it raises
+`test_failed` only on the exact tool name `run_command`, which declares `fs.write` and is therefore
+excluded from every read-only capability set. With no tag, `deriveVerdict` falls to
+`inferVerificationFromLog` — and while item 70 was open, what that returned for a run with no write
+tool was `tests_failed_by_patch`, so closing this surface first would have un-masked a live defect
+rather than completing item 61. **`ef9d0608` closed item 70: that branch now returns
+`no_verification_attempted`, correct for every population reaching it.**
+
+**Un-masking is harmless, but the route this entry gave to that conclusion did not cover the case,
+and the route is corrected rather than left standing.** It reasoned that the branch item 70 fixed
+was what this surface masked. Two consumers are reached only when the tag is absent, not one. The
+second is `deriveAgentVerificationSummary`'s fallthrough, whose every named arm keys on a
+tag-supplied reason, so `no_verification_attempted` falls through to a pair of arms that both name a
+patch or an error — and since `finalizeRun` reports failure on this trigger unconditionally, the
+note this population now gets says the run encountered errors during execution, which is false for a
+run that merely exhausted its budget. **It is harmless because nothing renders it, not because it is
+correct** — see item 76, which owns the missing arm. **The falsifier, precisely:** any reader
+appearing for that note or for the verification reason on a rendered surface. Today `printResult`
+renders only `warnings` and `decisionMode`, and the headless envelope carries neither. This is the
+sixteenth pattern's own shape, one commit after that essay was written — see there.
+
+**Closed, and the heading rewritten on item 70's precedent.** The suffix-dropping pair (items 32 and
+56) does not apply here — both governed entries carrying a `— partially closed` suffix, and this
+entry never had one. Item 70 is the matching case: no suffix, Neither bucket, closed by taking the
+`Closed — ` prefix and rewriting the whole heading around the resolution rather than the defect.
+**The footnote is untouched, checked rather than assumed:** the 32/56 rule is about members leaving
+on closure, and this entry was never a member of it.
+
+**The bucket history is worth one line, because this entry passed through Actionable now without
+ever resting there.** It was moved Neither → Actionable now as a consequence of `ef9d0608`, on the
+coupling's discharge rather than on any change to its own analysis, and closed one commit later. The
+Neither placement it left had been argued as item 59's shape — "the approach itself is still open" —
+which was wrong even then: the approach was specified; what was open was whether applying it was
+correct before item 70 was decided.
+
+**Where the code lives:** the wrapup message, its local `answerOnly`, the mirrored
+`effectiveArchetype`/`isReadOnlyArchetype` pair, and the three-armed instruction text are all in
+`runAgentLoopScoped`'s post-loop max-iterations block, `agentLoop.ts`; the gate they mirror is in
+`assembleAgentSystemPrompt`, same file. The pinning tests are in
+`runLlmPatchFlow.terminationReasonProbe.test.ts` — the CONTRAST case for the tag's retention, and
+two blocks added by `29230a1b`. See item 61 for the surface that did close, item 70 for the branch
+this one's closure routes to, and item 76 for the note it exposed.
 
 ## 70. Closed — the broken-tests verdict for a run that had no write tool, and why the branch that replaced it cannot be tested
 
@@ -4140,6 +4210,18 @@ or something else — no investigation was run and none is prescribed here. Dedu
 timestamp and payload at read time is what both corrections above did; it is sufficient for
 counting and it is not a fix.
 
+**A second standing constraint on this instrument, about what can be joined rather than how records
+are counted — recorded here on the same grounds this entry gives for its own placement.** Archetype
+is not on the classification record: `[zone-task-classified]`'s payload carries the task hash, the
+tier, the confidence, the classifier's model and cost, and the fallback flag, and no archetype field
+at all. The only archetype-bearing marker is `[zone-archetype]`, emitted at loop close. **So a run
+that never reaches loop close has no archetype record**, and any population question keyed on
+archetype silently excludes exactly the interrupted, hard-killed and resumed runs — the population
+several entries here care most about. Item 75's own trigger is a two-marker join over that
+population, and the two resumed runs in its window are archetype-invisible for precisely this
+reason. This is not a defect to fix so much as a limit to state before the next pass reads an
+archetype breakdown as covering every run: it covers every *completed* run.
+
 **Where the code lives:** the sink's append path, its size cap, and its rotation are in
 `markerSink.ts`; the interception that routes marker-shaped writes into it is the same shield item
 11 describes. The file itself is `markers.jsonl` under the user-level `.zone` directory.
@@ -4163,16 +4245,21 @@ separated on purpose so the correctness fix could land without waiting on it.
 
 **Strand two: `patchValidatedByAgent` is set true on runs that applied nothing.** Re-established
 after `5d01d27a` rather than assumed closed by it, and untouched by `ef9d0608` — that commit changed
-a value the flag was already false for, so the flag's own defect is exactly as it was.
+a value the flag was already false for. **Half of it closed later, by `29230a1b` under item 69**;
+the other half is open and the two are separated below.
 
 **`patchValidatedByAgent` is the sibling half, re-established after `5d01d27a` rather than assumed
 closed by it.** The flag is set true whenever the post-override reason is `tests_passed`,
 `tests_skipped_no_infra`, or `tests_failed_unrelated`. Two shapes still set it true on a run that
 applied nothing, and the widening closed neither:
-- **Read-only-archetype runs on the max-iterations path**, via item 69's surviving tag demand — the
-  model picks `tests_skipped_no_infra`, nothing downstream contradicts it, and
-  `applyNoInfraVerificationOverride` cannot correct it because that override itself requires
-  `patchApplied`.
+- **Read-only-archetype runs on the max-iterations path** — **closed by `29230a1b`, a sibling's fix
+  rather than this entry's own, and recorded because nothing else here would say so.** The route was
+  item 69's surviving tag demand: the model picked `tests_skipped_no_infra`, nothing downstream
+  contradicted it, and `applyNoInfraVerificationOverride` could not correct it because that override
+  itself requires `patchApplied`. Item 69's third arm removes the demand for exactly this
+  population, so the run reaches `inferVerificationFromLog` untagged and lands on
+  `no_verification_attempted`, which is not one of the three reasons that set the flag. The shape
+  below is untouched, so this strand is halved, not closed.
 - **Any run of any archetype that applied nothing**, which `5d01d27a` never addressed and was never
   scoped to: a patch-archetype run whose patches all failed still receives the FINAL ASSESSMENT
   block correctly, and can still answer with a validating value. Worth stating because the two
@@ -4305,7 +4392,10 @@ resumed run whose applied-nothing status was guessed and then reported as valida
 only shape where the guess reaches a surface anyone reads. **It does not occur today:** across the
 sink window from 2026-07-29 to 2026-08-05 the two markers' run-id sets are disjoint, and neither
 resumed run in that window reached run completion at all, so no resumed run has reached the predicate
-yet. Both figures are upper bounds on item 73's key.
+yet. Both figures are upper bounds on item 73's key. **Neither resumed run carries an archetype
+record either**, since archetype is emitted only at loop close — item 73 records that constraint,
+and it bears directly here: this trigger cannot be narrowed to a read-only archetype even if a
+later pass wanted it to be.
 
 **Review point, independent of the trigger:** revisit after roughly fifty real runs that include at
 least one resume reaching completion — the resume path, not the run count, is what gates this, and
@@ -4332,20 +4422,72 @@ that does not exist yet, which is that bucket's definition rather than an approx
 input is assembled in `cli/dispatch.ts`; the arm that consumes the field is `didApplyPatch` in
 `llm/verification/logUtils.ts`.
 
+## 76. The run summary's verification note has no arm for a run that neither patched nor errored, and says the run errored
+
+**What it is:** `deriveAgentVerificationSummary` maps a verification reason to the note that travels
+on the run summary. Each of its five named arms keys on a reason a model-supplied tag produces —
+tests passed, skipped, unrelated, inconclusive, failed-by-patch — and everything else falls through
+to a two-way choice between "Patch applied by agent (no test verification)" and "Agent loop
+encountered errors during execution", selected on the loop's own success flag. **`no_verification_attempted`
+reaches only that fallthrough**, and on the max-iterations path `finalizeRun` reports failure
+unconditionally — its success is computed as natural-completion-and-not-warned — so the note is
+always the error one. A run that was never offered a write tool and simply exhausted its iteration
+budget is described as having encountered errors during execution. Both fallthrough arms name a
+patch or an error; neither describes a run that did neither.
+
+**Why it surfaced now, and why it is not item 69's problem.** `29230a1b` removed the tag demand for
+read-only-archetype runs at max iterations, so that population now reaches the fallthrough where it
+previously carried a tag into a named arm. Item 69's closure records this as the second consumer its
+own un-masking reasoning missed. The demand's removal is correct; it made an existing gap reachable
+rather than creating one — the fallthrough was already wrong for any untagged max-iterations run,
+which is why this is its own entry rather than a cost recorded inside that closure.
+
+**It is emitted, not merely computed — the fact that separates this from item 60.** `assembleRunSummary`
+places the note on the run summary payload's verification block and the surrounding code emits that
+payload as a `run_summary` event on the bus. It crosses the boundary and the current consumer ignores
+it: the TUI's own handler for that event reads the cost total and nothing else, and the headless
+printer renders only warnings and the decision mode. Item 60's report never leaves the process at all
+— its only readers in the whole tree are test assertions — and its own closure needs a delete-or-wire
+decision made first. This one needs no such decision: the string is already being produced and
+shipped on every agent-loop run, and it is wrong for a reachable population.
+
+**What would close it:** an arm for the shape both fallthrough arms miss — a run with no applied
+patch and no command failure — saying so rather than reporting an error. Specifiable without deciding
+anything about consumers, which is the whole of the distinction above.
+
+**What would make it urgent, and what a null result means.** Urgency is contingent on a reader
+appearing for the note on a rendered surface; today there is none, which is why the wrong text has
+cost nothing so far. If no reader ever appears, that does not close this entry — it folds it into
+item 60's own question, since an emitted-but-never-rendered field is that entry's subject even though
+this one's is not. Recorded so a later pass does not read "nothing renders it" as "nothing to do."
+
+**Bucket — Actionable now**, on the bar's own terms rather than by elimination: the fix is specified
+above, and nothing needs to be learned first because the note's production is not in question, only
+its text for one shape. **Deliberately not Neither on item 60's precedent** — that entry sits there
+because its "wire it up" option is not a fix until something else decides the report's purpose, and
+this entry has no equivalent prior decision blocking it.
+
+**Where the code lives:** `deriveAgentVerificationSummary` and `assembleRunSummary` are both in
+`core/runLlmPatchFlow.ts`, as is the `run_summary` emission that carries the payload; the success
+flag it reads is computed in `llm/runCompletion/composer.ts`; the renderers that ignore it are
+`printResult` in `cli/dispatch.ts` and the `run_summary` case in the TUI's `eventToActions.ts`. See
+item 69 for the change that made this population reach it, and item 60 for the entry it will merge
+into if no reader ever appears.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 75 to find out which ones still need something. No index of
+reader the trouble of reading all 76 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (38): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 70, 71, 72
+**Closed** (39): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (1): 69
+first (1): 76
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (7): 1, 4, 18, 23, 57, 63, 75
 
@@ -4633,6 +4775,20 @@ A set-size comparison could not see this; only reading which test failed, and wh
 runs of equal size can differ completely in which tests they killed, and that difference — not
 the count — is where the real information about whether a change altered behavior actually lives.
 
+**The same rule from the other direction, and the cheaper half of it: a new assertion proves nothing
+until it has been seen to fail.** Everything above is about whether a mutation *can* kill a test.
+The mirror question is whether a new test *does* fail when the fix it was written for is absent, and
+it is answered the same way — by running, against unmodified source, before the fix lands.
+`29230a1b` produced the instance. Two assertions were added for one fix; run against the untouched
+tree first, one failed as intended and the other passed, because the probe file's mock returns the
+same response to every completion call regardless of what the prompt asked for, so the outcome it
+asserted was already the outcome. It was a real gap being filled — nothing in the tree had driven
+that path before — but not the gap it was written to fill, and it was renamed for what it actually
+pins. **Nothing but running it could have told the two apart**: it is green either way, it sits in
+the right file, and its name asserted the coupling it does not have. A pin that passes before the
+change is a characterization test wearing a regression test's name, and the whole cost of finding
+that out is one run against the tree you already have.
+
 ## A ninth pattern, beside the seventh: a ledger entry that prescribes a check does not cause the check to happen
 
 The seventh pattern's own second incident already names this shape once: "having just read the
@@ -4919,3 +5075,17 @@ value, keep following the value until it either reaches the named surface or is 
 overwrite is the interesting result, not the boring one — it means the payoff belongs to whatever
 still reads the pre-overwrite value, which is a real payoff and worth claiming, just not the one that
 was about to be written down.
+
+**The third instance arrived one commit after this essay was written, and it fails in breadth rather
+than depth — worth recording because the check above, read literally, would have missed it.** Item
+69 argued that un-masking its tag demand was harmless because the branch item 70 had just fixed was
+what the demand masked. The trace was correct and stopped at the first consumer; a second consumer
+of the same absent-tag condition sits beside it, and its fallthrough now describes an
+iteration-exhausted run as having encountered errors (item 76). So "follow the value forward" is not
+quite the instruction — **enumerate what the condition reaches, then follow each**, because a
+condition can have siblings where a value has successors. The verdict survived anyway, and that is
+the second half worth keeping: un-masking really is harmless, but because nothing renders the second
+consumer's output, not because the reasoning covered it. **A conclusion that happens to be right is
+not evidence its argument was** — the argument is what a later pass inherits and reuses, and this one
+would have carried a false generalization about there being a single consumer into whatever came
+next.
