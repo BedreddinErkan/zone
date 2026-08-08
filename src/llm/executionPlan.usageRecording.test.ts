@@ -69,4 +69,26 @@ describe("generateExecutionPlan — usage recording carries the ambient runId", 
     expect(record!.input_uncached).toBeGreaterThan(0);
     expect(record!.output).toBeGreaterThan(0);
   });
+
+  it("the emitted onCostUsd figure equals the persisted ledger row's est_cost_usd exactly", async () => {
+    const runId = `plangen-usage-onCostUsd-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    mockPlanResponse({ input_tokens: 1000, output_tokens: 200, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 });
+    const onCostUsd = vi.fn();
+
+    await withRequestContext({ runId, userId: TEST_USER_ID }, () =>
+      generateExecutionPlan({
+        task: "Add a helper function",
+        repoSummary: "A TypeScript project.",
+        relevantFiles: [],
+        userApiKey: "sk-ant-test",
+        provider: "anthropic",
+        onCostUsd,
+      })
+    );
+
+    const record = readRecords(TEST_USER_ID).find((r) => r.runId === runId);
+    const emitted = onCostUsd.mock.calls[0]?.[0];
+    expect(emitted).toBeGreaterThan(0);
+    expect(emitted).toBe(record!.est_cost_usd);
+  });
 });

@@ -25,12 +25,36 @@ import type { ExecutionPlan } from "./executionPlan.js";
 // buildPrompt is pure and synchronous (no LLM call) — real, unmocked import is safe here;
 // this file mocks no part of planInvestigation.js.
 import { buildPrompt } from "./planInvestigation.js";
+import { totalCost } from "../usage/pricing.js";
+import { round4 } from "../usage/usageTracker.js";
 
 function mockPlanResponse(plan: unknown) {
   mocks.createChatCompletion.mockResolvedValueOnce({
     choices: [{ message: { content: JSON.stringify(plan) } }],
   });
 }
+
+/** Like mockPlanResponse, but with a `usage` object (and optionally an echoed `model`)
+ *  attached — mockPlanResponse's bare shape has neither, which is correct for every
+ *  other describe block in this file but not for cost-emission tests. */
+function mockPlanResponseWithUsage(
+  plan: unknown,
+  usage: { prompt_tokens: number; completion_tokens: number } | undefined,
+  model?: string
+) {
+  mocks.createChatCompletion.mockResolvedValueOnce({
+    choices: [{ message: { content: JSON.stringify(plan) } }],
+    ...(usage ? { usage } : {}),
+    ...(model ? { model } : {}),
+  });
+}
+
+const MINIMAL_PLAN = {
+  objective: "Add X",
+  steps: [{ title: "Add", description: "Add it", filesLikely: [] }],
+  riskHints: [],
+  scopeSummary: "Add X.",
+};
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -352,6 +376,59 @@ describe("generateExecutionPlan — seededFileContents + scopeNotes", () => {
     });
 
     expect(plan.scopeNotes).toBeUndefined();
+  });
+});
+
+describe("generateExecutionPlan — cost emission (onCostUsd)", () => {
+  it("emits onCostUsd exactly once when a callback and a real usage object are both present", async () => {
+    mockPlanResponseWithUsage(MINIMAL_PLAN, { prompt_tokens: 1000, completion_tokens: 200 });
+    const onCostUsd = vi.fn();
+
+    await generateExecutionPlan({ task: "add x", repoSummary: "app", relevantFiles: [], onCostUsd });
+
+    expect(onCostUsd).toHaveBeenCalledTimes(1);
+  });
+
+  it("prices off the echoed model, not the requested one, matching an independently computed figure", async () => {
+    // Requested model resolves to "gpt-4o-mini" (getModelName's openai/standard default,
+    // no override, no ZONE_LLM_MODEL/OPENAI_MODEL stubbed anywhere in this file).
+    // Echoed "gpt-5.6-sol" is a real catalog entry over 30x more expensive per MTok —
+    // a wrong-model mutation must move this figure by more than rounding noise.
+    mockPlanResponseWithUsage(
+      MINIMAL_PLAN,
+      { prompt_tokens: 100_000, completion_tokens: 10_000 },
+      "gpt-5.6-sol"
+    );
+    const onCostUsd = vi.fn();
+
+    await generateExecutionPlan({ task: "add x", repoSummary: "app", relevantFiles: [], onCostUsd });
+
+    const expected = round4(
+      totalCost("openai", "gpt-5.6-sol", {
+        input_uncached: 100_000,
+        cache_write: 0,
+        cache_read: 0,
+        output: 10_000,
+      })
+    );
+    expect(onCostUsd).toHaveBeenCalledWith(expected);
+  });
+
+  it("does not throw when onCostUsd is absent from the input", async () => {
+    mockPlanResponseWithUsage(MINIMAL_PLAN, { prompt_tokens: 500, completion_tokens: 100 });
+
+    await expect(
+      generateExecutionPlan({ task: "add x", repoSummary: "app", relevantFiles: [] })
+    ).resolves.toBeDefined();
+  });
+
+  it("does not emit when the response carries no usage object", async () => {
+    mockPlanResponseWithUsage(MINIMAL_PLAN, undefined);
+    const onCostUsd = vi.fn();
+
+    await generateExecutionPlan({ task: "add x", repoSummary: "app", relevantFiles: [], onCostUsd });
+
+    expect(onCostUsd).not.toHaveBeenCalled();
   });
 });
 

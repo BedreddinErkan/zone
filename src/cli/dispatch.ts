@@ -271,6 +271,31 @@ export async function runOneShotInner(
       let planCtxRepoSummary = "";
       let planCtxRelevantFiles: string[] = [];
       let preGeneratedPlan: ExecutionPlan | undefined;
+      // Flow-scoped: the gate can call generateExecutionPlan more than once (forced-
+      // steps safety net, feedback replans) and the store's STATUS_UPDATE.costUsd is a
+      // SET, not an accumulator — a later smaller figure would erase an earlier larger
+      // one. Declared outside any loop so repeated feedback rounds keep adding.
+      let planGenCostSoFarUsd = 0;
+      const onPlanGenCostUsd = (costUsd: number): void => {
+        planGenCostSoFarUsd += costUsd;
+        progressCallback({
+          stage: "iter_cost_update",
+          progress: { type: "iter_cost_update", runId, ts: Date.now(), cumulativeCost: planGenCostSoFarUsd },
+        } as unknown as LlmPatchProgressUpdate);
+      };
+      // Seeds planGenCostSoFarUsd from investigation's own synthetic repaint
+      // (planInvestigation.ts's emitProgress, reachable before any lexical call in the
+      // mixed case) without changing runPlanInvestigation's signature — forwards every
+      // event through unchanged and only reads the one field it needs.
+      const investigationProgressCallback = (update: LlmPatchProgressUpdate): void => {
+        if (typeof update === "object" && update.progress?.type === "iter_cost_update") {
+          const cumulativeCost = (update.progress as { cumulativeCost?: number }).cumulativeCost;
+          if (typeof cumulativeCost === "number") {
+            planGenCostSoFarUsd = cumulativeCost;
+          }
+        }
+        progressCallback(update);
+      };
       progressCallback({ stage: "plan_generation_started", progress: { type: "plan_generation_started", ts: Date.now(), runId, title: "Planning…" } } as unknown as LlmPatchProgressUpdate);
       try {
         const planCtx = await withRequestContext(planGenCtx, () =>
@@ -318,7 +343,7 @@ export async function runOneShotInner(
               userApiKey: planUserApiKey,
               provider: effectiveConfig.provider,
               abortSignal: ac.signal,
-              progressCallback,
+              progressCallback: investigationProgressCallback,
             })
           );
         } else {
@@ -347,6 +372,7 @@ export async function runOneShotInner(
               userApiKey: planUserApiKey,
               provider: effectiveConfig.provider,
               seededFileContents,
+              onCostUsd: onPlanGenCostUsd,
             })
           );
         }
@@ -422,6 +448,7 @@ export async function runOneShotInner(
               userApiKey: planUserApiKey,
               provider: effectiveConfig.provider,
               forceSteps: true,
+              onCostUsd: onPlanGenCostUsd,
             })
           );
         } catch (e) {
@@ -495,6 +522,7 @@ export async function runOneShotInner(
                     // concrete steps, not let the model re-emit answerOnlyReason.
                     // Falsy (unchanged) for every other plan shape.
                     forceSteps: isAnswerOnlyPlan(currentPlan),
+                    onCostUsd: onPlanGenCostUsd,
                   })
                 );
                 if (result.feedback?.trim()) {
@@ -542,6 +570,7 @@ export async function runOneShotInner(
                     // [3] advertises (plans a fix), just without the footer
                     // telling the user that's what's about to happen.
                     forceSteps: isAnswerOnlyPlan(currentPlan),
+                    onCostUsd: onPlanGenCostUsd,
                   })
                 );
                 if (result.feedback?.trim()) {

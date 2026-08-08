@@ -50,7 +50,7 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
-function round4(n: number): number {
+export function round4(n: number): number {
   return Math.round(n * 10_000) / 10_000;
 }
 

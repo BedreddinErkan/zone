@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // Must be hoisted before any imports that use the module
 const mockRunLlmPatchFlow = vi.hoisted(() => vi.fn());
@@ -135,6 +135,10 @@ beforeEach(() => {
   // Suppress stdout/stderr in tests
   vi.spyOn(process.stdout, "write").mockReturnValue(true);
   vi.spyOn(process.stderr, "write").mockReturnValue(true);
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 describe("runOneShotInner — happy path", () => {
@@ -459,6 +463,80 @@ describe("runOneShotInner — plan mode paths", () => {
     expect(ac.signal.aborted).toBe(false);
   });
 
+});
+
+describe("runOneShotInner — plan-generation cost accumulation", () => {
+  const ZERO_STEP_PLAN = { objective: "Add X", steps: [], riskHints: [], scopeSummary: "Add X." };
+
+  it("threads onCostUsd into the initial gate-flow generateExecutionPlan call", async () => {
+    vi.stubEnv("ZONE_PLAN_INVESTIGATION_FIRST", "0");
+    mockRequestPlanApproval.mockResolvedValueOnce({ planId: "p-cost1", decision: "reject" });
+
+    await runOneShotInner("do something", BASE_CONFIG, "run-cost-threading", {
+      mode: "plan",
+      externalAc: new AbortController(),
+    });
+
+    const call = mockGenerateExecutionPlan.mock.calls[0]![0] as Record<string, unknown>;
+    expect(call["onCostUsd"]).toEqual(expect.any(Function));
+  });
+
+  it("forced-steps second call: onProgress receives the running sum, not just the second call's own figure", async () => {
+    vi.stubEnv("ZONE_PLAN_INVESTIGATION_FIRST", "0");
+    mockGenerateExecutionPlan
+      .mockImplementationOnce(async (input: any) => {
+        input.onCostUsd?.(0.01);
+        return ZERO_STEP_PLAN;
+      })
+      .mockImplementationOnce(async (input: any) => {
+        input.onCostUsd?.(0.02);
+        return FAKE_PLAN;
+      });
+    mockRequestPlanApproval.mockResolvedValueOnce({ planId: "p-cost2", decision: "reject" });
+    const onProgress = vi.fn();
+
+    await runOneShotInner("do something", BASE_CONFIG, "run-cost-forced-steps", {
+      mode: "plan",
+      externalAc: new AbortController(),
+      onProgress,
+    });
+
+    expect(mockGenerateExecutionPlan).toHaveBeenCalledTimes(2);
+    const costUpdates = onProgress.mock.calls
+      .map((c) => c[0] as any)
+      .filter((u) => u?.progress?.type === "iter_cost_update");
+    expect(costUpdates[costUpdates.length - 1]?.progress?.cumulativeCost).toBe(0.03);
+  });
+
+  it("mixed case: investigation's own repaint seeds the accumulator before the safety net's call adds to it", async () => {
+    vi.stubEnv("ZONE_PLAN_INVESTIGATION_FIRST", "1");
+    mockRunPlanInvestigation.mockImplementationOnce(async (input: any) => {
+      input.progressCallback?.({
+        stage: "iter_cost_update",
+        progress: { type: "iter_cost_update", cumulativeCost: 0.05 },
+      });
+      return ZERO_STEP_PLAN;
+    });
+    mockGenerateExecutionPlan.mockImplementationOnce(async (input: any) => {
+      input.onCostUsd?.(0.02);
+      return FAKE_PLAN;
+    });
+    mockRequestPlanApproval.mockResolvedValueOnce({ planId: "p-cost3", decision: "reject" });
+    const onProgress = vi.fn();
+
+    await runOneShotInner("do something", BASE_CONFIG, "run-cost-mixed", {
+      mode: "plan",
+      externalAc: new AbortController(),
+      onProgress,
+    });
+
+    expect(mockRunPlanInvestigation).toHaveBeenCalledTimes(1);
+    expect(mockGenerateExecutionPlan).toHaveBeenCalledTimes(1);
+    const costUpdates = onProgress.mock.calls
+      .map((c) => c[0] as any)
+      .filter((u) => u?.progress?.type === "iter_cost_update");
+    expect(costUpdates[costUpdates.length - 1]?.progress?.cumulativeCost).toBe(0.07);
+  });
 });
 
 // Phase 2b: planDepth routing

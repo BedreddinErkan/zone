@@ -3,8 +3,11 @@ import { getModelName } from "./openaiClient.js";
 import { AUX_CALL_MAX_OUTPUT_TOKENS } from "./models.js";
 import { createLLMClient, PlanRefusalError } from "./factory.js";
 import { getRequestContext } from "./openaiContext.js";
+import { extractUsage } from "./recordingClient.js";
 import type { LLMProvider } from "./types.js";
 import { log } from "../utils/logger.js";
+import { totalCost } from "../usage/pricing.js";
+import { round4 } from "../usage/usageTracker.js";
 
 export type ExecutionPlan = {
   objective: string;
@@ -338,6 +341,9 @@ export async function generateExecutionPlan(input: {
   forceSteps?: boolean;
   /** When provided, aborts the in-flight LLM call. */
   abortSignal?: AbortSignal;
+  /** When provided, called once with this call's own derived USD cost — not a running
+   *  total. Callers that make more than one call in a flow own their own accumulation. */
+  onCostUsd?: (costUsd: number) => void;
 }): Promise<ExecutionPlan> {
   const client = createLLMClient({
     apiKey: input.userApiKey,
@@ -470,6 +476,26 @@ ${input.forceSteps
     // session-level cost is still recorded by RecordingLLMClient.
     throw new PlanRefusalError(refusalText, 0);
   }
+
+  // Emitted before parsing, deliberately: the call cost is real whether or not the
+  // text below parses, and (unlike tryParseExecutionPlan's own internal try/catch)
+  // JSON.parse/executionPlanSchema.parse below can throw and exit this function.
+  if (input.onCostUsd) {
+    const usage = extractUsage(response.usage);
+    if (usage) {
+      const pricingModel = response.model || model;
+      const costUsd = round4(
+        totalCost(client.provider, pricingModel, {
+          input_uncached: usage.input_uncached,
+          cache_write: usage.cache_write,
+          cache_read: usage.cache_read,
+          output: usage.output,
+        })
+      );
+      input.onCostUsd(costUsd);
+    }
+  }
+
   const parsed = JSON.parse(
     extractJson(choice?.message?.content ?? "")
   );
