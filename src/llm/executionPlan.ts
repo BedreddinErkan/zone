@@ -268,8 +268,8 @@ export function formatExecutionPlanForPrompt(plan?: ExecutionPlan | null): strin
 
   const steps = plan.steps
     .map((step, index) => {
-      const files = step.filesLikely.length > 0 ? step.filesLikely.join(", ") : "unknown";
-      return `${index + 1}. ${step.title}: ${step.description} (files: ${files})`;
+      const filesSuffix = step.filesLikely.length > 0 ? ` (files: ${step.filesLikely.join(", ")})` : "";
+      return `${index + 1}. ${step.title}: ${step.description}${filesSuffix}`;
     })
     .join("\n");
 
@@ -282,6 +282,10 @@ export function formatExecutionPlanForPrompt(plan?: ExecutionPlan | null): strin
   if (plan.riskHints.length > 0) {
     lines.push("Risks:");
     lines.push(plan.riskHints.map((hint) => `- ${hint}`).join("\n"));
+  }
+  if (plan.scopeNotes) {
+    lines.push("Caveats:");
+    lines.push(plan.scopeNotes);
   }
   return lines.join("\n");
 }

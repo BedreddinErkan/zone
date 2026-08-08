@@ -812,9 +812,16 @@ describe("formatExecutionPlanForPrompt", () => {
 
   it("renders objective, steps, and scope unchanged when riskHints is empty", () => {
     const text = formatExecutionPlanForPrompt(BASE_PLAN);
-    expect(text).toContain("Objective: Add a login feature");
-    expect(text).toContain("1. Add login route: Create the route (files: src/routes/login.ts)");
-    expect(text).toContain("Scope: Add a login feature end to end.");
+    // Content checks, not label-shape checks: a relabel of "Objective:"/"Scope:" should
+    // not fail this suite, only losing the content itself should. The old fused
+    // step-line assertion (numbering + separator + "(files: ...)" suffix in one string)
+    // is split into three independent checks for the same reason — each field is
+    // independently provable rather than one string pinning shape and content together.
+    expect(text).toContain("Add a login feature");
+    expect(text).toContain("Add login route");
+    expect(text).toContain("Create the route");
+    expect(text).toContain("src/routes/login.ts");
+    expect(text).toContain("Add a login feature end to end.");
     expect(text).not.toContain("Risks:");
   });
 
@@ -829,6 +836,64 @@ describe("formatExecutionPlanForPrompt", () => {
   it("does not render a Risks: label when riskHints is empty (no dangling header)", () => {
     const text = formatExecutionPlanForPrompt({ ...BASE_PLAN, riskHints: [] });
     expect(text).not.toContain("Risks:");
+  });
+
+  it("omits the (files: ...) suffix entirely for a step with no likely files — no 'unknown' placeholder", () => {
+    const plan: ExecutionPlan = {
+      ...BASE_PLAN,
+      steps: [{ title: "Investigate the gap", description: "A step whose likely files were never determined during planning.", filesLikely: [] }],
+    };
+    const text = formatExecutionPlanForPrompt(plan);
+    expect(text).toContain("A step whose likely files were never determined during planning.");
+    expect(text).not.toContain("(files:");
+    expect(text).not.toContain("unknown");
+  });
+
+  // The two expects below are deliberately two separate `it`s, not two expects in one —
+  // vitest halts a test body at its first failing expect, so a single combined test can
+  // only ever report "the header assertion failed," even on a mutation that drops the
+  // header but leaves the content intact. Splitting them means a mutation that removes
+  // only the header (content survives) and one that removes everything (content also
+  // gone) produce genuinely different, observable kill sets rather than looking identical
+  // because the second expect never got the chance to run.
+  it("scopeNotes present — the Caveats: header appears", () => {
+    const plan: ExecutionPlan = { ...BASE_PLAN, scopeNotes: "Only the read_file catch path was investigated; the write_file catch was not examined and may have the same gap." };
+    const text = formatExecutionPlanForPrompt(plan);
+    expect(text).toContain("Caveats:");
+  });
+
+  it("scopeNotes present — the note's own content reaches the output", () => {
+    const plan: ExecutionPlan = { ...BASE_PLAN, scopeNotes: "Only the read_file catch path was investigated; the write_file catch was not examined and may have the same gap." };
+    const text = formatExecutionPlanForPrompt(plan);
+    expect(text).toContain("Only the read_file catch path was investigated; the write_file catch was not examined and may have the same gap.");
+  });
+
+  it("scopeNotes absent — no Caveats: header (no dangling header, same principle as Risks)", () => {
+    // "Caveats:" grep-verified unique against every fixture string in this describe
+    // block before writing this assertion — an absence check is only meaningful if
+    // nothing else could produce a coincidental match.
+    const text = formatExecutionPlanForPrompt(BASE_PLAN);
+    expect(text).not.toContain("Caveats:");
+  });
+
+  it("a plan carrying every optional field renders all of them — one silently dropped field would be visible here", () => {
+    const plan: ExecutionPlan = {
+      objective: "Rename the legacy config loader",
+      steps: [
+        { title: "Update the loader export", description: "Switch the default export to the renamed function", filesLikely: ["src/config/loader.ts"] },
+      ],
+      riskHints: ["Downstream importers using the old export name will break at compile time."],
+      scopeSummary: "Touches only the config module and its direct importers.",
+      scopeNotes: "The importer list was generated from a grep, not a type-level check, so an importer using a dynamic require would be missed.",
+    };
+    const text = formatExecutionPlanForPrompt(plan);
+    expect(text).toContain("Rename the legacy config loader");
+    expect(text).toContain("Touches only the config module and its direct importers.");
+    expect(text).toContain("Update the loader export");
+    expect(text).toContain("Switch the default export to the renamed function");
+    expect(text).toContain("src/config/loader.ts");
+    expect(text).toContain("Downstream importers using the old export name will break at compile time.");
+    expect(text).toContain("The importer list was generated from a grep, not a type-level check, so an importer using a dynamic require would be missed.");
   });
 });
 
