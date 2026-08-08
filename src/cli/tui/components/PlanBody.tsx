@@ -24,7 +24,15 @@ export function PlanBody({
 }: PlanBodyProps): React.ReactElement {
   return (
     <Box flexDirection="column">
-      <Text bold color="cyan">{answerOnlyReason ? "Ready to answer?" : "Ready to code?"}</Text>
+      <Text bold color="cyan">
+        {noChangeReason
+          ? "Nothing to change?"
+          : cannotVerifyReason
+            ? "Could not verify?"
+            : answerOnlyReason
+              ? "Ready to answer?"
+              : "Ready to code?"}
+      </Text>
       <Text> </Text>
       <Text dimColor>Objective:</Text>
       <Text>{objective}</Text>

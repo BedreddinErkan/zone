@@ -88,6 +88,71 @@ describe("PlanBody — content rendering", () => {
   });
 });
 
+describe("PlanBody — title reflects which of four shapes the plan carries", () => {
+  const ALL_TITLES = ["Ready to code?", "Ready to answer?", "Nothing to change?", "Could not verify?"];
+
+  it('renders "Nothing to change?" for noChangeReason, not any of the other three titles', () => {
+    const frame = lastFrame_({ ...BASE_PROPS, steps: [], noChangeReason: "Verified clean." });
+    expect(frame).toContain("Nothing to change?");
+    expect(frame).not.toContain("Ready to code?");
+    expect(frame).not.toContain("Ready to answer?");
+    expect(frame).not.toContain("Could not verify?");
+  });
+
+  it('renders "Could not verify?" for cannotVerifyReason, not any of the other three titles', () => {
+    const frame = lastFrame_({ ...BASE_PROPS, steps: [], cannotVerifyReason: "Reproduce command was blocked." });
+    expect(frame).toContain("Could not verify?");
+    expect(frame).not.toContain("Ready to code?");
+    expect(frame).not.toContain("Ready to answer?");
+    expect(frame).not.toContain("Nothing to change?");
+  });
+
+  it('renders "Ready to answer?" for answerOnlyReason, not either of the two newly-added titles', () => {
+    const frame = lastFrame_({ ...BASE_PROPS, steps: [], answerOnlyReason: "The task is a question; nothing needs to change." });
+    expect(frame).toContain("Ready to answer?");
+    expect(frame).not.toContain("Ready to code?");
+    expect(frame).not.toContain("Nothing to change?");
+    expect(frame).not.toContain("Could not verify?");
+  });
+
+  it("maps each of the four plan shapes to the exact title it should carry, not merely a distinct one", () => {
+    const shapes: Array<{ name: string; props: PlanBodyProps; expectedTitle: string }> = [
+      { name: "patch", props: BASE_PROPS, expectedTitle: "Ready to code?" },
+      { name: "answer-only", props: { ...BASE_PROPS, steps: [], answerOnlyReason: "Nothing needs to change." }, expectedTitle: "Ready to answer?" },
+      { name: "no-change", props: { ...BASE_PROPS, steps: [], noChangeReason: "Verified clean." }, expectedTitle: "Nothing to change?" },
+      { name: "cannot-verify", props: { ...BASE_PROPS, steps: [], cannotVerifyReason: "Reproduce command was blocked." }, expectedTitle: "Could not verify?" },
+    ];
+    // A set-based check ("are there four distinct titles among the four frames?") would
+    // pass under a mutation that assigns the right titles to the wrong fixtures — this
+    // asserts the fixture -> title MAPPING, in one expect, so a permutation fails it too.
+    const actual = shapes.map(({ name, props }) => {
+      const frame = lastFrame_(props);
+      const found = ALL_TITLES.filter((t) => frame.includes(t));
+      return { name, title: found.length === 1 ? found[0] : found };
+    });
+    expect(actual).toEqual(shapes.map(({ name, expectedTitle }) => ({ name, title: expectedTitle })));
+  });
+
+  // The schema guarantees at most one reason field is ever set on a generated plan, but
+  // that guarantee is enforced only at parse time. PlanBodyProps has no such constraint —
+  // three independent optional strings — and a resumed session's transcript is a bare
+  // `JSON.parse(...) as DiskSession`, never re-validated against the schema. So this shape
+  // is reachable in practice, not just in the type system, and what the title does about
+  // it should be a known, tested fact rather than an accident of branch order.
+  it("when noChangeReason and cannotVerifyReason are both set, the title follows the reason box's own first-match precedence", () => {
+    const frame = lastFrame_({
+      ...BASE_PROPS,
+      steps: [],
+      noChangeReason: "Verified clean.",
+      cannotVerifyReason: "Reproduce command was blocked.",
+    });
+    expect(frame).toContain("Nothing to change?");
+    expect(frame).not.toContain("Could not verify?");
+    expect(frame).not.toContain("Ready to code?");
+    expect(frame).not.toContain("Ready to answer?");
+  });
+});
+
 // Regression guard for the caps this pass removes from the old bordered-modal
 // rendering (SCOPE_SUMMARY_MAX=200, RISK_HINT_MAX=120, STEP_DESCRIPTION_MAX=48,
 // all in PlanReadyModal.tsx, deleted with the file in Commit 2). PlanBody has no
