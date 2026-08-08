@@ -4689,6 +4689,18 @@ when a field overruns the number its own prompt asked for. That marker has fired
 is observed rather than hypothetical, and its own comment already frames the open question correctly:
 whether the model is ignoring the cap or the cap is wrong for the job that field actually does.
 
+**That framing was overtaken by `e6eb298e`, and what the marker measures changed with it.** That
+commit removed both caps from both templates, so the model is no longer told either number and the
+question of whether it is ignoring one no longer has a subject — the paragraph above is kept as
+written because the caps were stated when it was, and corrected here rather than rewritten. The
+marker itself was left untouched deliberately, which leaves it measuring organic field length against
+a threshold nobody is given. **It is also one-sided by construction**: it fires only when a field
+exceeds its constant, so it can report the tail and never the distribution below it, and a run whose
+fields both come in short is indistinguishable in the sink from a run that never happened. Two
+records exist after that commit, from a plan generated on 2026-08-08 whose summary and scope note
+both overran, against one record before it — one plan per side of a change is not a measurement of
+it.
+
 **A constraint any fix inherits, and it is a correctness constraint rather than a preference.** The
 investigation reads at most a handful of ranked files and is instructed to stop as soon as it can
 write the plan. A field inviting the model to say what it *considered and rejected* invites it to
@@ -4715,6 +4727,15 @@ model holds every file it read in context at the moment it writes. What is lost 
 per-step detail generated lazily when a user expands a step would need a second full investigation
 rather than a lookup, because the material was in hand one line before the function returned and is
 unreachable one line after.
+
+**The iteration count and the cost are lost at that same boundary, for the same reason, and one
+change to the return type would carry all three.** Both are read inside the function — they feed the
+completion marker, which is how they are known to exist at all — and neither escapes it, because the
+return type is the plan. A caller wanting to tell the user how many iterations produced the plan in
+front of them, or what it cost, meets the identical shape as the lazy-expand case: the value is in
+hand one line early and gone one line late. What separates them is only what each is for — the call
+log serves an expansion that does not exist yet, the count and the cost serve the approval decision
+itself, which is a surface that exists today and shows neither. See item 79.
 
 **The lazy path has a second, independent blocker, and both would have to move together.** The plan
 is drawn as a committed transcript entry inside a region that writes each item exactly once, keyed on
@@ -4747,6 +4768,16 @@ built against today's shape, test fixtures included. One remedy, no options, not
 **Records predating `fc26fda3` carry the total and not the three new fields**, so any analysis
 spanning that commit must treat them as absent rather than zero. Defaulting them to zero understates
 the earlier window and overstates what the change did.
+
+**Every record in the sink is on the earlier side of that line, so the added fields have no data
+behind them yet.** The twenty-five completion records run from 2026-07-29 to 2026-08-01 — the whole
+population rather than a sampled window, and not inflated by the duplication item 73 records, since
+raw lines and records distinct on that item's key agree here. All of them predate `fc26fda3`, so
+every one carries the total alone. That no run has exercised the new fields since is a consequence of
+the gate item 79 records rather than of anything in this entry: the default route for an additive
+task skips the investigation, and this marker only fires on the path that runs it. So the three
+fields are untested against real output as well as unusable for a rate, and whichever record
+exercises them first will also be the first to show whether they read as intended.
 
 **What plan generation costs today, which is why this is a decision rather than an obvious yes.**
 Measured from the completion marker over a window running 2026-07-29 to 2026-08-01, collapsed on item
@@ -4784,11 +4815,168 @@ committing transcript region that draws it are in the TUI's components directory
 seeding with its caps is in `runOneShotInner`, `cli/dispatch.ts`. See item 77 for the approval cycle
 this content is presented through, and item 73 for why the figures above are upper bounds.
 
+## 79. Plan context assembly: the gate that skips investigation routes on a lead verb, the context it hands the model is a handful of files and one wrong summary line, and the approval surface shows none of it
+
+**What it is:** two strands around the *input* a plan is written from, and around what the surface
+presenting that plan says about where it came from. Item 77 owns the approval **cycle** — which
+actions exist and what each does. Item 78 owns the plan's **content** — what the prompt asks for and
+what the schema has room for. This is a third subject, and nothing in this document covered it before
+this entry. The two strands are recorded together for the reason item 77 gives about its own second
+strand rather than the one item 78 gives about its: strand two is not a feasibility question strand
+one cannot be decided without, it is the **instrument strand one would have been caught by**, and it
+is absent. Established against the tree at `e6eb298e`; every figure drawn from a run comes from one
+plan generated on 2026-08-08 and is named as such.
+
+**Strand one — the gate decides how much context to gather without looking at the context it
+already has.** The branch between a single lexical generation call and a full investigation loop is a
+negation of one predicate in `llm/taskShape.ts`, and that predicate is a single regular expression
+anchored to the task's first word. Nothing else is consulted — not the classifier, not the repo, not
+the file list. And the file list exists by then: `runOneShotInner` awaits the context preparation
+*before* it evaluates the branch, so the decision about whether the model needs to read anything is
+taken with the list of what it would read already in hand and unexamined.
+
+**A sibling predicate in the same module disables both refusal paths for the same task shape.** The
+two early returns that honour a plan coming back cannot-verify or no-change are each a conjunction
+with `taskAssertsProblem`, which tests its own additive lead-verb list first and returns false before
+reaching any problem word. The two verb lists are not identical — the pure-addition one excludes the
+structural verbs and the ambiguous one — but they agree on an additive lead verb. So the task shape
+that skips investigation is also the task shape whose refusals are discarded.
+
+**Three mechanisms in series then convert a refusal into steps, and item 77 records the same three
+from the other side.** With the early returns gated off, a plan that comes back with no steps is
+regenerated with the forced-steps flag, whose prompt branch replaces the three terminal-reason field
+descriptions with a comment saying they are not valid for this task and adds an instruction that at
+least one concrete step must be returned; behind that sits a minimal-plan synthesis built from the
+task text and the file list. Item 77's second strand records these three as guarantees sitting above
+the approval loop that do not re-run on a replan, which is the defect on that side. On the first pass
+they are the reason an additive task cannot decline at all: each turns an absence of steps into
+steps, and they fire on exactly the shape that also got no investigation.
+
+**The repo summary is one line, and for this repository the wrong one.** The context preparation
+joins the notes a structure detector returns. Measured against the dogfood worktree on 2026-08-08
+that detector returned a single note, `React-like frontend detected`, and that string was the entire
+repo-summary block the model received for a Node TypeScript command-line tool. The detector is not
+malfunctioning — the terminal interface is built on React — it reports the one thing it recognises,
+and nothing in its vocabulary names a command-line tool at all.
+
+**The ranking is lexical, and three of its inputs are dead on this path.** The ranker accepts optional
+semantic scores, a recently-changed file list and a task intent; the plan path passes none of the
+three, so the hybrid branch, the last-changed boost and the intent boost are all unreachable here.
+What runs is a keyword score over paths and names, plus a content pass that opens files — but only the
+highest-scoring thirty by that same keyword score, so a file the path score does not already favour is
+never read and cannot be rescued by what is inside it.
+
+**Four caps apply in series and two of them are defects.** The ranker returns at most its own
+context-file cap, five files by default. The context preparation then slices that result to its own
+maximum of eight — **a longer bound applied to a shorter array, which can never bind** — and appends
+grep matches afterwards, which is what takes the list past five in practice. The generation prompt
+then renders only the first eight of whatever it is handed, so for the run on 2026-08-08, which
+computed nine paths, the ninth never reached the model. And the dispatcher seeds file *bodies* for the
+first five under its own per-file and total character caps. The distance between a path the model can
+see and a path whose contents it can read is therefore several positions wide, and is stated nowhere.
+
+**Widening a cap does not reach the file the task was about.** Re-running the same ranking against
+the dogfood worktree on 2026-08-08 with the context cap lifted places the command-line entry point
+four hundred and thirty-eighth of the eight hundred and seventy-five files that survive the ranker's
+skip filter, at a score of one against a top score of five hundred and seventy-nine. It is not near a
+boundary. The list's last four entries were all remote-control modules, of which the prompt showed
+three; the plan named two of them as the command's home — present to the model as bare paths, never
+seeded, so it attributed the feature to filenames it had not opened.
+
+**The referent did not exist, and the consequence is the part worth stating plainly.** The task named
+a `plan` command; the command-line surface declares one sub-command, and `plan` appears only as a
+documented value of the permission-mode option, beside an output-format option that already offers
+JSON. Given a summary line naming the wrong kind of project, eight paths of which three are test
+files, five seeded bodies of which three are one module and its tests, and a task naming something
+absent, **the plan the model produced was close to the best available inference from what it was
+given.** The defect is not that it guessed badly. It is that nothing in the pipeline can say the input
+was insufficient — and the model did say so, in the scope note, which is free prose that reaches the
+user and nothing else.
+
+**The gate's own marker contradicts the field beside it.** It records the branch taken, the lead verb
+that matched, and a third field whose value reads `default-non-additive` whenever no environment
+override is set — including on the additive task that made the gate skip, where it sits next to a
+recorded lead verb of `add` and a recorded mode naming the lexical branch. The field distinguishes
+the default predicate from an override, which is what it is for and what it reports correctly; its
+*value* names an outcome it does not measure, so a sink query filtering on it for additively-routed
+runs returns the opposite of the intended set.
+
+**Strand two — the proposal carries content and no provenance.** Its fields are the plan and run
+identifiers, the objective, the steps, the scope summary, the scope note, the risk hints and the
+three mutually exclusive terminal reasons. The rendering component draws those and nothing else.
+Neither the action nor the component carries an iteration count, a cost, a list of what was read, or
+which of the two paths produced the plan.
+
+**So a lexical plan and an investigated plan render identically**, and every difference that exists
+lives outside the payload: the tool-call lines an investigation emits into the transcript above the
+plan, elapsed time, and the cost in the status bar. A user approving a plan cannot distinguish one
+written after reading files from one written from a handful of bodies picked by keyword — and on
+2026-08-08 it was the second, with the module the task was actually about not among them.
+
+**The zero cost is the lexical path's accidental signature.** The store's cost field is written by
+three events — loop completion, run summary, and the per-iteration cost update — all of them
+agent-loop events. The lexical generation function takes no progress callback at all, so it can emit
+none of them and the field stays at the value the initial state gives it, while `runPlanInvestigation`
+explicitly re-emits the per-iteration cost and token-budget events out of its inner loop and so does
+show a live figure at the same gate. The signal is real and unusable: it is indistinguishable from
+accounting that is simply broken, which is how it was read when it was noticed. The call is not free.
+The usage log records `$0.0515` for the plan generated on 2026-08-08 against a displayed `$0.0000`,
+written there because the client factory wraps every client in the recording one, and fully uncached
+with both cache counters at zero.
+
+**What is lost where, per value, since the answers differ and a fix pass needs them apart.** The
+iteration count and the cost of an investigated plan exist on the loop result and are dropped at that
+function's return — retrievable at that boundary, which is why item 78's second strand now records
+them beside the call log. The list of files read is the same boundary, surviving only as transient
+transcript lines. The lexical path's cost is not lost at a boundary at all: it is written to the usage
+log and never routed to an event, so it is on disk and absent from the process. Which path ran exists
+only in the gate marker. **Nothing about provenance is unavailable; all of it is unrouted** — which
+makes this plumbing rather than instrumentation, and is the one part of this entry where the shape of
+a fix is not in question even though its surface is.
+
+**A plan declined at the gate persists nowhere.** Session files are written after a run completes, so
+the run on 2026-08-08 has none, and the plan's text — objective, steps, and the scope note in which
+the model reported its own missing context — is unrecoverable. What survives is the gate marker and
+two cap-overrun records, which between them give the branch, the lead verb and two field lengths. The
+content that would let anyone judge the plan is exactly the part that is gone.
+
+**Bucket — Neither, on item 77's rule, and with the citations distinguished again.** Item 77
+established that a multi-strand entry is bucketed on what remains across its parts rather than on its
+readiest one; item 78 carried that rule while rejecting item 77's citations on the ground that a
+precedent's applicability lives in what makes it safe. The rule applies here unchanged and the
+citations again do not transfer: item 46 and item 38 are entries whose remaining work is choosing
+between named options, and most of what is above has no options named — what a summary line for a
+command-line tool should say, and what provenance a plan should carry, are questions nobody has posed,
+let alone narrowed to a choice. The one that reaches is **item 74**, for the single specified fact
+here: the gate marker's contradicting field is a one-word change, deliberately not proposed as one,
+because the value is a sink key that every historical query over that marker matches on — the same
+shape as item 74's separated change, which moves a signature and its call site and sits in Neither
+holding it. What would cite this entry: any later entry whose most-ready part is a rename that older
+records are keyed on. **Checked in the other direction, as item 77 requires** — promoting for that
+field alone would retroactively mis-bucket item 74, and the two other candidates for readiness here
+are the inert maximum and the dropped ninth path, neither of which has an agreed target to align on.
+**Neither.**
+
+**Where the code lives:** the gate, its marker, the two early returns, the forced-steps regeneration
+and the body-seeding caps are all in `runOneShotInner`, `cli/dispatch.ts`; both lead-verb predicates
+are in `llm/taskShape.ts`; the minimal-plan synthesis, the forced-steps prompt branch and the slice
+that renders only the first eight relevant paths are in `llm/executionPlan.ts`. The ranker — with its
+unused semantic, last-changed and intent inputs, its skip filter and its content pass over the top
+thirty — is `repo/rankRelevantFiles.ts`, and the scan it consumes is `repo/scanRepo.ts`; the summary
+join and the inert maximum are in `core/preparePlanContext.ts`, alongside the structure detector it
+calls. On the presentation side, the proposal action and the store field it writes are in the TUI's
+store core, the rendering component and the action prompt gating on it are in the TUI's components
+directory, and the three cost-bearing events and their mapping are in the event-to-actions module;
+the investigation loop's re-emission of two of them is in `llm/planInvestigation.ts`, and the
+recording wrapper that writes the usage row is reached through `llm/factory.ts`. See item 77 for the
+cycle this gate sits in, item 78 for what the plan says once this context has produced it, and item
+73 for why sink counts are upper bounds.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 78 to find out which ones still need something. No index of
+reader the trouble of reading all 79 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -4801,8 +4989,8 @@ first (0):
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (7): 1, 4, 18, 23, 57, 63, 75
 
-**Neither — a structural fact recorded, with no fix proposed** (32): 2, 3, 5, 9, 11, 15, 17, 19,
-27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78
+**Neither — a structural fact recorded, with no fix proposed** (33): 2, 3, 5, 9, 11, 15, 17, 19,
+27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, and 65 are partially closed or corrected; the
 classification above covers only the portion still open, not the whole entry.
@@ -5516,3 +5704,34 @@ written in the same commit as its own subject cannot be checked by that commit; 
 pass yet, and reading it back and finding it coherent proves only that it is coherent. So the check
 belongs to the next pass that touches the entry, and it has to be a re-derivation from the code
 rather than a re-reading of the prose — enumerations first, since those are where this fails.
+
+**A second locus, found one commit later, and it is not an enumeration.** The closing line of the
+sixteenth pattern's fourth instance — written in the same commit as item 78, about item 78 — reads
+that the material is already in context, so what limits the plan is the prompt and the schema. Item
+78's own second strand, in that same commit, is correctly scoped: it says the plan is parsed out of
+the *investigation loop's* final message, which is true of the path that runs a loop. The essay
+restated it with the qualifier dropped, as a claim about "the plan." On the default path for an
+additive task there is no loop at all; the model gets a handful of file bodies chosen by keyword, and
+what limited the plan observed on 2026-08-08 was neither the prompt nor the schema but which files
+those were (item 79). The entry was right and the essay generalizing from it was not — same commit,
+same pass, one sentence apart.
+
+**What this adds is where to look, beyond the enumerations.** The paragraph above names enumerations
+as the concentration point because that is where item 76 failed. This instance failed at a
+**restatement**: a claim that carried a scope qualifier in the entry lost it on the way into the
+essay. That is worse than losing it in an entry, because an essay is inherited as a *rule* rather
+than as a fact about one subsystem, and a rule with a dropped qualifier is applied to everything the
+next pass touches. Summarising an entry into a general lesson is the same act as writing an
+enumeration — generalizing from one trace — with none of the visible seams that make an enumeration
+checkable. So the re-derivation this pattern prescribes has to cover the essays, and the cheap
+version is specific: when an essay restates an entry's finding, check whether the entry scoped it to
+a path, a mode or a branch, and whether the restatement kept the scope.
+
+**The cost of this one was very nearly paid and was not, which is the last thing worth recording.**
+The commit that acted on item 78 removed the prompt's brevity instructions; it was correct on its own
+terms and was not aimed at any observed symptom, since it predates the run that produced one. The
+commit queued behind it — adding a field for rationale — would have been the first change actually
+aimed at plan quality, and on the default path it would have been aimed at a mechanism that exists
+and is not the operative one. This pass reached the mechanism first, so the pattern's cost was
+avoided rather than incurred. It gets a sentence rather than a pattern of its own: writing one about
+a failure that did not happen would be the same generalization-from-one-trace this pattern is about.
