@@ -4935,12 +4935,55 @@ the approval loop that do not re-run on a replan, which is the defect on that si
 they are the reason an additive task cannot decline at all: each turns an absence of steps into
 steps, and they fire on exactly the shape that also got no investigation.
 
-**The repo summary is one line, and for this repository the wrong one.** The context preparation
-joins the notes a structure detector returns. Measured against the dogfood worktree on 2026-08-08
-that detector returned a single note, `React-like frontend detected`, and that string was the entire
-repo-summary block the model received for a Node TypeScript command-line tool. The detector is not
-malfunctioning — the terminal interface is built on React — it reports the one thing it recognises,
-and nothing in its vocabulary names a command-line tool at all.
+**The repo summary was one line and, for this repository, the wrong one — closed by `a2fa9ee8`.**
+The context preparation joins the notes a structure detector returns. Measured against the dogfood
+worktree on 2026-08-08 that detector returned a single note, `React-like frontend detected`, and that
+string was the entire repo-summary block the model received for a Node TypeScript command-line tool.
+
+**What produced it, and the distinction that decided the fix's shape.** The old function keyed on
+nothing but file paths — its input is the scanned file list and it never opened a manifest — so no
+installed package could have caused this. Its frontend test matched on a file *extension*, and this
+repository has dozens of files carrying it under the terminal-interface tree, plus one whose name the
+same test matched a second time. The detector was therefore not reporting React because React is
+present; it was reporting an extension. **And the single note was coincidental, not structural:** the
+function built its notes from a series of independent pushes and could return all of them, and
+returned one because every other test matched nothing. That mattered — a structural
+returns-at-most-one defect would have needed the selection rewritten, where this needed the tests
+themselves replaced.
+
+**What replaced it.** Detections now run in tiers ordered by discriminating power — runtime and
+language first, then project kind, then frameworks — keyed on what the manifest declares: the module
+type, a declared binary entry for command-line kind, an exports map for library kind, dependency
+names for frameworks, with a config file or a source extension for language. The note count is capped
+at five, and the basis for the cap is this entry's own strand about cost: the summary lands in every
+plan prompt on both generation paths, and that call is fully uncached, so every note is paid at full
+input rate on every generation. Tiers one and two are at most four notes together, so the cap can only
+ever truncate the framework tier. Before `a2fa9ee8` this repository's whole summary was
+`React-like frontend detected`; after it, `Node.js project (ESM) TypeScript Command-line tool
+(declares a bin entry) Ink terminal UI`.
+
+**Two consumers beyond plan generation share this function, which a later pass changing it needs to
+know.** The patch flow joins the same notes into its own project summary, and the feature agent reads
+two of the returned booleans into a context string. Five of the returned booleans have no reader at
+all. The returned type is unchanged by `a2fa9ee8`, so neither consumer moved.
+
+**The finding that outranks the fix: a declared signal is not automatically better than an inferred
+one, and this repository proves it twice in opposite directions.** The rule the fix started from was
+prefer-what-is-declared, and taken plainly it would have failed. `react` is a genuine production
+dependency here, pulled in by the terminal-interface library, so a declared-dependency test on it
+would have produced exactly the wrong line the path test produced. What is conclusive is the
+**absence** of the browser-DOM package, which a browser React application must carry and a terminal
+one never does. In the other direction, `express` is declared at a real version with one surviving
+type-only import long after its server was deleted; keying on that declaration alone made the backend
+detection fire, a regression introduced during the fix and caught before it landed, so the detection
+now requires the declaration *and* a server-shaped layout — which costs a single-file Express
+application its note, the cheaper error under a rule that a missing note beats a wrong one. **The
+corrected rule: what matters is not whether a signal is declared or inferred but whether it is
+conclusive for the question being asked.** In an ecosystem where dependencies arrive transitively,
+the presence of a package is weak evidence about what a project *is*; the absence of a package that a
+given kind of project must carry is strong. Recorded here rather than left in the commit message
+because a later pass reading only what the notes now say would re-derive it at the cost of the same
+regression.
 
 **The ranking is lexical, and three of its inputs are dead on this path.** The ranker accepts optional
 semantic scores, a recently-changed file list and a task intent; the plan path passes none of the
@@ -5040,9 +5083,10 @@ established that a multi-strand entry is bucketed on what remains across its par
 readiest one; item 78 carried that rule while rejecting item 77's citations on the ground that a
 precedent's applicability lives in what makes it safe. The rule applies here unchanged and the
 citations again do not transfer: item 46 and item 38 are entries whose remaining work is choosing
-between named options, and most of what is above has no options named — what a summary line for a
-command-line tool should say, and what provenance a plan should carry, are questions nobody has posed,
-let alone narrowed to a choice. The one that reaches is **item 74**, for the single specified fact
+between named options, and most of what is above has no options named — what provenance a plan should
+carry is a question nobody has posed, let alone narrowed to a choice. (This sentence also named the
+summary line when it was written; `a2fa9ee8` answered that one, and the strand above records how.)
+The one that reaches is **item 74**, for the single specified fact
 here: the gate marker's contradicting field is a one-word change, deliberately not proposed as one,
 because the value is a sink key that every historical query over that marker matches on — the same
 shape as item 74's separated change, which moves a signature and its call site and sits in Neither
@@ -5052,14 +5096,30 @@ field alone would retroactively mis-bucket item 74, and the two other candidates
 are the inert maximum and the dropped ninth path, neither of which has an agreed target to align on.
 **Neither.**
 
+**Re-checked after the summary strand closed, rather than inherited.** `a2fa9ee8` closed one of this
+entry's strands outright, which is a stronger event than the partial closures item 78 re-checked
+against one commit ago — and it still does not promote the entry, for the reason item 78's note gives:
+an entry does not become actionable by having a part removed, whatever the size of the part. The check
+that decides it is what remains, and what remains is the same set as before minus one: a routing
+predicate nobody has decided to change, three step-guaranteeing mechanisms whose correct behaviour is
+genuinely open, four caps with no agreed target, and a provenance surface with no proposal. **Item 79
+differs from item 78 in what closed, not in what governs** — item 78's closures were the parts that
+needed no decision, this one was a whole strand, and neither changes that the bucket measures the
+remainder. Checked in the other direction: promoting on the strength of a closed strand would make
+item 61 retroactively mis-bucketed, since it holds a closed bullet and stayed Neither on exactly this
+reasoning. **Neither.**
+
 **Where the code lives:** the gate, its marker, the two early returns, the forced-steps regeneration
 and the body-seeding caps are all in `runOneShotInner`, `cli/dispatch.ts`; both lead-verb predicates
 are in `llm/taskShape.ts`; the minimal-plan synthesis, the forced-steps prompt branch and the slice
 that renders only the first eight relevant paths are in `llm/executionPlan.ts`. The ranker — with its
 unused semantic, last-changed and intent inputs, its skip filter and its content pass over the top
 thirty — is `repo/rankRelevantFiles.ts`, and the scan it consumes is `repo/scanRepo.ts`; the summary
-join and the inert maximum are in `core/preparePlanContext.ts`, alongside the structure detector it
-calls. On the presentation side, the proposal action and the store field it writes are in the TUI's
+join and the inert maximum are in `core/preparePlanContext.ts`. The structure detector it calls,
+its manifest read, its tiers, its note cap and the two conditions the declared-signal finding is
+about are all in `repo/detectProjectStructure.ts`, whose own test file arrived with `a2fa9ee8`; the
+patch flow's second summary join is in `core/runLlmPatchFlow.ts` and the feature agent's boolean read
+is in `core/runFeatureAgent.ts`. On the presentation side, the proposal action and the store field it writes are in the TUI's
 store core, the rendering component and the action prompt gating on it are in the TUI's components
 directory, and the three cost-bearing events and their mapping are in the event-to-actions module;
 the investigation loop's re-emission of two of them is in `llm/planInvestigation.ts`, and the
@@ -5087,7 +5147,7 @@ first (0):
 **Neither — a structural fact recorded, with no fix proposed** (33): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79
 
-Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, and 78 are partially closed or corrected; the
+Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, and 79 are partially closed or corrected; the
 classification above covers only the portion still open, not the whole entry.
 
 ---
@@ -5523,6 +5583,23 @@ it — correctly, since its subject is completeness of content. The lesson pairs
 splitting a block raises the granularity at which failures can be *reported*, and choosing what each
 assertion inspects sets the granularity at which they can be *detected*. A kill-set prediction is a
 claim about both, and this one was wrong about the second while being right about the first.
+
+**The second instance arrived in `a2fa9ee8` and runs the opposite way, which is what turns the pair
+into a rule.** There, an assertion comparing a whole expected array was predicted to be
+order-sensitive, so a mutation raising a count cap was expected to kill only the block asserting that
+cap. It killed the ordering block too: an exact-array comparison also compares length, so any change
+to how many elements survive fails it. Set beside the first, the error is symmetric — one prediction
+credited an assertion with inspecting *more* than it does, the other with inspecting *less* — and in
+both the assertion was right and only the prediction about it was wrong. Neither is a coverage gap,
+and treating either as one would have meant weakening a correct test to match a wrong forecast.
+
+**So predicting a kill set has a step before it that neither the granularity rule nor the
+shared-extraction rule supplies: enumerate what each assertion actually compares, then ask what could
+move that.** It is a different question from what the block is *named* for, and both divergences came
+from answering the name instead of the comparison — "the all-fields block checks all the fields" and
+"the ordering block checks the ordering" are both true and both insufficient. The cheap version is to
+read the assertion rather than its title, and it costs one line of reading per assertion in the
+predicted set.
 
 ## An eleventh pattern, beside the second: a precedent's applicability lives in what makes it safe, not in what makes it similar
 
