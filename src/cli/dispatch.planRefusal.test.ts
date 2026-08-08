@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PlanRefusalError } from "../llm/factory.js";
 
 const mockRunLlmPatchFlow = vi.hoisted(() => vi.fn());
@@ -81,6 +81,10 @@ beforeEach(() => {
   delete process.env["ZONE_PLAN_APPROVAL_CYCLE"];
   vi.spyOn(process.stdout, "write").mockReturnValue(true);
   vi.spyOn(process.stderr, "write").mockReturnValue(true);
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 const PLAN_OPTS = { mode: "plan" as const };

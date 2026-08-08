@@ -176,4 +176,13 @@ describe("safety net excludes the answer-only shape (dispatch.ts:412)", () => {
 
     expect(synthesizeMinimalPlan).not.toHaveBeenCalled();
   });
+
+  // mockRunPlanInvestigation has no resolved value anywhere in this file — inert today
+  // because ADDITIVE_TASK matches the real (unmocked) isPureAddition, not because
+  // anything here asserts the routing. Pinning it directly rather than leaving it implicit.
+  it("routes to the lexical branch — runPlanInvestigation is not called", async () => {
+    await runOneShotInner(ADDITIVE_TASK, BASE_CONFIG, "run-answer-initial", { mode: "plan" });
+
+    expect(mockRunPlanInvestigation).not.toHaveBeenCalled();
+  });
 });

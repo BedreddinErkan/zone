@@ -227,3 +227,19 @@ describe("[zone-plan-decision] reviewed passes through the observed modalEmitted
     expect(calls[0]).toMatchObject({ reviewed: true });
   });
 });
+
+// [zone-plan-decision]'s payload carries no plan-derived field (runId, planId, decision,
+// planAttempt, reviewed — none of them read plan content), so every test above is blind
+// to which of generateExecutionPlan/runPlanInvestigation actually supplied the plan.
+// This pins the file's own stated assumption (ADDITIVE_TASK routes lexical) directly,
+// rather than leaving it implicit in a comment.
+describe("ADDITIVE_TASK fixture routes to the lexical branch, not investigation", () => {
+  it("generateExecutionPlan is called; runPlanInvestigation is not", async () => {
+    mockRequestPlanApproval.mockResolvedValueOnce({ planId: "plan-1", decision: "reject", modalEmitted: true });
+
+    await runOneShotInner(ADDITIVE_TASK, BASE_CONFIG, "run-routing", { mode: "plan" });
+
+    expect(mockGenerateExecutionPlan).toHaveBeenCalledTimes(1);
+    expect(mockRunPlanInvestigation).not.toHaveBeenCalled();
+  });
+});
