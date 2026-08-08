@@ -5039,16 +5039,114 @@ plan, elapsed time, and the cost in the status bar. A user approving a plan cann
 written after reading files from one written from a handful of bodies picked by keyword — and on
 2026-08-08 it was the second, with the module the task was actually about not among them.
 
-**The zero cost is the lexical path's accidental signature.** The store's cost field is written by
-three events — loop completion, run summary, and the per-iteration cost update — all of them
-agent-loop events. The lexical generation function takes no progress callback at all, so it can emit
-none of them and the field stays at the value the initial state gives it, while `runPlanInvestigation`
-explicitly re-emits the per-iteration cost and token-budget events out of its inner loop and so does
-show a live figure at the same gate. The signal is real and unusable: it is indistinguishable from
-accounting that is simply broken, which is how it was read when it was noticed. The call is not free.
-The usage log records `$0.0515` for the plan generated on 2026-08-08 against a displayed `$0.0000`,
-written there because the client factory wraps every client in the recording one, and fully uncached
-with both cache counters at zero.
+**The zero cost was the lexical path's accidental signature — closed by `9874eb91`.** The store's
+cost field was written by three events — loop completion, run summary, and the per-iteration cost
+update — all of them agent-loop events when this was written. The lexical generation function took no
+progress callback at all, so it could emit none of them and the field stayed at the value the initial
+state gives it, while `runPlanInvestigation` explicitly re-emits the per-iteration cost and
+token-budget events out of its inner loop and so did show a live figure at the same gate. The signal
+was real and unusable: it is indistinguishable from accounting that is simply broken, which is how it
+was read when it was noticed. The call is not free. The usage log records `$0.0515` for the plan
+generated on 2026-08-08 against a displayed `$0.0000`, written there because the client factory wraps
+every client in the recording one, and fully uncached with both cache counters at zero.
+
+**What made it a wrong statement rather than a missing one, which is the part worth keeping.** The
+status bar composes its left-hand text with the token figure suffixed only when that figure exceeds
+zero, and the cost rendered unconditionally to four decimal places. The same run therefore showed no
+token suffix at all and a `$0.0000` — one quantity absent, the other asserting. An absent figure
+invites the question; an asserted zero answers it, wrongly, and a reader has no reason to doubt it.
+The asymmetry is in the two renderings rather than in the two values, and it is why this was worth a
+fix while the missing token count beside it was not.
+
+**The derivation, and why it cannot drift from the ledger.** The generation function now takes an
+optional cost callback and, when one is supplied, pulls the usage buckets out with the same exported
+extractor the recording wrapper uses, prices them with the same shared pricing function, and rounds
+with the ledger's own four-decimal helper — exported by that commit rather than copied, so the emitted
+figure and the persisted row cannot round apart. The price is taken from the model the API echoes
+back, falling back to the requested model only when the echo is absent, which is the recording
+wrapper's own precedence reused rather than reimplemented. The emission sits after the refusal throw
+and before the response is parsed, because the money is spent whether or not the text that comes back
+parses; the investigation path's own repaint sits *after* its parse instead, which is safe only there,
+because the parse helper it calls swallows its own failures and returns nothing where this one throws.
+
+**The accumulator, and why forwarding each call's own figure would have been worse than the zero.**
+The store's status action SETS the cost field rather than adding to it, and one pass through this gate
+can call the generation function more than once — the forced-steps regeneration above, and a replan on
+each feedback round. A callback wired straight through would have let a cheaper later call overwrite a
+dearer earlier one, replacing an obviously wrong zero with a plausibly wrong number, which is the
+harder of the two to catch. The gate instead keeps a running total for the flow, declared outside the
+approval loop so repeated feedback rounds keep adding to it, and forwards the total rather than the
+increment.
+
+**The investigation path seeds that total through the event it already emits, because its return
+value carries no cost.** Both of `runPlanInvestigation`'s returns yield the plan alone; the loop's
+cost is read inside the function for the refusal throw and for the synthetic repaint, and reaches the
+caller through neither. The mixed case is reachable — the branch choosing between investigating and
+generating closes before the forced-steps regeneration, so an investigated plan that comes back
+stepless is followed by a lexical call in the same pass — so the gate wraps the progress callback it
+already passes down, reads the cumulative figure off the repaint event as it goes past, and forwards
+the event untouched. Nothing about the investigation path's own behaviour changes.
+
+**Verified end to end rather than by inspection.** On a run dated 2026-08-08 the status bar and the
+usage ledger row carrying the same run identifier agreed exactly, both at `$0.0747`.
+
+**The first measured pair, and what one pair cannot support.** Two runs of the same task text, both
+dated 2026-08-08 and both recorded by the gate marker as the lexical route, now sit in the ledger
+under their own run identifiers. The earlier drew about six thousand nine hundred uncached input
+tokens and about two thousand one hundred output, at `$0.0515`; the later about six thousand three
+hundred input and about three thousand seven hundred output, at `$0.0747`. Output rose by roughly four
+fifths while input fell slightly. **Two commits landed between them** — the removal of the brevity
+instructions from both templates, and the repo-summary correction — so the rise is not attributable to
+either alone, and it is one pair rather than a distribution. Item 78 records the general form of the
+insufficiency, that one plan per side of a change is not a measurement of it; what it does not say,
+and what this pair makes concrete, is that two changes landing in the same interval are not separable
+afterwards from whatever records the sink happens to hold. A measurement has to be built rather than
+read: a fixed task set run against each side deliberately, one change at a time. Neither run exercised
+the token-breakdown fields item 78 records as having no data behind them — those are populated only by
+the investigation path's completion marker, and both of these took the lexical route, so that
+population is unchanged.
+
+**A second dollar figure on the same line disagrees with the first, and it is a different quantity
+rather than the same one twice.** The status bar's badge line carries a used-against-cap figure beside
+the run cost just corrected. Established by shape: it reads a different store field, written by one
+action with one dispatch site, fed by the usage aggregate over a rolling twenty-four-hour window
+across every record in the ledger under the TUI's fixed user identifier — a whole-window total, not
+this run's. It is rounded differently at two removes, the aggregate using the two-decimal helper where
+the per-record row uses the four-decimal one, and the badge rendering two decimals against the cost
+field's four. And it is refreshed once per run, after the run's costs reach disk, so at a mid-run
+surface such as the approval gate it necessarily carries the value left by the previous run's
+completion. **What remains unknown is which of those accounts for the gap actually seen.** For the
+later of the two runs above the rolling window totals `$0.1262`, which the badge would render as
+`$0.13`, while the value left by the previous completion would have been `$0.05`. A reported gap of
+roughly a third matches the second, but the badge is not written anywhere — nothing persists it — so
+which figure was on screen is not established here, and no fix is proposed. **This is not item 76's
+class, and the check is worth recording because the surface invites it.** That entry is about one name
+denoting several unrelated artifacts, so a query on the name returns all of them; these two fields are
+distinctly named and nothing about their naming misleads. What misleads is adjacency — two amounts in
+the same unit on one line, over different denominators, with neither labelled by the window it covers.
+
+**The plan the fix ran against, filed to the strands it is evidence for.** The later run produced a
+plan whose first step names the command-line entry point, where the same task on the earlier run named
+two remote-control modules by guess — the persisted earlier plan carries both — so this is the summary
+strand above working end to end, since the correction is what put a command-line tool in the model's
+context. Three things it did not fix, each evidence for a strand already open. The task named a
+command that does not exist in that worktree and nothing in the pipeline said so, which is the
+referent paragraph above. Two later steps still treat a module as the home of plan serialization on
+the strength of its filename, never having read it, which is the caps paragraph above — the same
+never-seeded-so-attributed-by-name mechanism recurring after the summary was corrected, which is what
+shows the two independent. The third has no owning strand: one step is a verification rather than an
+implementation step, which the lexical template's own instruction to break the task into a bounded
+range of implementation steps pressures toward. That instruction asks for *more*, where item 78's
+strand one enumerates the instructions asking for *less* — the subject is item 78's, what the prompt
+asks for, but no strand of it covers a floor on step count.
+
+**Where those observations come from, since the window is part of them.** The later run's plan is not
+on disk. Its gate marker and both of its cap-overrun records are in the sink and its usage row is in
+the ledger, but no decision marker was written and no session file carries it — the session is written
+when the TUI exits, which the strand below records, and that had not happened. So the earlier plan is
+re-readable and the later one is a reading of the live approval surface. Recorded that way
+deliberately: the eighteenth pattern is about this exact window, and both of its instances are in this
+entry.
 
 **What is lost where, per value, since the answers differ and a fix pass needs them apart.** The
 iteration count and the cost of an investigated plan exist on the loop result and are dropped at that
@@ -5109,6 +5207,19 @@ remainder. Checked in the other direction: promoting on the strength of a closed
 item 61 retroactively mis-bucketed, since it holds a closed bullet and stayed Neither on exactly this
 reasoning. **Neither.**
 
+**Re-checked again after the cost strand closed, and what governs is the rule already applied one
+strand ago rather than anything about this closure.** `9874eb91` closed the lexical path's zero-cost
+signature outright — the second strand-sized closure this entry has taken, where item 78's re-check
+was against partial ones. The note item 78 established still decides it: an entry does not become
+actionable by having a part removed, whatever the size of the part, and the bucket measures the
+remainder. That remainder is the previous set minus one — the routing predicate, the three
+step-guaranteeing mechanisms, the four caps, and a provenance surface that now shows a true cost and
+still says nothing about which path produced the plan or what was read to write it. This pass also
+*added* two open questions above rather than only removing one. Checked in the other direction, as the
+rule requires: promoting here would retroactively mis-bucket item 61, which holds a closed bullet and
+stayed Neither on this reasoning, and item 78 itself, which stayed Neither after two of its own
+strands partly closed. **Neither.**
+
 **Where the code lives:** the gate, its marker, the two early returns, the forced-steps regeneration
 and the body-seeding caps are all in `runOneShotInner`, `cli/dispatch.ts`; both lead-verb predicates
 are in `llm/taskShape.ts`; the minimal-plan synthesis, the forced-steps prompt branch and the slice
@@ -5123,8 +5234,15 @@ is in `core/runFeatureAgent.ts`. On the presentation side, the proposal action a
 store core, the rendering component and the action prompt gating on it are in the TUI's components
 directory, and the three cost-bearing events and their mapping are in the event-to-actions module;
 the investigation loop's re-emission of two of them is in `llm/planInvestigation.ts`, and the
-recording wrapper that writes the usage row is reached through `llm/factory.ts`. See item 77 for the
-cycle this gate sits in, item 78 for what the plan says once this context has produced it, and item
+recording wrapper that writes the usage row is reached through `llm/factory.ts`. For the cost
+closure: the optional callback, the usage extraction and the pricing call are in
+`generateExecutionPlan`, `llm/executionPlan.ts`; the exported rounding helper and the rolling-window
+aggregate the badge reads are both in `usage/usageTracker.ts`; the running total, the callback that
+folds into it and the wrapper that seeds it off the investigation's repaint are all in
+`runOneShotInner`, `cli/dispatch.ts`; and the two dollar figures, with the token suffix that hides at
+zero beside the cost that does not, are composed in the status-bar component. See item 77 for the
+cycle this gate sits in, item 78 for what the plan says once this context has produced it, item 76
+for the shared-name class this entry's second dollar figure is checked against and is not, and item
 73 for why sink counts are upper bounds.
 
 ## Status snapshot — a partition, not a priority ordering
