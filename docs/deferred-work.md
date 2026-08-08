@@ -4790,6 +4790,71 @@ three fifths. **About half the measured runs never executed at all**, matching t
 mix, and for those plan generation is the whole of the spend. A change that makes plans longer is
 therefore not a change to a small number.
 
+**Strand four — the prompt formatter and the approval renderer disagree about what a plan is, in
+both directions.** The formatter reads the objective, each step's title, description and likely-files,
+the scope summary and the risk hints, and emits them in that fixed order; the rendering component
+draws the same five plus the scope note and the three terminal reasons. Neither reads what the other
+reads, and until `edadd60c` neither side's omission was recorded anywhere.
+
+**Four fields reached the user and not the model, and three of the four are moot rather than
+pending.** The scope note was the live one — the only field carrying what the model could not see or
+had to assume — and `edadd60c` closed it. Of the three terminal reasons, two can never reach an
+executing model at all: the no-change and cannot-verify shapes are either returned early by the two
+conjunction gates in `runOneShotInner` that pair each with the problem-asserting predicate, or, on an
+additive task where those gates are inert, regenerated away by the forced-steps retry whose own
+prompt branch declares the three reason fields invalid. The third does reach the loop, and its
+*shape* already reaches the model — the answer-only predicate is read at two sites in `agentLoop.ts`,
+selecting the summary contract and gating the max-iterations wrapup — so what the formatter drops
+there is the reason text, not the distinction. Recording them as moot is the point: a later pass
+reading only the field list would file three fixes where none is owed.
+
+**Two fields reach the model and not the user, through a different function, and they persist to
+disk while rendering nowhere.** The per-step subagent eligibility flag and its type are emitted by
+`buildPlanAnnotationsBlock`, not by the formatter, as a delegatable-steps block. The rendering
+component's own props type declares only title, description and likely-files, so it cannot draw
+them — but the approval payload stringifies the whole step array, so both fields survive every hop
+into the store and into saved transcripts. Three of the five persisted plans carry them on disk,
+rendered nowhere. This half is open; nothing here proposes showing them.
+
+**A third asymmetry, smaller and now closed.** For a step with no likely files the formatter emitted
+a positive assertion of ignorance while the renderer emitted nothing. `edadd60c` dropped it, applying
+the principle `6dfe352f` had established one commit earlier on the renderer side — omit the label
+with the content rather than assert a placeholder — after confirming the placeholder string appeared
+nowhere else in the repository, in no test and no snapshot.
+
+**What that commit cost, which is the unusual part.** Nothing in output tokens: the scope note was
+already generated and already billed on every plan, and the change stops discarding it. What it adds
+is input, inside the first user message, which the approved-plan block already occupies and which
+sits inside the second cache breakpoint's prefix — so it is paid once at cache-write and read at a
+tenth thereafter. That asymmetry is why this half needed no cost decision while the half below does:
+the fields already exist, the content already exists, and only the discarding was a choice.
+
+**The corpus, anchored to the sessions that carry it.** Five plans persist in session transcripts,
+four dated 2026-07-31 and one 2026-08-08. The scope note is present on all five, running from about
+two hundred to about six hundred characters, mean under four hundred, which is a small fraction of
+the prose a plan already emits. At least three carry an unprompted admission of the model's own
+limits: one corrects its own relevant-files list, naming test files that do not reference the symbol
+the task named; one records that the exact clause it needs was never confirmed and must be located
+during implementation; one states that no entry-point file for the command it was asked to change
+appeared in its file list, and names what it assumed instead. **That is the strongest available
+argument that a dedicated uncertainty field would be filled honestly rather than padded** — the model
+already writes this content into the only free-prose field it has, on every plan measured, without
+being asked.
+
+**Ranked by groundedness, not usefulness, because the ranking is the decision.** *What the model
+could not see and therefore assumed* is the most grounded candidate available: the relevant-files
+list and the seeded bodies are both in the model's own prompt, so a claim about what was missing from
+them is a claim about its input, answerable without knowing anything about the repository. *A question
+back to the user* is the same class. *Prerequisites among the plan's own steps* are grounded while
+self-referential and stop being so the moment they assert repository state. *Per-step rationale* is
+grounded only for the handful of files whose bodies were actually seeded, and ungrounded for the
+paths delivered as names alone. **And rejected alternatives are ungroundable, which is worth stating
+in the strongest terms because it is the most useful-sounding candidate and the worst to add.** To
+reject an alternative is to claim it was viable and then rule it out; both halves require having read
+what was, by construction, not read. The constraint this entry already records applies to it directly,
+and item 79 records that nothing downstream would catch the resulting claim, since the user is the
+last reader before a plan takes effect.
+
 **Bucket — Neither, and the rule is carried deliberately while the precedent is not.** Item 77
 established one commit ago that a multi-strand entry is bucketed on what remains across its parts
 rather than on its readiest one, because promoting for the readiest strand alone would retroactively
@@ -4804,6 +4869,17 @@ would mis-bucket item 74 by the same argument item 77 made about its own precede
 design decision nobody has made, strand two is blocked on it and on a second change besides.
 **Neither.**
 
+**Re-checked after two strands partly closed, rather than inherited.** `e6eb298e` closed strand one's
+prompt-side half and `edadd60c` closed strand four's backward-looking half, so the question is whether
+what remains still fails the Actionable-now bar. It does, and by a wider margin than before: what
+closed were the two parts that needed no decision — removing instructions, and stopping a discard —
+and what is left is the part that needs one. Strand four's forward half is a ranking of five
+candidate fields with no choice made among them and one named unbuildable; strand one's remaining
+half is the same design decision it always was; strands two and three are unchanged. Applying the
+two-way check the rule requires: nothing here would cite this entry as precedent for promotion, and
+promoting it because two halves closed would say that an entry becomes actionable by having its
+easy parts removed, which is the opposite of what the bucket measures. **Neither, more firmly.**
+
 **Where the code lives:** the lexical template, the plan schema, both advisory-cap constants, the
 overrun marker, and the approved-plan renderer whose output is pinned are all in
 `llm/executionPlan.ts`; the investigation template, the iteration and file caps, and the completion
@@ -4812,8 +4888,15 @@ in `llm/agentLoop.ts`; the usage type and its empty and normalize helpers are in
 and the meter that populates it — along with the accumulator that already holds the read-and-write
 split — is in `llm/tokenBudget/TokenBudgetMeter.ts`. The plan's rendering component and the
 committing transcript region that draws it are in the TUI's components directory, and the file-body
-seeding with its caps is in `runOneShotInner`, `cli/dispatch.ts`. See item 77 for the approval cycle
-this content is presented through, and item 73 for why the figures above are upper bounds.
+seeding with its caps is in `runOneShotInner`, `cli/dispatch.ts`. For strand four: the formatter, the
+block that wraps it for the first user message, and the revision note that reuses it are all in
+`llm/executionPlan.ts`; the delegatable-steps block that carries the two subagent fields is
+`buildPlanAnnotationsBlock` in `llm/agentLoop.ts`, which is also where the answer-only predicate is
+read at its two sites; the two early returns and the forced-steps retry that make the other two
+terminal reasons moot are in `runOneShotInner`; the payload that stringifies the whole step array is
+in `llm/planApprovals.ts`, and the props type that declines to declare two of its fields is the
+rendering component's own. See item 77 for the approval cycle this content is presented through, and
+item 73 for why the figures above are upper bounds.
 
 ## 79. Plan context assembly: the gate that skips investigation routes on a lead verb, the context it hands the model is a handful of files and one wrong summary line, and the approval surface shows none of it
 
@@ -4934,11 +5017,23 @@ only in the gate marker. **Nothing about provenance is unavailable; all of it is
 makes this plumbing rather than instrumentation, and is the one part of this entry where the shape of
 a fix is not in question even though its surface is.
 
-**A plan declined at the gate persists nowhere.** Session files are written after a run completes, so
-the run on 2026-08-08 has none, and the plan's text — objective, steps, and the scope note in which
-the model reported its own missing context — is unrecoverable. What survives is the gate marker and
-two cap-overrun records, which between them give the branch, the lead verb and two field lengths. The
-content that would let anyone judge the plan is exactly the part that is gone.
+**A plan declined at the gate persists in full.** The session file is written when the TUI process
+exits, not when the run ends, so the plan rejected on 2026-08-08 is on disk complete: the
+`plan_ready` transcript entry the store appended, carrying the objective, all five steps with their
+likely-files, the scope summary, the scope note in which the model reported its own missing context,
+and every risk hint. The sink holds five records for the same run — the gate marker, the key-source
+line, both cap-overrun records, and the decision itself, a rejection on its first attempt. So the
+plan's *content* survives rejection, and the branch it took and the fact of the rejection survive
+beside it. What is absent is what the run cost — the session's own total reads zero, for the reason
+the strand above gives — and what was read to produce it. That is a provenance gap, not a
+persistence one.
+
+**Both halves of the preceding paragraph were false when first written here, and the way they became
+false is a repeatable error rather than a slip.** This entry originally said the plan persisted
+nowhere and that only three records survived. Both readings were taken while the run was still open
+— the decision marker was emitted minutes after the sink was read, the session written about an hour
+after that — and a measurement of an in-flight process was generalized into a claim about what
+exists. The eighteenth pattern is the general form and this is one of its two instances.
 
 **Bucket — Neither, on item 77's rule, and with the citations distinguished again.** Item 77
 established that a multi-strand entry is bucketed on what remains across its parts rather than on its
@@ -4992,7 +5087,7 @@ first (0):
 **Neither — a structural fact recorded, with no fix proposed** (33): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79
 
-Items 1, 2, 17, 18, 36, 38, 57, 61, 62, and 65 are partially closed or corrected; the
+Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, and 78 are partially closed or corrected; the
 classification above covers only the portion still open, not the whole entry.
 
 ---
@@ -5407,6 +5502,28 @@ skipped on the strength of the prediction. Predicting a null result does not exc
 run; the prediction is only trustworthy once it has been checked against something that actually
 executed.
 
+**The same property has a second limiting factor, found in `edadd60c`, and it is mechanical rather
+than design: a test block can report at most one failure, because the runner stops it at the first
+assertion that throws.** Two checks in one block therefore cannot distinguish two failure modes — on
+any input that fails the first, the second never runs, so its verdict is unobtainable rather than
+negative. That commit's three mutations against a newly-emitted section — removing it entirely,
+removing only its header, and removing only its content — produce three genuinely different outputs,
+and all three initially shared one predicted kill set for exactly this reason: the block asserting
+header-and-content could only ever report that the header check failed. Splitting it into two blocks
+turned "something broke" into "which thing broke," and the split was justified before running, not
+after reading a result. **The rule: when two mutations are expected to differ only in which half of a
+block's subject they destroy, the block is the wrong unit and has to be split, or the difference is
+unobservable no matter how carefully the kill sets are predicted.**
+
+**Its mirror, from the same pass, is about what an assertion looks at rather than where it sits.**
+One prediction in that commit diverged: a mutation removing only the section's header was expected to
+kill an all-fields block as well, and did not. That block asserts that every field's *content*
+reaches the output and never separately checks any label, so a header-only removal is invisible to
+it — correctly, since its subject is completeness of content. The lesson pairs with the one above:
+splitting a block raises the granularity at which failures can be *reported*, and choosing what each
+assertion inspects sets the granularity at which they can be *detected*. A kill-set prediction is a
+claim about both, and this one was wrong about the second while being right about the first.
+
 ## An eleventh pattern, beside the second: a precedent's applicability lives in what makes it safe, not in what makes it similar
 
 Reusing a nearby precedent because it shares a directory, a module, or an idiom is choosing on the
@@ -5735,3 +5852,37 @@ aimed at plan quality, and on the default path it would have been aimed at a mec
 and is not the operative one. This pass reached the mechanism first, so the pattern's cost was
 avoided rather than incurred. It gets a sentence rather than a pattern of its own: writing one about
 a failure that did not happen would be the same generalization-from-one-trace this pattern is about.
+
+## An eighteenth pattern: a measurement's window is part of its claim, and a reading taken while the writer is still running expires
+
+Both instances are in item 79 and both are mine. Reading the marker sink for a run that had just
+reached its approval gate, I found no decision record and wrote that the run was abandoned without
+one; the rejection was emitted minutes later, and the record exists. Reading the sessions directory
+for the same run, I found no session file and wrote that a plan declined at the gate persists
+nowhere and its text is unrecoverable; the session was written about an hour later, when the terminal
+process exited, and it carries the whole plan. Neither observation was wrong when taken. Both became
+false, in one case within minutes, and in both cases the sentence written into permanent record was
+not the observation but a generalization of it into a claim about what the system does.
+
+**Why this is not the seventeenth pattern.** That one is about a freshly written entry being the
+least-checked text, and its corrective is a re-derivation by the next pass. It would not have helped
+here: a re-derivation performed at the same moment would have reproduced the same absence and
+confirmed the wrong sentence. The defect is not insufficient checking, it is a measurement whose
+validity had an expiry the measurer did not think to name. Absence of a record is the one observation
+that cannot be strengthened by repeating it more carefully at the same time.
+
+**What makes it recognisable in advance is asymmetry between the two directions.** Finding a record
+present is durable — a record that exists will still exist later. Finding a record absent is
+provisional whenever anything that could still write it is alive. Every conclusion in this document
+resting on a zero inherits that: item 77's "the sink holds zero records" is sound only because the
+window it names is closed, and it says so; the same sentence about a currently-running process would
+not be. The two failures above both took a provisional absence and wrote it down as a durable one.
+
+**The check is one question, and it is cheap: is the process that would write this record still
+running?** For sinks, that is whether the run has terminated. For session files and envelopes, it is
+whether the terminal process has exited, which is later than the run ending and is exactly what
+caught the second instance — the write is triggered by process exit, not by the run's own completion,
+so a run can be finished, decided, and fully accounted for while its session file does not yet exist.
+When the answer is yes or unknown, the honest form is to state the window rather than the conclusion:
+"no record as of this reading" is a fact, "the run produced no record" is a claim that needs the
+window closed first.
