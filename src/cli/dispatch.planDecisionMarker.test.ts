@@ -121,7 +121,24 @@ beforeEach(() => {
   mockBuildCliSink.mockReturnValue({ onProgress: vi.fn() });
   mockCreateSpinner.mockReturnValue({ stop: vi.fn() });
   mockRunAuditPipeline.mockResolvedValue({ auditFindings: undefined, revisionDecision: undefined, earlyExit: null });
-  mockPreparePlanContext.mockResolvedValue({ projectSummary: "A TS project", relevantFilePaths: [] });
+  mockPreparePlanContext.mockResolvedValue({
+    projectSummary: "A TS project",
+    relevantFilePaths: [],
+    totalFileCount: 954,
+    rankedFileScores: [
+      { path: "src/utils/atomicWrite.test.ts", score: 51 },
+      { path: "src/utils/atomicWrite.ts", score: 51 },
+      { path: "src/utils/clipboardMailto.test.ts", score: 51 },
+      { path: "src/utils/clipboardMailto.ts", score: 51 },
+      { path: "src/utils/commandCacheLog.test.ts", score: 51 },
+    ],
+    grepMatchedPaths: [
+      "src/remote/toWireFrame.ts",
+      "src/remote/remoteControlAdapter.test.ts",
+      "src/remote/controlServer.ts",
+      "src/remote/remoteControlAdapter.ts",
+    ],
+  });
   mockReadAuditModeSetting.mockReturnValue("auto");
   mockLoadDiskModelSync.mockReturnValue({ planDepth: "quick" });
   mockIsNoChangePlan.mockReturnValue(false);
