@@ -4791,6 +4791,17 @@ task skips the investigation, and this marker only fires on the path that runs i
 fields are untested against real output as well as unusable for a rate, and whichever record
 exercises them first will also be the first to show whether they read as intended.
 
+**That record now exists, and all three fields read as intended.** The run item 79 records under the
+identifier beginning `fcbf3ede`, on 2026-08-09, is the twenty-sixth completion record and the first on
+the later side of `fc26fda3`, so the population above stays twenty-five for the window it names and is
+twenty-six overall. Its three fields were checked against the usage ledger rather than against
+themselves — the run billed four calls, and summing each column across them gives an uncached input of
+274, an output of 5609 and a cached read of 35451, each equal to the field of the same name on the
+completion record, with the record's own total of 5883 equal to input plus output. Two instruments,
+independently kept, agreeing field for field. **What this does not supply is a rate:** one record on
+the later side of that line is a shape confirmation, not a population, and the caution above about
+treating pre-`fc26fda3` records as absent rather than zero is unchanged.
+
 **What plan generation costs today, which is why this is a decision rather than an obvious yes.**
 Measured from the completion marker over a window running 2026-07-29 to 2026-08-01, collapsed on item
 73's key and therefore an upper bound on real events rather than a lower one: generation costs a mean
@@ -5007,16 +5018,116 @@ repository would still leave the file-count signal a near-constant, which is the
 need to vary. Waiting costs nothing and buying does not fix the sampling problem it would be bought
 to fix.
 
-**The zero has now been checked against every independent signal, and the question it was supposed
-to settle turns out to be unasked rather than answered.** Read on 2026-08-09 across the five stores
+**The zero was checked against every independent signal, and at the moment of that reading the
+question it was supposed to settle was unasked rather than answered — `fcbf3ede` has since asked it,
+and the answer is recorded below.** Read on 2026-08-09 across the five stores
 that key on the run identifier — the decision marker, the investigation-completion marker, the
-archetype marker, the usage ledger and the persisted plan entries — not one holds a record dated
-after `dc8a1e60`, and neither does the marker sink under any name at all, whose newest record of any
-kind predates that commit. So the gate marker's silence is explained by nothing having run rather
-than by a broken emission. **`100d1333` does not close the question and cannot:** that commit pins
+archetype marker, the usage ledger and the persisted plan entries — not one held a record dated
+after `dc8a1e60`, and nor did the marker sink under any name at all, whose newest record of any
+kind predated that commit. So the gate marker's silence was explained by nothing having run rather
+than by a broken emission, and that inference is the one the run below confirms. **`100d1333` does
+not close the question and cannot:** that commit pins
 what the emission literal produces against a mocked context, where whether a production run writes
 the widened payload correctly to the sink is a different claim, and only a plan-mode run dated after
-`dc8a1e60` will settle it.
+`dc8a1e60` will settle it. **That condition has since been met**, which makes the sentence a
+fulfilled prediction rather than a corrected one.
+
+**The run happened, and the question closes: the widened payload emits correctly in production.** A
+plan-mode run on 2026-08-09 under the identifier beginning `fcbf3ede` took the investigate route,
+produced a plan and had it rejected at the modal. Its gate-marker record carries nine payload keys —
+the eight the emission site writes unconditionally plus the conditional model key — which is exactly
+what the site produces on that branch and exactly what `100d1333` pins against a mock. So `dc8a1e60`
+and `100d1333` are both confirmed against real output for the first time, and the emission is neither
+broken nor drifted. **The lifecycle around it is coherent:** the decision marker, the archetype marker
+and the investigation-completion marker all carry the same run identifier at both the record and
+payload levels, and their order is gate, then investigation completing naturally at four iterations,
+then the modal, then a rejection recorded about forty seconds later. **Recorded as a tally against the
+eighteenth pattern rather than as a lesson:** that entry's rule is to state a reading's window instead
+of generalising it, and this entry's zero-check did exactly that — it carried its own date, named the
+one thing that would settle the question, priced buying the data and declined it on the ground that
+ordinary use would supply it at no marginal cost. Ordinary use supplied it within hours.
+
+**The first ranker distribution from a production run, and it is the second sample rather than the
+first of any kind.** The five scores are 84, 74, 68, 66 and 66 — a narrow spread with a tie at the
+bottom. The prior sample this entry already records, taken by calling the context builder directly at
+`3868719a` to generate fixtures, returned five results at a single tied score, so the two differ in
+shape and neither is a production-and-direct-call pair of the same thing. What the pair licenses is
+almost nothing yet, and that is the point worth writing down: a spread this narrow discriminates
+weakly, and on this run the highest-scored file was not the one the task was about, so a routing rule
+keyed on the top score or on the gap between the top two would have keyed on the wrong file. **No
+criterion is drawn from it.** Two observations, one of them not from a real run, against a signal the
+gate does not consult — the seventeenth pattern's precedent applies, and the honest position is that
+the distribution is now observable and still unmeasured.
+
+**The total file count came back 954, the same value the earlier sample holds, and that confirms a
+prediction this entry already made.** The fixture from the direct call holds exactly 954 and the prose
+above rounds it to the high nine hundreds. Two different trees and two unrelated tasks returning an
+identical count is what this entry predicted when it declined to buy data — that a deliberate set drawn
+from one repository "would still leave the file-count signal a near-constant, which is the thing it
+would most need to vary." It is a near-constant. This is agreement between two readings of the same
+repository rather than two independent facts, so by the thirteenth pattern's rule it is not
+corroboration of anything; it is the predicted degeneracy showing up on schedule.
+
+**Context quality on this run, recorded as its own observation and not filed under a defect above.**
+The grep field returned four paths under the remote-control tree, none of them related to a task about
+seeding caps, and the ranked five were dominated by files matching only the unrelated numeric literals
+the task happened to quote. The plan located the correct code regardless, and it did so by searching
+rather than by following what it was handed: the investigation's own scope note states that the loop in
+question is in none of the listed relevant files, names where it actually is, and dismisses four of the
+five ranked files by name as matching only those literals. **The seeding surface contributed nothing,
+and cannot be assessed from this run at all** — its quick-path loop sits in the branch this run did not
+take, and the investigation's own fallback copy sits behind an early return that fired because the plan
+parsed, so neither executed. Any reading of this run as evidence about what seeding is worth is
+therefore unavailable; what it is evidence about is the ranked list's value as an investigation
+starting point, which is a different surface and the one the prompt calls "read these". **A sharper
+observation sits beside it:** three of the four grep paths are the same remote-tree files the earlier
+sample returned, for a task with nothing in common with this one. That points at the grep signal being
+close to task-independent for this repository rather than at a single false positive, which is a
+stronger claim than the earlier sample alone could support — stated at two observations, with no
+criterion drawn.
+
+**Task intent is read nowhere, and the consequence is a permission boundary rather than a
+presentation preference.** The task began with the word Investigate and asked for a report. That word
+is in neither lead-verb list, so the gate recorded a null lead verb and the default-non-additive
+reason, routing it exactly as it would route a fix request — the gate has no notion of a request for
+findings. The requested finding was in fact delivered, inside the plan's own steps, so the content was
+right and the terminal shape was not: five implementation steps editing three source files. **What
+makes the shape load-bearing is the scope guard**, which returns a hard block on every write when a
+plan is answer-shaped, so an answer-only plan cannot write by construction and a stepped plan can. This
+plan, had it been approved, would have edited source in answer to a request to report. **This is not
+the refusal defect `b21d2bbf` closed**, and conflating the two would mis-scope both: refusal covers a
+plan concluding no change is needed, where this is a task never asking for a change. See item 78 for
+the schema side of what a plan has room to say.
+
+**Whether the model chose that shape is settled, and it chose it.** The answer-only permission is
+passed to the investigation prompt as a literal true at its single call site, so the shape was offered.
+The alternative — that the model returned no steps and the forced-steps net overwrote the result — is
+ruled out by the billing: the usage ledger holds exactly four calls for this run, matching the recorded
+iteration count, and their costs sum to the completion marker's figure and the session total exactly.
+Both the forced-steps regeneration and the investigation's own fallback would have made a fifth call,
+and there is none. So the five steps came out of the investigation loop's own final message, with the
+answer shape available and unused.
+
+**What this run cost, recorded as a point and not merged into the average above.** Four iterations,
+about `$0.2688`, terminating naturally. That is above the whole recorded range, which runs to about
+`$0.166`, at an iteration count below the recorded mean of about 4.8 — so whatever made it dear, it was
+not thinking longer. **One point cannot move a twenty-five-record mean and this one is not averaged into
+it.** Beyond the different window and the single observation, there is a confound that rules out even an
+informal comparison: every call in the recorded window was Sonnet or Haiku and not one was Opus, where
+this run was Opus throughout, so the gap is at least partly a price list rather than a behaviour. It is
+recorded as a flag that the window's figure may no longer describe what a plan costs today, and as
+nothing more than that.
+
+**A note on the plan's own citations, recorded as an observation about plan output and not as a
+defect.** The plan referred to code by file and line throughout. This document's shape-reference
+convention governs this document and not Zone's output, and the distinction matters: a plan is consumed
+minutes after it is written, by a model holding the same tree, so line citations are accurate when made
+and expire long after they stop being needed. Two narrow grounds make it worth writing down anyway. A
+stored plan can be replayed by durable resume against a tree that has since moved, which is the one path
+where the citations outlive their accuracy — and the guard reads the likely-files list, which carries
+paths and not lines, so the exposure is to the model's comprehension rather than to write scoping. And
+the plan cited the same loop with two different line ranges in two places, which is a self-consistency
+wrinkle rather than staleness.
 
 **Two drifts in the marker's shape were unpinned until `100d1333`, and neither is the one its test
 file looked like it covered.** Every payload assertion in the gate-marker file was a subset match or
@@ -5915,6 +6026,28 @@ turned a bare observation about the third consumer into a named undetermined sta
 gains open material beside what it loses. Checked in the other direction, unchanged: items 61 and 78
 both hold closed parts and stayed Neither, and nothing cites this entry for a bucket precedent.
 **Neither.**
+
+**Re-checked a tenth time, after `fcbf3ede` closed the production question, and this is the first
+re-check whose remainder actually shrinks.** The unasked production question is named in the
+enumerated remainder and is now answered, leaving four of the five: the routing predicate, the three
+step-guaranteeing mechanisms, the four caps, and the thirty-session expiry. That does not promote the
+entry. Item 78's note governs as before, and this pass adds more open material than it removes — the
+terminal-shape finding and its permission boundary, the grep signal looking close to task-independent,
+and a cost point that may mean the recorded average no longer describes current behaviour. Checked in
+the other direction, unchanged: items 61 and 78 both hold closed parts and stayed Neither, and nothing
+cites this entry for a bucket precedent. **Neither.**
+
+**Why this re-check and the one before it reach opposite answers about the same list, written once so
+the pair reads as the rule rather than as drift.** `0f072487` recorded that its closure removed nothing
+from the enumerated remainder; this one records that its closure removes an item. Both are right,
+and the difference is not about how large either closure was. **Whether a closure shrinks the
+enumerated remainder depends only on whether the thing it closed was enumerated there in the first
+place.** The refusal defect `b21d2bbf` fixed was recorded in this entry's body and never listed among
+what remains, so closing it left the list untouched; the production question was listed, so answering
+it takes the list from five to four. A closure recorded only in an entry's body leaves the remainder
+alone by construction, however substantial it is. Two instances, and nothing further is drawn from
+them — the seventeenth pattern's precedent applies to this sentence as much as to any other written in
+the same commit as its own subject.
 
 **Where the code lives:** the gate, its marker, the two early returns, the forced-steps regeneration
 and the body-seeding caps are all in `runOneShotInner`, `cli/dispatch.ts`; both lead-verb predicates,
