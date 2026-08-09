@@ -224,7 +224,8 @@ describe("Non-refusal plan-gen failure — quick path behavior", () => {
     // never runs, so it must not be the only place the reason gets verified.
     // Catches a careless recombination with the next test (an assertion moved into this
     // body without updating this count) — not a deliberate merge, which would touch this
-    // line anyway, and not the next test being deleted outright, which nothing here can see.
+    // line anyway, and not the next test being deleted outright: the pins do not catch
+    // that, closing it would take a different assertion, and nobody has written one.
     expect.assertions(6);
     mockPreparePlanContext.mockResolvedValueOnce(null);
     mockRunLlmPatchFlow.mockResolvedValueOnce({ ok: true, decisionMode: "safe_to_apply" });
