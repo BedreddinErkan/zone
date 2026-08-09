@@ -231,6 +231,30 @@ describe("[zone-plan-mode] carries the decision inputs alongside the outcome", (
   });
 });
 
+// Every other payload assertion in this file uses toMatchObject or toHaveProperty, and both
+// ignore keys they were not asked about. Two shape drifts are therefore invisible to all of
+// them: a key ADDED to the literal, and `model` leaking onto the lexical branch (the
+// investigate test asserts model is present; nothing asserts it is absent). An exact key-set
+// comparison catches both, and names the offending key in its own diff. Omission is caught by
+// construction — JSON.stringify drops undefined, so a dropped field shrinks the set and fails.
+const LEXICAL_KEYS = [
+  "runId", "mode", "gatedBy", "leadVerb",
+  "totalFileCount", "rankedFileScores", "grepMatchedPaths", "relevantFileCount",
+];
+const INVESTIGATE_KEYS = [...LEXICAL_KEYS, "model"];
+
+describe("[zone-plan-mode] emits exactly the documented key set for its branch", () => {
+  it("quick-lexical branch emits eight keys — no model", async () => {
+    await runOneShotInner(ADDITIVE_TASK, BASE_CONFIG, "run-keys-lexical", { mode: "plan" });
+    expect(Object.keys(planModeCalls()[0]!).sort()).toEqual([...LEXICAL_KEYS].sort());
+  });
+
+  it("investigate-first branch emits nine keys — the same eight plus model", async () => {
+    await runOneShotInner(NON_ADDITIVE_TASK, BASE_CONFIG, "run-keys-investigate", { mode: "plan" });
+    expect(Object.keys(planModeCalls()[0]!).sort()).toEqual([...INVESTIGATE_KEYS].sort());
+  });
+});
+
 describe("gateLeadVerb / gateMode threaded into the runLlmPatchFlow call", () => {
   it("quick-lexical branch forwards leadVerb:\"add\" and mode:\"quick-lexical\"", async () => {
     await runOneShotInner(ADDITIVE_TASK, BASE_CONFIG, "run-thread-additive", { mode: "plan" });
