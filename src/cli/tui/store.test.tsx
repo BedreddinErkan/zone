@@ -437,6 +437,8 @@ describe("PLAN_READY_PROPOSED", () => {
     expect(entry.steps).toEqual(PLAN_READY_ACTION.steps);
     expect(entry.riskHints).toEqual(PLAN_READY_ACTION.riskHints);
     expect(entry.scopeSummary).toBe(PLAN_READY_ACTION.scopeSummary);
+    expect(entry.planId).toBe(PLAN_READY_ACTION.planId);
+    expect(entry.runId).toBe(PLAN_READY_ACTION.runId);
   });
 
   it("still sets modalView:'plan_ready' and planReadyProposal, unchanged from before", () => {

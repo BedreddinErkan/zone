@@ -71,6 +71,10 @@ export type TranscriptEntry =
   | { kind: "post_execute_diffs"; files: StagedFile[] }
   | {
       kind: "plan_ready";
+      // Absent on entries persisted before these two fields existed; the disk loader casts
+      // unchecked rather than validating, so absence there is not distinguishable from a bug.
+      planId?: string;
+      runId?: string;
       objective: string;
       steps: Array<{ title: string; description: string; filesLikely: string[] }>;
       scopeNotes?: string;
@@ -897,6 +901,8 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
           ...flushed.transcript,
           {
             kind: "plan_ready" as const,
+            planId: action.planId,
+            runId: action.runId,
             objective: action.objective,
             steps: action.steps,
             ...(action.scopeNotes ? { scopeNotes: action.scopeNotes } : {}),
