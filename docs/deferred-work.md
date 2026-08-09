@@ -5337,11 +5337,63 @@ cycle this gate sits in, item 78 for what the plan says once this context has pr
 for the shared-name class this entry's second dollar figure is checked against and is not, and item
 73 for why sink counts are upper bounds.
 
+## 80. The scope-revision approval surface is wired end to end and cannot fire, and the document that justified keeping it names a surface that has since been deleted
+
+**What it is:** a complete approval surface — proposer, pending queue, resolver, TUI modal, and a
+per-run cleanup call — exists and is imported and rendered, while the one function that would put
+anything into it has no caller anywhere outside tests. Found by grep while checking a claim about
+one of its parts, not by looking for dead code.
+
+**The chain, each link established by its own grep.** `requestRevisionApproval`
+(`llm/revisionApprovals.ts`) is the only producer of the `scope_revision_proposed` event; searching
+the non-test tree for it returns its own declaration and nothing else. That event is the only thing
+that dispatches `PLAN_PROPOSED`, which is the only writer of the store's scope-revision proposal
+field, and the TUI renders `PlanModal` behind a non-null test on exactly that field. So the modal is
+mounted in the component tree and gated on a condition nothing can satisfy. **The other half of the
+surface is wired to real callers, which is what makes this worth recording rather than obvious:**
+the resolver is called from the CLI approvals module and from the modal itself, and
+`runOneShotInner` calls the queue's per-run reject helper in its cleanup — a cleanup that drains a
+queue nothing can fill, on every run.
+
+**The tool that looks like the trigger is not the trigger.** `suggest_scope_change` exists, is
+described in the tool definitions, and is handled in the agent loop — but its handler emits a
+`suggest_scope_change` structured event and pushes an acknowledgement, and it never reaches
+`requestRevisionApproval`. Two similarly-shaped names for two unconnected paths, which is item 76's
+class one instance further on; a reader tracing from the tool would conclude the surface is live.
+
+**The design document's stated reason for keeping it is stale in a way its own text cannot show.**
+`DESIGN-plan-mode-redesign.md` records the decision as keep-for-web, unwire-from-TUI: the modal and
+the approvals module stay for the HTTP patch path, which the document says speaks this event, and
+are removed only as the plan-mode gate. **The CLI-dead half of that is true at the tree this was
+established against and remains true.** What has changed underneath it is the other half: the HTTP
+server module that path named is gone, recorded in this repository's own contributor guidance as
+removed. So the justification survives as written while the surface it points at does not, and
+nothing in the document itself would reveal that.
+
+**Bucket — Neither, and the reason is which decision is missing rather than how much work it is.**
+Deleting the chain is mechanically small and the entry could specify it in a sentence, which is what
+the Actionable-now bar asks for. What is not settled is whether scope revision is a feature this
+project still wants: the tool that would front it is live in the toolset, the agent loop already
+handles it, and only the approval half is orphaned — so deletion and rewiring are both coherent, and
+nobody has chosen. That is a decision missing, not a specification missing, which is item 60's own
+reason for sitting here rather than item 76's. **Checked in the other direction, as item 77
+requires:** promoting this on the strength of "the deletion is small" would retroactively mis-bucket
+item 60, which is blocked on exactly the same kind of prior decision and stayed Neither for it.
+**Neither.**
+
+**Where the code lives:** the producer, the queue and the resolver are all in
+`llm/revisionApprovals.ts`; the modal and its own resolver call are
+`cli/tui/components/PlanModal.tsx`; the store field and the `PLAN_PROPOSED` case are in the TUI's
+store core, the event's mapping is the `scope_revision_proposed` case in `eventToActions.ts`, and
+the per-run cleanup call is in `runOneShotInner`, `cli/dispatch.ts`. The tool that is not the
+trigger is defined in `tools/toolDefinitions.ts` and handled in `llm/agentLoop.ts`. See item 76 for
+the shared-name class the tool/event pair belongs to, and item 60 for the bucket precedent.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 79 to find out which ones still need something. No index of
+reader the trouble of reading all 80 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -5354,8 +5406,8 @@ first (0):
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (7): 1, 4, 18, 23, 57, 63, 75
 
-**Neither — a structural fact recorded, with no fix proposed** (33): 2, 3, 5, 9, 11, 15, 17, 19,
-27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79
+**Neither — a structural fact recorded, with no fix proposed** (34): 2, 3, 5, 9, 11, 15, 17, 19,
+27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, and 79 are partially closed or corrected; the
 classification above covers only the portion still open, not the whole entry.
@@ -5433,6 +5485,34 @@ survives is three comments describing a gate that no longer exists. Items 43, 52
 candidates and none fits — the first is a live function whose return value has no consumer, the
 second is computed-and-unused values, the third is about the absence of detection tooling rather
 than any instance of what it would detect.
+
+**The densest instance so far, and it is in the file injected into every prompt.** A sweep of the
+contributor-guidance file in `e8c5a96b` enumerated every one of its file-and-line citations: of the
+fourteen it carried, twelve fell outside the sentences that commit was already editing, and every
+one of those twelve misses at the tree it was checked against. Two are off by more than a hundred
+and fifty lines, one names a function that has moved several hundred lines down its file, one lands
+on an unrelated comment, and one points at a construct whose content the same file marks protected
+until a named date — a wrong pointer into a protected zone, which is worse than a wrong pointer into
+ordinary code, because the protection is what a later pass is supposed to check before trimming and
+the pointer is how it would find it. **The smallest drift was counted, not waived.** One citation
+carries a tilde prefix already conceding approximacy and misses by roughly eighty lines; the test
+applied to it was the same one applied to the other eleven — does the citation land close enough
+that the named content is visible from it — and at that distance it does not. A prefix that says
+"don't expect exact" is not a prefix that says "exempt from the test."
+
+**Two failure classes in one file, kept apart because the remedies differ.** That same sweep found
+thirteen false symbol-or-value claims in the same document, which is a different defect from a
+stale pointer: a wrong value misdescribes behaviour and is caught by grepping the symbol, while a
+wrong pointer describes nothing and resolves to *something* every time, which is this section's
+original point. Collapsing them into one figure would hide that the first class is mechanically
+detectable by the very convention this section prescribes and the second is not detectable at all
+without following each pointer by hand. **What the fix pass applied, and where it came from:** the
+seeding claim in that file was rewritten in terms of its three named constants and the loop's own
+control keyword rather than the file count those constants imply, on the reasoning this section
+already states — a derived number has no symbol to grep, so it goes stale silently when either
+constant moves, where a symbol name fails loudly. That is this section's criterion reused, not a
+new one; recorded because it is the first time it has been applied to a *computed* claim rather
+than to a citation.
 
 ## A second pattern, a few commits apart: self-reference defeats a mutation test
 
@@ -5559,6 +5639,29 @@ file's location and its size — while the entry it "corrected" had been right. 
 records the other direction, where a review correction proposed a comparison point, the plan
 accepted it, and the implementing pass rejected it on measurement rather than argument. In both
 cases what settled it was going and looking, not the seniority of the claim.
+
+**A third instance, and the sharpest, because both the claim and its correction were wrong and the
+correction was the worse of the two.** An establish pass settled a question about a TUI modal by
+quoting a design document, which is the plainest form of this failure — that document had already
+been shown, in the same pass, to describe an escape hatch that was never implemented, so it was
+known not to be authority for current state at the moment it was cited. The correction grepped the
+production tree instead and reported the modal wired unconditionally into the component tree,
+contradicting the document. **That correction was also false, and it read as settled precisely
+because it arrived as a correction.** The modal is rendered behind a non-null test on a store field;
+the only writer of that field is one event; the only producer of that event is a function with no
+caller outside tests. So the document's own claim was true where it mattered and the correction was
+wrong on both halves — the render is conditional, not unconditional, and the path is dead, not live.
+Item 80 records the surface.
+
+**What the correction skipped is nameable and cheap: wiring is not reachability.** Grepping an
+import and a render site establishes that a component is *connected*; it says nothing about whether
+the condition guarding it can ever hold. The second question is a different grep — walk back from
+the guard to whatever writes it, and from there to whatever produces *that*, until you reach either
+a live caller or an empty result — and it is the one that decides whether code runs. The first grep
+answers "is this attached," the second answers "can this fire," and only the second was ever the
+question. Recorded beside the corollary rather than as its own pattern because the mechanism is
+identical to what this section already states: the correction lost to going and looking, and being a
+correction is what stopped it being looked at.
 
 ## A sixth pattern, following the fifth: a mutation that reroutes cannot prove suppression
 
