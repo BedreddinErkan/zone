@@ -5007,6 +5007,50 @@ repository would still leave the file-count signal a near-constant, which is the
 need to vary. Waiting costs nothing and buying does not fix the sampling problem it would be bought
 to fix.
 
+**The zero has now been checked against every independent signal, and the question it was supposed
+to settle turns out to be unasked rather than answered.** Read on 2026-08-09 across the five stores
+that key on the run identifier — the decision marker, the investigation-completion marker, the
+archetype marker, the usage ledger and the persisted plan entries — not one holds a record dated
+after `dc8a1e60`, and neither does the marker sink under any name at all, whose newest record of any
+kind predates that commit. So the gate marker's silence is explained by nothing having run rather
+than by a broken emission. **`100d1333` does not close the question and cannot:** that commit pins
+what the emission literal produces against a mocked context, where whether a production run writes
+the widened payload correctly to the sink is a different claim, and only a plan-mode run dated after
+`dc8a1e60` will settle it.
+
+**Two drifts in the marker's shape were unpinned until `100d1333`, and neither is the one its test
+file looked like it covered.** Every payload assertion in the gate-marker file was a subset match or
+a property check, and both ignore keys they were not asked about — so a key **added** to the literal
+was invisible to all of them, and `model` **appearing on the lexical branch** was invisible too,
+since one test asserts that key present on the investigate route and nothing asserted it absent on
+the other. `100d1333` pins the exact emitted key set per branch, eight keys on the lexical route and
+nine on the investigate one, one assertion each.
+
+**What that pin covers and what covers the rest, written together so neither is later read as a
+gap.** The key-set assertions compare names and not values, and **the values are covered separately
+and by evidence rather than by inspection**: the four per-field assertions sit at the shared emission
+site, and four single-field substitutions run at that site each killed exactly its own per-field
+assertion and nothing else, which is what establishes that a wrong value is caught on either route —
+the literal fires once before the branch split, so one assertion per field suffices for both. Rename
+and drop were already covered before that commit as well, since a subset matcher fails when a key it
+names is missing. The pin is credited with the two drifts nothing caught and with nothing else.
+
+**This is not the suite-size pin this entry declined, and the resemblance is worth dismissing rather
+than leaving to a later reader.** Both are assertions about a set rather than a value, which is where
+the likeness stops. The two objections recorded against the declined option were that it moves every
+time anyone adds any test to the block, and that a test would then fail for a reason with nothing to
+do with its own subject. Neither transfers: the key-set pin reads the marker's own payload rather
+than the suite's shape, so no test added anywhere moves it, and it fails only when the marker literal
+is edited — which is the edit that should be reviewed — with the failing test's subject being exactly
+that literal's shape. The declined option stays declined on its own reasoning.
+
+**How the shape was settled, recorded as method and earning no essay.** Four investigate-side
+per-field assertions were planned from a reading of the emission site and dropped before being
+written, once the reading's own consequence — a shared literal makes them redundant — was followed
+through. The four substitutions were then run and confirmed it. That is the fifth pattern's rule
+working as prescribed rather than being learned, which is a tally and not a lesson, so the essay is
+left alone.
+
 **A sibling predicate in the same module disables both refusal paths for the same task shape.** The
 two early returns that honour a plan coming back cannot-verify or no-change are each a conjunction
 with `taskAssertsProblem`, which tests its own additive lead-verb list first and returns false before
@@ -5802,6 +5846,16 @@ is the routing predicate, the three step-guaranteeing mechanisms, the four caps,
 none of them a specified fix. Checked in the other direction, unchanged: items 61 and 78 both hold
 closed parts and stayed Neither, and nothing cites this entry for a bucket precedent. **Neither.**
 
+**Re-checked an eighth time, after a coverage gap closed rather than a defect.** `100d1333` pinned
+the marker's emitted key set per branch, which closes a strand of the test surface and nothing about
+the gate itself. Item 78's note applies unchanged: a strand closing does not promote its parent to
+Actionable now. The same pass also added open material rather than only removing it — the production
+question the marker was widened to answer is now recorded as unasked rather than unanswered, and no
+plan-mode run has occurred that could ask it. What remains is the routing predicate, the three
+step-guaranteeing mechanisms, the four caps, the thirty-session expiry, and that unasked question,
+none of them a specified fix. Checked in the other direction, unchanged: items 61 and 78 both hold
+closed parts and stayed Neither, and nothing cites this entry for a bucket precedent. **Neither.**
+
 **Where the code lives:** the gate, its marker, the two early returns, the forced-steps regeneration
 and the body-seeding caps are all in `runOneShotInner`, `cli/dispatch.ts`; both lead-verb predicates
 are in `llm/taskShape.ts`; the minimal-plan synthesis, the forced-steps prompt branch and the slice
@@ -6553,6 +6607,18 @@ to how many elements survive fails it. Set beside the first, the error is symmet
 credited an assertion with inspecting *more* than it does, the other with inspecting *less* — and in
 both the assertion was right and only the prediction about it was wrong. Neither is a coverage gap,
 and treating either as one would have meant weakening a correct test to match a wrong forecast.
+
+**A third instance, and it contrasts with the other two rather than refining them.** `100d1333`
+pinned a gate marker's emitted key set per branch. Before that commit, eight assertions across one
+file covered that marker's payload and every one of them was a subset match or a property check — so
+none could see a key added to the payload, and none could see a conditional field appearing on the
+branch that should omit it. The rule this section already states covers the mechanism exactly: what
+an assertion inspects sets what it can detect. **The contrast is with this section's own closing
+claim that neither instance is a coverage gap.** That holds for both of them and does not hold here:
+this one was a coverage gap, and closing it meant adding an assertion rather than leaving a correct
+test alone. What distinguishes the two kinds is deliberately not written down — one instance on the
+coverage-gap side is too thin to draw a criterion from, and the seventeenth's precedent is to leave
+the line unwritten until a second instance earns it.
 
 **The splitting rule's own second instance, and it arrived by re-derivation rather than by
 citation.** At `2238f65d` one test asserted both that a swallowed fault's diagnostic carried a
