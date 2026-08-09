@@ -4922,6 +4922,22 @@ the file list. And the file list exists by then: `runOneShotInner` awaits the co
 *before* it evaluates the branch, so the decision about whether the model needs to read anything is
 taken with the list of what it would read already in hand and unexamined.
 
+**Three more signals now reach the caller and are equally unexamined, which is a change in what is
+available rather than in what the gate does.** The context preparation computed the scanner's own
+total file count, the ranker's per-file scores, and the raw grep-match set, and returned none of
+them: its result type carried the project summary and the merged path list alone, so all three died
+at that function's return. `774c9592` returns them raw — a count, score pairs, and a path list, with
+no threshold and no classification — on the reasoning that whatever a gate concludes from a score
+distribution is the gate's business rather than the context builder's. The grep field is the set as
+the matcher handed it over, before the filter that drops paths the ranked list already holds; it is
+not a pre-cap value, because the matcher applies its own ceiling internally and returns an
+already-bounded set. **Nothing reads any of the three, deliberately**, and the reason survives only
+in that commit's message, which is the part a later pass is likeliest to lose: they exist so the
+branch above can be decided on the context it already has, and until something decides to, they read
+as three dead fields. The strand is unchanged in substance — the gate still consults a lead verb and
+nothing else — and what moved is that the material it would need sits on the caller's side of the
+boundary instead of dying inside it.
+
 **A sibling predicate in the same module disables both refusal paths for the same task shape.** The
 two early returns that honour a plan coming back cannot-verify or no-change are each a conjunction
 with `taskAssertsProblem`, which tests its own additive lead-verb list first and returns false before
@@ -5210,19 +5226,27 @@ re-readable and the later one is a reading of the live approval surface. Recorde
 deliberately: the eighteenth pattern is about this exact window, and both of its instances are in this
 entry.
 
-**The gate's own test surface could not see which branch fired, and `a4824f39` closed that in two
-files of three.** The decision-marker file ran an additive fixture through the gate on every one of
+**The gate's own test surface could not see which branch fired, and it is now closed across all
+three files.** The decision-marker file ran an additive fixture through the gate on every one of
 its tests while asserting only on the decision marker's payload, which carries no plan-derived field
 — run identifiers, the decision, the attempt number, the reviewed flag, and nothing read off a plan —
 so every one of them was blind to the routing its own comments assumed. The answer-only safety-net
-file was blind the same way. Each gained one assertion naming which of the two generation functions
-was called. **The stepless-replan file stays open**: all eight of its tests run the same additive
-fixture through the gate with no routing assertion, and each queues two plan responses expecting the
-first to be consumed by the initial call and the second by the replan — an ordering that a
-misroute silently re-slots. Left open deliberately rather than missed; it is characterized here so a
-later pass does not have to re-derive it. Recorded in this entry rather than as its own because the
-subject is this gate's observability, which is what the entry is about, and the blindness is a
-property of the gate's tests rather than of any mechanism the other entries own.
+file was blind the same way. `a4824f39` closed those two, each gaining one assertion naming which of
+the two generation functions was called, and `2d5316af` closed the stepless-replan file the same way.
+That last file was the one worth measuring: each of its tests queues two plan responses expecting the
+first to be consumed by the initial call and the second by the replan, an ordering a misroute
+silently re-slots. Recorded in this entry rather than as its own because the subject is this gate's
+observability, which is what the entry is about, and the blindness is a property of the gate's tests
+rather than of any mechanism the other entries own.
+
+**What the blindness actually cost is visible in the mutation that closed it, and it is not what
+"blind" first suggests.** Inverting the gate's default arm killed every test in that file. Five died
+on a call-count or length mismatch downstream of the replan draining the wrong queued value, three
+crashed reading a second generation call that no longer existed, and one reported the routing fact
+directly — the assertion added for it. So a misroute was always going to fail that file loudly; what
+the file could not do was say what had gone wrong, and a reader would have spent the failure on the
+replan ordering rather than on the branch above it. The distinction is worth keeping: these tests
+were not insensitive to the defect, they were unable to name it.
 
 **A leaked environment stub in the refusal-path file was also closed there, and it had not been
 doing harm.** That file pinned the routing override for two of its blocks and never restored it,
@@ -5230,6 +5254,16 @@ where four sibling files restore the same variable. Every test downstream of the
 file wanted the pinned value anyway, and a full-suite run immediately before and immediately after
 the fix returned identical totals, which is the evidence that nothing outside the file had been
 inheriting it.
+
+**The opposite failure of the same discipline sits in the context builder's own test file, and the
+pair is what makes either one legible.** Two environment variables are read on that path — a scan
+ceiling in the repository scanner and a context-file cap in the ranker — and neither was pinned
+anywhere in that file, so every assertion in it ran against whatever the developer's shell happened
+to hold. `774c9592` stubs both to their own coded defaults and unstubs after each test. The first
+instance was a stub set and never restored, leaking outward to whatever ran next; this one is a read
+never pinned, leaking inward from the ambient environment. Opposite directions, one missing
+discipline — a test file owns the environment it reads as well as the one it writes, and only the
+writing half had been noticed here before.
 
 **What is lost where, per value, since the answers differ and a fix pass needs them apart.** The
 iteration count and the cost of an investigated plan exist on the loop result and are dropped at that
@@ -5311,6 +5345,16 @@ still says nothing about which path produced the plan or what was read to write 
 rule requires: promoting here would retroactively mis-bucket item 61, which holds a closed bullet and
 stayed Neither on this reasoning, and item 78 itself, which stayed Neither after two of its own
 strands partly closed. **Neither.**
+
+**Re-checked a third time, after the test-surface strand closed, and the rule does not need
+restating.** `2d5316af` closed the last of the three blind files, which is the third strand-sized
+closure this entry has taken, and item 78's note has now decided all three the same way. The
+remainder is what it was: the routing predicate, the three step-guaranteeing mechanisms, the four
+caps, and a provenance surface that still says nothing about which path produced a plan or what was
+read to write it. This pass added a paragraph above rather than only removing one — three signals
+that reach the caller and are read by nothing. Checked in the other direction: item 61 and item 78
+both hold closed parts and both stayed Neither, so promoting here would retroactively mis-bucket
+both. **Neither.**
 
 **Where the code lives:** the gate, its marker, the two early returns, the forced-steps regeneration
 and the body-seeding caps are all in `runOneShotInner`, `cli/dispatch.ts`; both lead-verb predicates
@@ -5991,6 +6035,18 @@ from answering the name instead of the comparison — "the all-fields block chec
 read the assertion rather than its title, and it costs one line of reading per assertion in the
 predicted set.
 
+**A third instance, from the prediction side, and it reaches a grain the kill set does not have.** A
+gate-inversion mutation on the plan-mode routing named its kill set exactly — every test in the file,
+by name, with the mechanism each would die by — and named, inside the one block written for the
+routing question, which of that block's two assertions would report. Membership held; the assertion
+did not. Under the mutation the block's first assertion failed as well, on a generation call that
+never happened, so the runner stopped there and the second one — the assertion the prediction was
+actually about — never ran. The first-failure rule above is the whole explanation, and it governs a
+single block's internal ordering as much as the two-mutation case that found it. **The refinement: a
+kill-set prediction is answerable at block grain, and a claim about which assertion reports is a
+different claim at a grain the block cannot express.** Nothing here weakens the prediction, which was
+right about what it was for; what it names is the one thing a kill set is not evidence about.
+
 ## An eleventh pattern, beside the second: a precedent's applicability lives in what makes it safe, not in what makes it similar
 
 Reusing a nearby precedent because it shares a directory, a module, or an idiom is choosing on the
@@ -6107,6 +6163,19 @@ The original error read an absence of a string as an absence of behavior; its ow
 the presence of a name as the presence of a call. Two passes, opposite signs, one habit. That
 symmetry is why the check above is stated as a method rather than as a caution: nothing about
 "grep more carefully" would have caught either one.
+
+**The matching-number half has a mirror too, found later and failing in the opposite direction.**
+Above, two names for one value read as two independently verified facts. The converse is two genuine
+bounds that share a magnitude reading as one. A file list in the plan pipeline passes two limits of
+eight: the context builder slices the ranker's result to its own maximum, and the prompt renderer
+slices whatever it is handed. The first is a longer bound over a shorter array and can never bind;
+the second bound a real list at nine and dropped its last entry. Item 79's caps paragraph states both,
+in sequence, correctly, and marks which is which — and a brief in this arc still read the two eights
+as one and concluded the wrong one binds, a claim about the code that the entry it drew from already
+contradicted. **What settles it is the method at the top of this section**, not more careful reading:
+grep both, in the two files that hold them, and read what each one slices. Recorded because the digit
+is doing identical work in both directions — a number that matches is not evidence the things
+carrying it are one thing, and a number that repeats is not evidence they are two.
 
 ## A fourteenth pattern: a test that derives its own scope can silently narrow it, and forbidding a string does not remove that string from the text
 
