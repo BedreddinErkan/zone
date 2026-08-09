@@ -127,3 +127,98 @@ describe("preparePlanContext — grep-grounded file injection (Fix C)", () => {
     expect(ctx.grepMatchedPaths).toContain("xyzSymbolFile.ts");
   });
 });
+
+describe("preparePlanContext — grep pattern is entity-shaped, not every 5+ char task word", () => {
+  const tmpDirs: string[] = [];
+
+  async function makeTmpRepo(files: Record<string, string>): Promise<string> {
+    const dir = join(tmpdir(), `prep-ctx-entity-test-${randomBytes(6).toString("hex")}`);
+    await mkdir(dir, { recursive: true });
+    for (const [name, content] of Object.entries(files)) {
+      await writeFile(join(dir, name), content, "utf-8");
+    }
+    tmpDirs.push(dir);
+    return dir;
+  }
+
+  beforeEach(() => {
+    vi.stubEnv("ZONE_MAX_SCANNED_FILES", "2000");
+    vi.stubEnv("MAX_CONTEXT_FILES", "5");
+  });
+
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    for (const d of tmpDirs.splice(0)) {
+      await rm(d, { recursive: true, force: true });
+    }
+  });
+
+  // Shared fixture/task for the three tests below: a rare camelCase symbol, two files
+  // that only contain common English words the old tokeniser would have grepped, and
+  // a file that only contains a stopword the task happens to quote. One task, three
+  // single-assertion tests — a shared setup with stacked expects would let an earlier
+  // failure hide a later one (this arc's own tenth-pattern rule).
+  const TASK = 'rename distinctiveSymbolName in the "test" module everywhere';
+
+  it("includes the file containing the task's real identifier", async () => {
+    const repoPath = await makeTmpRepo({
+      "target.ts": "export const distinctiveSymbolName = 0;\n",
+      "decoy1.ts": "// rename everything here\n",
+      "decoy2.ts": "// this file mentions everywhere and rename too\n",
+      "decoy4.ts": "// this is a test file for verification\n",
+    });
+    const ctx = await preparePlanContext({ task: TASK, repoPath, repoSummaryOverride: "test repo" });
+    expect(ctx.grepMatchedPaths).toContain("target.ts");
+  });
+
+  it("excludes files matching only common words the old tokeniser would have grepped", async () => {
+    const repoPath = await makeTmpRepo({
+      "target.ts": "export const distinctiveSymbolName = 0;\n",
+      "decoy1.ts": "// rename everything here\n",
+      "decoy2.ts": "// this file mentions everywhere and rename too\n",
+      "decoy4.ts": "// this is a test file for verification\n",
+    });
+    const ctx = await preparePlanContext({ task: TASK, repoPath, repoSummaryOverride: "test repo" });
+    expect(ctx.grepMatchedPaths.filter((p) => p === "decoy1.ts" || p === "decoy2.ts")).toEqual([]);
+  });
+
+  it("excludes a file matching only a stopword the task quotes", async () => {
+    const repoPath = await makeTmpRepo({
+      "target.ts": "export const distinctiveSymbolName = 0;\n",
+      "decoy1.ts": "// rename everything here\n",
+      "decoy2.ts": "// this file mentions everywhere and rename too\n",
+      "decoy4.ts": "// this is a test file for verification\n",
+    });
+    const ctx = await preparePlanContext({ task: TASK, repoPath, repoSummaryOverride: "test repo" });
+    expect(ctx.grepMatchedPaths).not.toContain("decoy4.ts");
+  });
+
+  it("a task built entirely of common words returns no grep matches", async () => {
+    const repoPath = await makeTmpRepo({
+      "a.ts": "export const a = 1;\n",
+      "b.ts": "export const b = 1;\n",
+    });
+    const ctx = await preparePlanContext({
+      task: "fix the bug in the app",
+      repoPath,
+      repoSummaryOverride: "test repo",
+    });
+    expect(ctx.grepMatchedPaths).toEqual([]);
+  });
+
+  it("the four-file cap still applies when more than four files match", async () => {
+    const repoPath = await makeTmpRepo({
+      "file1.ts": "export const distinctiveSymbolName1 = distinctiveSymbolName;\n",
+      "file2.ts": "export const distinctiveSymbolName2 = distinctiveSymbolName;\n",
+      "file3.ts": "export const distinctiveSymbolName3 = distinctiveSymbolName;\n",
+      "file4.ts": "export const distinctiveSymbolName4 = distinctiveSymbolName;\n",
+      "file5.ts": "export const distinctiveSymbolName5 = distinctiveSymbolName;\n",
+    });
+    const ctx = await preparePlanContext({
+      task: "rename distinctiveSymbolName everywhere",
+      repoPath,
+      repoSummaryOverride: "test repo",
+    });
+    expect(ctx.grepMatchedPaths.length).toBe(4);
+  });
+});

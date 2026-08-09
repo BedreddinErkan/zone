@@ -4,18 +4,32 @@ import { readFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import { scanRepo } from "../repo/scanRepo.js";
 import { detectProjectStructure } from "../repo/detectProjectStructure.js";
-import { rankRelevantFiles } from "../repo/rankRelevantFiles.js";
+import { rankRelevantFiles, extractEntityTerms } from "../repo/rankRelevantFiles.js";
 import type { RepoFile } from "../types/project.js";
 import type { LLMProvider } from "../llm/types.js";
 
 const execFileAsync = promisify(execFile);
 
 /**
- * Grep the repo for code-like identifiers found in the task text, returning
- * relative paths of files that contain at least one match. Used to pre-seed
- * RELEVANT FILES with content-grounded matches that lexical ranking may miss
- * (e.g., rename tasks where the symbol name doesn't appear in the file path).
- * Fails safe — returns empty Set on any error (rg absent, timeout, etc.).
+ * Grep the repo for entity-shaped identifiers found in the task text (via
+ * extractEntityTerms — the same extractor the ranker's own lexical boost
+ * uses), returning relative paths of files that contain at least one match.
+ * Used to pre-seed RELEVANT FILES with content-grounded matches that lexical
+ * ranking may miss (e.g., rename tasks where the symbol name doesn't appear
+ * in the file path). Fails safe — returns empty Set on any error (rg absent,
+ * timeout, etc.), and returns empty immediately when the task carries no
+ * identifier-shaped term (a plain-English task has nothing to grep for).
+ *
+ * --ignore-case is required, not optional: extractEntityTerms lowercases
+ * every term it returns, so an uppercase identifier in source (SCREAMING_CASE
+ * constants, PascalCase symbols) would never match without it. --word-regexp
+ * excludes substring hits (e.g. a short term matching inside a longer,
+ * unrelated identifier).
+ *
+ * The 8-term slice below is inherited from the prior word-tokeniser's sizing
+ * (which emitted every 5+ char task word) and is not a measured bound on this
+ * extractor — extractEntityTerms's four shape-restricted branches typically
+ * return far fewer terms (1-3 on measured tasks), so this cap rarely binds.
  */
 async function grepMatchingFiles(
   task: string,
@@ -23,15 +37,13 @@ async function grepMatchingFiles(
   repoPath: string,
   cap = 4,
 ): Promise<Set<string>> {
-  const tokens = (task.match(/\b[A-Za-z][A-Za-z0-9_]{4,}\b/g) ?? [])
-    .filter((t, i, a) => a.indexOf(t) === i)
-    .slice(0, 8);
+  const tokens = extractEntityTerms(task).slice(0, 8);
   if (tokens.length === 0) return new Set();
   const pattern = tokens.join("|");
   try {
     const { stdout } = await execFileAsync(
       "rg",
-      ["--files-with-matches", "--glob", "*.{ts,tsx,js,jsx,py,go,rb}", pattern, repoPath],
+      ["--files-with-matches", "--ignore-case", "--word-regexp", "--glob", "*.{ts,tsx,js,jsx,py,go,rb}", pattern, repoPath],
       { maxBuffer: 1024 * 512 },
     );
     const knownPaths = new Set(allFiles.map(f => f.path));
