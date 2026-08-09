@@ -327,6 +327,10 @@ export async function runOneShotInner(
           mode: gateModeValue,
           gatedBy: investigationFlag === undefined ? "default-non-additive" : "env",
           leadVerb: gateLeadVerb,
+          totalFileCount: planCtx.totalFileCount,
+          rankedFileScores: planCtx.rankedFileScores,
+          grepMatchedPaths: planCtx.grepMatchedPaths,
+          relevantFileCount: planCtxRelevantFiles.length,
           ...(shouldInvestigate ? { model: investigationModel ?? "inherit" } : {}),
         }));
         if (shouldInvestigate) {

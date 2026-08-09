@@ -171,6 +171,49 @@ describe("[zone-plan-mode] fires via log() (unconditional), never debugLog()", (
   });
 });
 
+// The gate marker recorded its outcome (mode/gatedBy/leadVerb) but none of its inputs — no
+// future change to shouldInvestigate could be measured against what today's inputs would
+// have produced. RICH_PLAN_CTX gives each of the four widened fields a distinct value/length
+// so a mutation swapping one field's emission for another's default can't accidentally pass:
+// totalFileCount=42, rankedFileScores has 2 entries, grepMatchedPaths has 1, relevantFilePaths
+// has 3 (so relevantFileCount=3) — four different numbers, not reused across fields.
+const RICH_PLAN_CTX = {
+  projectSummary: "A TS project",
+  relevantFilePaths: ["src/a.ts", "src/b.ts", "src/c.ts"],
+  totalFileCount: 42,
+  rankedFileScores: [
+    { path: "src/a.ts", score: 61 },
+    { path: "src/b.ts", score: 12 },
+  ],
+  grepMatchedPaths: ["src/c.ts"],
+};
+
+describe("[zone-plan-mode] carries the decision inputs alongside the outcome", () => {
+  it("totalFileCount matches preparePlanContext's own count", async () => {
+    mockPreparePlanContext.mockResolvedValueOnce(RICH_PLAN_CTX);
+    await runOneShotInner(ADDITIVE_TASK, BASE_CONFIG, "run-inputs-total", { mode: "plan" });
+    expect(planModeCalls()[0]).toMatchObject({ totalFileCount: 42 });
+  });
+
+  it("rankedFileScores matches preparePlanContext's own array", async () => {
+    mockPreparePlanContext.mockResolvedValueOnce(RICH_PLAN_CTX);
+    await runOneShotInner(ADDITIVE_TASK, BASE_CONFIG, "run-inputs-scores", { mode: "plan" });
+    expect(planModeCalls()[0]).toMatchObject({ rankedFileScores: RICH_PLAN_CTX.rankedFileScores });
+  });
+
+  it("grepMatchedPaths matches preparePlanContext's own array", async () => {
+    mockPreparePlanContext.mockResolvedValueOnce(RICH_PLAN_CTX);
+    await runOneShotInner(ADDITIVE_TASK, BASE_CONFIG, "run-inputs-grep", { mode: "plan" });
+    expect(planModeCalls()[0]).toMatchObject({ grepMatchedPaths: ["src/c.ts"] });
+  });
+
+  it("relevantFileCount matches relevantFilePaths.length, not rankedFileScores.length", async () => {
+    mockPreparePlanContext.mockResolvedValueOnce(RICH_PLAN_CTX);
+    await runOneShotInner(ADDITIVE_TASK, BASE_CONFIG, "run-inputs-relevant", { mode: "plan" });
+    expect(planModeCalls()[0]).toMatchObject({ relevantFileCount: 3 });
+  });
+});
+
 describe("gateLeadVerb / gateMode threaded into the runLlmPatchFlow call", () => {
   it("quick-lexical branch forwards leadVerb:\"add\" and mode:\"quick-lexical\"", async () => {
     await runOneShotInner(ADDITIVE_TASK, BASE_CONFIG, "run-thread-additive", { mode: "plan" });
