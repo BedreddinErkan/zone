@@ -222,6 +222,10 @@ describe("Non-refusal plan-gen failure — quick path behavior", () => {
     // The mislabelled reason this fault produces is checked in the next test, deliberately kept out
     // of this one: an assertion after a fault that can itself fail first (e.g. the run not continuing)
     // never runs, so it must not be the only place the reason gets verified.
+    // Catches a careless recombination with the next test (an assertion moved into this
+    // body without updating this count) — not a deliberate merge, which would touch this
+    // line anyway, and not the next test being deleted outright, which nothing here can see.
+    expect.assertions(6);
     mockPreparePlanContext.mockResolvedValueOnce(null);
     mockRunLlmPatchFlow.mockResolvedValueOnce({ ok: true, decisionMode: "safe_to_apply" });
 
@@ -247,6 +251,9 @@ describe("Non-refusal plan-gen failure — quick path behavior", () => {
     // because the throw fired before the reassignment from planCtx.relevantFilePaths — so a TypeError
     // from a null context is labelled the same as a genuinely empty one. Pinning the current, wrong
     // label — not what it should say.
+    // Same guard as the previous test's pin, other direction: catches this assertion being
+    // merged into a test that already has its own count pinned, without noticing this one.
+    expect.assertions(1);
     mockPreparePlanContext.mockResolvedValueOnce(null);
     mockRunLlmPatchFlow.mockResolvedValueOnce({ ok: true, decisionMode: "safe_to_apply" });
 
