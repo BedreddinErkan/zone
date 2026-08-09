@@ -5370,6 +5370,30 @@ server module that path named is gone, recorded in this repository's own contrib
 removed. So the justification survives as written while the surface it points at does not, and
 nothing in the document itself would reveal that.
 
+**How stale, established from the document's own history rather than from reading it.**
+`DESIGN-plan-mode-redesign.md` has exactly one commit in its history and has never been revised. It
+was added on 2026-06-06; the HTTP server module it names was live at that commit, carrying both of
+the routes it cites; and `2cb7afaa` deleted that module the next day. So the retention reasoning was
+accurate for about a day and has stood unchanged for the two months since — drift, not an authoring
+error, and deleting the clauses would destroy an accurate record of a decision rather than correct a
+false claim. **The document is not unmarked, which is what makes this hard to see rather than easy.**
+It opens by calling itself a proposal for review with no implementation yet, and its third part's own
+status line records the first phase as shipped. What it carries nowhere is a date, or the commit it
+was written against, and that is the one thing that would let a reader discount a clause about a
+module deleted the day after it was written.
+
+**Whether to add that is an open question rather than a fix, and it sits in this entry's bucket for
+this entry's reason.** Dating a proposal after the fact is a claim about when its author wrote it;
+marking the individual clauses superseded is the restructuring this document's own convention avoids;
+leaving it alone is defensible on the ground that a document labelled a proposal was never a
+specification. Nobody has chosen, which is a decision missing rather than a specification missing.
+**If a later pass does revise it, the edit's shape is already known and it is not uniform:** the
+Part 1 audit table's HTTP-endpoint row and the Part 2 risks bullet on two-surface divergence would
+each take a whole-unit removal, since the endpoint and the second surface are what those units are
+about, while the Part 3 risks bullet naming the same symbols as doubly-dead for CLI keeps a true
+remainder — the CLI half is exactly what this entry establishes, and only its web-parity caveat is
+stale.
+
 **Bucket — Neither, and the reason is which decision is missing rather than how much work it is.**
 Deleting the chain is mechanically small and the entry could specify it in a sentence, which is what
 the Actionable-now bar asks for. What is not settled is whether scope revision is a feature this
@@ -5514,6 +5538,32 @@ constant moves, where a symbol name fails loudly. That is this section's criteri
 new one; recorded because it is the first time it has been applied to a *computed* claim rather
 than to a citation.
 
+**The second class splits the same two ways the first one already does, and the sweep could not see
+the split from where it stood.** Every claim it corrected was false at the tree it was checked
+against, which is what the figure above records and what it still means. What that tree cannot report
+is *when* each became false. Running the pickaxe over each symbol's own history puts eight of the
+eleven distinct claims as drift and three as wrong on arrival. The drift is real code with real
+removal commits: a modal component imported and rendered in the TUI's own app file from `954c7bcf`
+until `955d95a2` deleted it outright two months later; a marker payload emitted in exactly the
+described shape at five exit sites until `7b0fd860` replaced it; an environment-gated escape hatch,
+the audit-pipeline module it called, and the modal path it restored, all three retired together by
+`577f1edb`; a fixed output-token default removed by `ed09286d` because it had been truncating
+thinking models mid-answer. The arrival cases never existed at all: an environment-variable name that
+appears in no commit anywhere in `src/`, a sub-flag naming shorthand that appears in no commit
+anywhere in the repository, and the seeding claim above — whose three constants landed together in
+`66c23fe0`, have not been touched by any commit since, and were already contradicting the sentence
+that describes them by the time it was written seven days later.
+
+**The remedies differ, which is the only reason the arithmetic is worth doing.** Drift is what a
+shape reference already defends against: the symbol fails loudly, its absence is provable in one
+grep, and the fix is to re-derive the sentence from current code — the procedure this section already
+prescribes. An arrival error fails nothing, and re-derivation never finds it, because every later
+reading returns the same "false now" the first one did and none of them distinguishes a claim that
+decayed from a claim that was never checked against the code it describes. It is catchable at one
+moment only, when the claim is written, and that is the moment this document has no procedure for.
+**Recorded as a subdivision and not a correction:** the figure above stands, the sentences the fix
+pass wrote stand, and what changes is that "false" was doing two jobs.
+
 ## A second pattern, a few commits apart: self-reference defeats a mutation test
 
 A test verifying a constant's own value must not import that constant. Two opposite-conclusion
@@ -5643,7 +5693,7 @@ cases what settled it was going and looking, not the seniority of the claim.
 **A third instance, and the sharpest, because both the claim and its correction were wrong and the
 correction was the worse of the two.** An establish pass settled a question about a TUI modal by
 quoting a design document, which is the plainest form of this failure — that document had already
-been shown, in the same pass, to describe an escape hatch that was never implemented, so it was
+been shown, in the same pass, to describe an escape hatch since retired from the tree, so it was
 known not to be authority for current state at the moment it was cited. The correction grepped the
 production tree instead and reported the modal wired unconditionally into the component tree,
 contradicting the document. **That correction was also false, and it read as settled precisely
@@ -5662,6 +5712,18 @@ answers "is this attached," the second answers "can this fire," and only the sec
 question. Recorded beside the corollary rather than as its own pattern because the mechanism is
 identical to what this section already states: the correction lost to going and looking, and being a
 correction is what stopped it being looked at.
+
+**The clause that sentence used to carry was itself false, and this document is the last place that
+should have inherited it.** The escape hatch was implemented. It was an environment check in the
+dispatch module guarding a call to the legacy audit pipeline with `forceAudit` set, restoring what
+its own comment calls the old forced-audit and modal accept-or-reject path, with three tests
+asserting exactly that; `66c23fe0` added it and `577f1edb` removed it fifteen days later, along with
+the rest of the legacy audit chain. **The edit it was given as a reason for still stands, which is
+the half worth keeping separate.** Deleting that sentence from the contributor-guidance file was
+right, because that file describes current state and the hatch is gone from it — an artefact
+surviving a false account of itself, which the tenth pattern already states from the assertion side
+and item 36 from the entry side. What does not survive is the inference underneath: absence at HEAD
+reported the falsity correctly and said nothing about its cause, and a cause was supplied anyway.
 
 ## A sixth pattern, following the fifth: a mutation that reroutes cannot prove suppression
 
@@ -6275,6 +6337,30 @@ A third identical re-derivation is not a third check.** This is one instance, wh
 own precedent — item 36's neighbouring version, declined until there were enough — would not carry a
 pattern of its own. It is recorded here instead, as a limit on this pattern's corrective rather than
 as a pattern beside it, because that is exactly what it is.
+
+**A second instance, and it widens the condition rather than lengthening a list.** The first case's
+trigger was a value with no consumer: the code is ambiguous, so reading it again returns the same
+ambiguity. The second has no ambiguity in it at all. A design note at the repo root justified keeping
+a modal and its approvals module for an HTTP path, and every grep of the current tree agrees that
+path is gone — correctly, unanimously, and at any number of readings. What the tree cannot report is
+*when* the note was written, and a document saying a surface exists is not falsified by that surface
+being absent today unless the two are contemporaneous. One command settled it and it was the same
+command as before: the note has exactly one commit in its whole history, the module it names was live
+at that commit, and it was deleted the day after. **So the condition generalises past the
+no-consumer case — read the introducing commit whenever the disputed claim is about a past state and
+the tree can only report the present one** — and the mechanism underneath both is one thing. A
+re-reading of the current tree is the same source of evidence as the first reading, not a second one,
+while the commit that introduced the text is a different source.
+
+**The scale is what makes this worth widening rather than noting, and the unit is occurrences because
+occurrences are what the method was applied to.** Of the thirteen false spans the
+contributor-guidance sweep corrected against the current tree alone, ten named something that had
+been real when the sentence naming it was written. So the tree-only reading was right about falsity
+every time and silent about cause ten times out of thirteen, and on the single occasion a pass
+supplied a cause anyway it supplied the wrong one — the fifth pattern's third instance, corrected in
+the same commit as this paragraph. That is still two instances of the introducing-commit check
+itself, which by the precedent above does not earn a pattern of its own; it earns a wider statement
+of the one already here.
 
 ## An eighteenth pattern: a measurement's window is part of its claim, and a reading taken while the writer is still running expires
 
