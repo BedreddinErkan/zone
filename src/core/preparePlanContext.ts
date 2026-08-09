@@ -52,6 +52,9 @@ async function grepMatchingFiles(
 export type PlanContext = {
   projectSummary: string;
   relevantFilePaths: string[];
+  totalFileCount: number;
+  rankedFileScores: Array<{ path: string; score: number }>;
+  grepMatchedPaths: string[];
 };
 
 export async function preparePlanContext(input: {
@@ -65,6 +68,7 @@ export async function preparePlanContext(input: {
   const maxFiles = input.maxFiles ?? 8;
 
   let allFiles = await scanRepo(input.repoPath).catch(() => []);
+  const totalFileCount = allFiles.length;
 
   const structure = detectProjectStructure(allFiles);
   const projectSummary =
@@ -73,6 +77,8 @@ export async function preparePlanContext(input: {
     "No project summary available.";
 
   let relevantFilePaths: string[] = [];
+  let rankedFileScores: Array<{ path: string; score: number }> = [];
+  let grepMatchedPaths: string[] = [];
   if (allFiles.length > 0) {
     try {
       const ranked = await rankRelevantFiles({
@@ -86,8 +92,10 @@ export async function preparePlanContext(input: {
           }
         },
       });
+      rankedFileScores = ranked.map((f) => ({ path: f.path, score: f.score }));
       const rankedPaths = ranked.slice(0, maxFiles).map((f) => f.path);
       const grepMatches = await grepMatchingFiles(input.task, allFiles, input.repoPath);
+      grepMatchedPaths = [...grepMatches];
       const extra = [...grepMatches].filter(p => !rankedPaths.includes(p)).slice(0, 4);
       relevantFilePaths = [...rankedPaths, ...extra];
     } catch {
@@ -95,5 +103,5 @@ export async function preparePlanContext(input: {
     }
   }
 
-  return { projectSummary, relevantFilePaths };
+  return { projectSummary, relevantFilePaths, totalFileCount, rankedFileScores, grepMatchedPaths };
 }
