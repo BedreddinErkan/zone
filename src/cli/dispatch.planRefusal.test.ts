@@ -215,10 +215,13 @@ describe("Non-refusal plan-gen failure — quick path behavior", () => {
     expect((result as any).ok).toBe(true);
   });
 
-  it("context-read fault, not a plan-gen rejection: preparePlanContext resolves null → property read throws before the gate → swallowed, reason mislabelled empty-context, run continues", async () => {
+  it("context-read fault, not a plan-gen rejection: preparePlanContext resolves null → property read throws before the gate → swallowed, not propagated, run continues", async () => {
     // Distinct from every other test in this describe: the throw originates at planCtx.projectSummary
     // (the context builder's return value itself), not from generateExecutionPlan/runPlanInvestigation
     // rejecting. It fires before shouldInvestigate is even computed, so neither generator is reached.
+    // The mislabelled reason this fault produces is checked in the next test, deliberately kept out
+    // of this one: an assertion after a fault that can itself fail first (e.g. the run not continuing)
+    // never runs, so it must not be the only place the reason gets verified.
     mockPreparePlanContext.mockResolvedValueOnce(null);
     mockRunLlmPatchFlow.mockResolvedValueOnce({ ok: true, decisionMode: "safe_to_apply" });
 
@@ -230,16 +233,25 @@ describe("Non-refusal plan-gen failure — quick path behavior", () => {
 
     expect(mockGenerateExecutionPlan).not.toHaveBeenCalled();
     expect(mockRunPlanInvestigation).not.toHaveBeenCalled();
-    // planCtxRelevantFiles is still its outer-scope default ([]) when the catch computes the
-    // reason, because the throw fired before the reassignment from planCtx.relevantFilePaths —
-    // so a TypeError from a null context is labelled the same as a genuinely empty one. Pinning
-    // the current, wrong label — not what it should say.
-    expect(mockDebugLog).toHaveBeenCalledWith("[zone-plan-gen-failed]", expect.objectContaining({ reason: "empty-context" }));
     // Swallowed, not propagated — the run continues rather than failing.
     expect(mockRunLlmPatchFlow).toHaveBeenCalledOnce();
     const call = mockRunLlmPatchFlow.mock.calls[0]![0] as Record<string, unknown>;
     expect(call["preGeneratedPlan"]).toBeUndefined();
     expect(ac.signal.aborted).toBe(false);
     expect((result as any).ok).toBe(true);
+  });
+
+  it("context-read fault: the swallowed reason is mislabelled empty-context — checked in its own test so an earlier failure elsewhere can never skip it", async () => {
+    // Same fault as the previous test (preparePlanContext resolves null), asserted in isolation.
+    // planCtxRelevantFiles is still its outer-scope default ([]) when the catch computes the reason,
+    // because the throw fired before the reassignment from planCtx.relevantFilePaths — so a TypeError
+    // from a null context is labelled the same as a genuinely empty one. Pinning the current, wrong
+    // label — not what it should say.
+    mockPreparePlanContext.mockResolvedValueOnce(null);
+    mockRunLlmPatchFlow.mockResolvedValueOnce({ ok: true, decisionMode: "safe_to_apply" });
+
+    await runOneShotInner("task", BASE_CONFIG, "run-ctx-throw-reason", PLAN_OPTS);
+
+    expect(mockDebugLog).toHaveBeenCalledWith("[zone-plan-gen-failed]", expect.objectContaining({ reason: "empty-context" }));
   });
 });
