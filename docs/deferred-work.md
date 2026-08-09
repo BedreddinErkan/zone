@@ -4782,7 +4782,11 @@ exercises them first will also be the first to show whether they read as intende
 **What plan generation costs today, which is why this is a decision rather than an obvious yes.**
 Measured from the completion marker over a window running 2026-07-29 to 2026-08-01, collapsed on item
 73's key and therefore an upper bound on real events rather than a lower one: generation costs a mean
-of `$0.0977` per plan, ranging from about `$0.026` to about `$0.166`. Joined against the archetype
+of `$0.0977` per plan, ranging from about `$0.026` to about `$0.166`, over a mean of about `4.8`
+iterations per plan with none exceeding the cap of six — the iteration figure comes from the same
+records over the same window and was absent here until it was re-derived alongside them, which is
+worth naming because a cost with no iteration count beside it cannot say whether a dearer plan
+thought longer or merely wrote more. Joined against the archetype
 marker — and noting that the investigation loop emits its own archetype-less record, which is what
 makes the join easy to get wrong — **roughly a third of the cost of a run that goes on to execute is
 spent before the user has approved anything**; the per-run share ranges from under a fifth to nearly
@@ -4925,6 +4929,23 @@ reaching any problem word. The two verb lists are not identical — the pure-add
 structural verbs and the ambiguous one — but they agree on an additive lead verb. So the task shape
 that skips investigation is also the task shape whose refusals are discarded.
 
+**Where the two lists disagree, the cost lands the other way round, which the sentence above stops
+short of drawing.** The structural verbs and the ambiguous one are in the problem-predicate's list
+but not the pure-addition one, so a task led by any of them takes the opposite pair of decisions: the
+gate sends it to a full investigation, and both refusal exits stay dead anyway, because the
+problem-predicate returns false on its own additive test before reaching any problem word. A rename
+or a migration therefore buys the most expensive planning path available and then discards a
+no-change or cannot-verify verdict if the investigation reaches one. Agreement on the additive verbs
+is what the sentence above records; disagreement on the structural ones is the same mechanism costing
+more, not less.
+
+**A third consumer of the same predicate is negated, so the additive task is the one it fires on.**
+Besides the two refusal exits, the merge of explicit path tokens from the task text into the first
+step's likely-files — the floor the write-scope guard later reads — is gated on the predicate being
+false. The task shape that skips investigation and cannot decline is therefore also the only shape
+that gets its literal path mentions forced into scope, which is the one place this predicate's
+additive branch adds a capability rather than removing one.
+
 **Three mechanisms in series then convert a refusal into steps, and item 77 records the same three
 from the other side.** With the early returns gated off, a plan that comes back with no steps is
 regenerated with the forced-steps flag, whose prompt branch replaces the three terminal-reason field
@@ -4934,6 +4955,19 @@ task text and the file list. Item 77's second strand records these three as guar
 the approval loop that do not re-run on a replan, which is the defect on that side. On the first pass
 they are the reason an additive task cannot decline at all: each turns an absence of steps into
 steps, and they fire on exactly the shape that also got no investigation.
+
+**What a stepless plan would have done downstream is narrower than "the guard goes off", which
+matters because that is the usual reason given for closing the refusal side first.** The write-scope
+guard has several returns of no-opinion, and an empty step list reaches only one of them: it declines
+to constrain a plan with no steps *unless* the plan is answer-shaped, in which case it returns a hard
+block on every write instead — the opposite of going off. Of the other no-opinion returns, two are
+archetype and bookkeeping-directory exemptions that have nothing to do with plan shape, one covers a
+plan that is absent or malformed, and the last covers a plan that has steps but names no valid path
+between them, which the minimal-plan synthesis can produce when the task carries no path token and
+the ranked list came back empty. So the mechanisms above do not stand between the user and an
+unconstrained agent in the single way the phrase suggests; they stand between the user and a plan
+that cannot say no, and the guard's behaviour on the shape they suppress depends on which stepless
+shape it was.
 
 **The repo summary was one line and, for this repository, the wrong one — closed by `a2fa9ee8`.**
 The context preparation joins the notes a structure detector returns. Measured against the dogfood
@@ -5019,13 +5053,37 @@ given.** The defect is not that it guessed badly. It is that nothing in the pipe
 was insufficient — and the model did say so, in the scope note, which is free prose that reaches the
 user and nothing else.
 
-**The gate's own marker contradicts the field beside it.** It records the branch taken, the lead verb
-that matched, and a third field whose value reads `default-non-additive` whenever no environment
-override is set — including on the additive task that made the gate skip, where it sits next to a
-recorded lead verb of `add` and a recorded mode naming the lexical branch. The field distinguishes
-the default predicate from an override, which is what it is for and what it reports correctly; its
-*value* names an outcome it does not measure, so a sink query filtering on it for additively-routed
-runs returns the opposite of the intended set.
+**The gate's own marker records which rule decided, not what it decided.** It records the branch
+taken, the lead verb that matched, and a third field whose value reads `default-non-additive`
+whenever no environment override is set — including on the additive task that made the gate skip,
+where it sits next to a recorded lead verb of `add` and a recorded mode naming the lexical branch.
+The field distinguishes the default predicate from an override, which is what it is for and what it
+reports correctly.
+
+**That juxtaposition was read here as a contradiction, and it is not one — the sentence saying so is
+withdrawn.** What stood in the paragraph above claimed the field's *value* named an outcome it did
+not measure, and that a sink query filtering on it for additively-routed runs would return the
+opposite of the intended set. Both halves are thrown out. The value is a source label: it names which
+rule reached the decision, and the sibling arm of the same ternary is the bare word for the override
+mechanism, which no reading construes as an outcome. `mode` sits beside it, emitted unconditionally
+on both branches, and is the field that carries the outcome; a second field re-deriving the same
+outcome would be duplication that nothing asked for. The paragraph above already contained the
+correct reading — that the field reports the default-versus-override distinction correctly — and the
+withdrawn sentence contradicted it one clause later, which is what a false claim looks like when it
+is assembled next to the fact that disproves it.
+
+**What settled it was the introducing commit, not the current code.** The field arrived, in the
+commit that first gated investigation on task shape, reading the deciding predicate's own function
+name against the bare word for the override — a source label with no second available reading. The
+later commit that inverted the gate to its fail-safe form swapped the predicate and renamed that
+literal in the same move, to a phrase naming the new default rule's disposition rather than any
+task's outcome. The value has tracked which rule is in force for as long as it has existed. No
+change is owed, and `a4824f39` withdrew the one that had been drafted.
+
+**The two assertions on that field pin its presence, not its discrimination.** Both live in the
+gate-marker test file, both name a branch in their own titles, and a mutation of the shared literal
+run in `a4824f39` killed both. A value asserted identically on either side of a branch cannot witness
+that branch — consistent with a source label, and the reason those two tests were left as they are.
 
 **Strand two — the proposal carries content and no provenance.** Its fields are the plan and run
 identifiers, the objective, the steps, the scope summary, the scope note, the risk hints and the
@@ -5108,14 +5166,18 @@ population is unchanged.
 
 **A second dollar figure on the same line disagrees with the first, and it is a different quantity
 rather than the same one twice.** The status bar's badge line carries a used-against-cap figure beside
-the run cost just corrected. Established by shape: it reads a different store field, written by one
+the run cost just corrected. Established by shape: it reads a different store field, updated by one
 action with one dispatch site, fed by the usage aggregate over a rolling twenty-four-hour window
 across every record in the ledger under the TUI's fixed user identifier — a whole-window total, not
 this run's. It is rounded differently at two removes, the aggregate using the two-decimal helper where
 the per-record row uses the four-decimal one, and the badge rendering two decimals against the cost
 field's four. And it is refreshed once per run, after the run's costs reach disk, so at a mid-run
 surface such as the approval gate it necessarily carries the value left by the previous run's
-completion. **What remains unknown is which of those accounts for the gap actually seen.** For the
+completion. **That last sentence was written as if the update action were the field's only source,
+which is incomplete rather than wrong.** The same aggregate is read a second time at TUI startup and
+seeded into the store's initial state, so on a session's first run the badge shows neither this run's
+cost nor a previous run's completion value but whatever the window held when the process started.
+The per-run refresh is the only *update*; it is not the only writer. **What remains unknown is which of those accounts for the gap actually seen.** For the
 later of the two runs above the rolling window totals `$0.1262`, which the badge would render as
 `$0.13`, while the value left by the previous completion would have been `$0.05`. A reported gap of
 roughly a third matches the second, but the badge is not written anywhere — nothing persists it — so
@@ -5148,6 +5210,27 @@ re-readable and the later one is a reading of the live approval surface. Recorde
 deliberately: the eighteenth pattern is about this exact window, and both of its instances are in this
 entry.
 
+**The gate's own test surface could not see which branch fired, and `a4824f39` closed that in two
+files of three.** The decision-marker file ran an additive fixture through the gate on every one of
+its tests while asserting only on the decision marker's payload, which carries no plan-derived field
+— run identifiers, the decision, the attempt number, the reviewed flag, and nothing read off a plan —
+so every one of them was blind to the routing its own comments assumed. The answer-only safety-net
+file was blind the same way. Each gained one assertion naming which of the two generation functions
+was called. **The stepless-replan file stays open**: all eight of its tests run the same additive
+fixture through the gate with no routing assertion, and each queues two plan responses expecting the
+first to be consumed by the initial call and the second by the replan — an ordering that a
+misroute silently re-slots. Left open deliberately rather than missed; it is characterized here so a
+later pass does not have to re-derive it. Recorded in this entry rather than as its own because the
+subject is this gate's observability, which is what the entry is about, and the blindness is a
+property of the gate's tests rather than of any mechanism the other entries own.
+
+**A leaked environment stub in the refusal-path file was also closed there, and it had not been
+doing harm.** That file pinned the routing override for two of its blocks and never restored it,
+where four sibling files restore the same variable. Every test downstream of the leak inside that
+file wanted the pinned value anyway, and a full-suite run immediately before and immediately after
+the fix returned identical totals, which is the evidence that nothing outside the file had been
+inheriting it.
+
 **What is lost where, per value, since the answers differ and a fix pass needs them apart.** The
 iteration count and the cost of an investigated plan exist on the loop result and are dropped at that
 function's return — retrievable at that boundary, which is why item 78's second strand now records
@@ -5169,6 +5252,14 @@ beside it. What is absent is what the run cost — the session's own total reads
 the strand above gives — and what was read to produce it. That is a provenance gap, not a
 persistence one.
 
+**The zero reached disk, which the sentence above leaves implicit, and whether the repair follows it
+there is still open.** The session writer takes its total straight from the status-bar cost field, so
+the same value the strand above records as displayed is the value persisted: the session written on
+2026-08-08 carries a zero total, while the four investigation-path sessions dated 2026-07-31 carry
+real ones. `9874eb91` fixed the field. Whether it fixes the persisted total follows by construction
+and has not been observed — no session has been written on the lexical path since that commit, so
+this stays open until one is.
+
 **Both halves of the preceding paragraph were false when first written here, and the way they became
 false is a repeatable error rather than a slip.** This entry originally said the plan persisted
 nowhere and that only three records survived. Both readings were taken while the run was still open
@@ -5184,15 +5275,16 @@ citations again do not transfer: item 46 and item 38 are entries whose remaining
 between named options, and most of what is above has no options named — what provenance a plan should
 carry is a question nobody has posed, let alone narrowed to a choice. (This sentence also named the
 summary line when it was written; `a2fa9ee8` answered that one, and the strand above records how.)
-The one that reaches is **item 74**, for the single specified fact
-here: the gate marker's contradicting field is a one-word change, deliberately not proposed as one,
-because the value is a sink key that every historical query over that marker matches on — the same
-shape as item 74's separated change, which moves a signature and its call site and sits in Neither
-holding it. What would cite this entry: any later entry whose most-ready part is a rename that older
-records are keyed on. **Checked in the other direction, as item 77 requires** — promoting for that
-field alone would retroactively mis-bucket item 74, and the two other candidates for readiness here
-are the inert maximum and the dropped ninth path, neither of which has an agreed target to align on.
-**Neither.**
+**One precedent that did reach has been withdrawn.** This paragraph cited **item 74** for a single
+specified fact — that the gate marker's field was a one-word rename, held back only because the value
+is a sink key every historical query over that marker matches on, which is item 74's own shape. The
+strand above records that there is nothing to rename, so the citation has lost its subject and goes
+with it: the sink-key objection was a reason not to make a change that turns out not to be owed, and
+a reason not to do something unnecessary is not a precedent for anything. That leaves the two
+remaining candidates for readiness, the inert maximum and the dropped ninth path, neither of which
+has an agreed target to align on. **Checked in the other direction, as item 77 requires** — no entry
+cites this one for that precedent, so withdrawing it moves nothing else's bucket, and item 74 keeps
+its own place on its own facts. **Neither.**
 
 **Re-checked after the summary strand closed, rather than inherited.** `a2fa9ee8` closed one of this
 entry's strands outright, which is a stronger event than the partial closures item 78 re-checked
@@ -5616,6 +5708,21 @@ block can die for a fixture-construction reason its name says nothing about. Not
 enough to change: giving those buckets content would make the fixture less like the document it
 stands in for. The prediction was wrong for a nameable reason, and the divergence was reported rather
 than reconciled to the prediction, which is the only part that was ever in the pass's control.
+
+**A predicted killer surviving because the assertion counts calls rather than reading values.**
+`a4824f39` predicted a gate mutation would kill every test in a block that queues two plan responses
+and expects the replan to consume the second. It killed all but one. The survivor asserts only that
+the approval function ran once and the flow function ran once — and both remain true when the replan
+consumes the wrong queued plan, because neither refusal exit nor the step-forcing safety net re-runs
+on a replan, a non-re-run item 77's second strand already records from the other side. The mutation
+did reach that test; it changed which plan flowed through it and changed nothing the test looks at.
+**The addition to the rule:** before predicting a kill, read what the assertion compares, not what
+the block is named for — a call-count assertion is insensitive to every substitution that preserves
+arity, which is most of them. The same pass predicted a second green in a neighbouring block, where
+a mutation skips the whole region containing the call under test so a `not.toHaveBeenCalled` stays
+true vacuously; that one was predicted and held. Two greens, one pass, opposite epistemics: the
+predicted-vacuous one is the check working, and only the unpredicted one is evidence of a blind spot.
+Counting them together as two instances of anything would overstate what happened.
 
 ## A ninth pattern, beside the seventh: a ledger entry that prescribes a check does not cause the check to happen
 
@@ -6047,6 +6154,24 @@ aimed at plan quality, and on the default path it would have been aimed at a mec
 and is not the operative one. This pass reached the mechanism first, so the pattern's cost was
 avoided rather than incurred. It gets a sentence rather than a pattern of its own: writing one about
 a failure that did not happen would be the same generalization-from-one-trace this pattern is about.
+
+**The corrective this pattern prescribes has one blind spot, found by a false sentence that survived
+it three times.** Re-derivation from the code is the check named above, and it cannot settle what a
+value *means* when nothing consumes it. Item 79 carried a claim that the gate marker's source label
+named a routing outcome. Three separate readings of the code — an establish pass, the brief drawn
+from it, and a fix plan that queued a rename — reproduced the claim rather than killing it, and not
+through carelessness: the emitting ternary assigns a string and stops, the field has no reader
+anywhere in the tree, and its own entry contained both the true reading and the false one a clause
+apart. Re-derivation returns the same ambiguity every time, and a name that sounds like an outcome
+resolves the ambiguity the same wrong way every time. What killed it was the commit that introduced
+the field, where the literal was the deciding function's own name set against the bare word for the
+override — unreadable as an outcome, and one command away throughout. **So the rule gains a case:
+when the disputed claim is about what a value denotes rather than what the code does, and the value
+has no consumer to disambiguate it, read the commit that introduced it before reading the code again.
+A third identical re-derivation is not a third check.** This is one instance, which by this pattern's
+own precedent — item 36's neighbouring version, declined until there were enough — would not carry a
+pattern of its own. It is recorded here instead, as a limit on this pattern's corrective rather than
+as a pattern beside it, because that is exactly what it is.
 
 ## An eighteenth pattern: a measurement's window is part of its claim, and a reading taken while the writer is still running expires
 
