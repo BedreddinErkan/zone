@@ -5339,6 +5339,19 @@ on the same missing value throws. Both were run against the widened fixtures at 
 time, and the two kill sets differ by exactly the three tests in the two files the throwing read
 reaches and the tolerant one does not.
 
+**Only one of the two shapes can be demonstrated today, which the pair above leaves out.** Both
+sentences describe what a gate *would* do, so neither is wrong. What they omit is that no comparison
+of any kind against any of the three signals exists in current source: grepped at `2238f65d`, they
+appear outside their own type declaration and the builder that fills them in exactly one place, all
+three as values inside the single serialization call that assembles the gate marker. The throwing
+shape was exercised against real fixtures by a mutation; the tolerant shape describes a comparison
+nobody has written, so it is unreachable rather than untested — worth keeping distinct, because an
+untested shape is a gap in the suite and an unreachable one is a gap in the source, and only the
+second is closed by writing code. **The behaviour the signals actually meet at present is a third one
+the pair does not name:** serialization omits a missing property rather than comparing it or throwing
+on it, so a missing signal today yields neither a silent false nor a fault but an absent field —
+which is exactly what every pre-widening record in the gate marker's store shows.
+
 **Where the throw goes, read at that commit rather than inferred from the shape of the block.** One
 `try` opens after the plan-generation-started emission and closes below both generation calls, so the
 context preparation, the gate, its marker and both arms are inside it. Its `catch` re-throws two typed
@@ -5421,8 +5434,41 @@ matches being a sensible thing for a gate to route on. Written down because that
 exercise of the signal that exists, and a later reader finding it unqualified would find a
 demonstration whose single worked example routes badly.
 
-**A leaked environment stub in the refusal-path file was also closed there, and it had not been
-doing harm.** That file pinned the routing override for two of its blocks and never restored it,
+**The swallowed path now has a test, and its honest margin is much narrower than the paragraphs above
+would suggest.** `2238f65d` adds one: the context builder resolves a value whose first property read
+throws, which fires before the gate is reached, so neither generation function runs, the catch
+swallows, and the run continues into the patch flow with no plan. **What was already guarded:**
+mutating the catch to re-throw and mutating the fallback to return each killed six tests at that
+commit, one of them the new one, so five pre-existing tests already covered the swallow-and-fallback
+shape — the refusal-path file's own generic-error block, plus one in the base dispatch file. That
+figure overstates slightly if read as five independent guards: one of the five is a two-part test
+whose first half asserts the typed-refusal class still propagates, and a mutation making *everything*
+propagate leaves that half true, so it guards this shape in its second half only. **What was not
+guarded, and is the whole of what the commit adds:** every one of the five throws from the mocked
+generation call, which is downstream of the context assignment, so none exercises a fault originating
+in the context's own shape; and none of them — nor any assertion anywhere in this repository — read
+the reason value the catch emits.
+
+**The wrong label is pinned as current behaviour, deliberately.** The new assertion requires the
+reason to read `empty-context` for a fault that is not an empty context, because that is what the
+catch does today. A test asserting the label were correct would fail against current source and would
+be a change request wearing a test's clothes. **Where the correction would live, so a later reader
+fixes the code rather than the test:** the reason is computed in the catch's own first statement from
+the relevant-file count, and deriving it from the caught value instead is a change to that statement,
+whose author has to update this assertion in the same commit. The test is not the defect.
+
+**Two mechanically different faults share one kill set, and what separates them is weaker than a
+test.** Re-throwing from the catch and returning from the fallback break different things — one stops
+the swallow, the other stops the continuation — and both kill the same six tests. They separate only
+inside the new test and only by where it fails: the re-throw escapes the call, so no assertion in the
+test runs at all, while the fallback return leaves the catch intact, so the diagnostic assertion
+passes and the failure lands one line later on the continuation assertion. **That discriminator is a
+property of assertion order rather than of the suite.** It exists because the new test asserts the
+diagnostic before the continuation; swapping those two — a reordering no review would question —
+makes both faults fail at the same line and indistinguishable again.
+
+**A leaked environment stub in the refusal-path file was also closed by `a4824f39`, and it had not
+been doing harm.** That file pinned the routing override for two of its blocks and never restored it,
 where four sibling files restore the same variable. Every test downstream of the leak inside that
 file wanted the pinned value anyway, and a full-suite run immediately before and immediately after
 the fix returned identical totals, which is the evidence that nothing outside the file had been
@@ -5576,6 +5622,16 @@ neither is what not-actionable means, rather than an argument against it. Checke
 direction: items 61 and 78 both hold closed parts and stayed Neither, so promoting here mis-buckets
 both retroactively; and of the entries citing this one, none cites it for a bucket precedent, so
 nothing else moves either way. **Neither.**
+
+**Re-checked a fifth time, after the swallowed path gained a test, and it is the slightest closure
+this entry has taken.** `2238f65d` pinned one path, and the paragraphs above record how little of it
+was unguarded to begin with — the shape had five existing tests, and what the commit adds is a throw
+origin and a reason value. The same pass found the degradation pair recorded one commit earlier
+incomplete, and found a positional reference in this entry resolving to the wrong commit because an
+insertion had moved it, so the entry again gains material beside what it loses. Item 78's note has
+now decided this entry five times without needing restatement, and this is the easiest of the five.
+Checked in the other direction, unchanged: items 61 and 78 both hold closed parts and stayed Neither,
+and nothing cites this entry for a bucket precedent. **Neither.**
 
 **Where the code lives:** the gate, its marker, the two early returns, the forced-steps regeneration
 and the body-seeding caps are all in `runOneShotInner`, `cli/dispatch.ts`; both lead-verb predicates
@@ -5774,6 +5830,26 @@ survives is three comments describing a gate that no longer exists. Items 43, 52
 candidates and none fits — the first is a live function whose return value has no consumer, the
 second is computed-and-unused values, the third is about the absence of detection tooling rather
 than any instance of what it would detect.
+
+**The same failure inside this document, where the reference is an anaphor rather than a line
+number, and the convention above does not reach it.** Every instance in this section points *out* of
+this document into code, and the rule it prescribes — name the enclosing function, the branch, the
+marker, the symbol — is built for that direction. A pointer *into* this document has the same problem
+and no coverage. Item 79 carried a sentence saying a leaked environment stub "was also closed there,"
+where `there` meant a commit named in the paragraph that then sat directly above it. `419e1972`
+inserted eight paragraphs between the two, and the nearest preceding commit became a different one,
+so the reference resolved to the wrong commit for anyone resolving it by position. Nothing about the
+wording decayed and it was correct when written; what moved was the distance to its antecedent. The
+repair is this section's own rule applied to the document instead of the code: name the commit, not
+the position. **Rested on one instance, and the sweep that establishes it is the reason that is a
+claim rather than a guess.** Every positional referent in this document was checked at `2238f65d` —
+each `there` following a closure verb, and each `the <unit> above` — and of the seventeen that point
+at a position rather than at something named in their own sentence, this was the only one broken. One
+other is loose by construction rather than by insertion: a bucket paragraph's `the paragraph above`
+means "somewhere earlier in this entry" and was never adjacent to what it names, which still resolves,
+but only because a single paragraph in the entry fits the description. So the mechanism is real and
+rare, and it is recorded here rather than generalized: an insertion-heavy pass is when it happens, and
+this document has just had several in a row.
 
 **The densest instance so far, and it is in the file injected into every prompt.** A sweep of the
 contributor-guidance file in `e8c5a96b` enumerated every one of its file-and-line citations: of the
@@ -6110,6 +6186,20 @@ A set-size comparison could not see this; only reading which test failed, and wh
 **The sharpened rule:** compare failure-set *membership*, not cardinality. Two mutation-testing
 runs of equal size can differ completely in which tests they killed, and that difference — not
 the count — is where the real information about whether a change altered behavior actually lives.
+
+**The rule's own floor, and what to do when membership ties.** The line above already names the
+discriminator as which test failed *and why*, and the second half turns out to be carrying more than
+it looks. At `2238f65d` two mechanically distinct faults in the same module — one stopping a catch
+from swallowing, one stopping a fallback from continuing — killed an identical set. Membership did
+not tie approximately; it tied exactly, so this rule's own instrument returned nothing, and only the
+*why* separated them: the first escaped the call so no assertion ran at all, the second left every
+assertion before the continuation check passing and failed on that check. **The consequence worth
+carrying is what the why costs.** When membership ties, the failure *location* is the only
+discriminator left, and a location is not a property of the fault — it is a property of how the test
+happens to be ordered. Reversing two adjacent assertions in that one test, which no review would
+flag, collapses both faults onto the same line and removes the distinction entirely. So the floor of
+this rule is not "read why" but "read why, and know the why rests on something nothing is protecting."
+One instance, named as one, and item 79 records the mechanism.
 
 **The same rule from the other direction, and the cheaper half of it: a new assertion proves nothing
 until it has been seen to fail.** Everything above is about whether a mutation *can* kill a test.
