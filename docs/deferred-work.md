@@ -5457,15 +5457,39 @@ fixes the code rather than the test:** the reason is computed in the catch's own
 the relevant-file count, and deriving it from the caught value instead is a change to that statement,
 whose author has to update this assertion in the same commit. The test is not the defect.
 
-**Two mechanically different faults share one kill set, and what separates them is weaker than a
-test.** Re-throwing from the catch and returning from the fallback break different things — one stops
-the swallow, the other stops the continuation — and both kill the same six tests. They separate only
-inside the new test and only by where it fails: the re-throw escapes the call, so no assertion in the
-test runs at all, while the fallback return leaves the catch intact, so the diagnostic assertion
-passes and the failure lands one line later on the continuation assertion. **That discriminator is a
-property of assertion order rather than of the suite.** It exists because the new test asserts the
-diagnostic before the continuation; swapping those two — a reordering no review would question —
-makes both faults fail at the same line and indistinguishable again.
+**Two mechanically different faults shared one kill set, and the account written here of what
+separated them was wrong.** Re-throwing from the catch and returning from the fallback break
+different things — one stops the swallow, the other stops the continuation — and at `2238f65d` both
+killed the same six tests. They separated only inside the one test that carried both facts: the
+re-throw escapes the call, so no assertion in that test runs at all, while the fallback return leaves
+the catch intact, so the diagnostic assertion passes and the failure lands later on the continuation
+assertion. That much was verified and stands.
+
+**What `5f0685ac` wrote about that separation is thrown out.** It claimed the separation was a
+property of assertion order,
+and that swapping the two adjacent assertions would make both faults fail at the same line and become
+indistinguishable. `669cf738` performed the swap and re-ran each mutation against it: they never
+converge. The re-throw fails at the awaited call with an uncaught type error before any assertion
+executes; the fallback return fails at an assertion. Those are different *kinds* of failure rather
+than two positions of one kind, and the kind is fixed by which fault occurred rather than by how the
+block is ordered. The sentence was reasoned from the shape of the code and never run, which is the
+fifth pattern's subject and its corollary about corrections at the same time — the paragraph it stood
+in was itself a correction pass's product.
+
+**What the ordering did cost is narrower, and this document already owned it.** With the two
+assertions swapped, the diagnostic check sits after one that fails first under the fallback fault,
+and a block stops at its first throwing assertion — so the reason check does not run at all and its
+verdict becomes unobtainable rather than negative. That is the tenth pattern's rule, stated there
+outright rather than implied, together with its remedy: when two mutations differ only in which half
+of a block's subject they destroy, the block is the wrong unit and has to be split.
+
+**The split landed at `669cf738`, and the discriminator is now a property of the suite.** The reason
+assertion moved into its own test in the same block, a single assertion with nothing to order it
+against. Re-throwing from the catch kills both of those tests beside the five pre-existing siblings;
+stopping the fallback kills only the first and leaves the reason test green — seven against six,
+differing by a test name in the failure list rather than by a line inside one body. Re-run after
+deliberately reordering two adjacent assertions in the trimmed test, the split held unchanged. The
+cost was one additional test.
 
 **A leaked environment stub in the refusal-path file was also closed by `a4824f39`, and it had not
 been doing harm.** That file pinned the routing override for two of its blocks and never restored it,
@@ -6193,13 +6217,23 @@ it looks. At `2238f65d` two mechanically distinct faults in the same module — 
 from swallowing, one stopping a fallback from continuing — killed an identical set. Membership did
 not tie approximately; it tied exactly, so this rule's own instrument returned nothing, and only the
 *why* separated them: the first escaped the call so no assertion ran at all, the second left every
-assertion before the continuation check passing and failed on that check. **The consequence worth
-carrying is what the why costs.** When membership ties, the failure *location* is the only
-discriminator left, and a location is not a property of the fault — it is a property of how the test
-happens to be ordered. Reversing two adjacent assertions in that one test, which no review would
-flag, collapses both faults onto the same line and removes the distinction entirely. So the floor of
-this rule is not "read why" but "read why, and know the why rests on something nothing is protecting."
-One instance, named as one, and item 79 records the mechanism.
+assertion before the continuation check passing and failed on that check.
+
+**What was written here about what the why costs is thrown out, and the membership half survives.**
+The
+membership tie was real and exact, this rule's own instrument did return nothing, and the *why* is
+what separated the two faults — that is this arc's cleanest instance of the rule reaching its limit,
+and it stands. What failed was the account of what rescued it. This paragraph claimed the why was a
+failure *location*, that a location is a property of how a block happens to be ordered rather than of
+the fault, and that reversing two adjacent assertions would collapse both faults together.
+`669cf738` performed the reversal and re-ran both mutations: they never converge. The why that
+separated them is the failure's *kind* — a call that rejects before any assertion runs, against an
+assertion that fails — and a kind is as durable as the mechanism producing it. **So the floor of this
+rule is where the sharpened rule already put it and no lower:** when membership ties exactly, read
+why. **What
+ordering does cost belongs to the tenth pattern rather than here** — an assertion placed after one
+that fails first is never reached, so its verdict is unobtainable, and the remedy is to split the
+block. One instance, named as one; item 79 records both the error and its correction.
 
 **The same rule from the other direction, and the cheaper half of it: a new assertion proves nothing
 until it has been seen to fail.** Everything above is about whether a mutation *can* kill a test.
@@ -6296,6 +6330,23 @@ open-ended prescription, not a comparison between two closed sets. It belongs wi
 that record lessons about this document's own process, not with the numbered items that record
 closable facts about the codebase.
 
+**A second instance, whose mechanism is not the first's and is worth separating from it.** The tenth
+pattern holds that a block reporting at most one failure cannot distinguish two failure modes, and
+prescribes splitting the block. Two consecutive passes met that rule's trigger and did not apply it:
+one wrote a two-fact block while predicting that two of its own mutations would share a kill set, and
+the next built a theory about why the faults could not be separated rather than reaching for the rule
+that already covered it — a theory `669cf738` then disproved by running. **The first instance's
+account does not explain this one.** There the prescription was read and cited, and the gap sat
+between reading it and executing the search it implied. Here it was never read, and the reason is how
+essays get retrieved: a pass reads the numbered entry it is editing closely, and reads essays *by
+name*, chosen in advance for the citations it expects to make. The pass that got this wrong recorded
+reading several essays in full, each selected because it anticipated citing it; the tenth was not
+among them, and the tenth's own heading reads "beside the eighth" — the essay that pass was editing.
+**The sharper form: a rule fires only if the reader already suspects it applies, so an essay's reach
+is bounded by what a pass walks in expecting to need.** That is worse than a missing rule rather than
+better, because nothing searches for it and its non-arrival leaves no trace — the pass produces a
+confident wrong account instead of an obvious gap.
+
 ## A tenth pattern, beside the eighth: shared extraction makes symmetric mutations invisible to comparison assertions
 
 From the pass that converged `parsePatchBlocks` onto the shared `normalizeSmartQuotes` (item 18):
@@ -6357,6 +6408,19 @@ to how many elements survive fails it. Set beside the first, the error is symmet
 credited an assertion with inspecting *more* than it does, the other with inspecting *less* — and in
 both the assertion was right and only the prediction about it was wrong. Neither is a coverage gap,
 and treating either as one would have meant weakening a correct test to match a wrong forecast.
+
+**The splitting rule's own second instance, and it arrived by re-derivation rather than by
+citation.** At `2238f65d` one test asserted both that a swallowed fault's diagnostic carried a
+particular reason and that the run continued past it — two halves of one block, and exactly the shape
+the splitting rule says has to be split. The prediction written for that commit expected two of its
+three mutations to share a kill set, which is that rule's own trigger condition stated in the pass's
+own words. Neither that pass nor the one after it consulted the rule; the second instead built a
+theory about why the two faults could not be separated, and the theory was wrong. `669cf738` split
+the block, moving one assertion into its own test, and the kill sets separated at once — seven
+against six, differing by whether the reason test appears — with the split justified before running
+rather than after reading a result, which is what this section already asked for. Item 79 records the
+entry-side account, and the ninth pattern records why a rule sitting in this file did not reach the
+work it applied to.
 
 **So predicting a kill set has a step before it that neither the granularity rule nor the
 shared-extraction rule supplies: enumerate what each assertion actually compares, then ask what could
