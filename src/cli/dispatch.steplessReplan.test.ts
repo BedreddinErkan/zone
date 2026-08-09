@@ -356,3 +356,19 @@ describe("C7 — forceSteps inference on the replan calls is keyed on currentPla
     expect(replanCall.forceSteps).toBe(true);
   });
 });
+
+// The eight blocks above assert only on values that don't depend on which of
+// generateExecutionPlan/runPlanInvestigation supplied the plan (emitPlanEmptyApproval's
+// payload, runLlmPatchFlow's input, forceSteps) — a misroute would surface as a confusing
+// call-index failure rather than a routing failure. Shape copied from a4824f39's identical
+// fix in dispatch.planDecisionMarker.test.ts, not invented here.
+describe("ADDITIVE_TASK fixture routes to the lexical branch, not investigation", () => {
+  it("generateExecutionPlan is called; runPlanInvestigation is not", async () => {
+    mockRequestPlanApproval.mockResolvedValueOnce({ planId: "plan-1", decision: "reject", modalEmitted: true });
+
+    await runOneShotInner(ADDITIVE_TASK, BASE_CONFIG, "run-routing", { mode: "plan" });
+
+    expect(mockGenerateExecutionPlan).toHaveBeenCalledTimes(1);
+    expect(mockRunPlanInvestigation).not.toHaveBeenCalled();
+  });
+});
