@@ -4243,6 +4243,18 @@ population, and the two resumed runs in its window are archetype-invisible for p
 reason. This is not a defect to fix so much as a limit to state before the next pass reads an
 archetype breakdown as covering every run: it covers every *completed* run.
 
+**A third standing fact, and it is about when the upper bound is tight rather than about what the key
+misses.** Every entry citing this sink says "upper bound on item 73's key", correctly, and none says
+where the bound closes — so a reader has no way to tell a figure that might shrink from one that
+cannot. It varies by marker, not by window. Over a sink read on 2026-08-09, both plan-mode stores
+survive the key untouched: the gate marker at nineteen raw and nineteen collapsed, the investigation
+completion marker at twenty-five and twenty-five. Two other markers in the same file over an
+overlapping window do not — `[zone-archetype]` collapses forty-nine to forty-four,
+`[zone-task-classified]` twenty-six to twenty-one. So the duplication this entry measures is not
+uniform across markers, and for the two plan-mode stores a count is an exact figure rather than a
+ceiling. Worth stating because the safe reading this entry prescribes — treat every count as
+shrinkable — costs precision wherever it is unnecessary, and which case applies is one dedup away.
+
 **Where the code lives:** the sink's append path, its size cap, and its rotation are in
 `markerSink.ts`; the interception that routes marker-shaped writes into it is the same shield item
 11 describes. The file itself is `markers.jsonl` under the user-level `.zone` directory.
@@ -4794,6 +4806,20 @@ three fifths. **About half the measured runs never executed at all**, matching t
 mix, and for those plan generation is the whole of the spend. A change that makes plans longer is
 therefore not a change to a small number.
 
+**What "none exceeding the cap of six" leaves out, and the arithmetic inverts the obvious reading.**
+That sentence is true and stays: nothing ran past six. What it does not say is how many *reached* six
+— twelve of the twenty-five did, of which seven finished on their own at exactly six and five were
+stopped there by the cap, and seven plus five is the twelve. For those five the recorded cost is a
+floor on what the run would have spent, not a measurement of it. **The tempting inference from that
+is wrong, and the five values are given so it can be checked rather than believed:** those runs cost
+`$0.1113`, `$0.0706`, `$0.1459`, `$0.0263` and `$0.0963`, summing to `$0.4504` for a mean of about
+`$0.0901`, against `$1.9933` over the remaining twenty for a mean of about `$0.0997`. Weighting those
+two means by five and twenty returns `$0.0977`, the same figure recorded above, so the split
+reconciles with the whole rather than replacing it. **The cap is therefore binding on the cheaper
+half of the population, not the dearer one** — a reader expecting it to be trimming the expensive
+tail would have the direction backwards, and a change that raised or removed it would not mostly add
+cost at the top.
+
 **Strand four — the prompt formatter and the approval renderer disagree about what a plan is, in
 both directions.** The formatter reads the objective, each step's title, description and likely-files,
 the scope summary and the risk hints, and emits them in that fixed order; the rendering component
@@ -4960,6 +4986,26 @@ deliberately instead of measured off the sink: a figure read from the sink would
 dedup key applied to it, where this one sidesteps the instrument entirely. The sink's own cap is a
 whole-file rotation threshold rather than a per-record limit, so nothing about the wider payload
 approaches a bound.
+
+**The instrument has not fired once, which is the precondition any comparison across a gate change
+rests on.** Read on 2026-08-09: the gate marker holds nineteen records spanning 2026-07-31 to
+2026-08-08, and all nineteen carry the four widened fields as absent, because every one of them
+predates `dc8a1e60`. So the baseline for the inputs is empty, not thin. **Item 74 records the
+adjacent shape and the difference decides how each reads:** there, every record predates a change and
+therefore measures the world before it, which is a usable baseline and is named as one. Here the
+records predate the *field's existence*, so they are not a measurement of anything to compare
+against — an absence rather than a prior value. A pass changing the gate today would be setting a
+window without the inputs against a window with them and calling the difference an effect.
+
+**The cheaper path is the one already running, and the alternative is priced so the choice is on
+record rather than only its conclusion.** All four values are computed on every quick-path run
+whether the gate investigates or not, so ordinary use accumulates them at no marginal cost and no
+scheduling — the only requirement is that runs happen. Buying the same records deliberately means
+running investigate-first tasks at the mean this document already records, around a tenth of a dollar
+each, so a few dozen is a few dollars plus the wall-clock; and a deliberate set drawn from one
+repository would still leave the file-count signal a near-constant, which is the thing it would most
+need to vary. Waiting costs nothing and buying does not fix the sampling problem it would be bought
+to fix.
 
 **A sibling predicate in the same module disables both refusal paths for the same task shape.** The
 two early returns that honour a plan coming back cannot-verify or no-change are each a conjunction
@@ -5271,6 +5317,19 @@ the file could not do was say what had gone wrong, and a reader would have spent
 replan ordering rather than on the branch above it. The distinction is worth keeping: these tests
 were not insensitive to the defect, they were unable to name it.
 
+**That surface has a blind spot for the signals the marker now carries, and it was predicted before
+it could fire rather than found after.** Exactly one fixture object in the whole dispatch test
+surface supplies a file count, ranked scores or grep matches, and it lives in the gate-marker file,
+where its four tests assert on the emitted payload and never on routing. Every other context mock
+across the thirteen files that stub the context builder returns a project summary and a path list
+alone. So a gate modified to consult any of the three would read `undefined` in every routing test in
+the repository and pass — the six fixtures pinning the branch would keep asserting the same routing
+while exercising a comparison the change never intended. The remedy is cheap and belongs to whichever
+pass makes that change: supply the signal in the fixtures before claiming the routing tests cover it.
+Recorded here rather than as a pattern because the prediction-before-firing part has one instance
+against the two the eighth pattern already holds from the other direction, which by the seventeenth's
+own precedent is too few to generalize from.
+
 **A leaked environment stub in the refusal-path file was also closed there, and it had not been
 doing harm.** That file pinned the routing override for two of its blocks and never restored it,
 where four sibling files restore the same variable. Every test downstream of the leak inside that
@@ -5297,6 +5356,40 @@ log and never routed to an event, so it is on disk and absent from the process. 
 only in the gate marker. **Nothing about provenance is unavailable; all of it is unrouted** — which
 makes this plumbing rather than instrumentation, and is the one part of this entry where the shape of
 a fix is not in question even though its surface is.
+
+**What already joins after the fact, which is a different question from what is routed and was never
+in doubt here — added because nothing states it.** The paragraph above is about values not reaching
+the process's own event stream; it says nothing about reading the stores afterwards, and the run
+identifier does that work today. Measured over a sink read on 2026-08-09, the gate marker's run
+identifier matches the decision marker on all nineteen of its records, the investigation completion
+marker on all seventeen of the runs it sent to investigation, the archetype marker on seventeen, and
+the usage ledger on all nineteen. So a gate decision can already be read alongside its cost, its
+iteration count, its archetype, its approval outcome and its token spend, by one key, with no work
+owed. **The exception is the plan itself, and it is total:** the persisted transcript entry carries
+the objective, the steps, the scope summary, the scope note and the risk hints, and no identifier of
+any kind — its session file's only identifier is the session's, which appears in no marker store, and
+the plan identifier the decision marker carries is never written beside the plan text. So every
+question about a plan's *provenance* is answerable and every question about its *content* is not.
+Recorded as the gap it is, with what would close it named — a plan identifier on the persisted entry,
+or a run identifier on the session — and neither proposed here.
+
+**What that join yields once read, and why the obvious question is not among the answers.** Of the
+nineteen gate records, seventeen took investigation and two took the lexical branch; thirteen of the
+seventeen ended in a rejection or a timeout, four in an acceptance, and both lexical runs ended
+terminal. The question those numbers invite — did a run take investigation without needing it — is
+**not answerable from them, for a reason the eighteenth pattern's qualification already owns**: no
+field records *why* a plan was rejected, so the decision value has several states behind it and
+cannot be read back to one. That is the ambiguous-value case, cited rather than restated.
+
+**The second reason is separate from the first, is not owned anywhere, and is the sharper of the
+two.** Every one of those records was produced by the operator building this feature, inspecting
+plans as they appeared. A rejection in that population is an artifact of who was watching and how
+closely, not a verdict on the plan — the split measures the operator's attention. Stated plainly
+rather than as a caveat, because a caveat attached to a number gets dropped when the number is
+quoted: **this rejection rate is not evidence about plan quality and no reading of it can be made
+into evidence about plan quality.** What the same records do support is the routing split, cost per
+route, the iteration distribution, and the share of investigation spend on runs that never executed
+— none of which depend on why anyone rejected anything.
 
 **A plan declined at the gate persists in full.** The session file is written when the TUI process
 exits, not when the run ends, so the plan rejected on 2026-08-08 is on disk complete: the
