@@ -18,6 +18,8 @@ const mockLoadDiskModelSync = vi.hoisted(() => vi.fn(() => null));
 const mockRunPlanInvestigation = vi.hoisted(() => vi.fn());
 const mockIsNoChangePlan = vi.hoisted(() => vi.fn());
 const mockIsCannotVerifyPlan = vi.hoisted(() => vi.fn());
+const mockDebugLog = vi.hoisted(() => vi.fn());
+const mockLog = vi.hoisted(() => vi.fn());
 
 vi.mock("../core/runLlmPatchFlow.js", () => ({ runLlmPatchFlow: mockRunLlmPatchFlow, isChitchat: () => false, isVagueDeveloperTask: () => false }));
 vi.mock("../api/commandApprovals.js", () => ({
@@ -47,6 +49,7 @@ vi.mock("../llm/executionPlan.js", async (importOriginal) => {
 vi.mock("../visual/tierSettings.js", () => ({ readAuditModeSetting: mockReadAuditModeSetting, readDailyUsdCapOverride: vi.fn() }));
 vi.mock("../api/diskModel.js", () => ({ loadDiskModelSync: mockLoadDiskModelSync }));
 vi.mock("../llm/planInvestigation.js", () => ({ runPlanInvestigation: mockRunPlanInvestigation }));
+vi.mock("../utils/logger.js", () => ({ debugLog: mockDebugLog, log: mockLog }));
 
 import { runOneShotInner } from "./dispatch.js";
 
@@ -208,6 +211,34 @@ describe("Non-refusal plan-gen failure — quick path behavior", () => {
     });
 
     expect(mockRunLlmPatchFlow).toHaveBeenCalledOnce();
+    expect(ac.signal.aborted).toBe(false);
+    expect((result as any).ok).toBe(true);
+  });
+
+  it("context-read fault, not a plan-gen rejection: preparePlanContext resolves null → property read throws before the gate → swallowed, reason mislabelled empty-context, run continues", async () => {
+    // Distinct from every other test in this describe: the throw originates at planCtx.projectSummary
+    // (the context builder's return value itself), not from generateExecutionPlan/runPlanInvestigation
+    // rejecting. It fires before shouldInvestigate is even computed, so neither generator is reached.
+    mockPreparePlanContext.mockResolvedValueOnce(null);
+    mockRunLlmPatchFlow.mockResolvedValueOnce({ ok: true, decisionMode: "safe_to_apply" });
+
+    const ac = new AbortController();
+    const result = await runOneShotInner("task", BASE_CONFIG, "run-ctx-throw", {
+      mode: "plan",
+      externalAc: ac,
+    });
+
+    expect(mockGenerateExecutionPlan).not.toHaveBeenCalled();
+    expect(mockRunPlanInvestigation).not.toHaveBeenCalled();
+    // planCtxRelevantFiles is still its outer-scope default ([]) when the catch computes the
+    // reason, because the throw fired before the reassignment from planCtx.relevantFilePaths —
+    // so a TypeError from a null context is labelled the same as a genuinely empty one. Pinning
+    // the current, wrong label — not what it should say.
+    expect(mockDebugLog).toHaveBeenCalledWith("[zone-plan-gen-failed]", expect.objectContaining({ reason: "empty-context" }));
+    // Swallowed, not propagated — the run continues rather than failing.
+    expect(mockRunLlmPatchFlow).toHaveBeenCalledOnce();
+    const call = mockRunLlmPatchFlow.mock.calls[0]![0] as Record<string, unknown>;
+    expect(call["preGeneratedPlan"]).toBeUndefined();
     expect(ac.signal.aborted).toBe(false);
     expect((result as any).ok).toBe(true);
   });
