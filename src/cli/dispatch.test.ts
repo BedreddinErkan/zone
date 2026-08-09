@@ -694,6 +694,69 @@ describe("S5: cannotVerify plan short-circuit", () => {
   });
 });
 
+describe("E8a/E8b: problemWordsPresent && !isPureAddition replaces taskAssertsProblem", () => {
+  const PLAN_CONFIG = { ...BASE_CONFIG };
+  const AC = () => new AbortController();
+  const NO_CHANGE_PLAN = {
+    objective: "Verify build",
+    steps: [] as { title: string; filesLikely: string[] }[],
+    riskHints: [],
+    scopeSummary: "No changes needed.",
+    noChangeReason: "npm run build exits 0 — no error to fix",
+  };
+  const CANT_VERIFY_PLAN = {
+    objective: "Verify build",
+    steps: [] as { title: string; filesLikely: string[] }[],
+    riskHints: [],
+    scopeSummary: "Could not verify.",
+    cannotVerifyReason: "Could not verify — npm run build did not run (auto-denied); premise unconfirmed.",
+  };
+  const PLAN_WITH_STEPS = {
+    objective: "Do the work",
+    steps: [{ title: "Step", filesLikely: [] }],
+    riskHints: [],
+    scopeSummary: "Concrete steps.",
+  };
+
+  beforeEach(() => {
+    mockLoadDiskModelSync.mockReturnValue({ version: 2, model: "claude-sonnet-4-6", provider: "anthropic", planDepth: "quick", updatedAt: "" });
+  });
+
+  it("E8a honored for a structural verb with a problem word — previously destroyed by taskAssertsProblem's additive short-circuit", async () => {
+    mockGenerateExecutionPlan.mockResolvedValueOnce(CANT_VERIFY_PLAN);
+    mockIsCannotVerifyPlan.mockReturnValue(true);
+    const result = await runOneShotInner("refactor the module that is broken", PLAN_CONFIG, "run-e8a-structural", { mode: "plan", externalAc: AC() });
+    expect(result.ok).toBe(false);
+    expect((result as { ok: false; reason: string }).reason).toBe("could_not_verify");
+  });
+
+  it("E8b honored for a structural verb with a problem word — previously destroyed by taskAssertsProblem's additive short-circuit", async () => {
+    mockGenerateExecutionPlan.mockResolvedValueOnce(NO_CHANGE_PLAN);
+    mockIsNoChangePlan.mockReturnValue(true);
+    const result = await runOneShotInner("refactor the module that is broken", PLAN_CONFIG, "run-e8b-structural", { mode: "plan", externalAc: AC() });
+    expect(result.ok).toBe(false);
+    expect((result as { ok: false; reason: string }).reason).toBe("no_change_needed");
+  });
+
+  it("pure addition + problem word ('add error handling') still NOT honored — isPureAddition keeps the guard closed", async () => {
+    mockGenerateExecutionPlan.mockResolvedValueOnce(NO_CHANGE_PLAN).mockResolvedValue(PLAN_WITH_STEPS);
+    mockIsNoChangePlan.mockReturnValue(true);
+    mockRequestPlanApproval.mockResolvedValue({ planId: "p-regression", decision: "accept_all" });
+    mockRunLlmPatchFlow.mockResolvedValue(SUCCESS_RESULT);
+    await runOneShotInner("add error handling", PLAN_CONFIG, "run-pureaddition-guard", { mode: "plan", externalAc: AC() });
+    expect(mockRequestPlanApproval).toHaveBeenCalled();
+  });
+
+  it("structural verb WITHOUT a problem word still NOT honored — problemWordsPresent alone is not enough, the pure-addition guard isn't what's closing it here", async () => {
+    mockGenerateExecutionPlan.mockResolvedValueOnce(NO_CHANGE_PLAN).mockResolvedValue(PLAN_WITH_STEPS);
+    mockIsNoChangePlan.mockReturnValue(true);
+    mockRequestPlanApproval.mockResolvedValue({ planId: "p-noproblemword", decision: "accept_all" });
+    mockRunLlmPatchFlow.mockResolvedValue(SUCCESS_RESULT);
+    await runOneShotInner("refactor the auth module", PLAN_CONFIG, "run-structural-noproblemword", { mode: "plan", externalAc: AC() });
+    expect(mockRequestPlanApproval).toHaveBeenCalled();
+  });
+});
+
 // ─── Stage 2: create/scaffold tasks reach the modal ───────────────────────────
 describe("Stage 2: create-task gate + empty-steps fallback + path-token merge", () => {
   const PLAN_CONFIG = { ...BASE_CONFIG };

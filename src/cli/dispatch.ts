@@ -16,7 +16,7 @@ import { createSpinner, buildCliSink } from "./sink.js";
 import type { LlmPatchProgressUpdate, ZoneStructuredProgressEvent } from "../core/agentLifecycleEvents.js";
 import { preparePlanContext } from "../core/preparePlanContext.js";
 import { generateExecutionPlan, isNoChangePlan, isCannotVerifyPlan, isAnswerOnlyPlan, synthesizeMinimalPlan, planTerminalShape } from "../llm/executionPlan.js";
-import { taskAssertsProblem, isPureAddition, matchedLeadVerb } from "../llm/taskShape.js";
+import { taskAssertsProblem, isPureAddition, matchedLeadVerb, problemWordsPresent } from "../llm/taskShape.js";
 import { rejectPendingEditsForRun } from "../api/editApprovals.js";
 import { rejectPendingStagedForRun } from "../api/stagedApprovals.js";
 import { rejectPendingQuestionsForRun } from "../api/questionApprovals.js";
@@ -402,9 +402,10 @@ export async function runOneShotInner(
       } else {
 
       // E8a: reproduce command did not run — premise unverified, do not fabricate a fix.
-      // Gate: only honor for tasks that assert a pre-existing problem (fix/debug).
-      // Additive tasks (create/add/refactor) must never be verdict-killed here.
-      if (taskAssertsProblem(task) && isCannotVerifyPlan(preGeneratedPlan)) {
+      // Gate: only honor when the task text names a problem AND isn't a pure addition —
+      // problemWordsPresent(), not taskAssertsProblem(), which also excludes every
+      // structural verb (refactor/rename/extract/migrate/convert) regardless of wording.
+      if (problemWordsPresent(task) && !isPureAddition(task) && isCannotVerifyPlan(preGeneratedPlan)) {
         progressCallback({
           stage: "narration",
           progress: {
@@ -420,8 +421,8 @@ export async function runOneShotInner(
       }
 
       // E8b: premise verified false — investigation confirmed no problem exists.
-      // Gate: same — only honor for problem-asserting tasks.
-      if (taskAssertsProblem(task) && isNoChangePlan(preGeneratedPlan)) {
+      // Gate: same — problemWordsPresent() && !isPureAddition(task).
+      if (problemWordsPresent(task) && !isPureAddition(task) && isNoChangePlan(preGeneratedPlan)) {
         progressCallback({
           stage: "narration",
           progress: {

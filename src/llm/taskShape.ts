@@ -34,6 +34,19 @@ export function taskAssertsProblem(task: string): boolean {
   return PROBLEM_RE.test(task);
 }
 
+/**
+ * True when the task text contains a problem-signalling word — no additive-lead-verb
+ * short-circuit, unlike taskAssertsProblem. "add error handling" returns true here.
+ *
+ * Exists so a caller can pair this with its own additive/structural distinction
+ * (isPureAddition) instead of inheriting taskAssertsProblem's, which excludes every
+ * ADDITIVE_LEAD_VERB — including refactor/rename/extract/migrate/convert, verbs
+ * isPureAddition already treats as needing investigation, not as safe to skip.
+ */
+export function problemWordsPresent(task: string): boolean {
+  return PROBLEM_RE.test(task);
+}
+
 /** Lead verbs that introduce BRAND-NEW code without touching existing logic.
  *  Subset of ADDITIVE_LEAD_VERBS that EXCLUDES structural verbs
  *  (refactor/rename/extract/migrate/convert — blast radius into existing code) and the

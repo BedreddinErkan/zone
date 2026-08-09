@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { taskAssertsProblem, matchedLeadVerb } from "./taskShape.js";
+import { taskAssertsProblem, matchedLeadVerb, problemWordsPresent } from "./taskShape.js";
 import { synthesizeMinimalPlan } from "./executionPlan.js";
 
 describe("taskAssertsProblem", () => {
@@ -33,6 +33,38 @@ describe("taskAssertsProblem", () => {
   for (const [task, expected] of cases) {
     it(`${JSON.stringify(task)} → ${expected}`, () => {
       expect(taskAssertsProblem(task)).toBe(expected);
+    });
+  }
+});
+
+describe("problemWordsPresent", () => {
+  const cases: [string, boolean][] = [
+    // Six structural verbs, bare — no additive short-circuit, but also no problem word.
+    ["make a login page", false],
+    ["refactor the auth module", false],
+    ["rename UserService to AccountService", false],
+    ["extract helper function", false],
+    ["migrate database schema", false],
+    ["convert the script to TS", false],
+    // Same six, each with a problem word added — taskAssertsProblem would say false
+    // for all six; this predicate does not have that short-circuit.
+    ["make the parser robust, it is broken", true],
+    ["refactor the auth module, it has a bug", true],
+    ["rename UserService, it has a stale name", true],
+    ["extract helper function, the current one is broken", true],
+    ["migrate database schema, current one has a bug", true],
+    ["convert the script, it is broken", true],
+    // Pure addition + problem word: true here (unlike taskAssertsProblem), which is
+    // exactly why the E8a/E8b call sites pair this with !isPureAddition rather than
+    // using this predicate alone.
+    ["add error handling", true],
+    // Pure addition, no problem word.
+    ["add a helper", false],
+  ];
+
+  for (const [task, expected] of cases) {
+    it(`${JSON.stringify(task)} → ${expected}`, () => {
+      expect(problemWordsPresent(task)).toBe(expected);
     });
   }
 });
