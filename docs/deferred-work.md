@@ -5491,6 +5491,73 @@ differing by a test name in the failure list rather than by a line inside one bo
 deliberately reordering two adjacent assertions in the trimmed test, the split held unchanged. The
 cost was one additional test.
 
+**Nothing then held the split in place, so `88ec903d` pinned each of the two tests to its own
+assertion count.** A pinned count is checked by the runner at the end of a test that returned
+normally, so a body that executes one assertion more than its pin says fails naming both numbers.
+What that catches is one accident and no more: a *careless* recombination, where an assertion is
+copied into a test whose pin is not noticed or updated. It does not catch a deliberate merge, which
+edits the pin along with everything else in the body being changed.
+
+**The commit stated a second gap as an impossibility and that is false — thrown out here rather than
+softened.** Its comment and its message both say a deleted sibling test is invisible to any mechanism
+inside a surviving one. Read against the runner's own collection code, it is not: the collection pass
+assigns a block's children to its task list and back-links each child's suite to it, and the context
+handed to a test body carries that test's own task. **A running test can therefore reach its
+siblings, and a count pinned on that list would fail when one disappears.** The claim was reasoned
+and never run, which is the third time in this arc that pairing has produced a false sentence, and
+the fifth pattern owns the shape.
+
+**What closing it would take, recorded at the level of shape so the decision is available without
+re-deriving the mechanism.** One assertion, living in either surviving test or in a third of its own
+inside the same block, walking from the running test's task to its suite and pinning the length of
+that suite's task list. **And the cost, which is why this pass records the option rather than taking
+it:** that is another hand-maintained number, and it is a higher-churn one than the two already
+added — the per-test pins move only when someone changes assertions inside those two tests, where a
+suite-size pin moves every time anyone adds any test to a block that currently holds six of the
+file's eleven. Worse than the chore is what it does to the assertion's home: a test would then fail
+for a reason with nothing to do with its own subject. Whether that clears its cost line is a decision
+nobody has made, and this entry does not make it.
+
+**The pins' own cost, stated so it is not mistaken for a hazard.** Two hand-maintained numbers that
+any later legitimate assertion trips. Checked against the nearest existing classes and it is not
+already recorded: item 36's bucket counts have the same shape, but that entry's subject is the
+mechanical checker that catches them going stale rather than the burden of keeping them; the suite's
+call-count assertions have the shape too, and the eighth records a different hazard about those
+entirely. A tripped pin fails loudly with both numbers named, so this is a bump-a-number chore with
+an unmissable prompt, not a silent trap — which is the whole of why it was judged worth its
+maintenance.
+
+**How the pins were established, and the half of the method that has no owner.** The runner's task
+loop was read first to decide what to run — the count check sits immediately after the test body
+inside the same block with no `finally`, so it is unreached whenever the body itself throws, which
+predicted the pins would be inert against the two existing mutations. That prediction was then
+confirmed by running rather than accepted: both mutations were re-run unpinned and pinned on the same
+tree on 2026-08-09 and the outputs compared directly, identical failures and identical messages, with
+no count-mismatch text on either side. The fifth pattern owns reading-to-know-what-to-run and is
+cited rather than extended, since an instance of a rule working adds a tally and no lesson. **The
+second half is not owned anywhere:** both sides of that comparison were taken from one tree rather
+than one side being read off an earlier report, which is what rules out an unrelated intervening
+change accounting for a difference. Grepped for an existing same-tree comparison discipline and found
+only provenance statements naming which tree a figure came from. One instance, recorded as method,
+declined as a pattern on the seventeenth's precedent.
+
+**The comments naming those scopes are uncoupled from the pins they describe, and one of them is
+false as it stands.** Nothing connects the two: comments do not execute, no linter runs in this
+repository at all, and nothing anywhere reads that test file's text. Either can be edited without the
+other in either direction, which is the first pattern's own qualification about comments describing a
+mechanism they are not bound to — cited rather than added to it, because that instance is an observed
+drift and this one is prospective, on the precedent this entry set for the fixture blind spot one
+strand above. Rejected as owners: the ninth, because these comments describe a scope rather than
+prescribe a check; the thirteenth, the weakest fit of the three, because its subject is a name in
+prose failing to evidence a call path rather than a description drifting from what it describes.
+
+**The decision about the false comment, recorded as a decision rather than left implicit.** A ledger
+correction does not reach whoever edits that test, and this document's own ninth pattern is the
+reason to believe it: an entry can be read, cited, and still not fire, which this arc demonstrated
+again one commit ago. So the comment is corrected in a source commit of its own, immediately after
+this one — the correct wording already exists in this strand's account of what the pins catch, and
+ledger and source stay in separate commits as they have throughout.
+
 **A leaked environment stub in the refusal-path file was also closed by `a4824f39`, and it had not
 been doing harm.** That file pinned the routing override for two of its blocks and never restored it,
 where four sibling files restore the same variable. Every test downstream of the leak inside that
@@ -5656,6 +5723,15 @@ insertion had moved it, so the entry again gains material beside what it loses. 
 now decided this entry five times without needing restatement, and this is the easiest of the five.
 Checked in the other direction, unchanged: items 61 and 78 both hold closed parts and stayed Neither,
 and nothing cites this entry for a bucket precedent. **Neither.**
+
+**Re-checked a sixth time, and this is the clearest application of item 78's note so far because
+nothing closed at all.** `88ec903d` added a protection for one narrow accident, and this entry's
+assertion-pin strand names two gaps it does not cover, establishes that one of those two is closable
+rather than impossible, and records a false comment now standing in the source. So the entry gains open material
+in three places and loses none — a strictly weaker case for promotion than the five re-checks before
+it, every one of which answered an actual closure and still reached Neither. Checked in the other
+direction, unchanged: items 61 and 78 both hold closed parts and stayed Neither, and nothing cites
+this entry for a bucket precedent. **Neither.**
 
 **Where the code lives:** the gate, its marker, the two early returns, the forced-steps regeneration
 and the body-seeding caps are all in `runOneShotInner`, `cli/dispatch.ts`; both lead-verb predicates
