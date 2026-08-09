@@ -5070,8 +5070,8 @@ corroboration of anything; it is the predicted degeneracy showing up on schedule
 
 **Context quality on this run, recorded as its own observation and not filed under a defect above.**
 The grep field returned four paths under the remote-control tree, none of them related to a task about
-seeding caps, and the ranked five were dominated by files matching only the unrelated numeric literals
-the task happened to quote. The plan located the correct code regardless, and it did so by searching
+seeding caps, and the ranked five were dominated by files with nothing to do with the task's subject.
+The plan located the correct code regardless, and it did so by searching
 rather than by following what it was handed: the investigation's own scope note states that the loop in
 question is in none of the listed relevant files, names where it actually is, and dismisses four of the
 five ranked files by name as matching only those literals. **The seeding surface contributed nothing,
@@ -5085,6 +5085,97 @@ sample returned, for a task with nothing in common with this one. That points at
 close to task-independent for this repository rather than at a single false positive, which is a
 stronger claim than the earlier sample alone could support — stated at two observations, with no
 criterion drawn.
+
+**The numeric-literal explanation was false, and this entry asserted it in its own voice before
+checking it.** `1ee18fc3` wrote that the ranked five matched only the unrelated numeric literals the
+task quoted. That clause is now deleted rather than bounded: it was not true when written, so there is
+no window in which it held. The neighbouring sentence, which reports that the investigation's scope
+note dismissed four of the five by name as matching those literals, is kept unchanged — the scope note
+does say that, so recording it is accurate bookkeeping, and what changes is that the note's claim is
+now marked wrong rather than left reading as endorsed. **Numerals cannot reach the scoring at any
+stage:** the content-boost extractor requires a leading letter in all four of its branches, and the
+path-term set is only ever intersected against terms drawn from a file path, where no digit string
+appears. Replacing every numeral in the task with a neutral word leaves the top five byte-identical,
+scores included.
+
+**What the five actually scored on, decomposed and checked by summing each against its own measured
+value.** Incidental overlap between ordinary English words in the task and the characters of a path.
+The ranker file itself scored on "file" and "files" appearing in its own name; the search-cap manual
+scored on "cap" and "file"; the patch-blocks characterization test scored on "loop" and "blocks", both
+words the task used about its own subject in a different sense. **The starkest pair is the two
+exponential-backoff files**, which took fifty of their fifty-one path points from five keyword hits
+that are all substrings inside a single word — "the" and "one" both occur inside
+`withexponentialbackoff`, because the keyword rule is a bare `includes` test with no word boundary.
+Not one point came from either numeral, and none of the five paths contains either digit string.
+
+**The shape of the error is why it is worth keeping.** A model produced a confident, fluent,
+mechanically wrong explanation for its own bad context — it correctly observed that the five files
+were irrelevant and correctly named where the real code was, then supplied a cause it had no way to
+check — and that explanation entered this document as an attribution, which reads as established.
+The fifth pattern owns the general form and now carries this instance; the seventeenth owns the other
+half, that the sentence was written in the same commit as its own subject and had had no later reader.
+
+**The grep surface's selectivity closed at `afb8487a`, and what it was for is worth stating because it
+never did it.** `091564ae` built it as a recall backstop for exactly the path-blindness this entry
+records in the ranker — its own doc comment says it exists to catch "rename tasks where the symbol name doesn't
+appear in the file path." It failed that case in the most direct way available: given a rename task
+naming a rare symbol, the tokeniser OR-ed that symbol with the ordinary words beside it, matched
+eighty-six files, and returned four that did not contain the symbol while missing all four that did.
+`afb8487a` replaces the tokeniser with the extractor the ranker's own content boost already uses, so
+the pattern carries identifier-shaped terms only. Measured after the change: the designed case returns
+exactly the four files containing the symbol, and a task built entirely of common words returns
+nothing at all, because the extractor yields no term and the existing empty guard fires before any
+search runs.
+
+**Three things did not close, and they are distinct.** Selection order among matches beyond the
+four-file cap is still the search tool's directory-walk order, so the field remains nondeterministic
+run to run and cannot serve as a measurement baseline whatever its contents. The merged list's length
+stayed nine on the run this entry records while its composition changed entirely — a payload value
+whose population is one record. And the producer/consumer mismatch `66c23fe0` introduced is untouched:
+two consumers capped at five, against a producer that places the grep extras at positions six through
+nine. **The distinction that carries the consequence, and it must not be collapsed:** those extras
+reach the model as *content* on neither branch, and as *names* wherever the plan-generation call
+renders its own wider slice.
+
+**A filter with no test coverage anywhere, recorded as an open gap rather than an incidental note.**
+The extractor's stopword blocklist is referenced in exactly two places, its own definition and its own
+use, and nothing asserted its behaviour: removing the filter entirely left the whole suite passing.
+`afb8487a` added the first assertion that constrains it, and that assertion lives in the test file for
+the grep surface rather than beside the extractor — so a ranker behaviour is now guarded, incidentally,
+from a file whose subject is something else. **What would close it properly** is a test beside the
+extractor asserting the filter on its own terms, which would also give the removal a kill set instead
+of the empty one it has today.
+
+**The ranker is the open surface this arc has been circling, and the numbers name why.** On the run
+this entry records, the file the plan ultimately worked from scored one point out of a nine-hundred
+file field, ranking five hundred and forty-eighth, while containing thirteen capped hits on the very
+terms the query was built from — worth the maximum fifty-point content boost, which it never received
+because that boost is computed only for the top thirty by path score, and it was nowhere near. **The
+tempting fix is not the fix:** opening that window would have lifted it to fifty-one, which ranks
+sixteenth on the same run, still outside the five the model is handed. The base path score is the
+deeper failure, not the window.
+
+**Scores are not comparable across queries, which forecloses every threshold.** Three tasks against
+one tree returned top scores of eighty-four, five hundred and twenty-nine, and nineteen; the scale is
+a raw unnormalised sum whose reachable maximum depends on how the request happens to be worded. So no
+cross-task comparison and no fixed cut-off is sound, and a same-task same-tree re-run is the only
+comparison the field supports.
+
+**Score tracks task length and phrasing rather than task subject, at two observations.** Deleting the
+final sentence of the run's task — a sentence that changes nothing about what is being asked — moved
+the top five from eighty-four, seventy-four, sixty-eight, sixty-six, sixty-six to seventy-four and
+four ties at sixty-four, and **replaced three of the five files**. The mechanism is the same substring
+rule recorded above: the deleted sentence carried another "the", the only "one", and the word "blocks",
+and the files that fell out were the ones scoring on exactly those. Stated at two variants of one task
+on one tree, with no criterion drawn.
+
+**That is also what makes the missing baseline constructible, and it sets the one condition.** A fixed
+task string has to be pinned verbatim, character for character, because a reworded or shortened
+version of the same request is not the same measurement — it is a different query against the same
+tree. There is nothing to preserve today: the ranked-score field holds one sink sample and one
+direct-call fixture, and the two disagree in shape, one a spread and one a flat tie. Constructing a
+baseline is cheap, local and free of model spend, and it bears directly on the gate-change debt above,
+which prefers that field over every other signal the marker carries.
 
 **Task intent is read nowhere, and the consequence is a permission boundary rather than a
 presentation preference.** The task began with the word Investigate and asked for a report. That word
@@ -6037,7 +6128,7 @@ and a cost point that may mean the recorded average no longer describes current 
 the other direction, unchanged: items 61 and 78 both hold closed parts and stayed Neither, and nothing
 cites this entry for a bucket precedent. **Neither.**
 
-**Why this re-check and the one before it reach opposite answers about the same list, written once so
+**Why the ninth and tenth re-checks reach opposite answers about the same list, written once so
 the pair reads as the rule rather than as drift.** `0f072487` recorded that its closure removed nothing
 from the enumerated remainder; this one records that its closure removes an item. Both are right,
 and the difference is not about how large either closure was. **Whether a closure shrinks the
@@ -6049,6 +6140,19 @@ alone by construction, however substantial it is. Two instances, and nothing fur
 them — the seventeenth pattern's precedent applies to this sentence as much as to any other written in
 the same commit as its own subject.
 
+**Re-checked an eleventh time, after `afb8487a` closed the grep surface's selectivity, and the rule
+just stated decides it without needing judgement.** A closure moves the enumerated remainder only if
+the thing closed was enumerated in it. The remainder is the routing predicate, the three
+step-guaranteeing mechanisms, the four caps, and the thirty-session expiry — **the grep surface is not
+among them**, so the remainder stays at four and this closure does not touch it. What the closure does
+reach is material the tenth re-check itself added, and only half of it: the grep signal's
+task-independence is fixed, its nondeterminism is not. Against that, this pass adds open material in
+three places — a filter with no coverage anywhere, the ranker's base path scoring with the numbers that
+name it, and the surviving walk-order nondeterminism — and corrects a false clause this entry had
+asserted in its own voice. An entry that gains three open findings and loses half of one does not
+promote. Checked in the other direction, unchanged: items 61 and 78 both hold closed parts and stayed
+Neither, and nothing cites this entry for a bucket precedent. **Neither.**
+
 **Where the code lives:** the gate, its marker, the two early returns, the forced-steps regeneration
 and the body-seeding caps are all in `runOneShotInner`, `cli/dispatch.ts`; both lead-verb predicates,
 and the problem-word predicate the two refusal exits now pair with the narrower of them, are in
@@ -6056,7 +6160,9 @@ and the problem-word predicate the two refusal exits now pair with the narrower 
 that renders only the first eight relevant paths are in `llm/executionPlan.ts`. The ranker — with its
 unused semantic, last-changed and intent inputs, its skip filter and its content pass over the top
 thirty — is `repo/rankRelevantFiles.ts`, and the scan it consumes is `repo/scanRepo.ts`; the summary
-join and the inert maximum are in `core/preparePlanContext.ts`. The structure detector it calls,
+join, the inert maximum, and `grepMatchingFiles` with its four-file cap are in
+`core/preparePlanContext.ts`; the entity extractor it now shares with the ranker's content boost, and
+that extractor's stopword blocklist, are in `repo/rankRelevantFiles.ts`. The structure detector it calls,
 its manifest read, its tiers, its note cap and the two conditions the declared-signal finding is
 about are all in `repo/detectProjectStructure.ts`, whose own test file arrived with `a2fa9ee8`; the
 patch flow's second summary join is in `core/runLlmPatchFlow.ts` and the feature agent's boolean read
@@ -6482,6 +6588,21 @@ right, because that file describes current state and the hatch is gone from it �
 surviving a false account of itself, which the tenth pattern already states from the assertion side
 and item 36 from the entry side. What does not survive is the inference underneath: absence at HEAD
 reported the falsity correctly and said nothing about its cause, and a cause was supplied anyway.
+
+**A fourth instance, and its document had an author this section has not had to consider before.**
+Every case above cites a human-written artefact — a design document, a doc comment, a prior entry in
+this one. Item 79 recorded a mechanism taken from a plan produced by the agent under study, about that
+agent's own bad context, and no pass ran anything against it until one did and found it false. The
+mechanism it named cannot occur; the real cause was a different one entirely, and both are recorded in
+that entry. **What is worth naming narrowly, without building a rule on one instance:** a
+system's account of its own failure is generated to read as an explanation, is fluent in the
+vocabulary of the thing it is explaining, and is produced from inside the process whose behaviour is
+in question, so it cannot be checked from where it was written. That last property is what separates
+it from a stale design document, which was at least true once. It arrives, in other words, with every
+surface feature of authority and none of the substance — which is exactly the condition this section
+already says loses to running. **The rule does not change and is not extended:** this is the same
+failure, from a source that will keep supplying more of them as more of this document's raw material
+starts arriving from agent output rather than from people.
 
 ## A sixth pattern, following the fifth: a mutation that reroutes cannot prove suppression
 
