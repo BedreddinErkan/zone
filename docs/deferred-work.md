@@ -4922,8 +4922,8 @@ the file list. And the file list exists by then: `runOneShotInner` awaits the co
 *before* it evaluates the branch, so the decision about whether the model needs to read anything is
 taken with the list of what it would read already in hand and unexamined.
 
-**Three more signals now reach the caller and are equally unexamined, which is a change in what is
-available rather than in what the gate does.** The context preparation computed the scanner's own
+**Three more signals now reach the caller and are recorded but still not consulted, which is a change
+in what is available rather than in what the gate does.** The context preparation computed the scanner's own
 total file count, the ranker's per-file scores, and the raw grep-match set, and returned none of
 them: its result type carried the project summary and the merged path list alone, so all three died
 at that function's return. `774c9592` returns them raw — a count, score pairs, and a path list, with
@@ -4931,12 +4931,35 @@ no threshold and no classification — on the reasoning that whatever a gate con
 distribution is the gate's business rather than the context builder's. The grep field is the set as
 the matcher handed it over, before the filter that drops paths the ranked list already holds; it is
 not a pre-cap value, because the matcher applies its own ceiling internally and returns an
-already-bounded set. **Nothing reads any of the three, deliberately**, and the reason survives only
-in that commit's message, which is the part a later pass is likeliest to lose: they exist so the
-branch above can be decided on the context it already has, and until something decides to, they read
-as three dead fields. The strand is unchanged in substance — the gate still consults a lead verb and
+already-bounded set. **They were returned with no reader, and `dc8a1e60` is the reader**: the gate's
+own marker now carries all three beside the outcome it already recorded, plus the merged list's
+length, which was in scope at the marker all along and is a fourth quantity rather than one of the
+three. The strand is unchanged in substance — the gate still consults a lead verb and
 nothing else — and what moved is that the material it would need sits on the caller's side of the
 boundary instead of dying inside it.
+
+**What that marker cannot answer, which is the ceiling on any before-and-after comparison across a
+change to this gate.** Only the total is captured outside the context builder's guarded block; the
+other three are declared with empty defaults and assigned only inside it, so a throw from the ranker
+leaves all three empty. **The ordering is what keeps that from being the wider claim it looks like,
+and it is worth naming so a later reader can check it in one look:** the grep runs *after* the
+ranker, in the same guarded block, and takes the task and the full scanned list — never the ranked
+result — so an empty ranking still lets the grep run and report matches. A throw is therefore
+distinguishable from a legitimately empty ranking *except* when that ranking's grep also comes back
+empty, which is the only genuinely ambiguous case. Beneath it sits an older one this arc did not
+introduce: a zero total means the guarded block never ran at all, and a truly empty repository is
+indistinguishable there from a scan that threw, because the scan's own catch supplies the same empty
+list either way. Neither is proposed for a fix; both are what a pass claiming to have measured a
+gate change has to state it could not separate.
+
+**What the widening costs, with its store, and it is a constructed figure rather than a sink
+reading.** Serialising a representative payload at `dc8a1e60` — real path and score shapes taken from
+a live probe of this repository — gives 574 bytes against the pre-widening 121, so roughly 453 bytes
+more per gate decision, and one decision is one emission rather than one per iteration. Constructed
+deliberately instead of measured off the sink: a figure read from the sink would first need item 73's
+dedup key applied to it, where this one sidesteps the instrument entirely. The sink's own cap is a
+whole-file rotation threshold rather than a per-record limit, so nothing about the wider payload
+approaches a bound.
 
 **A sibling predicate in the same module disables both refusal paths for the same task shape.** The
 two early returns that honour a plan coming back cannot-verify or no-change are each a conjunction
@@ -5351,10 +5374,12 @@ restating.** `2d5316af` closed the last of the three blind files, which is the t
 closure this entry has taken, and item 78's note has now decided all three the same way. The
 remainder is what it was: the routing predicate, the three step-guaranteeing mechanisms, the four
 caps, and a provenance surface that still says nothing about which path produced a plan or what was
-read to write it. This pass added a paragraph above rather than only removing one — three signals
-that reach the caller and are read by nothing. Checked in the other direction: item 61 and item 78
-both hold closed parts and both stayed Neither, so promoting here would retroactively mis-bucket
-both. **Neither.**
+read to write it. The three signals recorded above have since gained a reader in `dc8a1e60`, and that
+moves nothing here either — item 78's note is about a part closing, and a field gaining a consumer is
+not even that: the decision still consults none of them, and the paragraph above adds two named
+limits, so the entry is marginally more open rather than less. Checked in the other direction: item 61
+and item 78 both hold closed parts and both stayed Neither, so promoting here would retroactively
+mis-bucket both. **Neither.**
 
 **Where the code lives:** the gate, its marker, the two early returns, the forced-steps regeneration
 and the body-seeding caps are all in `runOneShotInner`, `cli/dispatch.ts`; both lead-verb predicates
@@ -6464,3 +6489,23 @@ so a run can be finished, decided, and fully accounted for while its session fil
 When the answer is yes or unknown, the honest form is to state the window rather than the conclusion:
 "no record as of this reading" is a fact, "the run produced no record" is a claim that needs the
 window closed first.
+
+**A qualification on the durable half, because "present is safe" is doing more work above than it can
+carry.** A record that exists will still exist later — that much holds, and nothing below contradicts
+it. What durability does not supply is *invertibility*: a value that several distinct states all map
+onto cannot be read back to the state that produced it, however permanent it is. This document has
+recorded that failure three times without connecting them. Item 72 is the cleanest — a nonsense
+offset and a genuinely caught-up reader returned byte-identical results, field for field, so the
+record was durable and told the reader nothing. Item 74 is the same shape one layer up, several run
+shapes that applied nothing collapsing into one downstream verdict, one of them reported as
+validated. Item 64 is the weakest of the three and is named as such: its collapse is real, but the
+value doing the collapsing is a *hash*, which is many-to-one by construction, so it belongs here only
+because the collision was semantically wrong rather than because a many-to-one mapping is itself the
+defect — a reader who takes it as the type specimen will over-generalise. The fourth instance is the
+plan-gate marker item 79 now records, and it is the only one not observed after the fact: its
+ambiguous case was established by tracing the context builder rather than by finding a misread
+record, which makes it the instance most at risk of having been fitted to a class the same pass was
+assembling. **The check this adds is one question asked when an instrument is built rather than when
+it is read: how many states reach this value?** If more than one does, the field is a record of
+something, but not of what it appears to name — and unlike the absence problem above, waiting does
+not resolve it, because the ambiguity is in the mapping rather than in the timing.
