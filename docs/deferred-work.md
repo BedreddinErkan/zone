@@ -5085,6 +5085,53 @@ the approval loop that do not re-run on a replan, which is the defect on that si
 they are the reason an additive task cannot decline at all: each turns an absence of steps into
 steps, and they fire on exactly the shape that also got no investigation.
 
+**The refusal half closed at `b21d2bbf`, and what produced it is a partial migration rather than an
+original over-broad choice.** The two early returns no longer consult the problem predicate at all:
+each tests for a problem word directly and pairs that with a negated pure-addition check, so the six
+verbs the gate already sends to a full investigation now keep that investigation's verdict instead of
+having it discarded. Three commits produced the shape. `d6884285`, on 2026-06-13, introduced the
+module carrying a single sixteen-verb list and wrapped the two guards — bare at its parent — in the
+predicate built on it; the narrower ten-verb list did not exist yet, so the five structural verbs and
+the ambiguous one were swept in by the only list available rather than chosen over an alternative,
+and that commit's own worked example and its reason clause are both pure-addition. `3819be70`, on
+2026-06-20, added the ten-verb list precisely because those six must be investigated rather than
+guessed — and migrated the routing gate onto it while leaving both refusal exits behind. **The gap
+opened in the commit whose own stated reason contradicts leaving them.** `b21d2bbf`, on 2026-08-09,
+migrated the two exits.
+
+**What did not close, and the third consumer needs its status named rather than left as an
+observation.** The gate itself is untouched: it still routes on a lead verb and consults none of the
+four signals now reaching it. The three step-guaranteeing mechanisms still convert an absence of
+steps into steps, but the shape they fire on narrows with this change from the sixteen-verb list to
+the ten-verb one, which is a scope change to a sentence this entry leaves standing rather than
+rewrites. And the negated path-token merge is now the only consumer left on the wider list.
+
+**Whether the path-token merge's wider list is deliberate is undetermined, and saying so is the
+point, because a bare observation reads as a known-good decision or an obvious bug depending on who
+finds it.** Nothing in the source states a reason — the site's comment gives what it does, a
+scope-guard floor built from path tokens in the task text, and not why the list — and it arrived
+inside `d6884285`, a squashed baseline of a hundred and five files whose message names no individual
+change, so there is no rationale to recover. No test pins it either: every task string the merge's
+own tests use answers identically under both predicates, so a migration would pass the suite
+unchanged. **They diverge on exactly one shape** — a task led by a structural verb that names a path
+and a problem word — where the merge fires today and would not after a migration. That is the shape
+`b21d2bbf` just made able to reach the refusal exits, so the choice matters more than it did before.
+The asymmetry argues against migrating on symmetry alone: this site *grants* scope where the other
+two withheld a verdict, so aligning it would narrow what the guard permits for a task that named its
+own files. **What would settle it** is a scope-block record whose blocked path appears as a literal
+token in the task that produced it. None exists, and the marker has never reached the sink — which
+holds command-cache files only — so that is absence of instrumentation rather than a measured zero.
+
+**This change is measurement-neutral and the next accepted one is not, which is what makes the order
+matter.** `b21d2bbf` touched four files across source and test and no marker, payload or plan schema,
+checked by reading its diff for emission sites and finding none, so nothing it did disturbs a
+comparison across it and the empty gate-marker baseline this entry records is unaffected. The
+accepted order's second item, the refusal side, closes here. Its third, giving the plan a free-form
+shape, changes what a plan *is* and therefore what any before-and-after reading of plan content
+measures; a window opened before it and closed after it would not be comparing like with like.
+Recorded because it governs sequencing — instrument first, shape second — and not as a proposal for
+either.
+
 **What a stepless plan would have done downstream is narrower than "the guard goes off", which
 matters because that is the usual reason given for closing the refusal side first.** The write-scope
 guard has several returns of no-opinion, and an empty step list reaches only one of them: it declines
@@ -5856,9 +5903,23 @@ step-guaranteeing mechanisms, the four caps, the thirty-session expiry, and that
 none of them a specified fix. Checked in the other direction, unchanged: items 61 and 78 both hold
 closed parts and stayed Neither, and nothing cites this entry for a bucket precedent. **Neither.**
 
+**Re-checked a ninth time, after the refusal side closed, and item 78's note applies with less
+friction here than in any of the eight before it.** `b21d2bbf` closed the half of the predicate
+strand that had six verbs investigated and then overruled — a real closure, not a coverage gap — and
+the note decides it the same way: a strand closing does not promote its parent to Actionable now.
+What makes this the easiest application is that the closure removes nothing from the enumerated
+remainder, because the refusal defect was recorded in this entry's body and never listed among what
+remains. That remainder is unchanged — the routing predicate, the three step-guaranteeing mechanisms,
+the four caps, the thirty-session expiry, and the unasked production question. The same pass also
+turned a bare observation about the third consumer into a named undetermined status, so the entry
+gains open material beside what it loses. Checked in the other direction, unchanged: items 61 and 78
+both hold closed parts and stayed Neither, and nothing cites this entry for a bucket precedent.
+**Neither.**
+
 **Where the code lives:** the gate, its marker, the two early returns, the forced-steps regeneration
-and the body-seeding caps are all in `runOneShotInner`, `cli/dispatch.ts`; both lead-verb predicates
-are in `llm/taskShape.ts`; the minimal-plan synthesis, the forced-steps prompt branch and the slice
+and the body-seeding caps are all in `runOneShotInner`, `cli/dispatch.ts`; both lead-verb predicates,
+and the problem-word predicate the two refusal exits now pair with the narrower of them, are in
+`llm/taskShape.ts`; the minimal-plan synthesis, the forced-steps prompt branch and the slice
 that renders only the first eight relevant paths are in `llm/executionPlan.ts`. The ranker — with its
 unused semantic, last-changed and intent inputs, its skip filter and its content pass over the top
 thirty — is `repo/rankRelevantFiles.ts`, and the scan it consumes is `repo/scanRepo.ts`; the summary
@@ -6370,6 +6431,32 @@ and mutation-tests one file in the same commit — and after every `git checkout
 mutation-testing cycle, verify by reading (a grep for a known-deleted or known-changed identifier
 is enough) that what came back is what was expected, not just that the mutation is gone.
 
+**A third incident, `b21d2bbf`, and it is the first where the unsafe method was the one the pass had
+been told to use.** The pass edited two source files and then mutation-tested one of them to validate
+four new tests. Its brief specified `git diff --exit-code` on the mutated path as the per-mutation
+revert check, and the first revert was performed with `git checkout --`, restoring a `HEAD` that
+predated the whole pass — so the still-uncommitted fix went with the mutation, the same failure mode
+as the two before it. Caught by the next command rather than by the revert: a status read showed no
+diff on a file that should still have been carrying the edit.
+
+**What this adds is that the prescribed verification was blind in the same direction as the
+destroyer.** Both earlier incidents were caught by a content read, a grep for a known-changed
+identifier, and the sharpened rule already names that as the catch. `git diff --exit-code` against a
+path is not a content read. It is HEAD-relative, so with an uncommitted base fix it cannot
+distinguish a revert to the fix from a revert to `HEAD`, and returns clean for both. A revert check
+has to be anchored to the state being restored, and during a pass like this one that state is not
+`HEAD`.
+
+**The replacement that worked is a third remedy rather than a restatement of staging.** After the
+lost edit was re-applied, the fixed file was copied outside the tree, and every later mutation was
+applied and reverted by edit with each revert verified by diffing the file against that copy — three
+reverts, all byte-identical. This works where staging is unwanted or simply forgotten, which is the
+state all three incidents started from, and unlike a grep for one identifier it checks the whole file
+rather than the part the author thought to name. **That the brief prescribed the unsafe check is the
+ninth pattern's shape and is left there**: a rule can be written down and still be what misfires, and
+this is the first time the misfiring instruction was the pass's own instructions rather than the
+author's memory.
+
 ## An eighth pattern, beside the sixth: a mutation can be correct and still coincide with one test's answer
 
 The sixth pattern is about a routing mutation invisible to inputs a downstream guard would
@@ -6782,6 +6869,28 @@ contradicted. **What settles it is the method at the top of this section**, not 
 grep both, in the two files that hold them, and read what each one slices. Recorded because the digit
 is doing identical work in both directions — a number that matches is not evidence the things
 carrying it are one thing, and a number that repeats is not evidence they are two.
+
+**The instrument fails one more way, and this instance is the one where the question really was about
+the text.** Every instance in this section is a string search standing in for a call-graph check — the
+grep asked about behaviour it cannot see. In `b21d2bbf` the question was legitimately textual, how
+many test declarations a file holds, and the grep still returned a wrong number: the pattern was
+unanchored, so it matched inside an unrelated string literal in the same file and counted two
+occurrences that were not declarations, reporting sixty-four against a true sixty-two. It is recorded
+here rather than as a counterexample to this section's opening, because the failure is the same
+instrument trusted for a quantity it had not been specified carefully enough to produce.
+
+**What caught it is the half worth keeping: the quantity had a second instrument that owns it.** The
+test runner reports its own count, and the disagreement between the two numbers is what exposed the
+pattern; nothing about reading the grep more carefully would have. A companion figure in the same
+pass had no such disagreement available — it was quoted as a baseline after a context compaction
+without being re-measured, and the same anchoring correction retired it. A third figure, the suite
+total, was also carried rather than measured, and when a later pass finally measured it against a
+scratch checkout of the commit it named, it was correct. **That is the sharpest form of the point:** a
+carried figure turning out right is not the same event as a carried figure being checked, and only
+one of the two is evidence. **Neither wrong figure ever reached this document** — both lived in pass
+reports — which bounds what they touched and is worth stating so a later reader does not go hunting
+for them here. The rule is narrow and cheap: when a count can be produced two ways, produce it two
+ways, and when it cannot, name the single instrument it rests on.
 
 ## A fourteenth pattern: a test that derives its own scope can silently narrow it, and forbidding a string does not remove that string from the text
 
