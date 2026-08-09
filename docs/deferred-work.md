@@ -5330,6 +5330,97 @@ Recorded here rather than as a pattern because the prediction-before-firing part
 against the two the eighth pattern already holds from the other direction, which by the seventeenth's
 own precedent is too few to generalize from.
 
+**The sentence above is incomplete rather than wrong, and the mutations that closed the fixtures are
+what completed it.** It says a gate consulting any of the three would read a missing value in every
+routing test and pass. That holds for a read that tolerates a missing value and fails for one that
+does not, and the difference is the whole of it: a numeric comparison against a missing value is
+false, so the condition never fires and the test does pass blind, exactly as recorded; a length read
+on the same missing value throws. Both were run against the widened fixtures at `a4b4996d`, one at a
+time, and the two kill sets differ by exactly the three tests in the two files the throwing read
+reaches and the tolerant one does not.
+
+**Where the throw goes, read at that commit rather than inferred from the shape of the block.** One
+`try` opens after the plan-generation-started emission and closes below both generation calls, so the
+context preparation, the gate, its marker and both arms are inside it. Its `catch` re-throws two typed
+error classes — the provider-request one and the plan-refusal one — and swallows everything else, a
+missing-property fault included. The plan variable is left unassigned, and the block below falls
+through to the patch flow with no plan. Because the gate sits above both arms, neither generation
+function runs, which is what the failures showed: tests reporting a call that never happened rather
+than a branch that went the wrong way.
+
+**The reason field on that path is computed from a condition unrelated to what was caught, and that
+is a finding separate from the swallow.** It reads `empty-context` when the relevant-file list is
+empty and `parse-error` otherwise — neither derived from the caught value, and both plausible. For
+the two files that failed, the mocked relevant-file list is empty, so a missing-property fault in the
+gate would be reported as an empty context: a wrong label on a real fault, which sends a reader to the
+context builder for something that happened after it returned. Item 25 owns a fault becoming an
+ordinary outcome; this is the narrower thing of a fault keeping a name that belongs to a different
+cause.
+
+**The second half of that — that the label is verbose-gated — is a weaker claim than it looks, and
+this document has twice thrown out the stronger version.** The emission is on the verbose-gated logger
+rather than the unconditional one, and the marker reads zero in the sink on 2026-08-09. What that
+zero cannot be attributed to is the gating alone: a sibling marker on the same plan path and the same
+gating carries ten records dated 2026-08-05, the same day this document already records as the window
+when that gate stood open for two other markers. So the gate has demonstrably been open, and the zero
+is equally consistent with no plan generation having failed in the window — the sink cannot separate
+the two, which is the ambiguous-value qualification the eighteenth already carries. Recorded this way
+because both entries that previously reasoned from this gating to an absence had to withdraw the
+attribution while keeping the gating fact.
+
+**Four places in this document now turn on the same catch shape, and they are not four instances of
+one defect — the mechanism is neutral and the role is what varies.** A catch that substitutes an
+ordinary value for a fault appears here in three roles. As a **defect**, where the substituted outcome
+is indistinguishable from a real one and nothing names the fault: item 25's wrapper, which swallows
+every non-ENOENT fault and returns it as a miss, and the path above. As a **deliberate and
+well-behaved choice**, where the same mechanism is the right one: the new-file rollback's existence
+check, which swallows, substitutes the lower-blast-radius answer, emits a marker on exactly that path,
+and records the cost asymmetry that decided the default. And as a **relied-upon safety property**,
+where the swallow is the reason something else is correct: this entry's own note that the plan-parse
+helper swallows its own failures, which is why a cost emission can sit after the parse on one path and
+must sit before it on the other. **The membership rule this is decided on:** assemble a set by
+mechanism only when the mechanism is what the finding is about. It is not, here — so the set that
+could support a pattern is the defect role, which holds two instances across differing surfaces, and
+the seventeenth's precedent declines to generalize from that. Naming the other two as members rather
+than as counterexamples is the point; a set that quietly carries its own counterexample is a shape
+this document keeps finding. Item 76 is outside the set entirely: no catch is involved there, and its
+subject is a fallthrough over enumerated reason values producing a wrong description.
+
+**So the exposure is wider than the routing tests, and the rule that bounded it is the rule the throw
+ignores.** A crash at the gate removes a call, and a call is counted by tests whose subject is not
+routing at all: of the two files that failed and were deliberately left unfixtured, one pins
+run-identifier threading through the lexical call and the other pins the pre-generated-plan bypass.
+Neither asserts which branch ran; both count a call that only the lexical branch makes. The exposure
+is therefore every test whose mocked context reaches this code path on an additive task, and an
+exclusion rule keyed on what a test *asserts* cannot see it, because these assertions are sensitive to
+the branch without being about it.
+
+**Two options follow and neither is proposed here.** Guard the reads at the gate, or supply the
+signals in every mock. The second is not bounded by the file count, which is the part worth writing
+down: mocks live as per-test overrides as well as file-level defaults, nine such literals across the
+seven files still on the old shape, and one of the two files that failed has no file-level default at
+all — only an inline override inside the single test that failed, which widening a file default would
+not have reached.
+
+**What `a4b4996d` closed and what it did not.** Six of the thirteen files that stub the context
+builder now supply the three signals; the other seven do not, named as deliberately unfixtured on the
+rule that a file with no routing assertion needs no fixture. That split is not the boundary of the
+problem — both files that failed for the collateral reason come from those seven.
+
+**Where the fixture values came from, and what they are not.** They are one live call of the context
+builder against this repository on 2026-08-09 at `3868719a`, for the additive task text those files
+already shared — a file count in the high nine hundreds, the ranker's five results at a single tied
+score, and four grep matches. Taken from a run rather than invented so the shapes are ones the
+pipeline actually produces, and a point-in-time sample rather than a reproducible figure: the same
+call against a later tree returns different values, and nothing pins it. **The grep matches in that
+sample are a false-positive shape** — four remote-control modules, matched off a generic token in a
+task about a date helper, none of them related to it. That matters for how the mutation should be
+read: consulting the grep field rerouted the run on a signal that had matched nothing relevant, which
+demonstrates the tests can now see the field and demonstrates nothing whatever about presence of grep
+matches being a sensible thing for a gate to route on. Written down because that mutation is the only
+exercise of the signal that exists, and a later reader finding it unqualified would find a
+demonstration whose single worked example routes badly.
+
 **A leaked environment stub in the refusal-path file was also closed there, and it had not been
 doing harm.** That file pinned the routing override for two of its blocks and never restored it,
 where four sibling files restore the same variable. Every test downstream of the leak inside that
@@ -5473,6 +5564,18 @@ not even that: the decision still consults none of them, and the paragraph above
 limits, so the entry is marginally more open rather than less. Checked in the other direction: item 61
 and item 78 both hold closed parts and both stayed Neither, so promoting here would retroactively
 mis-bucket both. **Neither.**
+
+**Re-checked a fourth time, and this is the easiest of the four because nothing was removed.** The
+three re-checks above each answered a closure and reached Neither by measuring the remainder.
+`a4b4996d` closed part of the test-surface blind spot — six files of thirteen — and the same pass
+established that the blind spot is *larger* than the entry had recorded: the exposure is not bounded
+by routing assertions, one of the two remedies is unscoped, and the swallowed-throw path is new
+material with no fix named. An entry cannot promote by gaining an open finding under a rule that
+already refuses promotion to one losing a whole strand. And recording two options while proposing
+neither is what not-actionable means, rather than an argument against it. Checked in the other
+direction: items 61 and 78 both hold closed parts and stayed Neither, so promoting here mis-buckets
+both retroactively; and of the entries citing this one, none cites it for a bucket precedent, so
+nothing else moves either way. **Neither.**
 
 **Where the code lives:** the gate, its marker, the two early returns, the forced-steps regeneration
 and the body-seeding caps are all in `runOneShotInner`, `cli/dispatch.ts`; both lead-verb predicates
@@ -6050,6 +6153,26 @@ a mutation skips the whole region containing the call under test so a `not.toHav
 true vacuously; that one was predicted and held. Two greens, one pass, opposite epistemics: the
 predicted-vacuous one is the check working, and only the unpredicted one is evidence of a blind spot.
 Counting them together as two instances of anything would overstate what happened.
+
+**A prediction wrong in scope rather than in membership, from two causes with different owners.**
+`a4b4996d` widened six dispatch fixtures and ran two mutations to prove them load-bearing. The second
+was predicted exactly — same count, same files. The first was predicted at roughly eight and killed
+twenty-two across eight files, and the two mutations' kill sets differ by exactly the three tests that
+separate them, so neither figure is in doubt. **The first cause is this pattern's own, and gives the
+unpredicted-killer rule its second instance.** The prediction assumed one routing test per file; one
+file threads the same additive fixture through nearly every test it has, so nine died there where one
+was expected. That is the fixture-adoption instance restated in a different idiom — there a fixture
+written after a fix adopted the fixed syntax everywhere, here a fixture reused across a suite makes
+every test in it depend on the mutated path — and it degrades the same property, the kill set
+ceasing to be a map of what each block pins. **The second cause is a grain this pattern does not
+reach.** Two files with no routing assertion failed as well, through a second causal path the
+prediction had not modelled at all: the mutation's read throws on their un-widened mocks, a catch
+swallows it, and the run diverts to a state where the call those tests count never happens. Nothing
+about a fixture's construction or an assertion's sensitivity predicts that; it is the fifth pattern's
+shape — code nobody had a reason to read, in files an exclusion rule had correctly excluded — and it
+is cited there rather than restated, with that pattern's own tally left alone. Item 79 records the
+mechanism. One clause worth keeping and not generalizing from: the mutation whose kill set matched
+exactly was the one whose mechanism was reasoned through before it ran, one instance on each side.
 
 ## A ninth pattern, beside the seventh: a ledger entry that prescribes a check does not cause the check to happen
 
