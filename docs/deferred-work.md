@@ -5593,13 +5593,72 @@ identifier matches the decision marker on all nineteen of its records, the inves
 marker on all seventeen of the runs it sent to investigation, the archetype marker on seventeen, and
 the usage ledger on all nineteen. So a gate decision can already be read alongside its cost, its
 iteration count, its archetype, its approval outcome and its token spend, by one key, with no work
-owed. **The exception is the plan itself, and it is total:** the persisted transcript entry carries
-the objective, the steps, the scope summary, the scope note and the risk hints, and no identifier of
-any kind — its session file's only identifier is the session's, which appears in no marker store, and
-the plan identifier the decision marker carries is never written beside the plan text. So every
-question about a plan's *provenance* is answerable and every question about its *content* is not.
-Recorded as the gap it is, with what would close it named — a plan identifier on the persisted entry,
-or a run identifier on the session — and neither proposed here.
+owed. **The exception was the plan itself, and it was total until `cb29847e`:** the persisted transcript
+entry carried the objective, the steps, the scope summary, the scope note and the risk hints and no
+identifier of any kind, and the plan identifier the decision marker carries was never written beside
+the plan text. So every question about a plan's *provenance* was answerable and every question about
+its *content* was not. **The clause claiming the session file's own identifier appears in no marker
+store is thrown out rather than qualified — it is false.**
+
+**What the session identifier does appear in, and the three things that keep it from being a usable
+bridge.** `[zone-resume-rehydrated]`, emitted from the agent loop, carries a session identifier and a
+run identifier in one payload — the pairing the thrown-out clause denied. Read on 2026-08-09 the
+marker holds two records, both dated 2026-07-30, both for the same session. Three qualifications,
+each read at the emission site rather than inferred: it sits inside the resume-rehydration block
+behind an entries-present guard and fires on no other path; both identifiers are null-coalesced at
+the call, so either can be written absent; and two records across the sink's whole window is a bridge
+that exists in principle and almost never in fact. The gap was real; one reason given for it was not.
+
+**The second option this entry named for closing the gap is ill-formed rather than expensive, and the
+distinction is the point.** A run identifier on the session presumes a session has one run. It does
+not — the terminal reuses a session across submissions, and the same two marker records prove it, one
+session identifier standing against two distinct run identifiers. **An option recorded as expensive
+invites someone to pay for it; an option recorded as wrong does not.** Withdrawn rather than priced.
+
+**`cb29847e` closed the gap, and the boundary it applies from is the whole of its limit.** The
+reducer case that builds the persisted entry already carried both identifiers on its action and
+already copied them into the live proposal object, three lines from the transcript entry it built
+from that same action without them; the commit copies both across, optional on the type. A plan's
+text now joins to its gate record, its decision, its cost and its archetype by the run identifier,
+and to its own approval cycle by the plan identifier — **for entries written from that commit forward
+only.** Nothing rewrites what is already on disk.
+
+**The entries already on disk join anyway, and why that is not the reassurance it sounds like.** Six
+persisted plan entries exist in the session store over a window running 2026-07-31 to 2026-08-08, the
+same window as the gate marker's nineteen records under item 73's key. Tested rather than assumed:
+for each of the six, the number of gate records falling inside that session's own
+start-to-last-activity span is exactly one, in every case, so a timestamp-window join recovers every
+existing pairing today with no code change. **It works because the sink is sparse and it fails as the
+sink stops being sparse.** Two of the six span an hour or more and hold a single gate record only
+because nothing else ran in that time. The fallback degrades precisely as volume rises to the level
+that would make the analysis worth running, which is the argument for having added the key while the
+fallback still worked.
+
+**The closure creates a read-side ambiguity it does not solve, and the eighteenth pattern's own check
+names it.** The session loader parses a file and casts the result to the session type without
+validating it, so an entry written before `cb29847e` reads back with both identifiers undefined and
+nothing objects. Two states reach that one value — an entry predating the field, and a writer that
+failed — which is the invertibility qualification's question of how many states reach a value, cited
+rather than restated. The ambiguity belongs to that loader rather than to the closure, and it is
+recorded in this entry because `cb29847e` states it only in a type comment, which is not where a
+reader of this entry would look.
+
+**That ambiguity has an end condition, it is reached by volume rather than by time, and nothing
+computes it.** Session files are pruned to a global cap of thirty, newest first and oldest deleted,
+from the terminal's own exit path — global across repositories, so activity anywhere counts toward
+eviction. All six pre-boundary entries carry no identifier, and the newest of them is currently the
+newest file in the store, so **thirty new sessions have to be written before the last of them is
+evicted and the ambiguity clears without anyone acting.** The condition is checkable from disk
+without re-deriving any of this: when no `plan_ready` entry in the session store lacks a plan
+identifier, the boundary has healed. Recorded with the count and the condition so a later reader
+checks rather than re-derives.
+
+**A third option exists and is recorded so nobody re-derives that either.** The session-to-run
+pairing could be emitted unconditionally rather than only on the resume path — the session identifier
+is available on every run, per its own documentation on the loop's input, and it is one emission
+site. Real and cheap, and not what this gap needed: it joins a session to a run, and a session holds
+many runs and many plans, so it would put no identifier beside any plan's text. Available, for a
+different purpose.
 
 **What that join yields once read, and why the obvious question is not among the answers.** Of the
 nineteen gate records, seventeen took investigation and two took the lexical branch; thirteen of the
@@ -5732,6 +5791,16 @@ in three places and loses none — a strictly weaker case for promotion than the
 it, every one of which answered an actual closure and still reached Neither. Checked in the other
 direction, unchanged: items 61 and 78 both hold closed parts and stayed Neither, and nothing cites
 this entry for a bucket precedent. **Neither.**
+
+**Re-checked a seventh time, after a real closure this time, and item 78's note decides it the same
+way.** `cb29847e` closed the provenance gap for entries written after it, which is the first strand
+of this entry to close by adding something rather than by correcting something. It still does not
+promote: the note is that an entry does not become actionable by having a part removed, and the same
+pass that closed this part threw out a false clause, withdrew one of the two options the entry had
+named, and added a read-side ambiguity with a thirty-session expiry that nothing tracks. What remains
+is the routing predicate, the three step-guaranteeing mechanisms, the four caps, and that expiry —
+none of them a specified fix. Checked in the other direction, unchanged: items 61 and 78 both hold
+closed parts and stayed Neither, and nothing cites this entry for a bucket precedent. **Neither.**
 
 **Where the code lives:** the gate, its marker, the two early returns, the forced-steps regeneration
 and the body-seeding caps are all in `runOneShotInner`, `cli/dispatch.ts`; both lead-verb predicates
