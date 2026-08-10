@@ -5177,6 +5177,65 @@ direct-call fixture, and the two disagree in shape, one a spread and one a flat 
 baseline is cheap, local and free of model spend, and it bears directly on the gate-change debt above,
 which prefers that field over every other signal the marker carries.
 
+**That baseline now exists, built at `221ded69`, and what it can and cannot hold apart is the point.**
+It freezes the scanned path list — nine hundred and fifty-four entries, from which the scanner's own
+file records are fully derivable, so path-only ranking reproduces exactly — together with the file
+bodies for the hundred-and-twenty-one-file union of five pinned tasks' own content windows. It cannot
+freeze the grep half's selection beyond that surface's four-file cap, which is walk-order dependent.
+Checked per task by running the frozen ground against the live tree: **exact for the three tasks whose
+real match counts are at or under the cap** — four, zero and zero, so there is nothing to select among
+— and **approximate for the two that exceed it**, at fifty-five and fifteen, where the frozen four are one
+sample. The ranked half reproduced exactly for all five. **The content union is task-set-dependent:** a
+sixth task needs it recomputed, or that task's boost silently reads as zero rather than its real value,
+and that warning is written into the artifact's own data rather than left to this entry.
+
+**What the five tasks measure today.** The explicit-basename task is the only one the ranker gets
+right outright. The reference task from the run this entry records, and a task naming a concept absent
+from its filename, reach neither the ranker's top five nor the merge at all. The rename task reaches
+the merge and never the model — which is the mismatch this entry already records from `66c23fe0`, and
+it now carries a regression test rather than only this prose; the mechanism is not restated here.
+
+**Why that assertion is safe to make, which is a structural fact and not a property of any sample.**
+The merged list is built ranked-first, and the ranker returns exactly five, so the grep contribution
+always begins at position six and can never enter the top five — for any task, under any sample. That
+is what makes the reaches-the-model metric independent of grep's walk order, and therefore assertable
+at all. **What is not stable is position within the grep tail:** eight runs of the rename task's grep
+returned one distinct set and three distinct orderings, so the artifact's own determinism flag means
+its four matches are stable in *membership* and says nothing about their *order*. The record is that
+the correct file is present in the merge and absent from the first five; a position number would be a
+sample, not a fact.
+
+**The tree grew during the pass that froze it, which is the instability demonstrating itself.**
+`221ded69`'s own new test file was picked up by the scanner's glob and matched the reference task's
+pattern through a single one of its three extracted terms, cited twice in comments explaining the
+production consumer widths, moving that task's live match count from fifty-five to fifty-six. The
+snapshot file itself is not scanned, so only the test file did this. An artifact built to stabilise a
+measurement became, by naming the constant it was explaining, a new data point inside it.
+
+**A generator defect caught before the artifact shipped, and the distinction it turns on.** The content
+union built to twenty-three instead of a hundred and twenty-one, because the ranker's returned array is
+capped to five by an environment default the generator never set, so slicing that already-capped result
+to thirty yielded five per task — five tasks, twenty-five slots, twenty-three distinct after overlap,
+reproduced by measurement. **The ranker's real content window was never affected, and that is
+established rather than assumed:** the boost runs over the full internal array and the cap is applied
+only at the return, confirmed two independent ways — the top five score identically with the cap at
+five and at a hundred thousand, and the final top-scoring file entered from path-only rank nineteen,
+with two more from ranks seven and eight, none of which a five-wide window could have read. The defect
+was in the measuring script, not in the thing measured.
+
+**Two errors in that pass share one shape, recorded as a tally.** The generator assumed the ranker
+returned the full ranking when it returns five; a mutation prediction assumed a threshold indexed into
+the nine-hundred-file ranking when it indexes into a merged array of at most nine, so raising it
+widened a bound until it collapsed into the present-anywhere check and killed a different assertion
+than predicted. Both are a belief about an array's contents formed without checking what the code
+returns, and both were caught by running — the first because its number disagreed with one a prior pass
+had measured, the second on the mutation's first run. **The fourth pattern was considered and not
+extended, for two reasons rather than by omission:** its shape is a default on an *injected test seam*
+defeating a harness that exists to observe that seam, where nothing here was injected and no seam was
+defeated, and in any case both instances are the fifth pattern's rule working as prescribed, which this
+entry's own precedent files as a tally rather than a lesson. Nothing further is drawn from two
+instances by one author in one sitting.
+
 **Task intent is read nowhere, and the consequence is a permission boundary rather than a
 presentation preference.** The task began with the word Investigate and asked for a report. That word
 is in neither lead-verb list, so the gate recorded a null lead verb and the default-non-additive
@@ -6153,13 +6212,26 @@ asserted in its own voice. An entry that gains three open findings and loses hal
 promote. Checked in the other direction, unchanged: items 61 and 78 both hold closed parts and stayed
 Neither, and nothing cites this entry for a bucket precedent. **Neither.**
 
+**Re-checked a twelfth time, after `221ded69` built the measurement ground, and the same rule decides
+it again.** A closure moves the enumerated remainder only if the thing closed was enumerated in it.
+The remainder is the routing predicate, the three step-guaranteeing mechanisms, the four caps, and the
+thirty-session expiry; `221ded69` closes none of them. What it does close is the missing baseline —
+recorded in this entry's body, never listed among what remains — so **the remainder stays at four**,
+which is the ninth re-check's situation rather than the tenth's. The pass also adds open material: the
+frozen ground's task-set dependency, and the finding that the grep surface's ordering is unstable even
+where its membership is not. Checked in the other direction: items 61 and 78 both hold closed parts and
+stayed Neither, and of the eight references to this entry elsewhere in the document none cites it for a
+bucket precedent — all eight cite it for facts. **Neither.**
+
 **Where the code lives:** the gate, its marker, the two early returns, the forced-steps regeneration
 and the body-seeding caps are all in `runOneShotInner`, `cli/dispatch.ts`; both lead-verb predicates,
 and the problem-word predicate the two refusal exits now pair with the narrower of them, are in
 `llm/taskShape.ts`; the minimal-plan synthesis, the forced-steps prompt branch and the slice
 that renders only the first eight relevant paths are in `llm/executionPlan.ts`. The ranker — with its
 unused semantic, last-changed and intent inputs, its skip filter and its content pass over the top
-thirty — is `repo/rankRelevantFiles.ts`, and the scan it consumes is `repo/scanRepo.ts`; the summary
+thirty — is `repo/rankRelevantFiles.ts`, and the scan it consumes is `repo/scanRepo.ts`; the frozen
+measurement ground, its five pinned tasks and its per-task determinism flags are
+`repo/rankerBaseline.snapshot.json`, read by `repo/rankerBaseline.test.ts`; the summary
 join, the inert maximum, and `grepMatchingFiles` with its four-file cap are in
 `core/preparePlanContext.ts`; the entity extractor it now shares with the ranker's content boost, and
 that extractor's stopword blocklist, are in `repo/rankRelevantFiles.ts`. The structure detector it calls,
