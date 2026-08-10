@@ -7101,11 +7101,20 @@ twelve of the twenty term-producing tasks — seven ground, nineteen production 
 different term sets: the grep half truncates to eight, the boost expands with domain terms and is
 uncapped. On one production task the grep uses eight terms while the boost uses ninety-nine.
 
-**Twelve disagreement cases across nine production tasks, with the sign unmeasured.** Terms matching
-fifty-one to three hundred forty files are load-bearing for the boost and would drown the grep's
-four-file cap; four further terms are costly to the grep half and inert to the boost. Boost-active means
-the term is influential, not that it is beneficial — production tasks carry no correct-file label, so
-the direction of that influence is not established here. The disagreement is real; its sign is not.
+**Twelve terms once read as disagreement cases, and the disagreement itself dissolves under the same
+check that inverted the reference task's reading.** Terms matching fifty-one to three hundred forty
+files were flagged as load-bearing for the boost while costly to the grep half; checked for unique
+contribution the way the reference task was, all twelve carry real grep-pool value of their own, from
+nine files up to three hundred eight, none at zero. So the grep half does not have a clean, demonstrated
+preference to drop any of them — dropping would cost it real candidate files in every case, the same
+shape as the reference task, not the opposite. Five further terms — not four, the count this entry first
+gave — were flagged as costly to grep and inert to the boost; checked the same way, all five also carry
+nonzero unique contribution, ten to sixty-eight files each, so the boost's indifference to them does not
+translate into a grep-side reason to drop them either. Zero of the seventeen terms originally flagged
+survive as a demonstrated two-sided conflict. What is not established, and could not be without a
+correct-file label these production tasks don't carry, is whether any of the files each term uniquely
+contributes is the one that matters — that half of the original "sign unmeasured" caveat survives
+intact; the half asserting the grep half wanted these terms gone does not.
 
 **The ground shows no disagreement, and cannot.** Only three of seven tasks produce terms, two of them
 exactly one term each, and on the single task whose correct file reaches the top five, removing that
@@ -7155,6 +7164,67 @@ rather than becoming a new one: `grepMatchingFiles` and the shared extractor are
 established subject matter, not a distinct one reached for the first time. Checked in the other
 direction, unchanged: items 61 and 78 both hold closed parts and stayed Neither, and none of the
 references to this entry elsewhere cites it for a bucket precedent. **Neither.**
+
+**One essay candidate considered here, and declined.** A quantity assumed to be noise because it is
+common, found to be carrying the signal, with the precise-looking terms contributing nothing the common
+ones did not already reach. Checked against all eighteen by title and vocabulary; read in full: the
+thirteenth ("a string's presence or absence is evidence about the text, not about the behavior") — the
+closest by family resemblance, a cheap proxy misleading about a deeper property, corrected by the right
+method — but a different specific mechanism: string-presence standing in for a call-graph trace, not
+frequency standing in for signal quality. No essay names a "common implies noise" assumption inverted by
+measuring unique contribution. **One instance — declined**, on the seventeenth's own precedent, no
+criterion derived from one occurrence.
+
+**The frequency distribution is continuous, so any threshold is a tuning parameter rather than a
+structural fix.** One hundred fifty-nine distinct terms across the ground and production tasks measured,
+a smooth unimodal histogram peaking between thirty-four and fifty-five matches, with the only large gaps
+far out in the tail where a handful of terms live. No boundary anywhere in the operative range.
+
+**The filter's effect is measurable, and the two grounds that closed the substitution measurement do not
+carry over.** The observable is the pool — the full match set the cap draws from — which is
+deterministic, rather than the capped four, which is a walk-order lottery. Pool size, pool composition,
+per-term unique contribution, determinisation and total loss are all computable. The ground does
+discriminate for this question, unlike the two occasions already recorded where it could not.
+
+**The instability ground inverts rather than applies.** A filter acts on the stable pool, so its effect
+is deterministic by construction, and on the reference task it collapses the pool below the cap: the
+capped four goes from eight distinct memberships in ten runs to one, and the correct file goes from four
+of twenty runs to twenty of twenty. The filter removes the nondeterminism rather than competing with it.
+
+**The reach is narrower than previously recorded.** Three fresh arrays sit between the extractor and the
+pattern, so nothing is shared by reference; the terms and the pattern exist only inside the grep
+function, which returns paths rather than terms; and the debug-log site makes its own extractor call in
+another module, so a filter at the grep call site is wholly invisible to it rather than affecting its
+payload.
+
+**The trade-off is not settleable with available data, and this is why the surface stays recorded and
+unbuilt.** The threshold that delivers the reference task's clean win is the same threshold that destroys
+the grep half outright on eight of sixteen term-producing production tasks. Raising it until nothing is
+destroyed leaves six tasks changed and none made deterministic. Every term-producing task has a term
+above the lowest threshold measured, and the count that loses its grep half falls as the count that
+changes at all falls with it. Choosing between the two ends needs correct-file labels on the production
+population, which do not exist.
+
+**A self-consistency note, recorded rather than reconciled.** The same lottery was measured at one of
+twenty in an earlier pass and four of twenty here. Both are samples of one rate, and the variation is the
+instability that pass itself flagged. Neither figure is corrected in favour of the other.
+
+**Read-not-run, marked where it applies.** The array-freshness and call-site isolation findings are
+line-anchored reading. The unique-contribution counts, the frequency distribution, the threshold table,
+the pool collapse and the repeated lottery draws are runs.
+
+**Re-checked a twenty-second time, after an establish pass that finds the filter measurable and closes
+it anyway on a data ground rather than a measurability one.** The rule needs no judgement: a closure
+moves the enumerated remainder only if the thing closed was enumerated in it, and the remainder is the
+routing predicate, the three step-guaranteeing mechanisms, the four caps, and the thirty-session expiry.
+This pass touches none of them — the per-consumer frequency filter was never one of the four, and
+closing the question of whether to build it now is body material closing body material, the ninth and
+twelfth re-checks' situation. Not `326234f3`'s third case: that case is for a closure that narrows one
+of the four counted remainder items without removing it, and the filter surface was never a counted
+remainder item, so there is nothing there to narrow. Item 78's note governs the promotion question as
+before: measurable but unsettleable does not promote. Checked in the other direction, unchanged: items
+61 and 78 both hold closed parts and stayed Neither, and none of the references to this entry elsewhere
+cites it for a bucket precedent. **Neither.**
 
 **Where the code lives:** the gate, its marker, the two early returns, the forced-steps regeneration
 and the body-seeding caps are all in `runOneShotInner`, `cli/dispatch.ts`; both lead-verb predicates,
