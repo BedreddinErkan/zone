@@ -5155,6 +5155,51 @@ tempting fix is not the fix:** opening that window would have lifted it to fifty
 sixteenth on the same run, still outside the five the model is handed. The base path score is the
 deeper failure, not the window.
 
+**The substring rule's provenance, and two stopword lists that were never retrofitted to it.** The
+keyword rule decomposed above arrived in this repository's **root commit**, dated the first of April,
+and has not been edited since — verified by blame across the whole loop body, and by reading the root
+commit's own copy of the file, which holds the loop in the shape it has today. No rationale for it
+appears anywhere. **Two stopword sets were added later and neither reaches it**: the generic-task-terms
+set in late April, the entity-term blocklist in early May, both weeks after the root commit and both
+wired to other signals — the path-term overlap and the content boost respectively. The keyword loop
+carries no stopword check of any kind. The repository twice decided that some words are too common to
+score on, and twice left untouched the one signal that scores on every task word longer than two
+characters.
+
+**What it produces where there is no real signal to find, and the example already recorded here is one
+of two.** On the control task — six common words, no identifier anywhere in it — the entire top five is
+substring noise. "The" occurs inside `prometheusFormatter` **and** inside `withexponentialbackoff`, and
+because that task uses "the" twice, each of those four files takes twenty points from that word alone;
+the fifth scores on "app" inside `applyDeveloperPatchLocalized`. Not one of the five bears any relation
+to what was asked.
+
+**The negative result, which is what the noise finding does not say.** The file the plan ultimately
+worked from takes **zero** keyword hits on the reference task. Its one point is baseline. So the
+substring rule is noise on the files it lifts, and **it is not what buries the correct file** — that
+file is not being outscored by keyword noise, it is not being scored by that rule at all.
+
+**No candidate fix moves any outcome, measured on five tasks and again on seven.** Four variants were
+simulated — as-is, word-boundary, stopword-filtered, and both together. Under the best of them the
+correct file rises from five hundred and forty-eighth to five hundred and ninth, thirty-nine positions
+out of five hundred and forty-eight, and **its own score never moves off one**. It rises only because
+files above it lose points. That bounds the family rather than one member of it: every variant subtracts
+from other files and none adds to the right one, so all of them finish roughly five hundred places short
+of a five-file window. Nothing reached the model under any variant that did not already.
+
+**Removing measurable noise and producing a measurable gain are different things, and the first is not
+evidence of the second.** The noise is real, decomposed above, and now provenanced. The gain is
+thirty-nine positions of five hundred and forty-eight.
+
+**What the two records together point at, written as the question and not as a direction.** The first
+says the correct file matches this rule not weakly but not at all; the second says no variant of the
+rule can reach it, because variants only subtract. Together they are narrower than "the base path score
+is the deeper failure," which this entry already carries — they say that on this query the correct file
+matches **no signal at all**, rather than matching signals weakly. **The open question for the next
+establish pass is which signals could reach a file in that position, and whether any signal now in the
+ranker is capable of it.** Recorded so a later pass does not re-derive that the keyword family is
+exhausted, and does not read that exhaustion as a reason to try one more variant of it. No mechanism is
+named and no approach is proposed here; this pass measured the exhaustion, not a remedy.
+
 **Scores are not comparable across queries, which forecloses every threshold.** Three tasks against
 one tree returned top scores of eighty-four, five hundred and twenty-nine, and nineteen; the scale is
 a raw unnormalised sum whose reachable maximum depends on how the request happens to be worded. So no
@@ -5235,6 +5280,51 @@ defeating a harness that exists to observe that seam, where nothing here was inj
 defeated, and in any case both instances are the fifth pattern's rule working as prescribed, which this
 entry's own precedent files as a tally rather than a lesson. Nothing further is drawn from two
 instances by one author in one sitting.
+
+**The ground now holds seven pinned tasks, and its two new labels collide with this document's own.**
+`1f96013c` added a sixth and a seventh. **This document already uses the labels T6 and T7, in item 18**,
+for unrelated line-ending and smart-quote characterization tests, so the ground's additions are called
+the sixth and the seventh task here, and a reader grepping either label will land on both subjects.
+Recorded as a collision rather than resolved — renaming either side would break the other entry's text.
+
+**What the two hold, and where that is written.** Each guards one candidate fix against a regression
+the first five tasks cannot see, and each carries a `failureMeans` field beside its `exposes` field
+saying, in the artifact's own data, that a red result is the guarded regression firing rather than a
+stale assertion to update. Why the ground needed extending at all is the no-candidate-moves-any-outcome
+finding — all five original tasks are insensitive to every candidate, so the two additions are the only
+tasks in the ground that any candidate moves.
+
+**The sixth task was built as a stopword guard and is not one.** Its term crosses a camelCase hump join
+with no boundary transition, which is the shape the seventh task was built for, so it goes red under the
+word-boundary variant as well. Measured this pass — the sixth goes red under word-boundary, stopword and
+both; the seventh under word-boundary and both, but **not** stopword. So neither task alone says which
+variant fired and **the pair does**: sixth red with seventh green is the stopword variant, both red is
+the boundary variant. Found by running the simulation rather than predicted, and the artifact's own field
+text was corrected before that commit rather than after it.
+
+**The originally proposed sixth task was disqualified, on its premise first.** It named a test file's
+failing test as the thing to fix, and every test in that file passes. The one word it was built around
+appears nowhere in that file's path or its contents. A task whose premise is false and whose
+distinguishing term is absent could not have exposed the mechanism it was proposed for.
+
+**Two weight floors, and the property they corrected.** Scanning the rule's weight downward and recording
+where each task's correct file stops reaching gives the sixth task a floor of two and the seventh a floor
+of four. The planning had called the sixth task's margin thin **because it sits in the last of the five
+slots**, which is a different property: rank position says where a file sits in an ordering, weight margin
+says how far the signal can fall before it drops out. Measured, the two orderings are **inverted** — the
+task in the last slot has the wider margin of the two, the task in the first slot the narrower. No
+stand-in figure was used. A reduced-weight variant was about to be simulated with an invented number,
+which would have made an arbitrary choice read as measured, and the two floors replaced it because a
+floor is measured and a stand-in is not.
+
+**What the ground still does not cover, stated as coverage rather than as defect.** All seven tasks route
+to the investigate branch, verified by running the routing predicate over each, so the quick branch
+remains unrouted by the ground entirely — unchanged by the extension, and now established at seven rather
+than assumed from five. The content union is task-set-dependent at one hundred and thirty-six entries, up
+from a hundred and twenty-one, with all fifteen additions belonging to the two new tasks' own windows.
+**That the extension changed none of the first five's pinned values was verified rather than accepted:**
+both snapshots were reconstructed, each of the five recomputed against its own, and all five compare
+identical field for field.
 
 **Task intent is read nowhere, and the consequence is a permission boundary rather than a
 presentation preference.** The task began with the word Investigate and asked for a report. That word
@@ -6294,6 +6384,23 @@ the ground rather than merely unchanged, and the caps enumeration turns out to h
 Checked in the other direction, unchanged: items 61 and 78 both hold closed parts and stayed Neither,
 and nothing cites this entry for a bucket precedent. **Neither.**
 
+**Re-checked a fourteenth time, after `1f96013c`, and the rule decides it without reaching for the
+third case.** A closure moves the enumerated remainder only if the thing closed was enumerated in it.
+What `1f96013c` closed is the ground's blind spot, recorded in this entry's body and never listed among
+what remains, so the remainder is untouched at routing predicate, three step-guaranteeing mechanisms,
+caps, thirty-session expiry. That is the ninth and twelfth re-checks' situation, the first of the rule's
+two cases. **`326234f3` established a third** — an enumerated item narrowing without disappearing — and
+this re-check neither needs it nor widens it, which is worth saying because a case established once and
+never revisited afterwards is how a rule quietly acquires a clause it was never tested for. Item 78's
+note governs the promotion question unchanged, and this pass adds open material beside what it records
+as closed: the sixth task is not the guard it was designed to be, the quick branch is established
+unrouted at seven rather than assumed from five, the content union's task-set dependency now carries a
+number, and the ground's two new labels collide with item 18's. It also leaves a question open where
+none stood before — which signals could reach a file matching none, now that the keyword family is
+measured exhausted. Checked in the other direction, unchanged: items 61 and 78 both hold closed parts and
+stayed Neither, and of the eight references to this entry elsewhere none cites it for a bucket precedent,
+all eight citing it for facts. **Neither.**
+
 **Where the code lives:** the gate, its marker, the two early returns, the forced-steps regeneration
 and the body-seeding caps are all in `runOneShotInner`, `cli/dispatch.ts`; both lead-verb predicates,
 and the problem-word predicate the two refusal exits now pair with the narrower of them, are in
@@ -7005,6 +7112,25 @@ and not extended:** its shape is a default on an injected test seam being taken 
 production call site, defeating a harness built to watch that seam, where here the direction is
 inverted — a diagnostic probe omitted an optional argument that production supplies, and nothing was a
 seam and no harness was defeated.
+
+**A second instance of the second direction, filed as a tally increment and not as a new direction.**
+`1f96013c` simulated four candidate fixes against a seven-task measurement ground, where the object
+playing the mutation's part is a candidate fix and the kill set is which pinned tasks go red. The
+boundary candidate's set was predicted as one task and returned two. The unpredicted member did not
+arrive through an unmodelled causal path, which is what this direction's existing instance records — it
+arrived because **a discriminator did not discriminate**: the two tasks were built as a pair to separate
+two candidates, and one of them matched both. Stated as what this instance did rather than as a rule,
+since it is one instance and this essay's own precedent is to draw nothing further from a single one.
+The catching was the fifth pattern working as prescribed — the simulation was run and returned the wider
+set — cited there rather than restated, with that pattern's tally left alone, as this essay's two prior
+citations already do. **The thirteenth was considered and not extended**, for the other finding from the
+same pass: a plan inferred one property of a measurement, how far a signal's weight could fall, from a
+different property of the same measurement, where the file sat in the ordering, and measurement found the
+two inverted. That essay's subject is one instrument standing in for another, a string search doing a
+call graph's job. Here the instrument was right and produced both quantities correctly, and the error sat
+downstream of a correct measurement, in choosing which of its outputs answered the question asked —
+extending the thirteenth to cover that would widen it from instrument choice to inference generally.
+Item 79 records it.
 
 ## A ninth pattern, beside the seventh: a ledger entry that prescribes a check does not cause the check to happen
 
