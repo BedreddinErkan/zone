@@ -5511,24 +5511,37 @@ Both held on all seven tasks. Neither is a property of the merge that holds rega
 task vocabulary — the mechanism's status is decided by shape, its irrelevance so far is decided by
 measurement, and only one of the two would survive an eighth task with different vocabulary.
 
-**Four of the seven tasks never reach the second half at all.** The reference task, the rename task's
-own sibling among the newer additions, and the ground's sixth and seventh tasks all return zero entity
-terms from their task text, so `grepMatchingFiles` returns before invoking `rg` — their merged length
-is five, not nine, and "ranked slots with zero grep hits" is not a countable quantity for them, only
-n/a. The ground's sixth and seventh tasks share their T6/T7 labels with an unrelated pair this document
-already uses those labels for elsewhere, and that collision is now load-bearing in a second place: first
-where the ground's own sixth and seventh tasks were introduced, and again here, in a sentence naming
-which tasks have no grep half at all.
+**Four of the seven tasks never reach the second half at all — the control, the concept-vocabulary
+task, and the ground's sixth and seventh tasks, not the reference task, corrected here rather than left
+standing.** These four all return zero entity terms from their task text, so `grepMatchingFiles`
+returns before invoking `rg` — their merged length is five, not nine, and "ranked slots with zero grep
+hits" is not a countable quantity for them, only n/a. The reference task does not belong in this list —
+see below, corrected in the same pass as this sentence. The ground's sixth and seventh tasks share
+their T6/T7 labels with an unrelated pair this document already uses those labels for elsewhere, and
+that collision is now load-bearing in a second place: first where the ground's own sixth and seventh
+tasks were introduced, and again here, in a sentence naming which tasks have no grep half at all.
 
-**The rename task's correct file is excluded by the cap, not by ranked occupancy.** Present in its own
-grep half at depth ten of fifty-six in a live sample, past the four-match cap. An empty ranked half
-would not have changed that; the cap excludes it independent of whether the ranked half fills all five
-slots.
+**The rename task's correct file is not excluded by the cap — it is one of exactly four total matches,
+all of which survive it.** Confirmed by running fresh, stable across repeated live samples: the
+pattern returns four files, no more, and the correct file is always among them, deterministically. It
+reaches the merge as a grep extra, landing somewhere from the sixth through the ninth slot depending on
+which of the four raw matches is not already in the ranked half and on their own walk-order among
+themselves — a position that varies, matching this entry's own already-established grep-ordering
+finding, but never an exclusion. The prior figure here — fifty-six total matches, excluded at depth ten
+— does not hold against the live tree, and the count itself is suspicious on its face: fifty-six is the
+reference task's own total match count, named in the very next paragraph, from this same commit. Deleted
+rather than bounded — most likely a conflation between two tasks' figures written in one sitting, not a
+value that was ever true of this task and later went stale.
 
-**The reference task's correct file is unreachable by either half, for two different reasons.** It is
-absent from the ranked half on the merits, and it cannot enter the grep half at any cap value, because
-entity-term extraction returns empty for that task — raising the four-match cap changes nothing here,
-since there is nothing for a wider cap to admit.
+**The reference task's correct file is unreachable by either half in most samples, and the grep-half
+part is a lottery it sometimes wins, not the wall this entry described.** It is absent from the ranked
+half on the merits — unaffected by this correction. It is not absent from the grep half for lack of a
+term to match: entity-term extraction returns three terms for this task, not zero, and the correct file
+matches two of them directly, confirmed present among the full fifty-six raw matches. What usually
+excludes it from the capped four is walk-order, not absence: one of twenty fresh live runs this pass
+took placed it inside the cap, the other nineteen did not — a lottery with long odds, not a
+deterministic wall. Raising the cap would in fact help here, the opposite of what this entry claimed:
+there genuinely is something for a wider cap to admit, just admitted rarely at four.
 
 **The reachability gap this entry already records runs the other direction too, on the scope-guard
 task.** That gap says no signal maps a described behaviour onto a file named otherwise — task
@@ -6745,15 +6758,19 @@ The rule needs no judgement here either: a closure moves the enumerated remainde
 closed was enumerated in it, and this pass measures and records rather than closing anything. The
 remainder stands unchanged at routing predicate, three step-guaranteeing mechanisms, caps, thirty-session
 expiry; the third case established at `326234f3` is not reached and is not widened by being left alone
-again. Item 78's note governs the promotion question as before. This pass adds open material in six
+again. Item 78's note governs the promotion question as before. This pass adds open material in five
 places while removing none: the cap-before-filter displacement mechanism, real by shape and inert only
 by measurement, with the second condition it adds to the exact-fit claim; the merge-order surface
-otherwise closed as non-existent rather than fixed; the two-different-reasons split between the rename
-task's and the reference task's exclusions; the reachability gap running in the second direction on the
-scope-guard task; the second hazard beside the artifact's own note; and the T6/T7 label collision now
-load-bearing twice. An entry that gains six findings and loses nothing does not promote. Checked in the
-other direction, unchanged: items 61 and 78 both hold closed parts and stayed Neither, and none of the
-references to this entry elsewhere cites it for a bucket precedent. **Neither.**
+otherwise closed as non-existent rather than fixed; the reachability gap running in the second direction
+on the scope-guard task; the second hazard beside the artifact's own note; and the T6/T7 label collision
+now load-bearing twice — five, not the six once counted here. A sixth item this list carried, a
+two-different-reasons split between the rename and reference tasks' exclusions, is deleted rather than
+bounded: both tasks' own paragraphs are corrected elsewhere in this entry to the same shape, the rename
+task's grep half never excluding it at all and the reference task's excluding it only by a walk-order
+lottery it sometimes wins, so there were never two distinct reasons to split. An entry that gains five
+findings and loses one wrongly counted does not promote. Checked in the other direction, unchanged:
+items 61 and 78 both hold closed parts and stayed Neither, and none of the references to this entry
+elsewhere cites it for a bucket precedent. **Neither.**
 
 **Re-checked a seventeenth time, after a pass that classified production task shapes against the
 extractor and closed nothing enumerated.** The rule needs no judgement: a closure moves the enumerated
@@ -6876,13 +6893,14 @@ everywhere else here.
 **What a resample would cost, named rather than totaled.** Findings throughout this entry are
 anchored to a specific task's role, not just its number — the reference task's
 five-hundred-and-forty-eighth rank and the thirty-nine-position ceiling no candidate fix moves past;
-the rename task's merged position nine, reached only after the merge-width fix; the
-two-different-reasons exclusion split between the reference and rename tasks; the mirror-direction
+the rename task's merged position nine, reached only after the merge-width fix; the mirror-direction
 finding that name and content fail in both directions, first on the rename task and then, inverted, on
 the scope-guard task; and the sixth and seventh tasks' own `failureMeans` fields, meaningful only read
-together. None of this is false if the task set changed — it is unreproducible, because the task
-standing at that role would no longer be the task that produced the figure. A cost of replacing the
-ground, not a fragility in it today.
+together. Four examples, not the five once named here — a fifth, a two-different-reasons exclusion
+split between the reference and rename tasks, is withdrawn along with the finding it named, corrected
+elsewhere in this entry. None of this is false if the task set changed — it is unreproducible, because
+the task standing at that role would no longer be the task that produced the figure. A cost of
+replacing the ground, not a fragility in it today.
 
 **A continuing self-reference, not a one-time artifact of when the harness was built.**
 `rankerBaseline.test.ts` still matches the reference task's own grep pattern today — two occurrences
@@ -6969,6 +6987,70 @@ named test; and the ordering dependency the fix's own correctness rests on, now 
 case rather than left to a comment. Checked in the other direction, unchanged: items 61 and 78 both
 hold closed parts and stayed Neither, and none of the references to this entry elsewhere cites it for
 a bucket precedent. **Neither.**
+
+**The substitution measurement this entry recorded as needed is closed as unmeasurable, on three
+independent grounds.** The extractor has three production call sites — one in the grep surface, two in
+the ranker — established by line-anchored reading, so a substitution inside it reaches all three; run
+against the ground, it moves the ranked top five on five of seven tasks. The coincidence the
+measurement would count is an intersection, and the substitution moves both operands, so no change in
+the count is attributable to it without a shape change to the extractor first, not a one-line mutation.
+Second, the ground cannot discriminate: both arms return zero on all seven tasks. Third, where the
+value is non-zero in production it is unstable on repetition — its own repeat distribution is recorded
+with the production-population fact rather than restated here — so a before/after difference of one
+would be indistinguishable from that task's own run-to-run noise.
+
+**The cap was the wrong suspect.** Under the substitution the cap binds on one of seven ground tasks,
+not the many the earlier framing implied; the operative confound is the shared extractor, not the cap.
+Recorded because the cap precondition already sits in this entry and would otherwise be carried forward
+as the main obstacle to a later pass that never re-derives the real one.
+
+**The before-arm needs no live grep at all.** Computable from the frozen half intersected with the
+ranked half produced by running the real ranker over the frozen paths and content union: zero
+invocations, zero coincidences across all seven tasks — a fact, not a sample, for the five tasks at or
+under the four-match cap, and a sample for the two above it.
+
+**The instability is confined above the cap, sharpening what `afb8487a` already established.** Twelve
+repeats per task: the full raw match set returned one distinct membership every time, including on the
+two tasks well above the cap; the capped set returned ten distinct memberships on one of them and six
+on the other, one distinct on the task sitting at the cap exactly. Full-set membership stability and
+capped-set membership instability are two different claims the earlier record did not distinguish
+between.
+
+**The coincidence needs no instrumentation to observe.** It is the intersection size between
+grep-matched paths and ranked paths, per task, before the dedup filter — both already fields on the
+plan context, confirmed by running the real function directly rather than assumed from its signature.
+
+**The production population is usable for this quantity, and is the only one that produced any
+signal.** The absence of determinable correct files does not block it, because the count needs a
+ranked half and a raw grep half and nothing else. One of nineteen Zone-relevant tasks is non-zero,
+identical on both arms — and unstable on repetition: fifteen repeats against an unchanged tree returned
+the value on thirteen of them, so a before/after difference of one on this task specifically would be
+indistinguishable from its own noise, the figure the ground's own zero cannot supply since it never
+produces a non-zero reading to test for stability at all.
+
+**Cost is not the obstacle.** A single grep invocation costs milliseconds here; the before-arm on the
+ground costs nothing; bounding the observed production rate to a useful interval is under a minute of
+invocations. No snapshot regeneration is needed — and regenerating the frozen grep half would mean
+freezing a quantity this entry has now established as unstable, the opposite of what freezing is for.
+
+**Read-not-run, tagged where it applies.** The three call sites were established by line-anchored
+reading. The coincidence counts, the repeat distributions, the cap-binding rates, and the ranked-half
+movement under substitution are runs, including the two figures behind the settle-first correction
+above — the reference task's own three terms and fifty-six matches, and the rename task's own four
+total matches, all confirmed fresh this pass, not carried from an earlier reading.
+
+**Re-checked a twentieth time, after an establish pass that closes the recorded measurement as
+unmeasurable and a correction that removes a false sentence.** The rule needs no judgement: a closure
+moves the enumerated remainder only if the thing closed was enumerated in it, and the remainder is the
+routing predicate, the three step-guaranteeing mechanisms, the four caps, and the thirty-session expiry.
+Neither touches it. The measurement was recorded as needed in this entry's own body, never one of the
+four; the settle-first correction removes a sentence this entry asserted in its own voice, also body
+material. Both are the ninth and twelfth re-checks' situation, not the tenth's. Item 78's note governs
+the promotion question as before: a measurement closing, like a defect closing, does not promote its
+parent to Actionable now. This pass adds the eight findings above while removing three wrongly-counted
+ones elsewhere in this entry (two task-exclusion claims and one tally item), a net gain. Checked in the
+other direction, unchanged: items 61 and 78 both hold closed parts and stayed Neither, and none of the
+references to this entry elsewhere cites it for a bucket precedent. **Neither.**
 
 **Where the code lives:** the gate, its marker, the two early returns, the forced-steps regeneration
 and the body-seeding caps are all in `runOneShotInner`, `cli/dispatch.ts`; both lead-verb predicates,
@@ -7901,6 +7983,16 @@ single block's internal ordering as much as the two-mutation case that found it.
 kill-set prediction is answerable at block grain, and a claim about which assertion reports is a
 different claim at a grain the block cannot express.** Nothing here weakens the prediction, which was
 right about what it was for; what it names is the one thing a kill set is not evidence about.
+
+**A fourth instance of the opening mechanism, from a measurement rather than a mutation, filed as a
+tally increment.** An establish pass evaluating a planned guard substitution for `extractEntityTerms`
+found the same shape one level removed from a pass/fail assertion: the function feeds both the grep
+half's raw matches and, through the ranker's content boost, the ranked half a coincidence count
+intersects against — so a substitution inside it moves both operands of the intersection together, on
+five of seven ground tasks measured. The opening paragraph's rule was written for a comparison between
+two call sites; here the comparison is between two outputs of two call sites, and the same
+shared-extraction blindness applies to both shapes alike, not only the assertion form. Item 79 records
+the measurement and why it is closed as unattributable rather than run.
 
 ## An eleventh pattern, beside the second: a precedent's applicability lives in what makes it safe, not in what makes it similar
 
