@@ -5322,6 +5322,91 @@ its four matches are stable in *membership* and says nothing about their *order*
 the correct file is present in the merge and absent from the first five; a position number would be a
 sample, not a fact.
 
+**That sentence's own quantifier — "for any task, under any sample" — needs a boundary now, given
+without editing the sentence itself.** Three claims about the merge's two halves turn out to be
+separable, and only one of them is a structural fact. That the delivered output never double-counts a
+file is guaranteed by the shape of the merge's own extras line, which excludes from the delivered
+extras anything already ranked — established by reading. That the raw grep matches and the ranked half
+never actually coincided, on any of the seven ground tasks, is a different and empirical claim: the
+filter's shape proves only what happens *if* an overlap exists, not that no overlap occurs, so this
+stays a measurement rather than being re-grounded on the filter. Whether an overlap would cost the grep
+half a slot turns on an order of operations, settled by reading `grepMatchingFiles`'s own signature and
+body: it takes no `rankedPaths` argument, and caps its own result at four purely from raw `rg` output,
+entirely blind to what is ranked; only after that internally-capped set is returned does the merge
+module dedupe it against `rankedPaths`. **The cap runs before the filter, not after.** A raw match
+sharing a path with a ranked file is not replaced by a fifth raw match the internal cap never
+considered — it is simply dropped, and the delivered extras fall below four. This is a real,
+narrower displacement mechanism than a broad "ranked-slot occupancy costs the grep half something"
+reading would suggest, established by reading and currently inert only because the no-overlap
+measurement holds on every sample taken so far: zero overlaps, so the mechanism has never fired. **The
+"for any task, under any sample" sentence is left as written — true on every sample this document has
+measured, including these seven — and its boundary is this condition, not an edit to its own words.**
+
+**The exact-fit arithmetic — five ranked slots plus four grep extras filling the nine-wide window —
+therefore carries two conditions, not one, and both are measured, not structural.** It holds only when
+the ranked half returns five, which requires at least five files to survive the skip-path filter (the
+ranker's own return is a plain slice with no filter after it on the production call path, since that
+path never supplies semantic scores), **and** when the raw grep matches do not overlap the ranked half.
+Both held on all seven tasks. Neither is a property of the merge that holds regardless of repo size or
+task vocabulary — the mechanism's status is decided by shape, its irrelevance so far is decided by
+measurement, and only one of the two would survive an eighth task with different vocabulary.
+
+**Four of the seven tasks never reach the second half at all.** The reference task, the rename task's
+own sibling among the newer additions, and the ground's sixth and seventh tasks all return zero entity
+terms from their task text, so `grepMatchingFiles` returns before invoking `rg` — their merged length
+is five, not nine, and "ranked slots with zero grep hits" is not a countable quantity for them, only
+n/a. The ground's sixth and seventh tasks share their T6/T7 labels with an unrelated pair this document
+already uses those labels for elsewhere, and that collision is now load-bearing in a second place: first
+where the ground's own sixth and seventh tasks were introduced, and again here, in a sentence naming
+which tasks have no grep half at all.
+
+**The rename task's correct file is excluded by the cap, not by ranked occupancy.** Present in its own
+grep half at depth ten of fifty-six in a live sample, past the four-match cap. An empty ranked half
+would not have changed that; the cap excludes it independent of whether the ranked half fills all five
+slots.
+
+**The reference task's correct file is unreachable by either half, for two different reasons.** It is
+absent from the ranked half on the merits, and it cannot enter the grep half at any cap value, because
+entity-term extraction returns empty for that task — raising the four-match cap changes nothing here,
+since there is nothing for a wider cap to admit.
+
+**The reachability gap this entry already records runs the other direction too, on the scope-guard
+task.** That gap says no signal maps a described behaviour onto a file named otherwise — task
+vocabulary present, file path silent. Here the direction inverts: the scope-guard task's correct file
+ranks first and is named `scopeGuard.ts`, yet does not match its own task's entity term `scopeguard` —
+confirmed by running, not inferred. A file can be found because its name suits a task and still fail a
+content check built from that same task's vocabulary. The gap between name and content runs both ways,
+and this is the first instance recorded in the second direction.
+
+**Two findings from the pass that measured this were read, not run, and are marked so here.** That no
+caller overrides the merge's `maxFiles` default, and that the ranker spawns no subprocess, are both
+negative existence claims established by grep across call sites — accurate, but not run.
+
+**A second hazard of the same kind the artifact's own note already carries.** The frozen grep half is
+per task, and any change to entity-term extraction invalidates every task's frozen match set silently,
+the same way the artifact's own content-union note already warns that changing the task set silently
+reads a new task's content boost as zero rather than its real value. One is keyed on the task set, the
+other on the extraction function, but both are frozen data that goes stale without recomputation and
+without a loud failure.
+
+**One surface, not two.** The four-match cap and extraction emptiness are two properties of the same
+grep-construction mechanism, not two mechanisms — emptiness decides whether the mechanism runs at all,
+the cap decides how much of its output survives, and their interaction with the ranked half decides
+whether the cap ever loses a slot. No new item is opened for any of this.
+
+**A pattern considered for this measurement and declined, checked against all eighteen.** The pass that
+measured the two halves was handed an instruction inviting a broad reading — that ranked-slot occupancy
+generally costs the grep half something — and corrected it in the same pass, before it reached this
+document: no false claim about displacement was ever recorded here, and the correction survives even
+once the cap-before-filter mechanism is accounted for separately, since that mechanism fires on a
+specific raw-match/ranked-path coincidence and never on occupancy by an otherwise-irrelevant file, which
+is the shape the broad reading actually described. Checked against all eighteen essays by title and by
+the vocabulary the candidate needs — occupancy, competition, a causal reading of two co-occurring
+quantities — and none owns it; the sixteenth is the closest by subject and is not it, since the
+sixteenth is about a trace stopping short of the surface a claim names, and this is about a reading
+invited and checked before any trace began. **One instance** — declined as a pattern on the
+seventeenth's precedent, no criterion derived from one occurrence.
+
 **The tree grew during the pass that froze it, which is the instability demonstrating itself.**
 `221ded69`'s own new test file was picked up by the scanner's glob and matched the reference task's
 pattern through a single one of its three extracted terms, cited twice in comments explaining the
@@ -6486,6 +6571,21 @@ with the spread that says it is pervasive, and the absence of any automated test
 An entry that gains six findings and loses nothing does not promote. Checked in the other direction,
 unchanged: items 61 and 78 both hold closed parts and stayed Neither, and none of the references to this
 entry elsewhere cites it for a bucket precedent. **Neither.**
+
+**Re-checked a sixteenth time, after a pass that measured the merge's two halves and closed nothing.**
+The rule needs no judgement here either: a closure moves the enumerated remainder only if the thing
+closed was enumerated in it, and this pass measures and records rather than closing anything. The
+remainder stands unchanged at routing predicate, three step-guaranteeing mechanisms, caps, thirty-session
+expiry; the third case established at `326234f3` is not reached and is not widened by being left alone
+again. Item 78's note governs the promotion question as before. This pass adds open material in six
+places while removing none: the cap-before-filter displacement mechanism, real by shape and inert only
+by measurement, with the second condition it adds to the exact-fit claim; the merge-order surface
+otherwise closed as non-existent rather than fixed; the two-different-reasons split between the rename
+task's and the reference task's exclusions; the reachability gap running in the second direction on the
+scope-guard task; the second hazard beside the artifact's own note; and the T6/T7 label collision now
+load-bearing twice. An entry that gains six findings and loses nothing does not promote. Checked in the
+other direction, unchanged: items 61 and 78 both hold closed parts and stayed Neither, and none of the
+references to this entry elsewhere cites it for a bucket precedent. **Neither.**
 
 **Where the code lives:** the gate, its marker, the two early returns, the forced-steps regeneration
 and the body-seeding caps are all in `runOneShotInner`, `cli/dispatch.ts`; both lead-verb predicates,
