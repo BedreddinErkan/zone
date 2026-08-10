@@ -5216,6 +5216,84 @@ raw-match/ranked-path coincidences before and after — predicted to kill the st
 exclusion tests plus every baseline assertion for the two guard-affected tasks, and only after the
 frozen grep half is recomputed, per this entry's own task-set-dependency hazard.
 
+**The question of which signals could reach a file matching none is answered against real usage, and
+the defect is selection, not size.**
+Thirty-two of thirty-five tasks drawn from persisted session records yield at least one entity term;
+three yield zero — against four of seven in the ground. The extractor's design fits the input it
+actually receives; the ground is the unrepresentative artifact, not the extractor. Established by
+running the real exported function, a per-branch tracer re-validated against it on every corpus row.
+Branch contribution in production: camelCase on thirty-two tasks, screaming-snake on thirteen, quoted
+on ten, snake_case on eight, seventeen tasks matching more than one branch. **Not a consequence of the
+ground's seven-task count** — a seven-task ground sampled from this same corpus would carry that branch
+mix; a thirty-five-task ground authored the way the current seven were would not. The tasks were
+authored rather than sampled from production shapes, a selection property, and the count the ground
+happens to hold is incidental to it.
+
+**The corpus needed cleaning first, and the contamination is itself the finding.** Seventy raw session
+rows reduced to fifty-three distinct strings, eighteen of which are QR-code box-glyph ASCII art captured
+as user prompts from one scratch repo. Computed before cleaning, the corpus would have reported roughly
+forty percent zero-term — close enough to the ground's own four-of-seven to read as confirmation rather
+than as contamination.
+
+**Two of the three zero-term real tasks reproduce the fixture-quality mismatch just established; one
+does not.** One
+loses twenty-two tokens to the underscore guard; one names a CLI flag, identifier-shaped and recognized
+by no branch. The third is a greeting the chitchat short-circuit already owns and is not a ranking
+problem at all. So that case sits at two in thirty-five in production against three in seven in the
+ground — present, but far rarer than the ground's own proportion suggests.
+
+**The underscore guard's production role inverts its ground role.** It fires on thirty-three of
+thirty-five tasks and drops two thousand seven hundred and sixty-nine tokens, yet leaves only two tasks
+with nothing at all — production's dominant *filter*. In the ground it is the sole loss gate for half
+the zero-term tasks — the ground's dominant *failure*. Same gate, opposite role.
+
+**A false doc comment on the eight-term slice cap, and what the cap cuts, not only that it cuts.** Terms
+per task run min zero, median three, max ninety-six; fifteen of thirty-five tasks exceed eight, so the
+cap binds on roughly forty-three percent of real tasks. The merge module's own doc comment says the cap
+rarely binds and cites one-to-three terms on measured tasks — true of whatever small sample produced it,
+false of the distribution it now governs; the median matches, the tail does not. The comment appears
+nowhere in this document, so nothing here inherited it, and it sits uncorrected in source. **What the
+cap cuts from is settled by reading `extractEntityTerms`'s own return**: no sort, no score, no
+frequency — a `Set`'s insertion order, which is branch-declaration order (camelCase, then
+screaming-snake, then snake_case, then quoted) and, within a branch, task-text position, not ranked by
+any measure of relevance. Confirmed by running: five repeated calls on the same task text return
+byte-identical order every time, so the cut point is deterministic per task — unlike the grep surface's
+own beyond-cap selection, which was found to be `rg`'s directory-walk order and therefore nondeterministic
+run to run. The parallel holds on membership-not-order and breaks on determinism: both caps decide which
+terms survive without regard to relevance, but the extraction cap is stable for a fixed task while the
+grep cap is not.
+
+**That order finding strengthens the underscore-guard-substitution measurement beyond holding the cap
+fixed.** Because the cap cuts from an unordered set rather than a ranked one, term identity at the cut
+point also has to be checked, not assumed stable. Loosening the underscore guard does not admit better
+terms past a fixed boundary, it changes which arbitrary terms fall on which side of one — confirmed by
+running the substitution against the production corpus directly: nineteen of thirty-five tasks have a
+different surviving eight-term set under a loosened guard, not because more relevant terms were
+admitted, but because the cut point landed on different terms. The measurement needs both this
+precondition and the frozen-grep-half one stated together.
+
+**The selective grep surface has zero production exposure — a boundary on what this entry has
+established, not a defect in it.** The corpus runs to the day before the commit that made the surface
+selective, and no row falls on or after it. Every property established for that surface — its
+selectivity, the four-match cap's behaviour, the cap-before-filter mechanism — rests on the ground and
+on shape arguments, never once on a real run.
+
+**Per-run file-selection comparison is not recoverable at corpus scale.** The marker sink holds three
+thousand seven hundred and ninety-two records; exactly one carries grep-matched paths and ranked scores
+together, and it is the single run this entry already records elsewhere. No correctness rate is
+computed, and none should be inferred here.
+
+**Two further essay candidates were considered and both declined.** A doc comment true of the
+measurement that produced it and false of the distribution it now governs resembles the eighteenth
+pattern only at a distance — that pattern's mechanism is a measurement whose validity has a *temporal*
+expiry, a record absent because the process that would write it hasn't finished, where this is a claim
+generalized from a too-small sample with no expiry involved at all. It also resembles the seventeenth
+only at a distance — that pattern's mechanism is a same-commit entry unchecked against its own
+neighbour, where this comment sits in source, uncorrected across an unknown span, never written and
+left unchecked in one sitting. Neither fits; one instance, declined on the seventeenth's own precedent.
+A corpus whose content silently diverges from what its label promises has no owner among the eighteen
+either; one instance, declined the same way.
+
 **The ranker is the open surface this arc has been circling, and the numbers name why.** On the run
 this entry records, the file the plan ultimately worked from scored one point out of a nine-hundred
 file field, ranking five hundred and forty-eighth, while containing thirteen capped hits on the very
@@ -6661,6 +6739,25 @@ scope-guard task; the second hazard beside the artifact's own note; and the T6/T
 load-bearing twice. An entry that gains six findings and loses nothing does not promote. Checked in the
 other direction, unchanged: items 61 and 78 both hold closed parts and stayed Neither, and none of the
 references to this entry elsewhere cites it for a bucket precedent. **Neither.**
+
+**Re-checked a seventeenth time, after a pass that classified production task shapes against the
+extractor and closed nothing enumerated.** The rule needs no judgement: a closure moves the enumerated
+remainder only if the thing closed was enumerated in it. This pass answers a question the entry itself
+raised in its own body, not one of the four enumerated items (routing predicate, three
+step-guaranteeing mechanisms, caps, thirty-session expiry); bounds existing claims to a corpus window
+that never reaches the selective grep surface; and adds two preconditions to a measurement already
+recorded as needed. None of that touches the remainder, which stays exactly as the sixteenth re-check
+left it — the fifteenth and sixteenth re-checks' own situation continued, and the third case established
+at `326234f3` remains unreached and unwidened. Item 78's note governs the promotion question as before.
+This pass adds open material in eight places while removing none: which side of the ground-versus-
+extractor question production usage decides, and that the decision is about selection rather than
+count; the corpus's own contamination as a finding; the fixture-quality case's real production rate
+against the ground's; the underscore guard's inverted role; the false doc comment and the unordered cut
+point behind it; the strengthened, run-confirmed second precondition that finding adds to the planned
+measurement; the selective grep surface's total absence from production; and the corpus-scale limit on
+recovering per-run file selection at all. An entry that gains eight findings and loses nothing does not
+promote. Checked in the other direction, unchanged: items 61 and 78 both hold closed parts and stayed
+Neither, and none of the references to this entry elsewhere cites it for a bucket precedent. **Neither.**
 
 **Where the code lives:** the gate, its marker, the two early returns, the forced-steps regeneration
 and the body-seeding caps are all in `runOneShotInner`, `cli/dispatch.ts`; both lead-verb predicates,
