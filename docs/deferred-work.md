@@ -5118,14 +5118,19 @@ half, that the sentence was written in the same commit as its own subject and ha
 **The grep surface's selectivity closed at `afb8487a`, and what it was for is worth stating because it
 never did it.** `091564ae` built it as a recall backstop for exactly the path-blindness this entry
 records in the ranker — its own doc comment says it exists to catch "rename tasks where the symbol name doesn't
-appear in the file path." It failed that case in the most direct way available: given a rename task
-naming a rare symbol, the tokeniser OR-ed that symbol with the ordinary words beside it, matched
-eighty-six files, and returned four that did not contain the symbol while missing all four that did.
-`afb8487a` replaces the tokeniser with the extractor the ranker's own content boost already uses, so
-the pattern carries identifier-shaped terms only. Measured after the change: the designed case returns
-exactly the four files containing the symbol, and a task built entirely of common words returns
-nothing at all, because the extractor yields no term and the existing empty guard fires before any
-search runs.
+appear in the file path." It failed that case in the most direct way available, though the account of
+*why* needs a distinction this entry had no language for until several passes later: given a rename task
+naming a rare symbol, the tokeniser OR-ed that symbol with the ordinary words beside it and matched
+eighty-six files — eighty-seven today, the same one-file tree-growth drift already recorded for the
+reference task. That pool, checked fresh against the live tree, contains all four files with the symbol;
+what returned four that did not contain it and missed all four that did was the four-file cap's own
+walk-order draw from that pool, not a property of the pool itself. The observation was real — one
+specific capped draw, and it did miss the target — but the pool it was drawn from was never the obstacle
+the framing credited it with being. `afb8487a` replaces the tokeniser with the extractor the ranker's own
+content boost already uses, so the pattern carries identifier-shaped terms only. Measured after the
+change: the designed case returns exactly the four files containing the symbol, and a task built entirely
+of common words returns nothing at all, because the extractor yields no term and the existing empty guard
+fires before any search runs.
 
 **Three things did not close, and they are distinct.** Selection order among matches beyond the
 four-file cap is still the search tool's directory-walk order, so the field remains nondeterministic
@@ -7225,6 +7230,80 @@ remainder item, so there is nothing there to narrow. Item 78's note governs the 
 before: measurable but unsettleable does not promote. Checked in the other direction, unchanged: items
 61 and 78 both hold closed parts and stayed Neither, and none of the references to this entry elsewhere
 cites it for a bucket precedent. **Neither.**
+
+**The mechanism behind `afb8487a`'s recorded gain is fewer terms, not better ones, established three
+ways.** A factorial separating vocabulary from the flag change afb8487a also made shows vocabulary
+dominating on fifteen of the sixteen tasks whose pools shrank, the flag change on one. The new
+vocabulary is a strict subset of the old on eighteen of twenty-six tasks — it only removes. And where it
+adds, it adds short common words the old five-plus-character rule excluded, which is why six of the
+seven tasks whose pools grew are among the eight tasks where it adds terms. The mechanism is confirmed
+by its own inverse: where the new extractor produces more terms, the surface gets worse.
+
+**A third variable was live and unnamed in the record.** That commit also added case-insensitive and
+word-boundary matching to the rg invocation, so the surface changed from case-sensitive substring
+matching to case-insensitive word-bounded matching at the same time as the vocabulary swap. The
+conclusion above survives the separation, but it was not established until the flags were held fixed
+against the vocabulary and checked independently.
+
+**A second component of the gain the record does not name: the eight-term cap stopped being the
+dominant selector.** The old tokenizer hit the cap on fifteen of twenty-six tasks, out of as many as two
+hundred sixty-five raw terms on one of them; the new extractor hits it on six. Under the old surface most
+pools were shaped by which eight of a much larger vocabulary survived an arbitrary cut, not by the
+vocabulary's own relevance.
+
+**The designed case does not generalize, a third instance in this arc of one case standing in for a
+population it did not represent.** Across twenty-six tasks: sixteen pools shrank, seven grew, three were
+unchanged, four lost their grep half entirely, and exactly one — the designed case itself — shrank to at
+or under the cap the way its own founding evidence described.
+
+**On the ground, where labels exist, the correct file is retained on two tasks and lost on two, and the
+two losses are not what they appear.** Traced by running: the scope-guard task's correct file contains
+no occurrence of its own identifier in any form and entered the old pool through two common words,
+"allow" and "files"; the concept-vocabulary task's correct file entered through six, every one a common
+word. The old surface's hits on both were carried by English rather than by the identifier, so the new
+surface's exclusion is the honest answer to a query the file genuinely does not match — the same
+name/content divergence this entry already records, reached from the grep side rather than the ranked
+side.
+
+**The unique-contribution finding holds under the old tokenizer too.** Common words carry the pool
+there as well — one term contributing two hundred fifty unique files on one task, several others over a
+hundred — while the precise identifiers contribute zero or one. The two tokenizers differ in vocabulary
+but not in which terms do the work: the swap changed how much English gets in, not which kind of term
+carries the signal.
+
+**Read-not-run, marked where it applies.** The old tokenizer's exact pattern and the absence of the two
+rg flags were recovered by reading history at `afb8487a^`. The factorial separating vocabulary from
+flags, the containment check, the cap-binding counts, the twenty-six-task outcome distribution, the two
+traced ground losses, and the unique-contribution counts under the old tokenizer are runs.
+
+**One essay candidate considered here, and declined.** A change's founding evidence describing a
+downstream quantity (the capped draw) while being read as describing the upstream one (the pool) — not
+wrong by the standards available when written, since the pool/cap distinction did not exist in this
+document's own vocabulary until several passes later. Checked against all eighteen by title and
+vocabulary; read in full: the seventeenth and eighteenth, the two closest by theme, both about a later
+pass revealing something an earlier entry could not see. Neither matches: the seventeenth's mechanism is
+a same-commit, unchecked claim, correctable by re-derivation available at the time it was written; this
+sentence was not uncheckable for lack of diligence, it was uncheckable for lack of a concept — no
+re-check performed at the time could have produced the pool/cap distinction, since nothing in this
+document had named it yet. The eighteenth's mechanism is a temporal absence-reading invalidated by a
+process finishing later; this is a positive, present observation whose causal framing needed a
+vocabulary not yet available, not a reading that expired. Checked by title against the remaining
+sixteen, none closer. **One instance — declined**, on the seventeenth's own precedent, no criterion
+derived from one occurrence.
+
+**Re-checked a twenty-third time, after an establish pass that corrects the founding evidence for
+`afb8487a`'s own recorded gain and names where that gain actually comes from.** The rule needs no
+judgement: a closure moves the enumerated remainder only if the thing closed was enumerated in it, and
+the remainder is the routing predicate, the three step-guaranteeing mechanisms, the four caps, and the
+thirty-session expiry. This pass touches none of them — checked against each of the four explicitly,
+not assumed: it does not decide the routing predicate, does not touch any of the three step-guaranteeing
+mechanisms, does not change any of the four caps, and says nothing about the thirty-session expiry. This
+is a correction to already-landed material, not a closure and not new open material — no fix opens, no
+behaviour changes. `326234f3`'s third case does not apply: that case is for a closure narrowing one of
+the four counted remainder items, and no counted remainder item is involved here at all. Item 78's note
+governs the promotion question as before: a correction to already-landed material does not promote.
+Checked in the other direction, unchanged: items 61 and 78 both hold closed parts and stayed Neither,
+and none of the references to this entry elsewhere cites it for a bucket precedent. **Neither.**
 
 **Where the code lives:** the gate, its marker, the two early returns, the forced-steps regeneration
 and the body-seeding caps are all in `runOneShotInner`, `cli/dispatch.ts`; both lead-verb predicates,
