@@ -5146,6 +5146,76 @@ from a file whose subject is something else. **What would close it properly** is
 extractor asserting the filter on its own terms, which would also give the removal a kill set instead
 of the empty one it has today.
 
+**That "whole suite passing" run was real, and it was scoped wrong, not fabricated and not merely
+stale.** The blocklist has coverage today: removing it changes the extractor's output on two collected
+inputs, one load-bearing — a decoy file the "excludes a file matching only a stopword the task quotes"
+assertion requires absent is admitted without the filter, verified by running the fixture both ways.
+Reconciling that with "removing the filter entirely left the whole suite passing" turns on when the run
+happened, not on whether it happened. It was
+listed among a pass's own findings in the commit that closed the grep surface's selectivity, which
+postdates `afb8487a` — so the run followed the assertion into existence, ruling out "not yet collected."
+**The shape that explains it is the extractor's own boundary, not yet stated precisely until now:**
+`extractEntityTerms`'s blocklist (`ENTITY_TERM_BLOCKLIST`) and the ranker's separate path-term
+extraction (`getTaskEntityTerms`, filtered by its own `GENERIC_TASK_TERMS`) are two functions with two
+stopword sets, not one function gated two ways — and `GENERIC_TASK_TERMS` has exactly one consumer,
+unreachable from the grep surface at all. A mutation disabling that set while intending to disable "the
+stopword blocklist" generally would leave the filter the stopword-quoting assertion depends on fully
+intact, and the suite would report precisely the clean result recorded — a mutation that never reached
+the code path it claimed to remove. **This is the best-supported reading, not a witnessed one**: no
+diff, output or count from the original run survives anywhere in the repository or its history, so the
+wrong-target explanation is inference from the two-extractor boundary, not a re-run of that mutation.
+
+**The two extractors, stated precisely, since the entry so far only says the grep surface and the
+content boost share one.** They do, through `extractEntityTerms` — but the ranker's path-term signal is
+reached through the other function entirely, insulated from anything that changes the shared one. Two
+zero-term ground tasks lose every candidate token to the shared extractor's snake_case branch
+requiring an underscore — six tokens in one task (`where`, `decide`, `iterations`, `agent`, `before`,
+`giving`), two in the other (`projects`, `contains`) — and two of those eight are also blocklist
+members, but the guard fires first, so the blocklist is unreachable for them; the other six reach no
+later gate at all. The remaining two zero-term tasks produce no candidate token of any kind — no branch
+of the extractor matches plain short lowercase words, which is a different mechanism from losing a
+match to a guard. Established by running a per-branch tracer validated against the real exported
+function on twenty inputs including all seven ground tasks.
+
+**The guard those six tokens lose to blames to the same commit as the blocklist itself**, never edited
+since, carrying a stated rationale whose scope matches its application — neither the written-narrow,
+applied-broad shape nor the deliberate-and-pinned shape, since no collected test references the
+extractor at all. Deliberate, rationale-consistent, unpinned; one instance, not generalized into a third
+shape alongside the two already named elsewhere.
+
+**The four zero-term tasks are not alike in fixture quality either.** One is the control: no identifier
+by construction, no correct file, an empty result that is simply correct. The other three carry none of
+the extractor's four recognized shapes, so their empty result is correct *for an identifier extractor* —
+but all three name real repository concepts in plain words and all three have a real correct file.
+Recorded as a mismatch between how the tasks are phrased and what the extractor is built to recognize;
+neither the ground nor the extractor is established as the defective side.
+
+**Two candidate essay patterns were considered here and neither is filed as a new one.** The finding that
+the four zero-term tasks lose their terms two different ways, and the finding that they are not alike in
+fixture quality either, share an outcome — four tasks return nothing — while resting on different
+mechanisms in one case and different verdicts in the other: two axes of one error, not one instance
+counted twice, and this document's own precedent for two instances from one author in one sitting
+declines a pattern from either count. The "whole suite passing" reconciliation is a second candidate,
+and it turns out to be the seventeenth pattern's own mechanism rather than a new one — tallied there,
+not opened here.
+
+**The reachability gap already recorded runs the other direction too, on the scope-guard task.** Its
+term came from the task text, which quotes the filename directly — the extractor takes only a string
+and has no path or basename route of its own. The task named the file, the ranker found it by name, and
+a content check built from that same task's vocabulary fails against it anyway. No zero-term task could
+have produced a term this way: none names a file or carries a camelCase token.
+
+**Widening extraction would raise the coincidence the cap-before-filter mechanism needs, by shape rather
+than by measurement.** Because one extractor feeds both the grep half and the content boost, a new term
+enters both at once — more raw matches, and higher boost scores that can pull content-matching files
+into the ranked five. A file promoted by a new term is exactly a file likelier to also be a raw match on
+that term, bounded but not eliminated by the boost touching only the top thirty by path score. The
+measurement this would need, recorded so a later pass does not re-derive it: substitute the underscore
+guard for a length predicate, recompute all seven tasks' raw grep sets and ranked halves, and count
+raw-match/ranked-path coincidences before and after — predicted to kill the stopword and common-word
+exclusion tests plus every baseline assertion for the two guard-affected tasks, and only after the
+frozen grep half is recomputed, per this entry's own task-set-dependency hazard.
+
 **The ranker is the open surface this arc has been circling, and the numbers name why.** On the run
 this entry records, the file the plan ultimately worked from scored one point out of a nine-hundred
 file field, ranking five hundred and forty-eighth, while containing thirteen capped hits on the very
@@ -6509,11 +6579,16 @@ step-guaranteeing mechanisms, the four caps, and the thirty-session expiry — *
 among them**, so the remainder stays at four and this closure does not touch it. What the closure does
 reach is material the tenth re-check itself added, and only half of it: the grep signal's
 task-independence is fixed, its nondeterminism is not. Against that, this pass adds open material in
-three places — a filter with no coverage anywhere, the ranker's base path scoring with the numbers that
-name it, and the surviving walk-order nondeterminism — and corrects a false clause this entry had
-asserted in its own voice. An entry that gains three open findings and loses half of one does not
-promote. Checked in the other direction, unchanged: items 61 and 78 both hold closed parts and stayed
-Neither, and nothing cites this entry for a bucket precedent. **Neither.**
+two places — the ranker's base path scoring with the numbers that name it, and the surviving
+walk-order nondeterminism — and corrects a false clause this entry had asserted in its own voice. **A
+third item this list once carried, "a filter with no coverage anywhere," is deleted rather than
+bounded**: `afb8487a`, which this same commit's own body paragraph already credits with adding the
+first assertion constraining that filter, predates this re-check, so the item was wrong the moment it
+was written, one paragraph from the sentence that contradicts it — a same-commit enumeration unchecked
+against the fuller entry beside it, the seventeenth pattern's own mechanism. An entry that gains two
+open findings and loses half of one does not promote. Checked in the other direction, unchanged: items
+61 and 78 both hold closed parts and stayed Neither, and nothing cites this entry for a bucket
+precedent. **Neither.**
 
 **Re-checked a twelfth time, after `221ded69` built the measurement ground, and the same rule decides
 it again.** A closure moves the enumerated remainder only if the thing closed was enumerated in it.
@@ -7935,6 +8010,14 @@ supplied a cause anyway it supplied the wrong one — the fifth pattern's third 
 the same commit as this paragraph. That is still two instances of the introducing-commit check
 itself, which by the precedent above does not earn a pattern of its own; it earns a wider statement
 of the one already here.
+
+**A conformance instance, tallied rather than lessoned.** Item 79's eleventh re-check listed a filter as
+carrying no test coverage, in the same commit whose own fuller paragraph beside it already credited a
+named commit with adding the first assertion against that filter — the enumeration item was wrong the
+moment it was written, one paragraph from the sentence that contradicts it. Caught by a later pass
+re-deriving from the code rather than re-reading the prose, exactly the corrective this pattern already
+prescribes, on an enumeration, exactly where this pattern already says the failure concentrates. Nothing
+new is drawn from it.
 
 ## An eighteenth pattern: a measurement's window is part of its claim, and a reading taken while the writer is still running expires
 
