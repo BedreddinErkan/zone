@@ -13,7 +13,7 @@ import type { RepoFile } from "../types/project.js";
  * not QUICK_PLAN_FILES -- the two production consumer widths diverged once the merge fix
  * landed, and every task in this file's own task set routes to the investigate branch
  * (verified: none is a pure addition), so this is the width that actually governs what
- * these five tasks' plans would show. QUICK_PLAN_FILES stays untested by this harness.
+ * these seven tasks' plans would show. QUICK_PLAN_FILES stays untested by this harness.
  * mergedInFull only records presence anywhere in the merge, a materially different (and
  * weaker) claim than reaching the model — see item 79.
  *
@@ -23,12 +23,25 @@ import type { RepoFile } from "../types/project.js";
  * A task's grep.deterministic flag says whether its frozen firstFour is the only possible
  * outcome (totalMatches <= 4) or one sample of many; mergedInFull is asserted only where
  * that flag is true.
+ *
+ * T6 and T7 (added after the first five) guard the ranker's un-boundaried keyword-substring
+ * signal against regressions the first five tasks cannot see. T7 isolates the boundary risk
+ * cleanly: its correctFile reaches the model only via "key" matched inside "Keys" with no
+ * regex \b transition, and "key" is not blocklisted, so T7 stays green if a blocklist-only
+ * fix ships. T6 was designed to isolate the blocklist risk the same way ("projects" is an
+ * ENTITY_TERM_BLOCKLIST entry) but measurement found it is NOT clean the way T7 is: "projects"
+ * also crosses the project/Structure hump join with no \b transition, so T6 goes red under
+ * either candidate alone, not just blocklist. Use the pair together to tell them apart -- T6
+ * red with T7 green implicates blocklist specifically; both red implicates boundary (or both).
+ * Their own failureMeans field carries this in the data -- see there before treating a red T6
+ * or T7 as a stale assertion to update.
  */
 
 interface SnapshotTask {
   id: string;
   task: string;
   exposes: string;
+  failureMeans?: string;
   correctFile: string | null;
   grep: {
     firstFour: string[];
@@ -170,5 +183,19 @@ describe("ranker measurement ground", () => {
 
   it("T5: correct file does not reach the model", () => {
     expect(merges.get("T5")!.mergedReachesModel).toBe(false);
+  });
+
+  // T6 and T7 use single-assertion style like T1/T4/T5, not T2's dual style: both have
+  // grep.deterministic=true with zero grep matches, so the merged array is exactly the
+  // ranked-only array (capped at 5) with nothing appended -- mergedInFull and
+  // mergedReachesModel are identical by construction for these two, unlike T2, where a real
+  // grep extra makes them materially different claims. A second assertion here would just
+  // restate the first.
+  it("T6: correct file reaches the model (blocklist guard)", () => {
+    expect(merges.get("T6")!.mergedReachesModel).toBe(true);
+  });
+
+  it("T7: correct file reaches the model (boundary guard)", () => {
+    expect(merges.get("T7")!.mergedReachesModel).toBe(true);
   });
 });
