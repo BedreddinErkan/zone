@@ -23,8 +23,13 @@ import { log } from "../utils/logger.js";
  *  in agentLoop.ts ensures this cap is honored even with tier defaults. */
 export const PLAN_INVESTIGATION_ITER_CAP = 6;
 
-/** Maximum files passed to the investigation prompt. Matches QUICK_PLAN_FILES. */
-export const PLAN_INVESTIGATION_MAX_FILES = 5;
+/** Maximum files passed to the investigation prompt. Set to cover the full
+ *  ranked+grep merge from preparePlanContext (5 ranked + up to 4 grep extras,
+ *  9 total) rather than QUICK_PLAN_FILES' contents-budget value — the two no
+ *  longer match. Below 9, a grep-only match (present in the merge but past
+ *  the old width-5 slice) never reaches this prompt at all. See
+ *  docs/deferred-work.md item 79. */
+export const PLAN_INVESTIGATION_MAX_FILES = 9;
 
 // Fallback seeding caps — same as Option B (dispatch.ts QUICK_PLAN_* constants).
 const FALLBACK_FILE_CAP = 3_000;

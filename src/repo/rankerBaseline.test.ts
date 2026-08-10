@@ -7,10 +7,15 @@ import type { RepoFile } from "../types/project.js";
 /**
  * Ranker measurement ground. Everything here runs against the frozen snapshot below,
  * never the live tree — see the snapshot's own contentUnionNote for why the embedded
- * content is scoped to exactly this task set. mergedInTop5's width (5) matches
- * PLAN_INVESTIGATION_MAX_FILES / QUICK_PLAN_FILES, the production consumer widths that
- * actually decide what the model sees; mergedInFull only records presence anywhere in
- * the merge, which is a materially different (and weaker) claim — see item 79.
+ * content is scoped to exactly this task set.
+ *
+ * reachesModel's width (INVESTIGATION_WIDTH, below) matches PLAN_INVESTIGATION_MAX_FILES,
+ * not QUICK_PLAN_FILES -- the two production consumer widths diverged once the merge fix
+ * landed, and every task in this file's own task set routes to the investigate branch
+ * (verified: none is a pure addition), so this is the width that actually governs what
+ * these five tasks' plans would show. QUICK_PLAN_FILES stays untested by this harness.
+ * mergedInFull only records presence anywhere in the merge, a materially different (and
+ * weaker) claim than reaching the model — see item 79.
  *
  * grep is captured data, not re-run: its selection among matches beyond its four-file
  * cap is rg's own directory-walk order, established nondeterministic, so re-running it
@@ -68,13 +73,14 @@ async function readFromUnion(p: string): Promise<string | null> {
     : null;
 }
 
-// Matches PLAN_INVESTIGATION_MAX_FILES / QUICK_PLAN_FILES -- the production consumer
-// widths that decide what the investigation/quick-path prompt actually shows.
-const TOP5_THRESHOLD = 5;
+// Matches PLAN_INVESTIGATION_MAX_FILES -- every task in this file routes to the
+// investigate branch, so this is the width that decides what their plans actually
+// show. QUICK_PLAN_FILES (still 5) is untested here; see the header comment above.
+const INVESTIGATION_WIDTH = 9;
 
 interface Merge {
-  rankedOnlyInTop5: boolean;
-  mergedInTop5: boolean;
+  rankedOnlyReachesModel: boolean;
+  mergedReachesModel: boolean;
   mergedInFull: boolean;
 }
 
@@ -93,8 +99,8 @@ async function computeMerge(entry: SnapshotTask): Promise<Merge | null> {
   const mergedIdx = merged.indexOf(entry.correctFile);
 
   return {
-    rankedOnlyInTop5: rankedOnlyIdx >= 0 && rankedOnlyIdx < TOP5_THRESHOLD,
-    mergedInTop5: mergedIdx >= 0 && mergedIdx < TOP5_THRESHOLD,
+    rankedOnlyReachesModel: rankedOnlyIdx >= 0 && rankedOnlyIdx < INVESTIGATION_WIDTH,
+    mergedReachesModel: mergedIdx >= 0 && mergedIdx < INVESTIGATION_WIDTH,
     mergedInFull: mergedIdx >= 0,
   };
 }
@@ -115,7 +121,7 @@ describe("ranker measurement ground", () => {
         continue;
       }
       console.log(
-        `  ${t.id}  rankedOnlyInTop5=${m.rankedOnlyInTop5}  mergedInTop5=${m.mergedInTop5}  ` +
+        `  ${t.id}  rankedOnlyReachesModel=${m.rankedOnlyReachesModel}  mergedReachesModel=${m.mergedReachesModel}  ` +
           `mergedInFull=${m.mergedInFull}${t.grep.deterministic ? "" : "  (grep sample-dependent, totalMatches=" + t.grep.totalMatches + ")"}`
       );
     }
@@ -138,28 +144,31 @@ describe("ranker measurement ground", () => {
     expect(byId.get("T3")!.correctFile).toBeNull();
   });
 
-  it("T1: correct file not in the merged top five", () => {
-    expect(merges.get("T1")!.mergedInTop5).toBe(false);
+  it("T1: correct file does not reach the model", () => {
+    expect(merges.get("T1")!.mergedReachesModel).toBe(false);
   });
 
-  it("T2: correct file not in the merged top five", () => {
-    expect(merges.get("T2")!.mergedInTop5).toBe(false);
+  // Inverted by the merge-width fix: this used to assert false. The correct file is
+  // found by grep deterministically and was always present somewhere in the merge
+  // (the sibling assertion below, unchanged) -- it sat at merged position nine, past
+  // the old width-5 slice. Now that the investigation prompt takes nine, it reaches
+  // the model. This is the regression guard on that fix.
+  it("T2: correct file now reaches the model", () => {
+    expect(merges.get("T2")!.mergedReachesModel).toBe(true);
   });
 
   // Safe to hard-assert unlike T1's mergedInFull: T2's grep.deterministic is true in the
   // frozen snapshot (totalMatches <= 4, verified at generation time), so this value is not
-  // a sample that could differ on a re-capture. This is the one assertion in this file that
-  // directly demonstrates the producer/consumer mismatch item 79 records: grep finds the
-  // file (this test), but it never reaches the model (the previous test, both false).
+  // a sample that could differ on a re-capture.
   it("T2: correct file present somewhere in the full merge", () => {
     expect(merges.get("T2")!.mergedInFull).toBe(true);
   });
 
-  it("T4: correct file in the merged top five", () => {
-    expect(merges.get("T4")!.mergedInTop5).toBe(true);
+  it("T4: correct file reaches the model", () => {
+    expect(merges.get("T4")!.mergedReachesModel).toBe(true);
   });
 
-  it("T5: correct file not in the merged top five", () => {
-    expect(merges.get("T5")!.mergedInTop5).toBe(false);
+  it("T5: correct file does not reach the model", () => {
+    expect(merges.get("T5")!.mergedReachesModel).toBe(false);
   });
 });

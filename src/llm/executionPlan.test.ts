@@ -321,6 +321,21 @@ describe("generateExecutionPlan — seededFileContents + scopeNotes", () => {
     expect(prompt.toLowerCase()).toContain("already implemented");
   });
 
+  // Hardcoded indices, matching planInvestigation.test.ts's own sibling pair: this
+  // pins the actual width (9) rather than tracking a constant, so it fails if the
+  // slice regresses. See docs/deferred-work.md item 79 -- this call site had no
+  // stated rationale for its old width of 8 at all.
+  it("passes nine relevant files to the prompt (the ranked+grep merge width), not eight", async () => {
+    mockPlanResponse(MINIMAL_PLAN);
+    const manyFiles = Array.from({ length: 10 }, (_, i) => `src/file${i}.ts`);
+    await generateExecutionPlan({ task: "add x", repoSummary: "app", relevantFiles: manyFiles });
+    const prompt = String(
+      mocks.createChatCompletion.mock.calls[0]?.[0]?.messages?.[0]?.content ?? ""
+    );
+    expect(prompt).toContain("src/file8.ts");
+    expect(prompt).not.toContain("src/file9.ts");
+  });
+
   it("seededFileContents is absent from prompt when not provided", async () => {
     mockPlanResponse({
       objective: "Refactor",

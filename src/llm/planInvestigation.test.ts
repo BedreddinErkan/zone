@@ -96,6 +96,18 @@ describe("runPlanInvestigation — agentLoop wiring", () => {
     expect(task).toContain(`src/file${PLAN_INVESTIGATION_MAX_FILES - 1}.ts`);
     expect(task).not.toContain(`src/file${PLAN_INVESTIGATION_MAX_FILES}.ts`);
   });
+
+  // Hardcoded indices, not derived from PLAN_INVESTIGATION_MAX_FILES -- the sibling
+  // test above tracks whatever the constant is set to and would silently pass at
+  // width 5 too. This one pins the actual width: it fails if the constant regresses.
+  it("passes nine files to the prompt (the ranked+grep merge width), not five", async () => {
+    const manyFiles = Array.from({ length: 10 }, (_, i) => `src/file${i}.ts`);
+    await runPlanInvestigation({ ...BASE_INPUT, relevantFiles: manyFiles });
+    const call = mocks.runAgentLoop.mock.calls[0]![0] as Record<string, unknown>;
+    const task = String(call["task"]);
+    expect(task).toContain("src/file8.ts");
+    expect(task).not.toContain("src/file9.ts");
+  });
 });
 
 describe("runPlanInvestigation — parse success path", () => {

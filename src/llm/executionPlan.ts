@@ -351,7 +351,9 @@ export async function generateExecutionPlan(input: {
   });
   const ctx = getRequestContext();
   const model = getModelName("standard", client.provider, ctx?.modelOverride);
-  const relevantFiles = input.relevantFiles.slice(0, 8).join("\n") || "(none)";
+  // 9, not 8: matches the ranked+grep merge width (preparePlanContext.ts) so a
+  // grep-only match at the last slot still reaches this prompt. See item 79.
+  const relevantFiles = input.relevantFiles.slice(0, 9).join("\n") || "(none)";
 
   // When the user has reviewed a previous plan and provided feedback, prepend
   // that context so the LLM treats it as the primary revision directive.

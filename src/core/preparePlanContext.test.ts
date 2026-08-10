@@ -221,4 +221,45 @@ describe("preparePlanContext — grep pattern is entity-shaped, not every 5+ cha
     });
     expect(ctx.grepMatchedPaths.length).toBe(4);
   });
+
+  // The merge order (ranked results before grep extras) has no other test anywhere --
+  // found while designing a mutation for it. alphaTargetFile.ts wins on an
+  // explicit-filename path bonus; quietModuleGamma.ts's content contains the task's
+  // entity term (that's what makes it a grep match at all) but its path shares no
+  // term with the task, so it scores 0 on path alone.
+  //
+  // Three earlier fixture attempts failed before this one, each caught only by
+  // running the mutation and finding it killed nothing rather than by inspection:
+  // (1) "grepOnlyMatch.ts" and (2) a "zzz"-prefixed name each accidentally shared a
+  // path term with the task, landing quietModuleGamma in the ranked half by path
+  // score alone. (3) A 4-filler version fixed that, but preparePlanContext always
+  // calls the ranker WITH readContent (unlike an isolated probe called without it),
+  // so applyLexicalBoost's own top-30 content window re-read quietModuleGamma's
+  // body, found the same entity term grep matches on, and boosted it back into the
+  // ranked top-5 anyway -- the two mechanisms search for identical terms by
+  // construction. Thirty filler files (all zero path score, sorted before the decoy)
+  // push it past that content-boost window entirely, verified directly both ways
+  // (fixed code: index 0 vs 5; the reverted-order mutation: index 1 vs 0) before
+  // relying on it here.
+  it("places the ranked result before a grep-only match in relevantFilePaths", async () => {
+    const fillers = Object.fromEntries(
+      Array.from({ length: 30 }, (_, i) => [
+        `aaaFiller${String(i).padStart(2, "0")}.ts`,
+        `export const noise${i} = ${i};\n`,
+      ])
+    );
+    const repoPath = await makeTmpRepo({
+      "alphaTargetFile.ts": "export const noise = 1;\n",
+      "quietModuleGamma.ts": "export const betaUniqueSymbolMarker = 0;\n",
+      ...fillers,
+    });
+    const ctx = await preparePlanContext({
+      task: "In alphaTargetFile.ts, rename betaUniqueSymbolMarker everywhere",
+      repoPath,
+      repoSummaryOverride: "test repo",
+    });
+    expect(ctx.relevantFilePaths.indexOf("alphaTargetFile.ts")).toBeLessThan(
+      ctx.relevantFilePaths.indexOf("quietModuleGamma.ts")
+    );
+  });
 });
