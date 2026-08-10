@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import { rankRelevantFiles } from "./rankRelevantFiles.js";
@@ -140,6 +140,30 @@ describe("ranker measurement ground", () => {
     }
   });
 
+  // Records every task ID the assertions below actually look up, so the check at the
+  // bottom of this file is derived from what the suite does rather than a second,
+  // hand-maintained list that could itself drift out of sync with the assertions.
+  // Registered in a SECOND beforeAll, after the one above: that ordering is load-bearing
+  // -- the loop in the first beforeAll calls merges.get(t.id) for every ground task purely
+  // to log it, and if this wrapper were installed before that loop ran, it would record
+  // every ground ID as "referenced" regardless of what the assertions below actually ask
+  // for, making the afterAll check below pass vacuously no matter what (verified: mutation
+  // testing below confirms swapping this order silently un-catches an added, unreferenced
+  // ground ID).
+  const referencedIds = new Set<string>();
+  beforeAll(() => {
+    const originalById = byId.get.bind(byId);
+    byId.get = ((key: string) => {
+      referencedIds.add(key);
+      return originalById(key);
+    }) as typeof byId.get;
+    const originalMerges = merges.get.bind(merges);
+    merges.get = ((key: string) => {
+      referencedIds.add(key);
+      return originalMerges(key);
+    }) as typeof merges.get;
+  });
+
   it("frozen path list length matches the recorded total file count", () => {
     expect(snapshot.paths.length).toBe(snapshot.totalFileCount);
   });
@@ -197,5 +221,17 @@ describe("ranker measurement ground", () => {
 
   it("T7: correct file reaches the model (boundary guard)", () => {
     expect(merges.get("T7")!.mergedReachesModel).toBe(true);
+  });
+
+  // Runs after every it() above regardless of where in this file it is declared -- afterAll's
+  // own semantics, not this check's position, is what makes it order-independent (verified:
+  // relocating this block to before every it() and re-running the rename mutation below still
+  // caught it, byte-identical failure). Both directions fail loudly: a ground ID renamed or
+  // removed leaves a stale entry in referencedIds with nothing in groundIds to match it, and a
+  // ground ID nothing above asserts on leaves a stale entry in groundIds with nothing in
+  // referencedIds to match it.
+  afterAll(() => {
+    const groundIds = snapshot.tasks.map((t) => t.id).sort();
+    expect([...referencedIds].sort()).toEqual(groundIds);
   });
 });
