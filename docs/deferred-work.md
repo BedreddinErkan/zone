@@ -6989,11 +6989,17 @@ hold closed parts and stayed Neither, and none of the references to this entry e
 a bucket precedent. **Neither.**
 
 **The substitution measurement this entry recorded as needed is closed as unmeasurable, on three
-independent grounds.** The extractor has three production call sites — one in the grep surface, two in
-the ranker — established by line-anchored reading, so a substitution inside it reaches all three; run
-against the ground, it moves the ranked top five on five of seven tasks. The coincidence the
-measurement would count is an intersection, and the substitution moves both operands, so no change in
-the count is attributable to it without a shape change to the extractor first, not a one-line mutation.
+independent grounds.** The first ground survives, but on a different basis than the one it was given:
+the extractor has three production call sites, and only two are consumers, not three as this entry
+first credited the count with. One sits in the grep surface, one in the ranker's content boost —
+established by line-anchored reading and confirmed by running: the third, recomputed immediately before
+the boost's own first two lines, has a guard whose neutralization changes the ranked top five on zero of
+twenty-six ground and production tasks, its one live effect a debug-log payload. A substitution inside
+the extractor still reaches both real consumers regardless — which is what actually makes this ground
+hold, not the count of three sites originally cited for it; run against the ground, it moves the ranked
+top five on five of seven tasks. The coincidence the measurement would count is an intersection, and the
+substitution moves both operands, so no change in the count is attributable to it without a shape change
+to the extractor first, not a one-line mutation.
 Second, the ground cannot discriminate: both arms return zero on all seven tasks. Third, where the
 value is non-zero in production it is unstable on repetition — its own repeat distribution is recorded
 with the production-population fact rather than restated here — so a before/after difference of one
@@ -7050,6 +7056,104 @@ the promotion question as before: a measurement closing, like a defect closing, 
 parent to Actionable now. This pass adds the eight findings above while removing three wrongly-counted
 ones elsewhere in this entry (two task-exclusion claims and one tally item), a net gain. Checked in the
 other direction, unchanged: items 61 and 78 both hold closed parts and stayed Neither, and none of the
+references to this entry elsewhere cites it for a bucket precedent. **Neither.**
+
+**Two consumers, not three.** The grep matcher and the content boost consume the extractor's terms; the
+third call site, recomputed immediately before the boost's own first two lines, is observability rather
+than consumption — confirmed by running: neutralizing its guard changes the ranked top five on zero of
+twenty-six tasks, seven ground and nineteen production. Its one live effect is a debug-log payload.
+Recorded so the site is not mistaken for a consumer again.
+
+**The coupling is ninety-six days younger than the extractor, and it was argued for.** The extractor and
+both ranker sites arrived together in `fec1dd2b`; the grep surface joined at `afb8487a`, ninety-six days
+later, replacing its own separate tokenizer, with a stated rationale in that commit's message — common
+English words drowning the surface, five hundred fifty-three of nine hundred fifty-four files matching a
+real production task under the old pattern. The extractor's own body has never been edited since
+`fec1dd2b`. So the coupling is neither the shape the extractor was originally given nor an accident that
+crept in — it is a recent, deliberate substitution whose side effect on the boost was not the point of
+the change and is not named in it. The side effect was unremarked at the time, not unnoticed since:
+nothing in this document's own history shows anyone tracing it before this pass.
+
+**One essay candidate considered here, and declined on the count — checked against the tenth and the
+sixteenth by mechanism first, since a carrier-only distinction would not survive a later pass asking the
+same question.** A change argued for on one consumer's terms whose effect on a second consumer went
+unremarked in the same commit (`afb8487a`'s message never mentions the content boost). Against the
+tenth, extended one pass ago: not the same mechanism — nothing here compares two things that moved
+identically; the commit's own claim about the grep surface is true and was simply never checked against
+a second consumer at all. Against the sixteenth, the closer candidate: its mechanism, in the founding
+instance and its own third, is tracing an *existing claim* forward until it reaches the surface it names
+or is overridden by something the trace didn't originally consider — three of three instances re-check a
+stated assertion's survival. This candidate has no claim to re-check: `afb8487a` asserts nothing about
+the content boost, so there is nothing for a forward trace to find overridden — the gap is disclosure,
+not survival, established from what the sixteenth's own instances actually check rather than assumed
+from where each was written. Checked by title and vocabulary against the remaining fourteen, none
+closer. **One instance — declined on the count**, which needs no mechanism argument to carry it, on the
+seventeenth's own precedent.
+
+**The two consumers have opposite error preferences, by shape.** The grep surface is winner-take-four
+selection: a high-frequency term consumes scarce cap slots, and the file that would have matched is
+simply lost. The boost is additive, capped scoring over a fixed top thirty: a high-frequency term lifts
+many files at once and costs at most fifty points regardless of how often it hits. The shared base layer
+is not neutral between them for this structural reason, independent of any specific task.
+
+**They already diverge in practice, at the post-processing layer rather than at the extractor.** On
+twelve of the twenty term-producing tasks — seven ground, nineteen production — the two consumers use
+different term sets: the grep half truncates to eight, the boost expands with domain terms and is
+uncapped. On one production task the grep uses eight terms while the boost uses ninety-nine.
+
+**Twelve disagreement cases across nine production tasks, with the sign unmeasured.** Terms matching
+fifty-one to three hundred forty files are load-bearing for the boost and would drown the grep's
+four-file cap; four further terms are costly to the grep half and inert to the boost. Boost-active means
+the term is influential, not that it is beneficial — production tasks carry no correct-file label, so
+the direction of that influence is not established here. The disagreement is real; its sign is not.
+
+**The ground shows no disagreement, and cannot.** Only three of seven tasks produce terms, two of them
+exactly one term each, and on the single task whose correct file reaches the top five, removing that
+task's only term changes nothing, because the file wins on path score rather than the boost. A second
+instance of the ground failing to discriminate, alongside the one this entry already records for the
+closed substitution measurement.
+
+**No fork is warranted, and the reason is that the seam already exists.** The grep call site already
+post-processes its own result in isolation — a plain `.slice(0, 8)` on the extractor's return — the
+result is local to that function, and the extractor returns a fresh array each call, so a per-consumer
+term filter reaches the grep half and nothing else. Adding a seam at the extractor would duplicate one
+already sitting one call away. The closed substitution measurement is explicitly not a reason: it is
+closed on two further independent grounds of its own, and a shape change made only to enable it would be
+unjustified by what it would unlock.
+
+**The other extractor is disqualified as a substitute, by measurement, and its own separation from this
+one has no recoverable basis.** `getTaskEntityTerms` splits camelCase into pieces and returns forty terms
+on the reference task where the grep cap is eight; its first eight would be common words — "investigate,"
+"why," "plan," "context" — with the actual identifier cut by the cap, reproducing the failure `afb8487a`
+fixed. Separately: no comment sits at either definition, and the two stopword sets arrived in two
+squashed baselines thirteen days apart under uninformative subjects. The sharing here is documented; the
+separation there is not — an asymmetry worth naming rather than assuming symmetric.
+
+**Both consumers want the same underscore guard setting, on the only directional evidence available.**
+Loosening it hurts both and helps neither: the boost loses a correct file from the top five on one
+ground task, the grep loses one from its capped four on another, its depth moving from third to
+thirty-second among a match count that explodes from four to seventy-one. Helped: none, on either
+consumer, on any of the seven ground tasks measured this way. Closes the per-consumer guard question —
+its premise was that the two might want opposite settings, and on this evidence they do not.
+
+**Read-not-run, tagged where it applies.** The provenance dates and the absence of a stated rationale for
+the second extractor's separation are readings of history and source. The redundancy neutralization, the
+term-set divergence, the per-term ablation, the substitute measurement, and the guard-loosening direction
+are runs.
+
+**Re-checked a twenty-first time, after an establish pass that corrects the three-consumer framing and
+closes two further shape questions.** The rule needs no judgement: a closure moves the enumerated
+remainder only if the thing closed was enumerated in it, and the remainder is the routing predicate, the
+three step-guaranteeing mechanisms, the four caps, and the thirty-session expiry. This pass touches none
+of them: the fork question and the per-consumer guard question are both body material this entry itself
+raised, never one of the four. So the remainder stands exactly where the twentieth re-check left it.
+Item 78's note governs the promotion question as before: two closures do not promote a parent whose
+remainder they don't touch, any more than one does. The pass also opens one new surface — a per-consumer
+frequency filter at the grep call site — without specifying it as a ready fix; its own sign is recorded
+as unmeasured, so it does not itself argue for promotion either. That surface stays inside this item
+rather than becoming a new one: `grepMatchingFiles` and the shared extractor are already this entry's own
+established subject matter, not a distinct one reached for the first time. Checked in the other
+direction, unchanged: items 61 and 78 both hold closed parts and stayed Neither, and none of the
 references to this entry elsewhere cites it for a bucket precedent. **Neither.**
 
 **Where the code lives:** the gate, its marker, the two early returns, the forced-steps regeneration
