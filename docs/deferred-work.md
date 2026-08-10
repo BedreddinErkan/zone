@@ -5200,6 +5200,78 @@ ranker is capable of it.** Recorded so a later pass does not re-derive that the 
 exhausted, and does not read that exhaustion as a reason to try one more variant of it. No mechanism is
 named and no approach is proposed here; this pass measured the exhaustion, not a remedy.
 
+**That question is now answered, and the answer is a gap rather than a candidate.** Of the sixteen
+scoring signals, **ten are structurally impossible** for that correct file — they test the path, the
+extension or the category, none of which any wording of a task can change — and **five are merely
+unfired**, meaning some task text would fire them. **The distinction is the record, not the list**: an
+impossible signal and an unfired one look identical in a decomposition that only reports zero, and this
+arc has conflated the two before. Of the five reachable, **four are keyed on the file's own name** —
+the explicit-basename bonus, the mentioned-file bonus, the path-term overlap and the keyword substring —
+and the fifth is a four-point branch that fires on the file extension alone. So the file is reachable
+only by a task that already contains its own path's vocabulary. **No signal maps a described behaviour
+onto a file named otherwise**, and the reference task describes plan-context seeding without ever
+naming the file it wanted.
+
+**The correct files fail for four different outcomes, not one, which forecloses a single explanation.**
+Measured per task as the winner-minus-correct decomposition across the ground's seven: **two lose to
+path tier alone**, both by exactly eight and by nothing else; **one loses to tier plus a single path
+term**; **one loses to all three of tier, keyword and path term**; and **two do not fail at all**,
+their correct file already first. A change aimed at any one signal reaches at most one of those groups.
+
+**The path-tier signal, with its provenance.** It arrived **whole and has never been edited** — the
+block diffs byte-identical between its introducing commit and today — and it was authored on a date
+when this repository's own `cli`, `llm`, `repo`, `tools`, `patch`, `engine`, `audit`, `ast` and
+`semantic` directories already existed, **without including any of them**. Never in it, never removed.
+Its own doc comment calls it framework-agnostic; **sixty-one of its seventy segments match nothing
+here**, and what does not match is Next.js- and Rails-shaped — pages, routes, controllers, views,
+middleware, models, stores, entities, composables, cypress. **Recorded as written for a different kind
+of codebase, which the vocabulary supports; not as borrowed from a specific application, which is not
+established either way** — there is no import, no attribution and no prior file, and the stronger claim
+would be an inference dressed as a finding.
+
+**Its measured reach.** **Sixty-two point two percent of the nine hundred and fifty-four scanned files
+score zero from it.** **Five of its ten tier entries match nothing here at all.** Of the files it does
+reach, **just under half take the maximum weight**. A signal silent on nearly two-thirds of a repository
+and saturated across half the remainder does not grade the way ten ordered rows suggest it does.
+
+**The commit's shape, recorded because it bears on how such a thing lands unreviewed:** that scoring
+taxonomy, both stopword lists and several new modules arrived together in a commit of **ninety-nine
+files and roughly nineteen thousand insertions**, under a subject line describing a URL rename.
+
+**Two negative results, and they are the load-bearing part.** Teaching the tier list this repository's
+own top-level directories **changes no task's outcome at any weight from zero through sixteen** — swept,
+not sampled. The reason is measured rather than supposed: **seventy-four point three percent of scanned
+files sit in one of those directories**, so added weight lifts a correct file and its competitors
+together, and ranks improve and then saturate while outcomes stay put.
+
+**And removing the tier signal entirely leaves one task's correct file jointly top-scoring, with nothing
+above it and seventy-eight files tied beside it — still ranked seventy-second**, because position among
+equal scores is settled by an alphabetical comparison of paths. **The eight-point gap was real, closing
+it completely does not produce the outcome.** A scoring change can be exactly right about the thing it
+targets and still not register, because something downstream of scoring decides the surface.
+
+**How far that reaches was measured before the right-but-unregistered claim was written, because it
+reads differently depending on the answer.** Across the seven tasks the number of files sharing the correct file's own
+score runs **one, one, two, sixty, three hundred and seventy-one and five hundred and fifty-eight**, and
+the number of distinct scores inside the top fifty runs **one, three, four, seven, eleven and
+seventeen** — at the extreme, one task's entire top fifty is a single score. **Ties are pervasive, not
+one task's accident**: in five of the six, one tie group covers between a quarter and all of the top
+fifty, so the alphabetical comparison is ordering a substantial part of every ranking and any scoring
+change meets it. **What varies is whether the correct file sits inside such a group**, and in this
+sample the two tasks whose correct file holds a score no other file holds are exactly the two that
+reach first place. Reported as the spread at seven tasks, with no criterion drawn from it.
+
+**A scorer surface that cannot fire here at all.** Every special case the scorer carries for an
+`index.html` path — four of them, including the largest single non-basename bonus in the file — is
+unreachable against this repository, because **no such path exists in the scanned tree**. Recorded as a
+fact about the scorer's reach, not as work to do.
+
+**Nothing constrains a change to any of this.** The tier function has **exactly one consumer outside the
+ranker**, a manual runner **the suite does not collect** — established by listing what the runner
+actually collects rather than by reading its glob. So a tier change is checked by no automated test,
+which sits beside the already-recorded finding that the twelve ranker tests pin only the task-signal
+score.
+
 **Scores are not comparable across queries, which forecloses every threshold.** Three tasks against
 one tree returned top scores of eighty-four, five hundred and twenty-nine, and nineteen; the scale is
 a raw unnormalised sum whose reachable maximum depends on how the request happens to be worded. So no
@@ -6401,6 +6473,20 @@ measured exhausted. Checked in the other direction, unchanged: items 61 and 78 b
 stayed Neither, and of the eight references to this entry elsewhere none cites it for a bucket precedent,
 all eight citing it for facts. **Neither.**
 
+**Re-checked a fifteenth time, after two establish passes that closed nothing.** The rule needs no
+judgement here: a closure moves the enumerated remainder only if the thing closed was enumerated in it,
+and these two passes closed nothing at all — they measured and recorded. The remainder stands unchanged
+at routing predicate, three step-guaranteeing mechanisms, caps, thirty-session expiry. That is the ninth
+and twelfth re-checks' situation, the first of the rule's two cases; the third case established at
+`326234f3` is not reached, and is not widened by being left alone. Item 78's note governs the promotion
+question as before, and this pass adds open material in six places while removing none — the
+reachability gap and its structural-versus-unfired distinction, the four distinct failure outcomes, the
+tier signal's provenance and measured reach, the two negative results, the tie-break's ordering role
+with the spread that says it is pervasive, and the absence of any automated test over the tier signal.
+An entry that gains six findings and loses nothing does not promote. Checked in the other direction,
+unchanged: items 61 and 78 both hold closed parts and stayed Neither, and none of the references to this
+entry elsewhere cites it for a bucket precedent. **Neither.**
+
 **Where the code lives:** the gate, its marker, the two early returns, the forced-steps regeneration
 and the body-seeding caps are all in `runOneShotInner`, `cli/dispatch.ts`; both lead-verb predicates,
 and the problem-word predicate the two refusal exits now pair with the narrower of them, are in
@@ -6509,11 +6595,44 @@ the per-run cleanup call is in `runOneShotInner`, `cli/dispatch.ts`. The tool th
 trigger is defined in `tools/toolDefinitions.ts` and handled in `llm/agentLoop.ts`. See item 76 for
 the shared-name class the tool/event pair belongs to, and item 60 for the bucket precedent.
 
+## 81. Every scanned file is labelled category "unknown", and that label is rendered into prompts at surfaces well outside the ranker
+
+The scanner assigns each scanned file a category, and it derives that category from exactly two
+top-level path prefixes. **This repository has neither of them**, so the value is `"unknown"` for **all
+nine hundred and fifty-five files the live scan returns** — measured by running the scanner, not by
+reading its predicate. Not predominantly, not by default in the absence of a better guess: every file,
+without exception, carries the same label.
+
+**This is filed apart from the ranker deliberately.** The field is produced by the scan, not by the
+ranking, and it is read at **six call sites outside the ranker** — counted this pass. **Two of the six
+render it directly into prompt text**, one composing a file list as a category-tagged line per file and
+the other tagging each path in a feature-planning prompt; the remaining four forward it into
+plan-construction and role-flow inputs. So the label reaches a model, on every file, in at least two
+prompt surfaces, and it says nothing on all of them. Filing that under the ranker would have made a
+prompt-content fact look like a scoring detail.
+
+**Inside the ranker the same emptiness makes three scoring paths unreachable here** — two category
+bonuses and one branch of the task-signal score that tests the category as an alternative condition.
+That much is a ranker consequence and is recorded in item 79's own signal work; what is recorded here
+is the wider surface.
+
+**What is not established:** whether any consumer treats `"unknown"` differently from a real value, and
+whether a model reading a uniform label is affected by it at all. Both are answerable and neither was
+asked, so no cost is claimed. Recorded as a structural fact about what the scan produces and where that
+production travels, with no fix proposed.
+
+**Where the code lives:** the derivation is `detectCategory` in `repo/scanRepo.ts` and the field is
+declared on the scanned-file type in `types/project.ts`; the two prompt-rendering reads are in
+`llm/prompts.ts` and `llm/planFeature.ts`, and the four forwarding reads are in `core/runFeatureAgent.ts`,
+`core/runLlmPatchFlow.ts`, `roles/runTestEngineerFlow.ts` and `roles/runDataAnalystFlow.ts`. The three
+unreachable scoring paths are in `repo/rankRelevantFiles.ts`. See item 79 for the ranker-side signal
+decomposition this was found beside.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 80 to find out which ones still need something. No index of
+reader the trouble of reading all 81 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -6526,8 +6645,9 @@ first (0):
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (7): 1, 4, 18, 23, 57, 63, 75
 
-**Neither — a structural fact recorded, with no fix proposed** (34): 2, 3, 5, 9, 11, 15, 17, 19,
-27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80
+**Neither — a structural fact recorded, with no fix proposed** (35): 2, 3, 5, 9, 11, 15, 17, 19,
+27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
+81
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, and 79 are partially closed or corrected; the
 classification above covers only the portion still open, not the whole entry.
@@ -7586,6 +7706,28 @@ mechanism is the part that decides what gets built, so it is the part that has t
 and confirming the outcome is not a check on it. The cheap version is the same one the essay already
 prescribes, run in the other direction: before believing something is lost, find the line that loses
 it.
+
+**A fifth instance, filed as a tally increment and not as a new direction, and it fails by a mechanism
+the other four do not use.** An establish pass measured that one ground task's correct file trailed the
+leader by eight points contributed entirely by one signal, and reasoned that removing that signal would
+let the file through. Removing it did exactly what was predicted to the value: the file became jointly
+top-scoring with **nothing above it at all**. Its position did not move — still seventy-second, because
+seventy-eight files held the same score and an alphabetical path comparison ordered them. **The trace
+stopped where the change was easiest to see, at the gap closing, and the surface the claim was about is
+position in a returned list.** This essay's own prescribed check would have caught it: follow the value
+until it reaches the named surface or is overwritten. What is new is that **the value is never
+overwritten** — the four earlier instances all turn on something rewriting it, and here the score
+survives intact and simply stops being what orders the result once it ties. Call that
+under-determination rather than override: when the primary key ties, a secondary key unrelated to the
+fix decides. Stated as what this instance did rather than as a rule, since it is one instance.
+
+**Not merged with the record it superficially resembles, and the reason is the useful part.** Item 79
+already carries a finding from the neighbouring signal that subtracting noise is not adding signal — an
+intervention that is directionally right and **too small**, moving a file thirty-nine positions of five
+hundred and forty-eight. This one is an intervention that **completely achieves its stated target** and
+is then absorbed downstream. Filing them as one shape would erase the difference between *too small* and
+*absorbed*, which is precisely the distinction a later pass choosing between options has to make. Two
+records, deliberately.
 
 ## A seventeenth pattern: a freshly written entry is the least-checked text in this document, not the most current
 
