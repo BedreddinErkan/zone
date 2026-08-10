@@ -5472,6 +5472,62 @@ computed nine paths, the ninth never reached the model. And the dispatcher seeds
 first five under its own per-file and total character caps. The distance between a path the model can
 see and a path whose contents it can read is therefore several positions wide, and is stated nowhere.
 
+**One of those four closed at `f150972c`, and that count was short by one to begin with.** The
+generation prompt's render-eight — the second of the two this paragraph calls defects — is now nine,
+so a ninth computed path reaches the model. The inert eight is untouched and still eight. And the
+series has a fifth member this enumeration omits: the investigation prompt's own cap, which was five
+and is now also nine, so the two name-rendering consumers agree for the first time. Recorded as an
+omission in the original count rather than as a cap newly created.
+
+**What that fixed and what it cannot touch, kept apart so the change is not credited with more than it
+did.** Nine is the minimum sufficient width, not a round number: on the frozen ground the rename
+task's correct file sits at merged position nine, reached at nine and excluded at eight. That task now
+reaches the model — **and its ranked position is unchanged at six hundred and forty-fifth of nine
+hundred.** The fix routed around the ranker rather than repairing it. The reference task and the
+concept-vocabulary task are unchanged and remain absent from the merge *entirely* — never in the list
+at all, not merely past a slice — which no width change can reach, because that absence is the
+ranker's and this entry's ranking strand still owns it.
+
+**The cost objection collapsed on measurement, and the figures are worth keeping because they are what
+made a one-character change defensible.** Both consumers render *names*, not contents. Widening the
+investigation prompt from five to nine costs at most a hundred and sixty-five characters — the
+reference task's figure, the largest of the five, with two tasks paying nothing because their merge
+never exceeds five. Widening the generation prompt from eight to nine costs eighteen to twenty-five
+characters on the tasks that have a ninth entry. Quick seeding is byte-identical at both widths on all
+five tasks, because the twelve-thousand-character budget binds before the file count ever does.
+
+**The producer/consumer mismatch this entry records narrows; it does not close.** The dispatcher's
+body-seeding count stays at five, on the measured inertness above and on a second ground worth stating
+separately: **none of the measurement ground's five tasks routes to that branch** — every one is a
+non-pure-addition and takes the investigate route. So the quick branch is **unmeasured by the baseline
+rather than merely unchanged**, which is a gap in what the ground covers rather than a fact about the
+code. Closing it means adding a pure-addition task, which also forces the content union to be
+recomputed — the artifact's own note already carries that warning.
+
+**Where the render-eight came from, since it bears on whether the misalignment was ever weighed.**
+`24498289`, a one-word squashed baseline dated 2026-04-21, is an ancestor of the commit that
+introduced the ranked-plus-grep merge. The eight predates the existence of the thing it later had to
+agree with, and no rationale for it appears anywhere. It was never aligned to anything; it was not
+about this.
+
+**The merge-order line had no test anywhere until `f150972c`, and designing a mutation found that,
+not reading.** Checked against the prior commit: the only comparison assertion in the producer's test
+file was between two *scores*, never between two positions in the merged list, and the measurement
+ground **replicates the merge inline** rather than calling the real function — so mutating the real
+order would have killed nothing from either direction. The gap surfaced only because a mutation needed
+a target and had none.
+
+**Isolating the merge in a fixture took four attempts, and the third failure is the one worth the
+record.** The fixture had to hold a file present in the grep extras and absent from the ranked half.
+Two attempts failed on accidental term-sharing between the decoy's filename and the task. The third
+failed for a reason no reading would have surfaced: the context builder calls the ranker **with** its
+content reader, and the verification probes called it **without**, so the probes could not see the
+content-boost window re-read the decoy's body, find the same entity term the grep matches on, and push
+it back into the ranked half. The two mechanisms draw from the same term source by construction, so a
+file that qualifies as a grep extra also qualifies for the boost. What worked was thirty zero-scored
+fillers sorted ahead of the decoy, pushing it past the top-thirty content window so its body is never
+read. The eighth pattern carries the general shape.
+
 **Widening a cap does not reach the file the task was about.** Re-running the same ranking against
 the dogfood worktree on 2026-08-08 with the context cap lifted places the command-line entry point
 four hundred and thirty-eighth of the eight hundred and seventy-five files that survive the ranker's
@@ -6223,11 +6279,28 @@ where its membership is not. Checked in the other direction: items 61 and 78 bot
 stayed Neither, and of the eight references to this entry elsewhere in the document none cites it for a
 bucket precedent — all eight cite it for facts. **Neither.**
 
+**Re-checked a thirteenth time, after `f150972c`, and this is the first case the rule does not
+decide.** The rule asks whether the thing closed was enumerated in the remainder. Here it was — the
+generation prompt's render-eight is one of the four caps — so unlike the eleventh and twelfth this
+closure does reach the list. But it reaches it by **narrowing an enumerated item rather than removing
+one**: four caps become three, and the list still reads routing predicate, three step-guaranteeing
+mechanisms, caps, thirty-session expiry. The ninth re-check found nothing enumerated closed and the
+tenth found an enumerated item closed outright; this is a third case between them, and it is recorded
+as one **without widening the rule to cover it** — one instance is not enough to say how a narrowing
+should generally be treated, only that this one did not empty its item. The promotion question is
+unaffected either way: item 78's note governs, an entry does not become actionable by having a part
+removed, and this pass adds open material beside what it removes — the quick branch is unmeasured by
+the ground rather than merely unchanged, and the caps enumeration turns out to have been short by one.
+Checked in the other direction, unchanged: items 61 and 78 both hold closed parts and stayed Neither,
+and nothing cites this entry for a bucket precedent. **Neither.**
+
 **Where the code lives:** the gate, its marker, the two early returns, the forced-steps regeneration
 and the body-seeding caps are all in `runOneShotInner`, `cli/dispatch.ts`; both lead-verb predicates,
 and the problem-word predicate the two refusal exits now pair with the narrower of them, are in
 `llm/taskShape.ts`; the minimal-plan synthesis, the forced-steps prompt branch and the slice
-that renders only the first eight relevant paths are in `llm/executionPlan.ts`. The ranker — with its
+that renders the relevant paths — eight until `f150972c`, nine after — are in `llm/executionPlan.ts`;
+the investigation prompt's own file cap, the other constant that commit moved to nine, is in
+`llm/planInvestigation.ts`. The ranker — with its
 unused semantic, last-changed and intent inputs, its skip filter and its content pass over the top
 thirty — is `repo/rankRelevantFiles.ts`, and the scan it consumes is `repo/scanRepo.ts`; the frozen
 measurement ground, its five pinned tasks and its per-task determinism flags are
@@ -6909,6 +6982,29 @@ shape — code nobody had a reason to read, in files an exclusion rule had corre
 is cited there rather than restated, with that pattern's own tally left alone. Item 79 records the
 mechanism. One clause worth keeping and not generalizing from: the mutation whose kill set matched
 exactly was the one whose mechanism was reasoned through before it ran, one instance on each side.
+
+**A third direction, and the one whose result carries no information at all: an empty kill set is
+ambiguous.** The two above degrade the kill set into a *wrong* map — a member missing, a member
+added. An empty one is worse in a specific way: it reads identically whether nothing pins the mutated
+line or the fixture never reaches it, and those call for opposite responses. `f150972c` hit both
+readings in sequence against the same line. The first empty result was the true one — the merge-order
+line genuinely had no test, from the measurement ground or anywhere, since the ground replicates that
+merge inline instead of calling it. The next three were the other reading: a fixture that never
+isolated what it was built to isolate, twice through accidental term-sharing with the task, and once
+because the context builder calls the ranker with a content reader while the verification probes
+called it without — so the probe could not observe the content pass pulling the decoy back into the
+half it was supposed to have been excluded from. **What separated the readings was checking the
+fixture in both directions before trusting an empty result**: confirm it produces the expected
+arrangement under unmutated code, then confirm the mutation changes that arrangement. The attempt that
+shipped was checked exactly that way and the three that failed were not — stated as what this instance
+did rather than as a rule, since it is one instance and the seventeenth pattern's precedent applies to
+a sentence written in the same commit as its own subject. Item 79 records the fixture and the shape.
+The catching itself was the fifth pattern working — running produced the empty set every time — and is
+cited there rather than restated, that pattern's tally left alone. **The fourth pattern was considered
+and not extended:** its shape is a default on an injected test seam being taken silently by a
+production call site, defeating a harness built to watch that seam, where here the direction is
+inverted — a diagnostic probe omitted an optional argument that production supplies, and nothing was a
+seam and no harness was defeated.
 
 ## A ninth pattern, beside the seventh: a ledger entry that prescribes a check does not cause the check to happen
 
