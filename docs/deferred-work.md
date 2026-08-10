@@ -5224,10 +5224,19 @@ actually receives; the ground is the unrepresentative artifact, not the extracto
 running the real exported function, a per-branch tracer re-validated against it on every corpus row.
 Branch contribution in production: camelCase on thirty-two tasks, screaming-snake on thirteen, quoted
 on ten, snake_case on eight, seventeen tasks matching more than one branch. **Not a consequence of the
-ground's seven-task count** — a seven-task ground sampled from this same corpus would carry that branch
-mix; a thirty-five-task ground authored the way the current seven were would not. The tasks were
-authored rather than sampled from production shapes, a selection property, and the count the ground
-happens to hold is incidental to it.
+ground's seven-task count, and not uniformly a consequence of authorship either** — a seven-task
+ground sampled from this same corpus would carry that branch mix; a thirty-five-task ground authored
+the way six of the current seven were would not. Six of the seven tasks were authored rather than
+sampled from production shapes, a selection property, and the count the ground happens to hold is
+incidental to it. **The seventh was not authored, and this paragraph was wrong to say so of all
+seven.** T1's task text matches, character for character, a row in both the thirty-five-task cleaned
+corpus and its nineteen-task Zone-only subset — a real session against this repository, dated
+2026-08-09; T2 through T7 match no corpus row, verbatim or whitespace-normalized, checked against all
+six. Narrowed rather than deleted: the paragraph's conclusion is that the branch-mix mismatch traces
+to selection rather than to size, and that conclusion holds on six authored tasks against one real
+sample exactly as it would not hold on a ground authored throughout — one sampled task does not make
+the ground representative, but it does mean "authored" can no longer stand as a description of all
+seven.
 
 **The corpus needed cleaning first, and the contamination is itself the finding.** Seventy raw session
 rows reduced to fifty-three distinct strings, eighteen of which are QR-code box-glyph ASCII art captured
@@ -5454,11 +5463,14 @@ sample. The ranked half reproduced exactly for all five. **The content union is 
 sixth task needs it recomputed, or that task's boost silently reads as zero rather than its real value,
 and that warning is written into the artifact's own data rather than left to this entry.
 
-**What the five tasks measure today.** The explicit-basename task is the only one the ranker gets
-right outright. The reference task from the run this entry records, and a task naming a concept absent
-from its filename, reach neither the ranker's top five nor the merge at all. The rename task reaches
-the merge and never the model — which is the mismatch this entry already records from `66c23fe0`, and
-it now carries a regression test rather than only this prose; the mechanism is not restated here.
+**What the first five tasks measured, before the sixth and seventh were added — left at five rather
+than corrected to seven, because the paragraph itself only narrates those four outcomes and updating
+the count alone would claim more than it says.** The explicit-basename task is the only one the ranker
+gets right outright. The reference task from the run this entry records, and a task naming a concept
+absent from its filename, reach neither the ranker's top five nor the merge at all. The rename task
+reaches the merge and never the model — which is the mismatch this entry already records from
+`66c23fe0`, and it now carries a regression test rather than only this prose; the mechanism is not
+restated here.
 
 **Why that assertion is safe to make, which is a structural fact and not a property of any sample.**
 The merged list is built ranked-first, and the ranker returns exactly five, so the grep contribution
@@ -5893,8 +5905,11 @@ five tasks, because the twelve-thousand-character budget binds before the file c
 
 **The producer/consumer mismatch this entry records narrows; it does not close.** The dispatcher's
 body-seeding count stays at five, on the measured inertness above and on a second ground worth stating
-separately: **none of the measurement ground's five tasks routes to that branch** — every one is a
-non-pure-addition and takes the investigate route. So the quick branch is **unmeasured by the baseline
+separately: **none of the measurement ground's seven tasks routes to that branch** — corrected from
+five to the ground's current count, since the underlying claim is re-verified rather than merely
+renamed: every one is a non-pure-addition and takes the investigate route, a finding this entry
+elsewhere confirms again at seven rather than assumes from five, after `1f96013c`. So the quick
+branch is **unmeasured by the baseline
 rather than merely unchanged**, which is a gap in what the ground covers rather than a fact about the
 code. Closing it means adding a pure-addition task, which also forces the content union to be
 recomputed — the artifact's own note already carries that warning.
@@ -6759,6 +6774,137 @@ recovering per-run file selection at all. An entry that gains eight findings and
 promote. Checked in the other direction, unchanged: items 61 and 78 both hold closed parts and stayed
 Neither, and none of the references to this entry elsewhere cites it for a bucket precedent. **Neither.**
 
+**The ground cannot be resampled, on four independent grounds, any one of which is enough alone.**
+The corpus itself is thin — nineteen Zone-relevant tasks over roughly seven weeks of one author's own
+sessions — so a fresh seven-task draw would be a second small sample of an already-small population,
+not an independent check against it. A resampled task's correctFile is not recoverable from run
+records either, for two reasons rather than one. The first holds even in the cleanest case: a write
+record shows what the agent did, not whether it was right, so turning a session's tool-calls into a
+correctFile label would still need independent verification against every task — the very thing a
+resample would need to buy fresh each time. The second is a method problem, checked by shape rather
+than assumed: segmenting this repository's twenty-seven live Zone-relevant session files by
+user-prompt boundary gives thirty-four segments, six of which carry a write-shaped tool call. Two of
+those six show zero keyword overlap between their own prompt and their tool call's target — not two
+different tasks, but two near-duplicate captures of the same one, nine seconds apart, sharing a
+session id: the prompt asks for a `--version` flag, and the tool call is a failed `apply_patch`
+against `src/snapshots/snapshotStore.ts`, a file with no occurrence of the word "version" (the real
+implementation is `.version(version)` in `src/cli/index.ts`). Traced rather than left as an anomaly:
+an orphaned, still-`running` envelope for the same repository carries the actual source task verbatim
+— mutation-testing instructions naming the same file, including the line about the empty-dir removal
+branch that the stray narration echoes. So the mismatch is not a flaw in segmenting by user-prompt
+boundary as such; it is a flaw in what the method has to assume — that one session file's transcript
+belongs to one dispatch — which fails here because a second, near-simultaneous dispatch's tool-call
+activity was appended into this file's own transcript, the two capture files nine seconds apart and
+sharing one session id. The other four write-bearing segments, spanning three distinct tasks, all
+show substantial vocabulary overlap between their own tool calls and their own prompt; the signature
+is isolated to one task, doubly captured and independently traced, not a property of the method
+generally. The sixth and seventh tasks bring a third reason on their own: their whole purpose is
+telling the blocklist and boundary candidates apart under disagreement, which needs the engineered
+pair together — a fresh random draw would not reproduce that disagreement on request. And a fourth:
+the grep half will not hold still to be resampled — five repeats of the reference task's own pattern
+against the unchanged live tree, run fresh for this pass, returned five distinct first-four sets, not
+one stable answer to freeze.
+
+**One judgement above was read, not run, in the same shape this entry already tags elsewhere.** Which
+transcript records identify a correct file — including which one is misattributed — is a reading of
+tool-call and envelope content against task prompts, not an execution of anything.
+
+**The ground was never one instrument, and that is the deeper reason a replacement cannot serve both
+jobs at once.** Five of the seven tasks stand in for production shapes — a representativeness claim,
+which is what makes "resample it" a coherent idea in the first place. The sixth and seventh do not:
+they were built, not drawn, specifically because all five original tasks are insensitive to every
+candidate fix already on record here, and their whole value sits exactly on a blocklist or boundary
+join a random sample is unlikely to land on by chance. A ground assembled by sampling could lose the
+regression guard the same way the original five did; a ground assembled by construction, the way the
+sixth and seventh were, gives up any claim to representativeness in the same motion. Any future ground
+proposal has to say which of the two jobs a given task is doing, because no task can be asked to do
+both.
+
+**The three dependency parts the ground's own notes already carry were checked, not just re-read, and
+hold.** The content union's: `readFromUnion` returns `null` on a missing key, and
+`rankRelevantFiles.ts`'s content-boost pass returns immediately on falsy content (`if (!content)
+return;`, confirmed by reading the source directly) — a missing key really does score as though the
+file were unscored, exactly as the artifact's own `contentUnionNote` says. The extraction function's:
+loosening the underscore guard changes the surviving eight-term set on nineteen of thirty-five
+production tasks, already established by running the substitution. And the grep half's own
+non-recomputability: the five-repeat run above, done fresh this pass rather than carried from the
+last one.
+
+**A fourth dependency the ground's own notes do not name, and it is a live defect rather than a
+documentation gap.** Eight of `rankerBaseline.test.ts`'s eleven assertions dereference a hardcoded
+literal task ID through TypeScript's non-null assertion — `byId.get("T3")!`, and `merges.get(...)!` on
+`"T1"`, `"T2"` (twice), `"T4"`, `"T5"`, `"T6"`, `"T7"` — confirmed by reading all eleven `it` blocks
+directly. None of the file's three structural checks would catch a renamed or removed ID: the
+closest, "every contentUnion key is a path the snapshot actually scanned," only verifies that one
+direction — the same removal-safe/addition-unsafe asymmetry the artifact's own `contentUnionNote`
+already carries for content, now shown to apply to the task-ID set too. A renamed or dropped ID does
+not fail one of the eight cleanly; it throws `Cannot read properties of undefined` out of a bare
+`.get(...)!`, an opaque crash instead of a readable diff, on exactly the edit a resample would make.
+
+**Where this belongs, decided rather than left implicit.** It stays inside this item.
+`rankerBaseline.test.ts` and its snapshot are already wholly attributed to this item in "Where the
+code lives" below, no other item claims any part of either file, and the three dependency parts just
+confirmed above are already this entry's own material, not another surface's. A fourth dependency of
+the same shape — task-set fragility with no integrity check behind it — is not a new surface merely
+because it lives in a test file rather than in `preparePlanContext.ts` or `rankRelevantFiles.ts`
+itself; it stays for the same reason the other three already do, not because the material here is
+large and not to keep the count.
+
+**One essay candidate considered, and declined.** A record documenting one direction of a hazard
+while the opposite direction fails silently: the content-union note warns only that a task *added* to
+the ground without recomputing content silently scores as zero; the fourth dependency above shows the
+*removed or renamed* direction failing silently too, as a crash rather than a quiet zero. Checked in
+full against the fourth pattern (a default on an injected test seam defeating the harness built to
+observe it — a mutation-testing mechanism, not a documentation-coverage one) and the eighteenth (a
+measurement's window expiring while its writer is still running — a timing mechanism, not a
+directional one), the two closest by vocabulary; checked by title and subject against the other
+sixteen, none closer. One instance — declined on the seventeenth's own precedent, no criterion derived
+from one occurrence.
+
+**zone-dogfood is a Zone clone, not a fifth unrelated project, recorded once so it is not recomputed
+wrong.** Both repositories share one origin (`github.com/BedreddinErkan/zone`, both remotes checked),
+and zone-dogfood's HEAD (`ce2fcdaa`) is a real object in this repository's own store, reachable via a
+local `test/zone-dogfood` branch whose merge-base with master is dated 2026-07-31 — ten days behind
+this pass. The thirty-five-task cleaned corpus splits five ways by raw `cwd` — six rows at this
+repository, thirteen at zone-dogfood, sixteen across three unrelated repositories, all counts fresh
+this pass — so a literal-path split gives six; the Zone-relevant nineteen used throughout this entry
+is six plus the thirteen, folded in by lineage rather than by path string. Recorded because the
+un-folded split was never written down as such, so a later pass reading raw `cwd` values without
+checking lineage would recompute six and never know it disagrees with the nineteen already used
+everywhere else here.
+
+**What a resample would cost, named rather than totaled.** Findings throughout this entry are
+anchored to a specific task's role, not just its number — the reference task's
+five-hundred-and-forty-eighth rank and the thirty-nine-position ceiling no candidate fix moves past;
+the rename task's merged position nine, reached only after the merge-width fix; the
+two-different-reasons exclusion split between the reference and rename tasks; the mirror-direction
+finding that name and content fail in both directions, first on the rename task and then, inverted, on
+the scope-guard task; and the sixth and seventh tasks' own `failureMeans` fields, meaningful only read
+together. None of this is false if the task set changed — it is unreproducible, because the task
+standing at that role would no longer be the task that produced the figure. A cost of replacing the
+ground, not a fragility in it today.
+
+**A continuing self-reference, not a one-time artifact of when the harness was built.**
+`rankerBaseline.test.ts` still matches the reference task's own grep pattern today — two occurrences
+of "investigate," three of "quick_plan_files," word-matched, verified by running `rg` against the file
+just now — so the measurement instrument keeps appearing as one of its own subject's raw matches.
+
+**Re-checked an eighteenth time, after a pass that establishes why the ground cannot be resampled and
+finds a fourth task-set dependency.** The rule needs no judgement: a closure moves the enumerated
+remainder only if the thing closed was enumerated in it, and the remainder is the routing predicate,
+the three step-guaranteeing mechanisms, the four caps, and the thirty-session expiry. This pass
+touches none of them — resampling was never one of the four, and the fourth dependency it adds is a
+property of the measurement harness, not of the gate, the steps, the caps, or the expiry. So the
+remainder stands exactly where the seventeenth re-check left it. This pass also narrows rather than
+removes a claim this entry made in its own voice about the ground's provenance, above. Item 78's note
+governs the promotion question as before: a correction is not a removal, and even a removal would not
+by itself promote the entry. This pass adds open material in three places while removing none: the
+fourth task-set dependency, a live defect in the baseline test rather than only a documentation gap;
+the two purposes a resampled ground would have to serve at once; and the corpus's own five-way split
+needing zone-dogfood folded in by lineage. Checked in the other direction, unchanged: items 61 and 78
+both hold closed parts and stayed Neither, and none of the references to this entry elsewhere cites it
+for a bucket precedent. **Neither.**
+
 **Where the code lives:** the gate, its marker, the two early returns, the forced-steps regeneration
 and the body-seeding caps are all in `runOneShotInner`, `cli/dispatch.ts`; both lead-verb predicates,
 and the problem-word predicate the two refusal exits now pair with the narrower of them, are in
@@ -6768,7 +6914,7 @@ the investigation prompt's own file cap, the other constant that commit moved to
 `llm/planInvestigation.ts`. The ranker — with its
 unused semantic, last-changed and intent inputs, its skip filter and its content pass over the top
 thirty — is `repo/rankRelevantFiles.ts`, and the scan it consumes is `repo/scanRepo.ts`; the frozen
-measurement ground, its five pinned tasks and its per-task determinism flags are
+measurement ground, its seven pinned tasks and its per-task determinism flags are
 `repo/rankerBaseline.snapshot.json`, read by `repo/rankerBaseline.test.ts`; the summary
 join, the inert maximum, and `grepMatchingFiles` with its four-file cap are in
 `core/preparePlanContext.ts`; the entity extractor it now shares with the ranker's content boost, and
