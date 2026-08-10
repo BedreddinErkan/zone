@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { rankRelevantFiles } from "./rankRelevantFiles.js";
+import { rankRelevantFiles, extractEntityTerms } from "./rankRelevantFiles.js";
 import type { RepoFile } from "../types/project.js";
 
 function buildRepoFile(
@@ -184,5 +184,56 @@ describe("rankRelevantFiles", async () => {
     expect(ranked[2].path).toBe("client/src/App.jsx");
     expect(ranked[0].score).toBeGreaterThan(ranked[1].score);
     expect(ranked[1].score).toBeGreaterThan(ranked[2].score);
+  });
+});
+
+describe("extractEntityTerms", () => {
+  it("extracts a camelCase identifier", () => {
+    expect(extractEntityTerms("call fetchUserData now")).toEqual(["fetchuserdata"]);
+  });
+
+  it("extracts a SCREAMING_SNAKE_CASE identifier", () => {
+    expect(extractEntityTerms("set DATABASE_URL now")).toEqual(["database_url"]);
+  });
+
+  // Filler kept to three characters or fewer deliberately -- an earlier draft used
+  // "explain"/"helper" here, both of which are themselves snake_case-branch-eligible
+  // (5+ lowercase chars, no underscore) and made this test fail under a guard mutation
+  // that has nothing to do with the quoted branch this test exists to pin.
+  it("extracts a quoted identifier", () => {
+    expect(extractEntityTerms("see `hasClerkEnv` now")).toEqual(["hasclerkenv"]);
+  });
+
+  it("extracts a snake_case identifier", () => {
+    expect(extractEntityTerms("check user_session now")).toEqual(["user_session"]);
+  });
+
+  // Verbatim text of the frozen ranker ground's T6 (rankerBaseline.snapshot.json) --
+  // one of item 79's own zero-term tasks. "projects" and "contains" both match the
+  // snake_case branch's regex but are dropped for lacking an underscore; nothing else
+  // in the sentence reaches any branch.
+  it("drops plain lowercase words with no underscore, on a real zero-term ground task", () => {
+    expect(extractEntityTerms("how do we tell what kind of projects this contains")).toEqual([]);
+  });
+
+  // Filler kept short so this is isolated from the underscore guard above -- the one
+  // collected-test interaction with ENTITY_TERM_BLOCKLIST before this file (item 79,
+  // 8c24e8f3) lived incidentally in preparePlanContext.test.ts; this pins it directly.
+  it("removes a quoted stopword via the blocklist", () => {
+    expect(extractEntityTerms('fix "test" now')).toEqual([]);
+  });
+
+  it("returns the same term sequence on repeated calls, in extraction order rather than sorted", () => {
+    // camelCase's own pass matches `zoneMarker` (it is itself camelCase-shaped) before
+    // the quoted pass ever runs, which is why it lands second rather than trailing after
+    // the SCREAMING_SNAKE match -- confirmed both by reading (the camelCase regex
+    // matches "zoneMarker") and by running (a patched copy that skips only that token in
+    // the camelCase pass moves it to the end, exactly where the quoted pass would place
+    // it), not assumed.
+    const task =
+      "call fetchUserData and set DATABASE_URL then use user_session and read the `zoneMarker` note";
+    const first = extractEntityTerms(task);
+    expect(first).toEqual(["fetchuserdata", "zonemarker", "database_url", "user_session"]);
+    expect(extractEntityTerms(task)).toEqual(first);
   });
 });

@@ -27,9 +27,15 @@ const execFileAsync = promisify(execFile);
  * unrelated identifier).
  *
  * The 8-term slice below is inherited from the prior word-tokeniser's sizing
- * (which emitted every 5+ char task word) and is not a measured bound on this
- * extractor — extractEntityTerms's four shape-restricted branches typically
- * return far fewer terms (1-3 on measured tasks), so this cap rarely binds.
+ * (which emitted every 5+ char task word). Measured against thirty-five
+ * production tasks from one author's own sessions (dogfood and scratch repos,
+ * not a user sample): median three terms, but the cap binds on roughly forty-
+ * three percent of them (fifteen of thirty-five exceed eight), so it is not
+ * the rare case the median alone suggests. The eight kept are the first by
+ * extraction order — camelCase matches, then SCREAMING_SNAKE, then
+ * snake_case, then quoted, each in task-text position — not the eight most
+ * relevant by any score; a task with many terms can lose any of them to this
+ * slice depending only on where they fall in that order.
  */
 async function grepMatchingFiles(
   task: string,
