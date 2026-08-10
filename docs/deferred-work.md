@@ -6905,6 +6905,71 @@ needing zone-dogfood folded in by lineage. Checked in the other direction, uncha
 both hold closed parts and stayed Neither, and none of the references to this entry elsewhere cites it
 for a bucket precedent. **Neither.**
 
+**The fourth task-set dependency this entry recorded is closed.** `rankerBaseline.test.ts`'s eight
+hardcoded task-ID lookups are now bound to the ground's own ID set: the two map accessors those eight
+assertions already use are wrapped to record every key looked up, and the recorded set is compared
+against `snapshot.tasks`'s own IDs in a teardown hook. Both directions fail now — an ID asserted but
+absent from the ground, and an ID present in the ground but asserted nowhere, the direction that
+passed silently before. Landed at `a5440cff`, source and test only, no ledger edit in that commit.
+
+**The binding form, and what ruled out the two on offer.** A hand-declared list of expected IDs,
+checked set-equal against the ground, was rejected: a second, independently maintained list sitting
+beside the assertions can itself drift out of sync with the actual lookups, a milder instance of the
+exact defect being closed. Deriving the referenced IDs by reading the test file's own source text was
+rejected as a source-text parser. What shipped instead is runtime call-tracking — wrapping the two
+accessors the assertions already call, so the referenced-ID set is derived from what the suite does
+rather than from either a restated list or a read of its text.
+
+**A trade-off in the shipped form, recorded so it is not read as a defect later.** The comparison
+lives in an `afterAll` hook rather than a named `it()` block, so a failure there reports under the
+suite ("Failed Suites") rather than as a named test, and the suite's own test count — eleven,
+confirmed by running fresh rather than carried from the fix pass — does not include it; a reader
+counting tests would not see it listed. Confirmed by running the rename mutation fresh for this pass:
+the crash from the affected assertion appears under "Failed Tests," the new check's own diff appears
+under "Failed Suites," a different section — the cost of not depending on the check's position in the
+file.
+
+**The ordering the tracking depends on is pinned by a failing case, not by a comment.** The existing
+setup hook loops over every ground task to log it, through the same accessor the assertions use; if
+the tracking wrapper were installed before that loop instead of after, it would record every ground ID
+as "referenced" regardless of what the assertions themselves ask for. Established by running, in the
+fix pass this entry cites rather than re-runs: with the two hooks' registration order reversed and an
+unreferenced ID added to the ground, the suite passed eleven of eleven — the exact direction this
+change exists to catch, going uncaught, silently.
+
+**The block-order dependency the guard might have had does not exist, and this was checked rather than
+assumed too.** An `afterAll` hook runs after every block in its scope by its own semantics, regardless
+of where in the file it is declared. Verified in the fix pass by relocating the hook to before every
+assertion and re-running the rename mutation: the failure — both the crash and the new check's diff —
+was byte-identical to the same mutation run against the hook in its shipped position.
+
+**Mutation record: five mutations, every predicted kill set matched, none smoothed.** All five are the
+fix pass's own runs, cited here rather than re-run. Renaming a ground task ID kills the affected
+assertion (a crash) and the new check (a named diff). Adding an unreferenced ID kills the new check
+alone. Replacing the comparison with a hardcoded `true`, run against the unmutated ground, kills
+nothing: recorded as the correct result of that mutation, not a failed design — a tautology and a
+passing real comparison are indistinguishable when the underlying data is already clean, the same
+coincidence the eighth pattern already names for a computed value substituted by a constant. The same
+neutered comparison stacked with the rename kills only the affected assertion, the new check now
+silent — the concrete sense in which that mutation matters, since an empty kill set alone would misread
+as an untested check rather than as a correctly behaving one. Reversing the two hooks' registration
+order and adding an unreferenced ID reproduces the ordering finding above as a fifth, independent
+mutation.
+
+**Re-checked a nineteenth time, after the fix pass that closed the fourth task-set dependency.** The
+rule needs no judgement: a closure moves the enumerated remainder only if the thing closed was
+enumerated in it, and the remainder is the routing predicate, the three step-guaranteeing mechanisms,
+the four caps, and the thirty-session expiry. `a5440cff` closes none of them — the fourth dependency
+was recorded in this entry's own body one pass ago, never listed among what remains, so the remainder
+stays exactly where the eighteenth re-check left it: the ninth and twelfth re-checks' situation, not
+the tenth's. Item 78's note governs the promotion question as before: a defect closing does not
+promote its parent to Actionable now. This pass adds open material in two places while removing none:
+the shipped form's own trade-off, a teardown-hook failure reporting under the suite rather than as a
+named test; and the ordering dependency the fix's own correctness rests on, now pinned by a failing
+case rather than left to a comment. Checked in the other direction, unchanged: items 61 and 78 both
+hold closed parts and stayed Neither, and none of the references to this entry elsewhere cites it for
+a bucket precedent. **Neither.**
+
 **Where the code lives:** the gate, its marker, the two early returns, the forced-steps regeneration
 and the body-seeding caps are all in `runOneShotInner`, `cli/dispatch.ts`; both lead-verb predicates,
 and the problem-word predicate the two refusal exits now pair with the narrower of them, are in
@@ -7669,6 +7734,17 @@ call graph's job. Here the instrument was right and produced both quantities cor
 downstream of a correct measurement, in choosing which of its outputs answered the question asked —
 extending the thirteenth to cover that would widen it from instrument choice to inference generally.
 Item 79 records it.
+
+**A third instance of the opening mechanism, filed as a tally increment and not as a new direction.**
+`a5440cff`'s mutation testing (item 79) replaced a set-equality comparison with a hardcoded `true`, run
+against the unmutated ground. It killed nothing — the comparison's own correct answer on clean data is
+already "equal," so the substituted constant and the real result agree, the same coincidence the
+opening paragraph names for a computed value rather than a boolean one. There was no battery of other
+tests with a differing correct answer to fall back on, since the check is the only one of its kind in
+the file, so the case the opening paragraph gets from variety was built instead: stacking a second,
+independent mutation that changes what the comparison's correct answer should be, then confirming the
+neutered version no longer tracks it. The empty set was reported as the actual result, not reconciled
+toward a prediction that assumed otherwise. Item 79 records both runs.
 
 ## A ninth pattern, beside the seventh: a ledger entry that prescribes a check does not cause the check to happen
 
