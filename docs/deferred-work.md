@@ -8195,6 +8195,19 @@ severity level, a mode gate, a one-shot guard, and a synthesized approval round-
 thing this tool never needed: a way past the fact that mode is fixed before the loop is entered, not
 after.
 
+**Superseded, this pass: the agent-visibility half of this finding no longer holds; the routing
+fragmentation and mode's inertness do — checked separately, per finding, not assumed together.**
+`69630cb0` and `6e102c75` give the agent a system-prompt notice naming absent tools and the cause, so
+"nothing tells the agent a tool it was not given exists, or why" is no longer true as a description of
+the live system. It was true when this entry was written, at `3c1241fb`, and the finding it sits inside
+is left as written rather than rewritten, since the other three findings this entry carries are
+untouched by anything this pass changed. The contrast this entry drew against the write-scope guard
+survives in part: `scopeGuard`'s denial is still a fresh, per-event signal returned the moment a write
+is blocked, where the notice is rendered once, before the loop starts, from state fixed at that point —
+the asymmetry narrows from "nothing versus something" to "recomputed every time versus computed once,"
+which is a smaller gap, not a closed one. See item 88 for the notice's own record, and item 89 for what
+that same one-shot rendering leaves open.
+
 **Read-not-run, marked where it applies.** The four sites' own decision inputs, the mode-typing, the
 scope-guard's own absence of the string, and the wiring inventory are readings. The identical-fields
 comparison and the dead-guard confirmation are runs.
@@ -8227,26 +8240,123 @@ essay count stays eighteen. Reopening condition, named for both: a second instan
 type-erased import mistaken for a runtime edge, or another capability correctly attributed to the
 wrong sibling module — reopens the question on two instances rather than one.
 
+## 88. Closed — the agent now receives a system-prompt notice naming every withheld tool and why, byte-identical for runs where nothing is withheld
+
+**What the notice says, and what it deliberately does not.** A system-prompt block, rendered once
+before the loop starts, names every tool absent from the run and the cause: this task's tier for a
+tier-derived restriction, this task's archetype for the dispatcher's own capability filter, this run's
+mode for the mode default — and, for the two arms with no semantic reason to recover, a tool list set
+by the caller for a caller-supplied restriction, and this run's own configuration for the residual case
+where no capability filter was selected at all but the offered set is still short of the full registry
+(`excludeTools`, or the subagent-budget gate that hides `Task` alone). States plainly that this is not
+a permission error and forbids shell workarounds. Never invites a request for an absent tool — no such
+path exists, and telling the agent to ask for one it cannot receive was judged worse than the silence
+it replaces.
+
+**Measured, not estimated, at `6e102c75`, against the twenty-tool registry a clean process holds.**
+Simple tier: fifteen absent, ninety-nine tokens. Medium tier: eleven absent, eighty-five tokens.
+Question archetype: eighteen absent, one hundred eight tokens. Investigation archetype: fifteen absent,
+ninety-seven tokens. `targeted_fix` and `refactor`: nothing absent, nothing emitted. `simple_add`: two
+absent, forty-eight tokens. The same withheld tools' own full schemas run past 1,700 tokens for the
+largest set alone — the notice costs a small fraction of what carrying the tools themselves would.
+
+**The no-notice case is verified byte-identical, not merely empty.** An empty string concatenated with
+a stray separator would still change every cached prefix for the runs that need no notice at all —
+`targeted_fix` and `refactor` chief among them, since neither ever has a tool withheld. Captured the
+full assembled system prompt for a `targeted_fix`-shaped run before this change and again after:
+14,138 characters, zero-line diff.
+
+**`listRegisteredTools()` gained its first production consumer.** Exported specifically to recover the
+full tool set from the module-scoped registry, with no caller anywhere in the tree before this. The
+notice is what it was exported for.
+
+**The bound this leaves, carried explicitly rather than estimated.** `assembleAgentSystemPrompt` has
+exactly one call site, confirmed by direct search, textually before the iteration loop begins — enough
+to establish the notice is computed once per run, not once per iteration. It is not enough to establish
+that the model provider's own cache reads the resulting prefix at the rate this arc's other
+measurements assume; that is a production read confirmed by no cheap, non-model check, and is left
+unmeasured rather than guessed at.
+
+**Where the code lives:** the notice itself is `llm/toolAbsenceNotice.ts`; it is computed once, beside
+`emitWriteCapabilityAbsent`, and threaded through `assembleAgentSystemPrompt`'s existing block-
+concatenation pattern, all in `llm/agentLoop.ts`. See item 87 for the finding this closes and the two
+findings it carries that this does not touch, and item 89 for what the notice's own one-shot timing
+leaves open.
+
+**Essay decision — declined, and the reason is sharper than a mechanism mismatch: this document
+already has an established shape for it, and it isn't an essay.** The candidate — information computed
+for one purpose (telemetry) and never routed to a different, unbuilt consumer that needed the same
+facts — is checked against the eighteen and against the numbered items directly, since items 43 and 52
+are this document's own precedent for exactly this family: a computed value with no consumer becomes
+its own ledger entry, not a cross-cutting pattern. All eighteen patterns are about this document's own
+investigative methodology — stale references, mutation-testing pitfalls, tracing versus running,
+measurement windows — not about code shapes found in Zone's source; a computed-and-unrouted value is a
+code shape, item 43's and item 52's own category, and this entry already is that entry. Declined on
+category, not on a close-but-different mechanism. Essay count stays eighteen. Reopening condition: if
+this document's own established items-vs-essays split is ever revisited generally, this candidate
+would need rechecking under whatever replaces it — not a second-instance condition, since the category
+boundary, not the instance count, is what's declining it here.
+
+## 89. The tool-absence notice can go stale mid-run, naming a tool as withheld after forced_tier_blocking has already restored it
+
+**What it is.** The notice `llm/toolAbsenceNotice.ts` renders is computed once, before the loop
+starts, from the tool set and cause fixed at that point — item 88 records this as the reason the
+notice is affordable inside the cached prefix. One in-loop mechanism changes the tool set after that
+point: `forced_tier_blocking`, which relaxes the capability filter and recomputes the tools the model
+is offered when a forced-simple tier has blocked exploration the task's own archetype needs, the agent
+has already failed at least once, and it has re-read the same file at least twice. When it fires, the
+already-sent notice still names the tools it relaxed as unavailable — the system prompt was sent once,
+at the start, and is not re-sent.
+
+**The trigger, named precisely rather than left general.** Guarded by a one-shot flag shared with the
+dispatcher's own promotion path, so it can fire at most once per run, and it is tool-only: it does not
+relax the iteration budget or the coaching-attempt budget alongside the tool set, only the tools the
+model is offered and the allowed-name set the executor enforces against. Firing requires all of: a
+task classified into an archetype that needs exploration, forced onto the simple tier anyway; an
+observed failure; at least two iterations elapsed; and at least one file read twice or more.
+
+**Why re-rendering is not a small fix, stated so a later pass does not treat it as one.** The system
+prompt is deliberately byte-stable across a run's own iterations — a comment at the prompt-assembly
+call site names this directly, for a different field, and the reasoning transfers: a system prompt
+that changes mid-run defeats the cached-prefix property every measurement in item 88 depends on.
+Making the notice self-correct would mean either re-sending the whole system prompt after promotion
+(paying the cache-miss cost item 88 was built to avoid) or inventing a second, narrower channel for
+exactly this one correction — neither is this pass's decision to make.
+
+**How often this fires in production is unmeasured.** No count exists for `forced_tier_blocking`
+promotions in the wild, so whether this is a live discrepancy on a meaningful fraction of runs or a
+one-shot mechanism that rarely reaches its own trigger is not established either way. Recorded as a
+known gap, not sized.
+
+**Proposing no fix.** The shapes a fix could take — re-render, a narrower append, or leaving it — are
+none of them decided here.
+
+**Where the code lives:** the notice is `llm/toolAbsenceNotice.ts`, rendered once in `llm/agentLoop.ts`
+beside `emitWriteCapabilityAbsent`. `forced_tier_blocking`'s trigger, its one-shot guard, and its
+recomputation of the offered tool set are all in the same file, inside the iteration loop. See item 88
+for the notice this leaves stale, and item 87 for the mode-revisability finding this residue sits
+beside.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 87 to find out which ones still need something. No index of
+reader the trouble of reading all 89 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (40): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82
+**Closed** (41): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (0):
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (7): 1, 4, 18, 23, 57, 63, 75
 
-**Neither — a structural fact recorded, with no fix proposed** (40): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (41): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
-81, 83, 84, 85, 86, 87
+81, 83, 84, 85, 86, 87, 89
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, and 79 are partially closed or corrected; the
 classification above covers only the portion still open, not the whole entry.
