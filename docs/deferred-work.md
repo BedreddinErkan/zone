@@ -7765,7 +7765,7 @@ so the reference resolved to the wrong commit for anyone resolving it by positio
 wording decayed and it was correct when written; what moved was the distance to its antecedent. The
 repair is this section's own rule applied to the document instead of the code: name the commit, not
 the position. **Rested on one instance, and the sweep that establishes it is the reason that is a
-claim rather than a guess.** Every positional referent in this document was checked at `2238f65d` —
+claim rather than a guess.** Every positional referent in this document was checked at `5f0685ac` —
 each `there` following a closure verb, and each `the <unit> above` — and of the seventeen that point
 at a position rather than at something named in their own sentence, this was the only one broken. One
 other is loose by construction rather than by insertion: a bucket paragraph's `the paragraph above`
