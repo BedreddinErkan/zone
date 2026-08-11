@@ -7656,11 +7656,88 @@ declared on the scanned-file type in `types/project.ts`; the two prompt-renderin
 unreachable scoring paths are in `repo/rankRelevantFiles.ts`. See item 79 for the ranker-side signal
 decomposition this was found beside.
 
+## 82. The data-analyst and test-engineer role flows are live behind a four-condition chain that reading alone did not find, and removing them would take nineteen modules with them
+
+Two modules in the roles directory, sharing one input signature, are the actual role-flow family — six
+modules repo-wide share a `run*Flow` name shape, but only these two share the shape that matters. **Both
+are live, confirmed by driving the built CLI through a real probe against a throwaway repository, not by
+reading the import graph alone:** the data-analyst branch printed its own delegation line and entered
+the flow; the test-engineer branch printed its delegation line and ran framework detection; both failed
+only on a missing API key, past every gate that matters.
+
+**The CLI advertises three role values; one has no flow at all, and the flag itself is unvalidated.**
+`--role` accepts `developer`, `test_engineer` and `data_analyst`, but no module implements the developer
+flow — that value falls through to the ordinary path — and nothing constrains the flag to any of the
+three; an unrecognized string falls through the same way.
+
+**Reachability runs through four conditions, and the fourth was invisible to reading.** The legacy CLI
+branch (entered only when not headless, with no positional task argument, and only via the deprecated
+`--task` flag) must be entered; `--task-only` must be set; an explicit `--format` must be given, because
+task-only mode rejects its own default format outright — found only when a first probe died there; and a
+role value must be supplied, alongside an unknown patch-intent classification and a real repo path. This
+is the same category of answer the category investigation recorded for its own prompt surface — alive
+behind a deprecated flag on a branch the code itself labels legacy — reached here by execution rather
+than by reading.
+
+**A real import graph, not a grep, sizes what a removal would touch: nineteen modules.** With the two
+flows reachable the CLI entry point reaches three hundred fifty production modules; without them, three
+hundred thirty-one. The nineteen lost split into the roles directory's own eight (the two flows plus six
+supporting modules) and eleven prompt modules — including one named for the role that has no flow,
+reachable only because the other two role flows import it. The same graph independently reproduced a
+finding the category investigation reached by grep: one prompt module in the language-model directory is
+orphaned, appearing among sixty-three production modules the entry point never reaches at all. Two
+methods, one result.
+
+**The role concept outlives the two flows.** It is read, independently of them, in risk scoring, in a
+confidence gate carrying a distinct threshold for one role, in two confidence-computation modules taking
+a role parameter, in a prompt builder exporting its own role union, and as an optional field on a
+persisted conversation type the billing repository consumes. Separately, one output-validation module
+exports a role union and switches on all three values while being unreachable from the CLI entry point
+entirely. Removing the two flows would not remove the concept.
+
+**No documentation anywhere mentions the flag or either role value.**
+
+**Coverage, as measured:** both flows carry dedicated tests and a real non-test caller, so neither is the
+case where a module's only caller is its own test. Every module in the roles directory has some test
+coverage; three of the eleven prompt modules in the transitive set have none.
+
+**Two essay checks, one correction to the brief that asked for them.** The coverage-check error below
+was checked against `8c24e8f3` on the assumption that commit already recorded the shape; it does not —
+that commit is an unrelated establish pass on `extractEntityTerms`, with no connection to a search
+missing its target. Checked against all eighteen by title instead: the thirteenth already states the
+exact failure — "a search for `from "…/x.js"` misses `await import(...)`" — as part of its own core
+method, not as a tallied instance. This pass's own coverage check made exactly that mistake and
+corrected it inside the same pass: extended there as a conformance instance, no new lesson. The second
+candidate — a reachability chain whose last condition only appeared under execution — was checked
+against the fifth and declined: its sharpened claim matches by wording, but what grounds that claim in
+every instance the fifth actually names is a trace of a change's consumers missing one, caught by a
+suite or a mutation. This pass traced no change and no consumers; it under-enumerated one control-flow
+path's own gating conditions, complete only once run. A claim broad enough in wording to describe two
+different mechanisms is not evidence they are the same mechanism. One instance, no essay change.
+
+**Read-not-run, marked where it applies.** The gate chain's individual conditions, the signature
+comparison, and the role-concept enumeration are readings. Both runtime probes, the import-graph
+reachability figures, the role-subtree test run, and the baseline suite are runs.
+
+Recorded as what a removal would touch, not as a recommendation — any fix for the unvalidated flag or
+the rejected default format is out of this pass's scope, the same posture item 81 takes on its own
+unestablished-cost question.
+
+**Where the code lives:** the two flows are `roles/runDataAnalystFlow.ts` and `roles/runTestEngineerFlow.ts`;
+their supporting modules are `roles/dataAnalystContext.ts`, `roles/detectDataSchema.ts`,
+`roles/detectTestComplexity.ts`, `roles/detectTestFramework.ts`, `roles/testEngineerContext.ts` and
+`roles/testOutputValidator.ts`. The gating chain lives in `cli/index.ts`'s task-only flow. The role
+concept beyond the flows is in `core/computeRiskScore.ts`, `core/confidenceGate.ts`,
+`core/scoring/computeConfidenceBreakdown.ts`, `core/scoring/confidenceRules.ts`,
+`prompts/buildFinalPrompt.ts`, `types/conversation.ts`, `billing/conversationRepository.ts`, and the
+orphaned `core/validateLlmOutput.ts`. See item 81 for the category-field investigation this pass
+followed from, and the thirteenth pattern for the essay instance above.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 81 to find out which ones still need something. No index of
+reader the trouble of reading all 82 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -7673,9 +7750,9 @@ first (0):
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (7): 1, 4, 18, 23, 57, 63, 75
 
-**Neither — a structural fact recorded, with no fix proposed** (35): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (36): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
-81
+81, 82
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, and 79 are partially closed or corrected; the
 classification above covers only the portion still open, not the whole entry.
@@ -8608,6 +8685,16 @@ one of the two is evidence. **Neither wrong figure ever reached this document** 
 reports — which bounds what they touched and is worth stating so a later reader does not go hunting
 for them here. The rule is narrow and cheap: when a count can be produced two ways, produce it two
 ways, and when it cannot, name the single instrument it rests on.
+
+**A further instance, caught inside the same pass rather than by a later one.** A coverage check for
+two role-flow modules searched only the static `from "…/x.js"` shape and returned no test importers
+for either — the exact blind spot this section's own method already names. Both modules have dedicated
+test files; the tests reach them through `await import(...)` inside the test body, so their `vi.mock`
+calls take effect first. The corrected sweep, matching both shapes, found the coverage, and every
+figure item 82 records rests on the corrected run. What differs from every instance above: the pass
+that produced the wrong reading produced the correction too, before anything downstream relied on it —
+worth naming because it shows the method here catching its own failure on the same day, not only across
+passes. Item 82 records the mechanism.
 
 ## A fourteenth pattern: a test that derives its own scope can silently narrow it, and forbidding a string does not remove that string from the text
 
