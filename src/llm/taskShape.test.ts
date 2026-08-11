@@ -1,5 +1,7 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, it, expect } from "vitest";
-import { taskAssertsProblem, matchedLeadVerb, problemWordsPresent } from "./taskShape.js";
+import { taskAssertsProblem, isPureAddition, matchedLeadVerb, problemWordsPresent } from "./taskShape.js";
 import { synthesizeMinimalPlan } from "./executionPlan.js";
 
 describe("taskAssertsProblem", () => {
@@ -85,6 +87,73 @@ describe("matchedLeadVerb", () => {
       expect(matchedLeadVerb(task)).toBe(expected);
     });
   }
+});
+
+describe("isPureAddition — preamble stripping (anchor-defeat fix)", () => {
+  // Twelve frozen base tasks the fix was measured against: seven ground tasks
+  // from rankerBaseline.snapshot.json, five from scripts/sweep-tasks.json.
+  // Read at runtime rather than hand-transcribed, so this test cannot drift
+  // from the actual frozen corpus by a transcription error.
+  const groundTasks = JSON.parse(
+    readFileSync(path.join(process.cwd(), "src", "repo", "rankerBaseline.snapshot.json"), "utf8")
+  ).tasks as Array<{ id: string; task: string }>;
+  const sweepTasks = JSON.parse(
+    readFileSync(path.join(process.cwd(), "scripts", "sweep-tasks.json"), "utf8")
+  ).tasks as Array<{ id: string; description: string }>;
+
+  const BASE_TASKS: Record<string, string> = {};
+  for (const t of groundTasks) BASE_TASKS[`ground:${t.id}`] = t.task.replace(/\n/g, " ").trim();
+  for (const t of sweepTasks) BASE_TASKS[`sweep:${t.id}`] = t.description.replace(/\n/g, " ").trim();
+
+  // Expected verdict per base task — unchanged by any same-intent rephrasing.
+  const EXPECTED: Record<string, boolean> = {
+    "ground:T1": false, "ground:T2": false, "ground:T3": false, "ground:T4": false,
+    "ground:T5": false, "ground:T6": false, "ground:T7": false,
+    "sweep:T1-comment-add": true,
+    // "rename" is deliberately excluded from PURE_ADDITION_LEAD_VERBS
+    // (structural) — the locative prefix this task also opens with is not
+    // why it was false, and stripping it does not change that.
+    "sweep:T2-single-file-rename": false,
+    // Was false pre-fix — the locative clause defeated the anchor on "add".
+    "sweep:T3-two-file-addition": true,
+    "sweep:T4-direct-typecheck-break": true,
+    "sweep:T5-tier-force-simple": false,
+  };
+
+  // The same four rephrasing templates the establish pass measured reaching
+  // this router.
+  const REPHRASINGS: Array<[string, (t: string) => string]> = [
+    ["polite-prefix", (t) => `Please ${t[0]!.toLowerCase()}${t.slice(1)}`],
+    ["request-frame", (t) => `I need you to ${t[0]!.toLowerCase()}${t.slice(1)}`],
+    ["question-frame", (t) => `Can you ${t[0]!.toLowerCase()}${t.slice(1)}?`],
+    ["lead-hedge", (t) => `Let's ${t[0]!.toLowerCase()}${t.slice(1)}`],
+  ];
+
+  // 60 assertions: one per base task, one per (task x rephrasing) pair. Every
+  // additive task's expected verdict is true across all five rows (base + 4
+  // rephrasings) — the fixed direction. Every non-additive or structural-verb
+  // task's expected verdict is false across all five — the too-loose guard: a
+  // mutation that widened the anchor to match mid-sentence, or made stripping
+  // too permissive, fails here, not only on the additive rows.
+  for (const [id, task] of Object.entries(BASE_TASKS)) {
+    const expected = EXPECTED[id]!;
+    it(`${id} (base) → isPureAddition === ${expected}`, () => {
+      expect(isPureAddition(task)).toBe(expected);
+    });
+    for (const [label, rephrase] of REPHRASINGS) {
+      it(`${id}/${label} → isPureAddition === ${expected} (same-intent rephrasing must not change the verdict)`, () => {
+        expect(isPureAddition(rephrase(task))).toBe(expected);
+      });
+    }
+  }
+
+  it('sweep:T3-two-file-addition (base): matchedLeadVerb becomes "add" (was null pre-fix)', () => {
+    expect(matchedLeadVerb(BASE_TASKS["sweep:T3-two-file-addition"]!)).toBe("add");
+  });
+
+  it('sweep:T2-single-file-rename (base): matchedLeadVerb stays null — "rename" is not a pure-addition verb', () => {
+    expect(matchedLeadVerb(BASE_TASKS["sweep:T2-single-file-rename"]!)).toBeNull();
+  });
 });
 
 describe("synthesizeMinimalPlan", () => {
