@@ -394,10 +394,9 @@ describe("validateDeveloperOutput", () => {
   });
 
   describe("confidence gate", () => {
-    it("treats confidence below 70 as preview_only", () => {
+    it("treats confidence below 60 as preview_only", () => {
       const gate = checkConfidenceGate({
-        confidenceScore: 69,
-        role: "data_analyst",
+        confidenceScore: 59,
       });
       const decisionMode = gate.pass ? "safe_to_apply" : "preview_only";
       expect(decisionMode).toBe("preview_only");
@@ -406,7 +405,6 @@ describe("validateDeveloperOutput", () => {
     it("treats confidence at or above threshold with no blocking issues as safe_to_apply", () => {
       const gate = checkConfidenceGate({
         confidenceScore: 80,
-        role: "developer",
       });
       const decisionMode = gate.pass ? "safe_to_apply" : "preview_only";
       expect(decisionMode).toBe("safe_to_apply");

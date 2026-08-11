@@ -15,7 +15,6 @@ import type {
 
 type RunAgentInput = {
   task: string;
-  role?: string;
 };
 
 // Phase J.4: narrowed from "blocked" | "preview_only" | "safe_to_apply".
@@ -218,7 +217,6 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
   const normalizedTask = input.task.trim();
 const { score, signals, breakdown } = computeRiskScore({
   task: normalizedTask,
-  role: input.role,
 });  const mode = mapScoreToMode(score, signals);
   const confidence = computeConfidenceScore({ breakdown });
 

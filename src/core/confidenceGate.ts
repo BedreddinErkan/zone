@@ -10,54 +10,19 @@ export type ConfidenceGateResult =
 
 export interface ConfidenceGateInput {
   confidenceScore: number;
-  role?: string;
-  framework?: string;
   warnings?: string[];
 }
 
-const THRESHOLDS = {
-  developer: 60,
-  test_engineer: 50,
-  data_analyst: 70,
-  default: 60,
-} as const;
+const DEFAULT_THRESHOLD = 60;
 
-const ROLE_RISK_DESCRIPTIONS: Record<string, string[]> = {
-  developer: [
-    "Low confidence may indicate unclear task scope",
-    "Existing code patterns may not be well understood",
-    "Generated code may not follow project conventions",
-  ],
-  test_engineer: [
-    "Test framework may not be fully detected",
-    "Page object method names may be inaccurate",
-    "Test file paths may not match project structure",
-  ],
-  data_analyst: [
-    "Schema changes are irreversible without a backup",
-    "Column types may not match existing data",
-    "Foreign key constraints may be violated",
-  ],
-};
+const RISK_DESCRIPTIONS: string[] = [
+  "Low confidence may indicate unclear task scope",
+  "Existing code patterns may not be well understood",
+  "Generated code may not follow project conventions",
+];
 
 export function computeEffectiveThreshold(input: ConfidenceGateInput): number {
-  let base =
-    THRESHOLDS[input.role as keyof typeof THRESHOLDS] ?? THRESHOLDS.default;
-
-  if (input.role === "test_engineer") {
-    if (
-      input.framework === "cucumber_java" ||
-      input.framework === "selenium_java"
-    ) {
-      base += 5;
-    }
-    if (
-      input.framework === "playwright_ts" ||
-      input.framework === "cypress"
-    ) {
-      base -= 5;
-    }
-  }
+  let base = DEFAULT_THRESHOLD;
 
   const warningCount = (input.warnings ?? []).length;
   if (warningCount >= 3) base += 10;
@@ -66,21 +31,17 @@ export function computeEffectiveThreshold(input: ConfidenceGateInput): number {
   return Math.min(base, 90);
 }
 
-function getRisks(role?: string, warnings?: string[]): string[] {
-  const roleRisks = ROLE_RISK_DESCRIPTIONS[role ?? "developer"] ??
-                    ROLE_RISK_DESCRIPTIONS["developer"];
-
+function getRisks(warnings?: string[]): string[] {
   const warningRisks = (warnings ?? [])
     .filter(Boolean)
     .map(w => `Warning: ${w}`);
 
-  return [...roleRisks, ...warningRisks];
+  return [...RISK_DESCRIPTIONS, ...warningRisks];
 }
 
 function getRecommendation(
   confidenceScore: number,
-  threshold: number,
-  role?: string
+  threshold: number
 ): string {
   const gap = threshold - confidenceScore;
 
@@ -88,16 +49,6 @@ function getRecommendation(
     return "Confidence is too low to proceed safely. " +
       "Provide more context in your task description, " +
       "or manually specify the target files.";
-  }
-
-  if (role === "test_engineer") {
-    return "Review the detected framework and page objects before applying. " +
-      "Consider running with --verbose to see what was detected.";
-  }
-
-  if (role === "data_analyst") {
-    return "Review the generated SQL carefully before applying. " +
-      "Ensure a database backup exists before running migrations.";
   }
 
   return "Review the patch preview carefully before applying. " +
@@ -115,12 +66,11 @@ export function checkConfidenceGate(
 
   return {
     pass: false,
-    reason: `Confidence score ${input.confidenceScore} is below the ${input.role ?? "default"} threshold of ${threshold}.`,
-    risks: getRisks(input.role, input.warnings),
+    reason: `Confidence score ${input.confidenceScore} is below the default threshold of ${threshold}.`,
+    risks: getRisks(input.warnings),
     recommendation: getRecommendation(
       input.confidenceScore,
-      threshold,
-      input.role
+      threshold
     ),
     effectiveThreshold: threshold,
   };

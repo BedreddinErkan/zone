@@ -47,8 +47,6 @@ import {
   convertGeneratedPlanToPatchPlan,
   type PatchPlan,
 } from "../patch/conversion/convertGeneratedPlanToPatchPlan.js";
-import { runTestEngineerFlow } from "../roles/runTestEngineerFlow.js";
-import { runDataAnalystFlow } from "../roles/runDataAnalystFlow.js";
 import { checkConfidenceGate, renderConfidenceGateBlock } from "../core/confidenceGate.js";
 import { runHeadless, runHeadlessResume } from "./dispatch.js";
 import { latestResumableEnvelope, resolveEnvelopeId } from "../api/diskRunEnvelope.js";
@@ -78,7 +76,6 @@ type CliOptions = {
   confirmApply?: boolean;
   patchPlan?: string;
   useGeneratedPatchPlan?: boolean;
-  role?: string;
   // CLI.0 agent-loop path options
   model?: string;
   effort?: string;
@@ -350,13 +347,6 @@ async function runLoginFlow(): Promise<number> {
       }, CLI_LOGIN_TIMEOUT_MS);
     });
   });
-}
-
-function colorConfidence(score: number): string {
-  if (!ANSI_ENABLED) return String(score);
-  if (score >= 70) return tone(String(score), c.bold, c.green);
-  if (score >= 50) return tone(String(score), c.bold, c.yellow);
-  return tone(String(score), c.bold, c.red);
 }
 
 function colorLabel(label: string, color: string, symbol?: string): string {
@@ -636,7 +626,6 @@ async function runTaskOnlyFlow(options: {
   patchPlanPath: string | null;
   useGeneratedPatchPlan: boolean;
   repoPath: string;
-  role?: string;
 }): Promise<number> {
 const {
   task,
@@ -654,11 +643,10 @@ const {
   patchPlanPath,
   useGeneratedPatchPlan,
   repoPath,
-  role,
 } = options;
 
   tracker.startPhase("run_agent");
-const result = await runAgent({ task, role });  tracker.endPhase("run_agent");
+const result = await runAgent({ task });  tracker.endPhase("run_agent");
 
   tracker.endPhase("total");
 
@@ -683,7 +671,6 @@ const result = await runAgent({ task, role });  tracker.endPhase("run_agent");
 // Confidence gate check
 const gateResult = checkConfidenceGate({
   confidenceScore: result.decision.confidenceScore,
-  role: role,
   warnings: result.topRisks?.map(r => r.reason) ?? [],
 });
 
@@ -710,126 +697,6 @@ const intent = classifyPatchIntent(task);
 let patchSection = generatedPatchPlanPreview;
 
 if (intent === "unknown" && repoPath) {
-  if (role === "data_analyst") {
-    console.log(
-      `${zonePrefix()} ${tone(
-        "Data Analyst role — delegating to data analyst flow...",
-        c.white
-      )}`
-    );
-    const daResult = await runDataAnalystFlow({ task, repoPath });
-
-    if (!daResult.ok) {
-      if (isSubscriptionRequiredReason(daResult.reason)) {
-        printSubscriptionRequiredMessage();
-        return 1;
-      }
-      console.error(`[zone] Data analyst flow failed: ${daResult.reason}`);
-      return 1;
-    }
-
-    console.log(
-      `${zonePrefix()} Dialect detected: ${tone(
-        daResult.dialect,
-        c.blue
-      )} (${tone(daResult.migrationFormat, c.blue)})`
-    );
-    console.log(`${zonePrefix()} Confidence: ${colorConfidence(daResult.confidence)}`);
-    console.log(daResult.preview);
-
-    if (apply && confirmApply && daResult.applyPatches.length > 0) {
-      const originalContents = await capturePatchOriginals(
-        repoPath,
-        daResult.applyPatches
-      );
-      console.log(`${zonePrefix()} ${tone("Applying migration files...", c.white)}`);
-      const applyResult = await applyLlmPatches(daResult.applyPatches, repoPath);
-      console.log(formatApplyLog("Applied", applyResult.applied));
-      console.log(formatApplyLog("Failed", applyResult.failed));
-      if (diff && applyResult.applied.length > 0) {
-        renderDiffSummary(
-          applyResult.applied.map((filePath) => {
-            const patch = daResult.applyPatches.find((p) => p.filePath === filePath);
-            return {
-              filePath,
-              original: originalContents[filePath] ?? "",
-              updated: patch?.fullContent ?? "",
-            };
-          })
-        );
-      }
-    }
-
-    return 0;
-  }
-
-  if (role === "test_engineer") {
-    console.log(
-      `${zonePrefix()} ${tone(
-        "Test Engineer role — delegating to test engineer flow...",
-        c.white
-      )}`
-    );
-    const teResult = await runTestEngineerFlow({ task, repoPath });
-
-    if (!teResult.ok) {
-      if (isSubscriptionRequiredReason(teResult.reason)) {
-        printSubscriptionRequiredMessage();
-        return 1;
-      }
-      console.error(`[zone] Test engineer flow failed: ${teResult.reason}`);
-      if (teResult.framework === "unknown") {
-        console.error("[zone] No test framework detected in this repository.");
-        console.error("[zone] Supported: playwright-ts, playwright-js, cypress, cucumber-java, selenium-java, testng, pytest");
-      }
-      return 1;
-    }
-
-    console.log(
-      `${zonePrefix()} Framework detected: ${tone(
-        teResult.framework,
-        c.blue
-      )} (${tone(teResult.language, c.blue)})`
-    );
-    console.log(`${zonePrefix()} Confidence: ${colorConfidence(teResult.confidence)}`);
-    if (teResult.complexity && teResult.complexity !== 'simple') {
-  const complexityLabels: Record<string, string> = {
-    data_driven: 'Data Driven',
-    e2e: 'E2E',
-    negative: 'Negative',
-    multi_scenario: 'Multi Scenario',
-  };
-  const label = complexityLabels[teResult.complexity] || teResult.complexity;
-  console.log(`${zonePrefix()} Complexity: ${tone(label, c.cyan)}`);
-}
-    console.log(teResult.preview);
-
-    if (apply && confirmApply && teResult.applyPatches.length > 0) {
-      const originalContents = await capturePatchOriginals(
-        repoPath,
-        teResult.applyPatches
-      );
-      console.log(`${zonePrefix()} ${tone("Applying test files...", c.white)}`);
-      const applyResult = await applyLlmPatches(teResult.applyPatches, repoPath);
-      console.log(formatApplyLog("Applied", applyResult.applied));
-      console.log(formatApplyLog("Failed", applyResult.failed));
-      if (diff && applyResult.applied.length > 0) {
-        renderDiffSummary(
-          applyResult.applied.map((filePath) => {
-            const patch = teResult.applyPatches.find((p) => p.filePath === filePath);
-            return {
-              filePath,
-              original: originalContents[filePath] ?? "",
-              updated: patch?.fullContent ?? "",
-            };
-          })
-        );
-      }
-    }
-
-    return 0;
-  }
-
   console.log(
     `${zonePrefix()} ${tone("Intent unknown — delegating to LLM patch flow...", c.white)}`
   );
@@ -1135,7 +1002,6 @@ export async function runCliWithOptions(options: CliOptions): Promise<number> {
   patchPlanPath: resolvePatchPlanPath(options),
   useGeneratedPatchPlan: Boolean(options.useGeneratedPatchPlan),
   repoPath,
-  role: options.role,
 });
     }
 
@@ -1352,8 +1218,7 @@ export async function run(): Promise<void> {
       "Path for structured JSON result output",
       DEFAULT_RESULT_PATH
     )
-      .option("--role <role>", "Agent role: developer | test_engineer | data_analyst")
-    .option("--trust", "Trust this project for this run and persist to the registry")
+      .option("--trust", "Trust this project for this run and persist to the registry")
     .option("--no-trust", "Force-deny trust for this run, even if registered")
     // --trust/--no-trust registered for recognition only (avoids unknown-option error).
     // parseTrustFlag(process.argv) is the sole authoritative source for the three-state value.
