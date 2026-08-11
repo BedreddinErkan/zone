@@ -49,17 +49,27 @@ async function grepMatchingFiles(
   try {
     const { stdout } = await execFileAsync(
       "rg",
-      ["--files-with-matches", "--ignore-case", "--word-regexp", "--glob", "*.{ts,tsx,js,jsx,py,go,rb}", pattern, repoPath],
+      ["--count-matches", "--ignore-case", "--word-regexp", "--glob", "*.{ts,tsx,js,jsx,py,go,rb}", pattern, repoPath],
       { maxBuffer: 1024 * 512 },
     );
     const knownPaths = new Set(allFiles.map(f => f.path));
-    const result = new Set<string>();
-    for (const abs of stdout.trim().split("\n")) {
-      if (!abs) continue;
+    const counted: Array<{ rel: string; count: number }> = [];
+    for (const line of stdout.trim().split("\n")) {
+      if (!line) continue;
+      const sep = line.lastIndexOf(":");
+      if (sep === -1) continue;
+      const abs = line.slice(0, sep);
+      const count = Number(line.slice(sep + 1));
       const rel = path.relative(repoPath, abs);
-      if (!rel.startsWith("..") && knownPaths.has(rel) && result.size < cap) {
-        result.add(rel);
+      if (!rel.startsWith("..") && knownPaths.has(rel) && Number.isFinite(count)) {
+        counted.push({ rel, count });
       }
+    }
+    counted.sort((a, b) => b.count - a.count || a.rel.localeCompare(b.rel));
+    const result = new Set<string>();
+    for (const { rel } of counted) {
+      if (result.size >= cap) break;
+      result.add(rel);
     }
     return result;
   } catch {

@@ -263,3 +263,105 @@ describe("preparePlanContext — grep pattern is entity-shaped, not every 5+ cha
     );
   });
 });
+
+describe("preparePlanContext — grep matches are ordered by match count, not walk order", () => {
+  const tmpDirs: string[] = [];
+
+  async function makeTmpRepo(files: Record<string, string>): Promise<string> {
+    const dir = join(tmpdir(), `prep-ctx-order-test-${randomBytes(6).toString("hex")}`);
+    await mkdir(dir, { recursive: true });
+    for (const [name, content] of Object.entries(files)) {
+      await writeFile(join(dir, name), content, "utf-8");
+    }
+    tmpDirs.push(dir);
+    return dir;
+  }
+
+  beforeEach(() => {
+    vi.stubEnv("ZONE_MAX_SCANNED_FILES", "2000");
+    vi.stubEnv("MAX_CONTEXT_FILES", "5");
+  });
+
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    for (const d of tmpDirs.splice(0)) {
+      await rm(d, { recursive: true, force: true });
+    }
+  });
+
+  const TASK = "rename distinctiveSymbolName everywhere";
+
+  // Each line is its own standalone word-boundary match -- verified directly with
+  // `rg --count-matches` before relying on it (the single-line numbered-suffix form
+  // used by the sibling cap test above, "distinctiveSymbolName1", does NOT count:
+  // the trailing digit blocks the word boundary, confirmed the same way).
+  function occurrences(n: number): string {
+    return Array.from({ length: n }, (_, i) => `const v${i} = distinctiveSymbolName;\n`).join("");
+  }
+
+  it("returns grep matches ordered by match count, descending, as a sequence", async () => {
+    const repoPath = await makeTmpRepo({
+      "fileA.ts": occurrences(1),
+      "fileB.ts": occurrences(2),
+      "fileC.ts": occurrences(3),
+      "fileD.ts": occurrences(4),
+    });
+    const ctx = await preparePlanContext({ task: TASK, repoPath, repoSummaryOverride: "test repo" });
+    expect(ctx.grepMatchedPaths).toEqual(["fileD.ts", "fileC.ts", "fileB.ts", "fileA.ts"]);
+  });
+
+  // 40 same-count files, not a handful -- raw rg walk order is only reliably unstable
+  // at this scale (verified separately: 3 tied files gave a stable order across a
+  // probe, 40 gave 10 distinct orderings across 10 repeats). A smaller fixture would
+  // risk this test passing under the walk-order fallback (mutation 3) by accident on a
+  // machine where raw order happens to be stable at that size. Compares repeats to
+  // each other, not to a fixed expected array, so this stays orthogonal to the
+  // ordering test above (a reversed-but-still-deterministic sort must not fail this).
+  it("returns an identical sequence across repeated calls on the same input", async () => {
+    const files: Record<string, string> = {};
+    for (let i = 1; i <= 40; i++) {
+      files[`detFile${String(i).padStart(2, "0")}.ts`] = occurrences(1);
+    }
+    const repoPath = await makeTmpRepo(files);
+    const first = await preparePlanContext({ task: TASK, repoPath, repoSummaryOverride: "test repo" });
+    const second = await preparePlanContext({ task: TASK, repoPath, repoSummaryOverride: "test repo" });
+    const third = await preparePlanContext({ task: TASK, repoPath, repoSummaryOverride: "test repo" });
+    expect(second.grepMatchedPaths).toEqual(first.grepMatchedPaths);
+    expect(third.grepMatchedPaths).toEqual(first.grepMatchedPaths);
+  });
+
+  // The 6-way tie (rather than 2) is deliberate: verified directly that the
+  // alphabetically-first file among a 2-way tie can land first in rg's raw output by
+  // coincidence, which would let a broken tie-break pass unnoticed. Across 6 repeats
+  // of this exact 6-way shape, the alphabetically-first file (fileTieA, created last,
+  // after F..B) was never raw-order-first -- it sat 4th-6th of 6 every time. That
+  // margin, not the count itself, is why 6.
+  it("resolves a tied match count by ascending path order", async () => {
+    const repoPath = await makeTmpRepo({
+      "fileHigh.ts": occurrences(5),
+      "fileMid.ts": occurrences(4),
+      "fileLow.ts": occurrences(3),
+      "fileTieF.ts": occurrences(2),
+      "fileTieE.ts": occurrences(2),
+      "fileTieD.ts": occurrences(2),
+      "fileTieC.ts": occurrences(2),
+      "fileTieB.ts": occurrences(2),
+      "fileTieA.ts": occurrences(2),
+    });
+    const ctx = await preparePlanContext({ task: TASK, repoPath, repoSummaryOverride: "test repo" });
+    expect(ctx.grepMatchedPaths).toEqual(["fileHigh.ts", "fileMid.ts", "fileLow.ts", "fileTieA.ts"]);
+  });
+
+  // Distinct from the existing "a task built entirely of common words" test above:
+  // that one never reaches rg at all (zero tokens extracted, early return). This task
+  // extracts a real token, so rg is invoked and exits with a real "no match" status --
+  // verified directly that this rejects execFileAsync the same way for both the old
+  // and new rg flags, landing in the same catch block either way.
+  it("returns no matches when the pattern has zero real hits (fail-safe path unchanged)", async () => {
+    const repoPath = await makeTmpRepo({
+      "other.ts": "export const somethingElse = 1;\n",
+    });
+    const ctx = await preparePlanContext({ task: TASK, repoPath, repoSummaryOverride: "test repo" });
+    expect(ctx.grepMatchedPaths).toEqual([]);
+  });
+});
