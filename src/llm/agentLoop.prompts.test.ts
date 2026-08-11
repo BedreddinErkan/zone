@@ -18,6 +18,21 @@ const PATCH_INPUT = {
   repoPath: '/repo',
 };
 
+describe('toolAbsenceBlock omitted: no literal "undefined" splice', () => {
+  // PATCH_INPUT above never carried toolAbsenceBlock — it predates the field. When
+  // that field was added as required (69630cb0), every direct call site like this
+  // one silently passed `undefined`, and `input.toolAbsenceBlock +` string-coerced
+  // it into a literal 9-character "undefined" spliced into the assembled prompt.
+  // tsc --noEmit never caught it (tsconfig excludes *.test.ts), and no existing
+  // assertion in this file happened to inspect that exact region of the string —
+  // the fourteen call sites that omit the field are the finding; this is the test
+  // that would have caught it, not just the ?? "" fallback that fixes it.
+  it('assembleAgentSystemPrompt(PATCH_INPUT) contains no literal "undefined"', () => {
+    const prompt = assembleAgentSystemPrompt(PATCH_INPUT);
+    expect(prompt).not.toContain('undefined');
+  });
+});
+
 describe('UI.6.1: patch prompt FINAL SUMMARY block', () => {
   it('patch summary is free-form: no fixed section list, headings gone, tag block untouched', () => {
     // Scoped to the summary block itself, not the whole prompt: "## Tests" also appears

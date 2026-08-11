@@ -613,11 +613,15 @@ export function assembleAgentSystemPrompt(input: {
   repoPath: string;
   planProgressBlock?: string;
   planAnnotationsBlock?: string;
-  /** "" when nothing is withheld — a full-toolset run's prompt is unchanged by this
-   *  field's presence. Rendered by buildToolAbsenceBlock, computed once before the
-   *  loop from the same effectiveAllowedSet/filterSource emitWriteCapabilityAbsent
-   *  reads. */
-  toolAbsenceBlock: string;
+  /** "" (or omitted) when nothing is withheld — a full-toolset run's prompt is
+   *  unchanged by this field's presence. Rendered by buildToolAbsenceBlock, computed
+   *  once before the loop from the same effectiveAllowedSet/filterSource
+   *  emitWriteCapabilityAbsent reads. Optional — dozens of existing test call sites
+   *  construct this input directly without it; a required field left them silently
+   *  splicing the literal string "undefined" into the assembled prompt (`tsc --noEmit`
+   *  doesn't catch it, since tsconfig excludes *.test.ts). See the concatenation
+   *  site's `?? ""` below, and this file's own prompts test for the pin. */
+  toolAbsenceBlock?: string;
   /** Step B: when set, appends TRUST_PHASE1_DIRECTIVE before the repo path line. */
   auditFindings?: unknown;
   /** When "question" or "investigation", prepends a Q&A/Listing mode preamble —
@@ -878,7 +882,7 @@ export function assembleAgentSystemPrompt(input: {
       ? `When running commands, use the correct package manager and commands above.\n`
       : "") +
     input.backgroundCommandBlock +
-    input.toolAbsenceBlock +
+    (input.toolAbsenceBlock ?? "") +
     (input.auditFindings ? `${TRUST_PHASE1_DIRECTIVE}\n\n` : "") +
     `Repository path: ${input.repoPath}`
   );
