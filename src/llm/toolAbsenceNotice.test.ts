@@ -33,25 +33,37 @@ describe("buildToolAbsenceBlock — six measured configurations, by name", () =>
     );
   });
 
-  it("archetype=question: 18 absent, named", () => {
+  // run_command dropped from 18 to 17 (collision fix, this arc): run_command_readonly
+  // is offered here and run_command is a strict prefix of it — naming the withheld
+  // root reads as covering the offered, more specific tool. Measured causal (this
+  // arc's behavioural establish): an agent holding run_command_readonly stopped using
+  // the shell entirely once "run_command" was named withheld alongside it, and twice
+  // reported a false negative it could have resolved with one command it already had.
+  // run_command_background stays named — it is not a prefix of run_command_readonly
+  // (diverges after "run_command_": "background" vs "readonly"), so nothing about it
+  // is misleading here.
+  it("archetype=question: 17 absent, named (run_command suppressed — collision with offered run_command_readonly)", () => {
     const offered = new Set(["read_file", "run_command_readonly"]);
     const block = buildToolAbsenceBlock({ offeredToolNames: offered, filterSource: "capabilityFilter", archetype: "question" });
     expect(block).toBe(
       "TOOLS NOT AVAILABLE THIS RUN — withheld by this task's archetype (question), not a permission error: " +
       "Task, TodoWrite, apply_patch, ask_user, fetch_url, find_references, kill_background, list_background, " +
-      "list_files, multi_edit, read_background_output, revert_patch, run_command, run_command_background, " +
+      "list_files, multi_edit, read_background_output, revert_patch, run_command_background, " +
       "search_in_files, suggest_scope_change, update_memory, write_file. " +
       "Do not attempt these via another tool or a shell workaround.\n\n"
     );
   });
 
-  it("archetype=investigation: 15 absent, named", () => {
+  // Same collision as the question case above: run_command_readonly is offered,
+  // run_command is a strict prefix of it, so run_command drops from the named list
+  // (15 -> 14). run_command_background stays named for the same reason as above.
+  it("archetype=investigation: 14 absent, named (run_command suppressed — collision with offered run_command_readonly)", () => {
     const offered = new Set(["read_file", "list_files", "search_in_files", "find_references", "run_command_readonly"]);
     const block = buildToolAbsenceBlock({ offeredToolNames: offered, filterSource: "capabilityFilter", archetype: "investigation" });
     expect(block).toBe(
       "TOOLS NOT AVAILABLE THIS RUN — withheld by this task's archetype (investigation), not a permission error: " +
       "Task, TodoWrite, apply_patch, ask_user, fetch_url, kill_background, list_background, multi_edit, " +
-      "read_background_output, revert_patch, run_command, run_command_background, suggest_scope_change, " +
+      "read_background_output, revert_patch, run_command_background, suggest_scope_change, " +
       "update_memory, write_file. Do not attempt these via another tool or a shell workaround.\n\n"
     );
   });
@@ -123,5 +135,41 @@ describe("buildToolAbsenceBlock — determinism", () => {
     const first = buildToolAbsenceBlock(input);
     const second = buildToolAbsenceBlock({ ...input, offeredToolNames: new Set(input.offeredToolNames) });
     expect(first).toBe(second);
+  });
+});
+
+describe("buildToolAbsenceBlock — collision suppression, both directions", () => {
+  // The reverse direction on purpose: run_command is OFFERED, run_command_readonly
+  // and run_command_background are WITHHELD. Neither withheld name is a prefix of
+  // "run_command" (both are longer), so neither qualifies for suppression — the
+  // offered tool is a strict superset here, naming the narrower siblings absent is
+  // true and harmless, and this direction is left untouched by design (not merely
+  // by omission — see the tier=simple/medium cases above, which pin the same fact
+  // as an incidental consequence of unrelated measured-configuration tests; this one
+  // names the property directly).
+  it("reverse direction is NOT suppressed: run_command offered, run_command_readonly/run_command_background stay named", () => {
+    const offered = new Set(["run_command", "read_file", "apply_patch", "multi_edit", "write_file"]);
+    const block = buildToolAbsenceBlock({ offeredToolNames: offered, filterSource: "tierFilterFromClassifier", tier: "simple" });
+    expect(block).toContain("run_command_readonly");
+    expect(block).toContain("run_command_background");
+    // And run_command itself must not appear in the absent list — it's offered, not
+    // withheld. Checked via the tool's own list-boundary (comma/period), not a bare
+    // substring match, since "run_command" is itself a substring of both siblings above.
+    expect(block).not.toMatch(/(^|, )run_command(,|\.)/);
+  });
+
+  // The empty-absent early return fires before the new filter runs at all (see
+  // source), so a full-toolset run is untouched by this fix — re-checked explicitly
+  // here, in this fix's own test, rather than relying only on the pre-existing
+  // byte-stability test above to carry it.
+  it("full toolset offered: still empty, the new filter is a no-op on an already-empty absent list", () => {
+    const offered = new Set([
+      "Task", "TodoWrite", "apply_patch", "ask_user", "fetch_url", "find_references",
+      "kill_background", "list_background", "list_files", "multi_edit", "read_background_output",
+      "read_file", "revert_patch", "run_command", "run_command_background", "run_command_readonly",
+      "search_in_files", "suggest_scope_change", "update_memory", "write_file",
+    ]);
+    const block = buildToolAbsenceBlock({ offeredToolNames: offered, filterSource: "capabilityFilter", archetype: "targeted_fix" });
+    expect(block).toBe("");
   });
 });

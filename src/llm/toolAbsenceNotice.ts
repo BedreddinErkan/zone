@@ -53,7 +53,20 @@ function describeCause(input: ToolAbsenceInput): string {
  */
 export function buildToolAbsenceBlock(input: ToolAbsenceInput): string {
   const fullNames = resolveToolList(undefined).map((t) => t.name);
-  const absent = fullNames.filter((name) => !input.offeredToolNames.has(name)).sort();
+  const absentRaw = fullNames.filter((name) => !input.offeredToolNames.has(name));
+  // A withheld name that is a strict prefix of an OFFERED name reads as covering that
+  // offered tool: measured (this arc's behavioural establish, seven ground tasks,
+  // question archetype) to make an agent holding run_command_readonly stop using the
+  // shell entirely and report two false negatives, once "run_command" was named
+  // withheld alongside it. Suppressed in this direction only. The reverse — a
+  // withheld name is a prefix OF an offered name (e.g. run_command_readonly withheld
+  // while run_command is offered, at tier=simple/medium) — is left alone: the offered
+  // tool there is a strict superset, so naming the narrower sibling absent is true and
+  // harmless, not misleading, and there is no measured reason to drop it.
+  const offeredList = [...input.offeredToolNames];
+  const absent = absentRaw
+    .filter((name) => !offeredList.some((offered) => offered !== name && offered.startsWith(name)))
+    .sort();
   if (absent.length === 0) return "";
 
   return (
