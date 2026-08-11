@@ -7656,7 +7656,7 @@ declared on the scanned-file type in `types/project.ts`; the two prompt-renderin
 unreachable scoring paths are in `repo/rankRelevantFiles.ts`. See item 79 for the ranker-side signal
 decomposition this was found beside.
 
-## 82. The data-analyst and test-engineer role flows are live behind a four-condition chain that reading alone did not find, and removing them would take nineteen modules with them
+## 82. Closed — the data-analyst and test-engineer role flows, the nineteen modules behind them, and `--role` itself are gone
 
 Two modules in the roles directory, sharing one input signature, are the actual role-flow family — six
 modules repo-wide share a `run*Flow` name shape, but only these two share the shape that matters. **Both
@@ -7748,15 +7748,25 @@ through a role branch; three neither consume one nor sit behind one. None of the
 role names one in its own body in any load-bearing way — the module written for the role with no flow
 is generic guidance that would read the same on the main path.
 
-**On the three scoring sites — risk score, confidence threshold, validation multiplier — the role
-contributes nothing on the live path, established by running rather than inferred.** For the only role
-the main path can carry, every role-keyed value at those three sites equals its own absent-role
-default: the risk score returns an identical object, the confidence threshold is the same number, the
-validation multiplier is the same. The two flow roles do move those values; an unvalidated role lands
-on the default rather than throwing. The absent case is not a degraded path at these three sites — it
-is the same path. This does not extend to `buildFinalPrompt`: role there is a required field with no
-default branch at all, so there is no absent-role case to compare against — a different site, checked
-separately.
+**On the three scoring sites — risk score, confidence threshold, validation multiplier — two show the
+role contributing nothing on the live path; the risk score does not, corrected this pass from a claim
+measured on a single schema-only task.** For the only role the main path can carry, the confidence
+threshold and the validation multiplier both equal their own absent-role default: the threshold is the
+same number, the multiplier is the same. **The risk score does not.** `computeRiskScore`'s
+`ROLE_MODIFIERS` table carries four fields per role. `role:"developer"` and the absent default read
+differently on two — destructiveMultiplier, criticalMultiplier — and the same on a third,
+massScopeMultiplier, genuinely: both 1.0, both applied to the score. The fourth, schemaMultiplier, is
+populated per role (0.0 or 1.0) but never read anywhere in the function — the actual schema exemption
+is a separate, hardcoded check against the literal names `test_engineer` and `data_analyst`, which
+`developer` and absent both fail to match, identically, regardless of what the table says for either of
+them. The task this entry originally measured against exercised only the two fields that agree — one
+because the multiplier genuinely matches, one because neither side reaches a field the function never
+reads at all. Tested against a task carrying destructive and critical signals instead, confirmed at
+`2efee011`: `role:"developer"` produces a destructive score of 28 and a critical score of 24; role
+absent produces 35 and 20 on the same task. The two flow roles do move those values; an unvalidated
+role lands on the default rather than throwing. This does not extend to `buildFinalPrompt`: role there
+is a required field with no default branch at all, so there is no absent-role case to compare against —
+a different site, checked separately.
 
 **The capability is reachable from the default path without new plumbing, and wiring it in today would
 produce nothing.** Every input it needs already exists on the main path, checked by signature. But run
@@ -7807,6 +7817,109 @@ anything a corrected detector could not already give it. Proposing neither remov
 that the two questions have different answers, so a later pass answering only the first does not
 license a move the second would not support.
 
+**Closed at `ee2443b9` and `2efee011`.** A later, separate pass removed both flows, the six supporting
+`roles/` modules, all eleven `prompts/` modules, and `--role` itself — the option, its help string, the
+`CliOptions` field, `runTaskOnlyFlow`'s own parameter, and both forwarding call sites. The flag itself —
+found unvalidated when this entry was written — is now gone entirely, not merely deprecated or
+defaulted: it does not parse. Confirmed by a runtime probe against the rebuilt CLI —
+`error: unknown option '--role'`, exit 1 — and by a direct search of the built output, which returns
+zero occurrences of the flag.
+
+**Two commits, not the three this entry's own removal-shapes paragraph assumed, and the reason
+generalizes past this one case.** `ee2443b9` landed two independent orphans first —
+`prompts/developerPrompt.ts` and `prompts/testEngineerContext.ts` — before touching anything else,
+because `prompts/testEngineerContext.ts` type-imports `DetectedTestFramework` out of
+`roles/detectTestFramework.ts`, one of the eight `roles/` modules in the removal set. `tsc --noEmit`
+checks the whole tree regardless of reachability, so deleting `roles/` first breaks the build on a file
+not even scheduled for that commit. The lesson: a removal plan built by checking who imports INTO the
+files being deleted checks only half the graph. What those files import OUT is just as capable of
+breaking the build, and being an orphan — nothing imports this — says nothing about whether it imports
+something else that is also being deleted.
+
+**`roles/` and the eleven prompt modules could not split across two commits either, and the coupling
+runs both directions at once.** The two flows import two of the eleven prompt builders outright
+(`roles/` to `prompts/`). Two of the eleven — `dataAnalystPrompt.ts` for `DataAnalystContext`,
+`testEngineerPrompt.ts` for both `TestEngineerContext` and a value import of `detectTestComplexity` —
+type-import back out of `roles/` (`prompts/` to `roles/`); a third import of this shape belongs to the
+orphan `prompts/testEngineerContext.ts`, which `ee2443b9` already removed for its own outbound
+dependency on `roles/detectTestFramework.ts` — not part of the eleven, and not part of that commit
+either. Every attempt to stage `roles/` and the eleven as two separate commits leaves one direction
+typechecking against a tree the other direction has already deleted. `2efee011` merges the entry point,
+all eight `roles/` modules, and all eleven prompt modules into one commit for exactly this reason.
+
+**`computeRiskScore` is untouched, on purpose, and a reader landing on this entry after the removal
+should not read that as something the removal missed.** `core/runLlmPatchFlow.ts` — the main patch
+flow, not one of the two role flows, not named in this entry's own removal accounting — hardcodes
+`computeRiskScore({ task: input.task, role: "developer", codeIntent: taskIntent.codeIntent })` on every
+run, confirmed at `2efee011`. Editing `computeRiskScore` would have forced a change to a file no brief
+in this arc ever put in scope; left alone, its signature, its `ROLE_MODIFIERS` table, and the
+schema-penalty branch built for it all stay exactly as this entry originally found them. Item 83 records
+what the table now looks like with `--role` gone.
+
+**Three scoring sites carry role-keyed logic, and this entry now has runtime evidence for the behavior
+of all three, not just two.** `computeRiskScore`'s divergence is corrected earlier in this entry, by
+running rather than inferring. `checkConfidenceGate` (`confidenceGate.ts`) is fully de-roled: its only
+developer-versus-absent difference was one word in an already-rare failure message — the threshold, the
+risks, and the recommendation are identical either way — so it de-roles without loss, and its source no
+longer mentions either role by name. A third site, `core/scoring/confidenceRules.ts` and
+`core/scoring/computeConfidenceBreakdown.ts` — named in this entry's own file listing but never put in
+scope by any brief this arc wrote, including this one's own — still carries the logic and was left
+untouched, for the same reason `computeRiskScore` was: nothing ever asked.
+
+**Six hand-written source files carry `test_engineer`/`data_analyst` text at `2efee011`, not only the
+three scoring sites just named.** `computeRiskScore.ts`, `confidenceRules.ts`, and
+`computeConfidenceBreakdown.ts` are the three scoring sites just named. The other three are not scoring
+sites in the same sense but were left untouched for the identical reason: `core/validateLlmOutput.ts`
+and its test, already recorded in this entry as unreachable from the CLI entry point, and
+`types/conversation.ts`, whose role field this entry already found has no writer and no reader anywhere
+in the tree. A seventh file matches the same text search — `repo/rankerBaseline.snapshot.json` — but it
+is a frozen test fixture holding an old snapshot of file contents, including a since-rewritten test
+file's old text, not hand-written source; a reader re-running the search should expect seven hits and
+reconcile the seventh against this footnote rather than read it as a missed file.
+
+**One test file's assertions, not its reachability, is what the production-caller search this entry
+relied on missed.** `developerOutputValidator.test.ts` called `checkConfidenceGate` with role-keyed
+thresholds — 70, 60 — that stopped existing once the gate collapsed to one universal threshold, 60.
+`tsc --noEmit` never saw it, because `*.test.ts` is excluded from the compiled tree; the caller search
+that scoped the removal excluded test files too, for a reason that is right for one question and wrong
+for another. Excluding `*.test.ts` is correct for "does this still compile and run in production," and
+wrong for "does this still pass" — a test file's own assertions can hardcode exactly the values a
+signature change makes false, and only running the suite finds that, reading the call graph does not.
+
+**A third essay check, run first against this item's own established comparison rather than a fresh
+sweep.** The thirteenth already governs one finding inside this entry — the `await import` coverage
+gap — and cites this item back as an instance of its own pattern, so it is the natural nearest neighbour
+to check first. Its core method is to enumerate the real callers and trace the call, in place of a
+partial search. This pass's own finding used exactly that method and still broke the build, because
+tracing callers — who imports the orphan — answers only one direction of a deletion-ordering question.
+The other direction — what the orphan itself imports out, among the files also being deleted — is a
+different question the thirteenth's method does not ask on its own terms; its own fix, enumerating
+every shape a caller-search can miss (static import, dynamic import, re-export), still only enumerates
+shapes of that same one direction. Related: both are call-graph completeness gaps that a partial trace
+reads as safe. Not the same: the thirteenth is about missing forms within one direction, this is about
+missing the other direction outright. Checked the fifth and the ninth as well, both further away — the
+fifth's mechanism is a distractor question mistaken for the real one, the ninth's is a later pass
+failing to execute an earlier entry's prescription, and neither is about graph directionality. Declined
+as an extension of the thirteenth, filed as its own instance — with a condition on staying that way: a
+second occurrence of this specific directional gap, inbound checked and outbound missed or the reverse,
+reopens the question of a nineteenth pattern on two instances rather than one.
+
+**Bucket — Closed, moved from Neither.** Checked toward item 78's own bar first: `c488aff1` held this
+entry in Neither one pass ago because no fix was proposed, citing item 78's rule that a well-informed
+decision is not a fix specified — correct then, and still correct as a description of what this entry
+itself ever proposed, which was nothing. That bar answers a different question than the one this pass is
+asking: not whether a fix is specified, but whether the subject is settled. Checked toward precedent for
+a bucket move itself: `67b46c50` moved item 76 out of Actionable-now on that same fix-specified bar —
+the only prior instance of a correction pass moving a bucket in this document, a different pair of
+buckets than this one, and not a literal precedent for a Neither-to-Closed move, but evidence this
+document moves a bucket when the bar an entry is judged against stops fitting, rather than leaving a
+stale classification standing. This move does not go through the Actionable-now bar at all: the
+`Closed` bucket's own working definition, consistent across all thirty-nine current members, is a
+finding followed by a resolution, and that is what this entry now is. The two flows, the nineteen
+modules, and `--role` are gone, verified by build, suite, and a runtime probe anchored to `2efee011`,
+with nothing left to learn, decide, or wait on. Title takes the `Closed —` prefix every other member of
+the bucket carries.
+
 **Where the code lives:** the two flows are `roles/runDataAnalystFlow.ts` and `roles/runTestEngineerFlow.ts`;
 their supporting modules are `roles/dataAnalystContext.ts`, `roles/detectDataSchema.ts`,
 `roles/detectTestComplexity.ts`, `roles/detectTestFramework.ts`, `roles/testEngineerContext.ts` and
@@ -7822,17 +7935,59 @@ independent of any removal, confirmed at `c488aff1`, are `prompts/developerPromp
 duplicate. See item 81 for the category-field investigation this pass followed from, and the thirteenth
 and fifth patterns for the two essay checks.
 
+## 83. `computeRiskScore`'s `ROLE_MODIFIERS` table: one field is confirmed dead, and two live entries diverge permanently for a reason nothing has measured
+
+**What is reachable, now that `--role` is gone, broken down by field rather than by role.**
+`computeRiskScore`'s `ROLE_MODIFIERS` table carries four fields per role — destructiveMultiplier,
+criticalMultiplier, massScopeMultiplier, schemaMultiplier — for `developer`, `test_engineer`,
+`data_analyst`, and an absent-role default `getRoleModifier` falls back to. Item 82 records `--role`'s
+removal at `2efee011`, along with every caller that could ever pass `test_engineer` or `data_analyst` —
+those two rows are now unreachable by any live caller, all four of their fields with them. Of the
+remaining two rows, `developer` and the default, three fields are read by the function:
+destructiveMultiplier and criticalMultiplier, each applied directly to its own score, and
+massScopeMultiplier, applied the same way. The fourth, schemaMultiplier, is never read by any code path
+in the function — confirmed by reading it in full — because the actual schema exemption is a separate,
+hardcoded check against the literal role names `test_engineer` and `data_analyst`, entirely independent
+of the table sitting beside it. That check's own two-role scope happens to match what the dead field's
+values would produce if it were read (zero for the same two roles, unchanged for the other two) — one
+reason a dead field shaped this way is easy to miss.
+
+**One question this table raises is settled; a different one is not, and until this pass they read as
+the same question.** Whether `schemaMultiplier` matters is settled: it does not, for any role, ever — a
+dead field, not an unmeasured one, and no fix is implied by that alone, since a field with no reachable
+effect is not by itself a defect. The open question is about the other three fields, specifically the
+two that diverge between the table's remaining live rows: `core/runLlmPatchFlow.ts` hardcodes
+`role: "developer"` on every main-path run, while `core/runAgent.ts` calls `computeRiskScore({ task })`
+with no role at all, reaching the absent default — reachable in turn from `cli/index.ts`'s task-only
+flow, the same legacy, four-condition-gated branch item 82 already establishes. Two callers, two rows,
+both live. On destructiveMultiplier and criticalMultiplier they no longer merely differ when explicitly
+asked to, the way item 82's close-out entry shows by running — they diverge permanently, on every run,
+with no flag left that could ever make them agree. massScopeMultiplier is also read on both paths and
+happens to agree, 1.0 either way: live, not dead, just not currently a source of divergence.
+
+**What that leaves unmeasured.** Whether the destructive/critical divergence between the main patch
+flow and the task-only flow is a load-bearing default — one path deliberately scored more conservatively
+than the other, and the table is how that decision was encoded — or dead configuration nobody has
+revisited since the role system it was built for was designed, is not established by anything this arc
+has measured. Recorded as an open question, not a verdict: this item proposes no fix and takes no
+position on whether either live field's values, or the dead field, should change at all.
+
+**Where the code lives:** `ROLE_MODIFIERS` and `getRoleModifier`, along with the schema-exemption check
+that bypasses `schemaMultiplier`, are in `core/computeRiskScore.ts`. The two live callers are
+`core/runLlmPatchFlow.ts` and `core/runAgent.ts`; the second is reached from `cli/index.ts`'s task-only
+flow. See item 82 for the removal that left the table in this state.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 82 to find out which ones still need something. No index of
+reader the trouble of reading all 83 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (39): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72
+**Closed** (40): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (0):
@@ -7841,7 +7996,7 @@ first (0):
 
 **Neither — a structural fact recorded, with no fix proposed** (36): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
-81, 82
+81, 83
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, and 79 are partially closed or corrected; the
 classification above covers only the portion still open, not the whole entry.
