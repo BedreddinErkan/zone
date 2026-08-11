@@ -7691,7 +7691,8 @@ methods, one result.
 **The role concept outlives the two flows.** It is read, independently of them, in risk scoring, in a
 confidence gate carrying a distinct threshold for one role, in two confidence-computation modules taking
 a role parameter, in a prompt builder exporting its own role union, and as an optional field on a
-persisted conversation type the billing repository consumes. Separately, one output-validation module
+persisted conversation type declared in the billing repository — corrected this pass, from "consumes":
+the field has no writer and no reader anywhere in the tree. Separately, one output-validation module
 exports a role union and switches on all three values while being unreachable from the CLI entry point
 entirely. Removing the two flows would not remove the concept.
 
@@ -7723,6 +7724,77 @@ Recorded as what a removal would touch, not as a recommendation — any fix for 
 the rejected default format is out of this pass's scope, the same posture item 81 takes on its own
 unestablished-cost question.
 
+**A follow-up establish pass, settling whether the capability is separable from the role concept.**
+The removal decision needs one thing not yet established: whether the nineteen modules' work depends
+on knowing a role, or is reached through one incidentally.
+
+**The separation is near-total.** Fourteen of the nineteen modules never mention a role at all. The
+role is read as data in exactly one production module, which switches on it and gates the framework
+prompts behind one of its three values. Everywhere else it is hardcoded at the call site, a write-only
+debug label asserted only in tests, or simply absent. The two flows themselves supply a literal and
+read no role from their own input.
+
+**The six supporting modules take task text, a file list, or generated content, and none takes or reads
+a role.** All six would run unchanged with the role concept removed. Five are pure over their inputs;
+one performs disk reads inside a private helper.
+
+**The eleven prompt modules split three ways.** One takes a role argument; seven are reached only
+through a role branch; three neither consume one nor sit behind one. None of the ten that do not take a
+role names one in its own body in any load-bearing way — the module written for the role with no flow
+is generic guidance that would read the same on the main path.
+
+**On the live path the role contributes nothing, established by running rather than inferred.** For the
+only role the main path can carry, every role-keyed value equals its own absent-role default: the risk
+score returns an identical object, the confidence threshold is the same number, the validation
+multiplier is the same. The two flow roles do move those values; an unvalidated role lands on the
+default rather than throwing. The absent case is not a degraded path — it is the same path.
+
+**The capability is reachable from the default path without new plumbing, and wiring it in today would
+produce nothing.** Every input it needs already exists on the main path, checked by signature. But run
+against this tree, its own framework detector returns unknown, low confidence, "no recognizable test
+framework detected" — on a repository carrying hundreds of test files, because its taxonomy covers
+end-to-end and acceptance tools and does not include the runner this repo actually uses. The live
+path's own, independent framework detector reports the correct runner and command on the same tree.
+The same shape item 81 already recorded for the category field: a detector correct in its own terms,
+written for a differently shaped codebase, inert here.
+
+**The three removal shapes cost different test surfaces.** Dropping the entry point alone deletes
+nothing but leaves the whole attached suite testing unreachable code — the only-caller-is-its-own-test
+condition this entry already established neither flow was in. Removing everything takes the attached
+suite with it, plus two already-orphaned modules as collateral: one whose only importer is its own
+tests, one a duplicate implementation of a module that also exists live in the roles directory. Keeping
+the capability without the role preserves the large majority of the attached tests with their subject
+unchanged, loses the flow-attached ones, and splits the one role-consuming prompt module's tests by
+whether they name role selection.
+
+**Read-not-run for this pass, marked where it applies.** The signature and branch analysis, the prompt
+classification, and the test-subject mapping are readings. The two-detector comparison, the absent-role
+threshold and risk-score probes, the attached-subtree test run, and the orphan check are runs. A first
+probe against the risk-score function reported nothing because its return field names were guessed
+rather than read; re-run against the actual return shape before anything was recorded from it.
+
+**The essay check, including the detector-shape question this pass raised of itself.** Checked against
+all eighteen by title; read in full: the fifth, specifically its own "wiring is not reachability"
+instance — the closest by structure, since both are about answering only one of two questions and
+being misled. Declined: that instance's own mechanism is a distractor question mistaken for the real
+one — "only the second was ever the question." Here neither question is a distractor: separability and
+value are both genuinely necessary and jointly insufficient, a different logical shape from one
+question standing in for the other. Checked separately whether this candidate is instead a restatement
+of the detector-written-for-another-codebase finding, now recurring a third time (item 79's path tiers,
+item 81's category field, this pass's framework detector): related but not identical — that finding is
+one piece of evidence for why this capability is inert, not the structural point about two questions
+needing separate answers, and none of its three occurrences was itself flagged as an essay candidate at
+the time, so this pass does not retroactively file it either. One instance, no essay change — the check
+itself follows the eleventh pattern's own lesson, what makes a precedent apply is what makes it safe to
+transfer, not surface similarity, applied here to its own essay-matching process.
+
+**What this settles and what it deliberately does not.** The capability is separable — cleanly,
+structurally, by reading and running both. Whether separating it is worth doing is a different
+question with a different, negative answer on this repository today: nothing downstream would gain
+anything a corrected detector could not already give it. Proposing neither removal nor a fix; recording
+that the two questions have different answers, so a later pass answering only the first does not
+license a move the second would not support.
+
 **Where the code lives:** the two flows are `roles/runDataAnalystFlow.ts` and `roles/runTestEngineerFlow.ts`;
 their supporting modules are `roles/dataAnalystContext.ts`, `roles/detectDataSchema.ts`,
 `roles/detectTestComplexity.ts`, `roles/detectTestFramework.ts`, `roles/testEngineerContext.ts` and
@@ -7730,8 +7802,11 @@ their supporting modules are `roles/dataAnalystContext.ts`, `roles/detectDataSch
 concept beyond the flows is in `core/computeRiskScore.ts`, `core/confidenceGate.ts`,
 `core/scoring/computeConfidenceBreakdown.ts`, `core/scoring/confidenceRules.ts`,
 `prompts/buildFinalPrompt.ts`, `types/conversation.ts`, `billing/conversationRepository.ts`, and the
-orphaned `core/validateLlmOutput.ts`. See item 81 for the category-field investigation this pass
-followed from, and the thirteenth pattern for the essay instance above.
+orphaned `core/validateLlmOutput.ts`. This pass's own comparison used `repo/detectFramework.ts` as the
+live path's independent detector, against `roles/detectTestFramework.ts`; the two orphaned modules
+taken as collateral by a full removal are `prompts/developerPrompt.ts` and `prompts/testEngineerContext.ts`,
+the second a duplicate of `roles/testEngineerContext.ts`. See item 81 for the category-field
+investigation this pass followed from, and the thirteenth and fifth patterns for the two essay checks.
 
 ## Status snapshot — a partition, not a priority ordering
 
