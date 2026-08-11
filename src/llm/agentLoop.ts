@@ -108,6 +108,7 @@ import type { Capability, CapabilityFilter } from "../tools/capabilities.js";
 import { resolveToolList } from "../tools/toolRegistry.js";
 import { allowedToolsToFilter } from "../tools/capabilityCompat.js";
 import { tierToolFilter } from "../tools/tierToolSubsets.js";
+import { buildToolAbsenceBlock } from "./toolAbsenceNotice.js";
 import {
   runPreIterationHooks,
   runPostToolUseHooks,
@@ -612,6 +613,11 @@ export function assembleAgentSystemPrompt(input: {
   repoPath: string;
   planProgressBlock?: string;
   planAnnotationsBlock?: string;
+  /** "" when nothing is withheld — a full-toolset run's prompt is unchanged by this
+   *  field's presence. Rendered by buildToolAbsenceBlock, computed once before the
+   *  loop from the same effectiveAllowedSet/filterSource emitWriteCapabilityAbsent
+   *  reads. */
+  toolAbsenceBlock: string;
   /** Step B: when set, appends TRUST_PHASE1_DIRECTIVE before the repo path line. */
   auditFindings?: unknown;
   /** When "question" or "investigation", prepends a Q&A/Listing mode preamble —
@@ -872,6 +878,7 @@ export function assembleAgentSystemPrompt(input: {
       ? `When running commands, use the correct package manager and commands above.\n`
       : "") +
     input.backgroundCommandBlock +
+    input.toolAbsenceBlock +
     (input.auditFindings ? `${TRUST_PHASE1_DIRECTIVE}\n\n` : "") +
     `Repository path: ${input.repoPath}`
   );
@@ -2369,6 +2376,18 @@ async function runAgentLoopScoped(input: AgentLoopInput, stats: LoopRunStats): P
     }
   }
 
+  // Computed once, before the loop, from the same effectiveAllowedSet/filterSource
+  // emitWriteCapabilityAbsent reads above — the notice-building sibling of that
+  // telemetry, rendered into the prompt instead of a log sink. "" when nothing is
+  // withheld, so a full-toolset run (targeted_fix, refactor) gets an unchanged prompt.
+  const toolAbsenceBlock = buildToolAbsenceBlock({
+    offeredToolNames: effectiveAllowedSet,
+    filterSource,
+    tier: input.taskClassification?.tier,
+    archetype: input.taskClassification?.archetype,
+    mode,
+  });
+
   let midWarnInjected = false;
   let chainSaturationWarnInjected = false;
   // ZONE_SATURATION_COUNT_MULTIEDIT (default on): count multi_edit successes alongside apply_patch.
@@ -2970,6 +2989,7 @@ Example:
         repoPath: input.repoPath,
         planProgressBlock,
         planAnnotationsBlock: buildPlanAnnotationsBlock(input.executionPlan),
+        toolAbsenceBlock,
         auditFindings: input.auditFindings,
         archetype: input.taskClassification?.archetype,
         planApproved: input.planApproved,
