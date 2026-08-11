@@ -7391,6 +7391,130 @@ before: neither the closure nor the open, promising, unspecified ordering surfac
 Checked in the other direction, unchanged: items 61 and 78 both hold closed parts and stayed Neither,
 and none of the references to this entry elsewhere cites it for a bucket precedent. **Neither.**
 
+**F9 — the draw is ordered by match count and the surface is deterministic where it was a lottery.**
+Landed at `b1027a41`. The matcher's single invocation now returns per-file match counts alongside which
+files matched; the pool is ordered by count descending, path ascending as the tie-break, and the cap is
+applied after that ordering rather than mid-walk. The cap's value is unchanged at both sites, the caller
+is unchanged — `Set` iteration order is insertion order, so the caller's two existing spreads of the
+returned set already reflect the new order without an edit of their own — and the frozen measurement
+ground is untouched.
+
+**F10 — the labeled ground task, measured in the fix pass's own repeats: ten of ten.** Ten of ten runs
+against the live matcher deliver the correct file, in one distinct sequence across all ten. Recorded
+beside, not in place of, F6's own figures for the walk-order draw: one of twenty and four of twenty.
+A precision correction, not a new number superseding an old one: F6's own wording for the ordered draw
+itself is qualitative — every run, no denominator stated — so this pass's ten-of-ten is the first
+specific count on this record for that mechanism, not a revision of a different figure. It should not be
+read against the twenty-of-twenty this document records elsewhere for a different, unbuilt mechanism — a
+per-consumer frequency filter narrowing the extractor's own terms, considered at an earlier re-check and
+left unspecified — which shares this reference task and this headline shape by coincidence, not by
+identity; the two are different interventions on different parts of the pipeline.
+
+**F11 — the evidence is one labeled task and mutation testing; production benefit is not established,
+and this is the fifth consecutive question the ground has failed on.** F7 already recorded the fourth:
+the ground could not discriminate a cap value. It cannot discriminate this either — production tasks
+carry no correct-file label, so nothing about whether the ordering improves their outcomes is measurable
+with this ground at all. What changed for production tasks is the determinism of what they receive, not
+a measured improvement in whether what they receive is correct — the two are different claims, and only
+the first has support here.
+
+**F12 — the tie situation is measured, not assumed identical to the ranker's.** Across the twenty-six
+tasks this pass drew from (seven ground, nineteen production): nineteen have a non-empty pool, six tie
+exactly at the cut boundary, eighteen of nineteen tie somewhere in the pool, and the tied groups at the
+cut point run two to three files. Path comparison — the same key the ranker uses for its own ties —
+adjudicates a small, local sub-selection here. In the ranker the same comparison is the practical
+dominant selector, already on record: up to five hundred and fifty-eight files sharing the correct
+file's own score. Same key, bounded role at this site, dominant role at that one — carried over
+deliberately, its effect here checked rather than assumed to match.
+
+**F13 — the structural change the ordering required, recorded so it is not read as a cap change.** The
+pool has to be collected in full before it can be ordered, so the mid-walk cap — the accumulation loop's
+own size guard, previously the only place the cap took effect — became a post-sort cap. Capping
+mid-walk and sorting afterward would have re-introduced walk-order bias into which files ever reached the
+sort in the first place. The cap's value did not move; only where in the sequence it applies did.
+
+**F14 — the fail-safe and empty-pool paths are unaffected, established by running.** The zero-token path
+returns before the matcher's rg invocation is ever reached, by construction. On zero real matches, the
+old flag and the new one were confirmed to reject the invocation identically — both the rg process
+directly and the wrapping call — so the existing catch path handles both the same way it always did.
+Only the success-path output format changed.
+
+**F15 — the frozen-data hazard was checked and does not apply.** The modified function has exactly one
+caller anywhere in the tree. Its only other appearance is inert text inside the measurement ground's own
+content union — a stale copy of the modified file's old source, used only as scoring input for the
+ranker's own tests, never executed and never inspected for grep behavior. Of the two test files that
+reference the ground, one reads the frozen grep field directly off the recorded data and imports neither
+the modified function nor its module; the other quotes one ground task's text for an unrelated purpose.
+No assertion anywhere reads frozen grep data through the function this pass modified.
+
+**F16 — mutation record: three mutations, three exact matches.** Reversing the count ordering,
+replacing the tie-break with a constant, and dropping the count flag back to walk order — all three kill
+sets matched their prediction exactly, and the three sets are pairwise distinct, checked rather than
+assumed. The fixture design that made the second and third mutations meaningful is itself recorded: a
+six-way tie, chosen because a two-way tie could let a constant tie-break produce the alphabetically
+correct answer by coincidence — checked directly, a two-file sample was found safe but thin, and the
+six-way version was confirmed never to put the correct file first by coincidence across repeated
+sampling; and a forty-file, all-tied pool for the determinism check, sized to where raw walk order was
+confirmed unstable across repeats rather than assumed to be.
+
+**F17 — read-not-run, marked where it applies.** The single-caller finding and the measurement ground's
+content-union inertness are readings. The tie distribution across the twenty-six tasks, the
+flag-rejection equivalence on zero matches, the three mutation kill sets, and the labeled task's ten
+repeats are runs.
+
+**What F6 recorded as open and unbuilt no longer is, for what could be measured; one thread inside it
+stays open by choice, and one is a ceiling rather than a gap.** F6's own reasoning for staying open was
+that no specific fix was proposed — a fix was specified and it shipped, so that half no longer holds.
+What stays open, named rather than left implicit: the modified function's doc comment was deliberately
+not updated in the same pass that shipped the behavior it would describe, on the reasoning that the
+property it would claim is exactly what the fix pass's own mutation results and repeats measure, and
+stating it beside measured figures before they existed would repeat a shape this document has already
+corrected more than once — deferred to a named follow-up rather than left unstated indefinitely. F11 is
+not open work waiting to be done: production benefit is a claim this ground cannot support with any
+amount of further building, because production tasks carry no correct-file label to check against, the
+fifth consecutive instance of that ceiling.
+
+**Re-checked a twenty-fifth time, after a fix pass that lands the count-ordered draw.** The rule needs
+no judgement: a closure moves the enumerated remainder only if the thing closed was enumerated in it,
+and the remainder is the routing predicate, the three step-guaranteeing mechanisms, the four caps, and
+the thirty-session expiry. This pass touches none of them — checked against each of the four explicitly:
+it decides nothing about the routing predicate, touches none of the three step-guaranteeing mechanisms,
+changes none of the four render caps (already established, at the twenty-fourth re-check, as a
+different, downstream set from the two grep-cap sites this and the prior pass both measured), and says
+nothing about the thirty-session expiry. Landing the ordered draw is therefore body material closing
+body material, the same shape the twenty-third and twenty-fourth re-checks each found for their own
+closures — not `326234f3`'s third case, since no counted remainder item is involved. Item 78's note
+governs the promotion question as before: closing a part does not promote a parent whose counted
+remainder it doesn't touch, whether that part was still open or, as here, already built and only
+awaiting the fix landing. Checked in the other direction, unchanged: items 61 and 78 both hold closed
+parts and stayed Neither, and none of the references to this entry elsewhere cites it for a bucket
+precedent. **Neither.**
+
+**Checked against all eighteen by title and vocabulary; read in full: the eighth.** A mutation can be
+correct and still coincide with one test's answer. Its own rule is close in shape to what the fix pass
+did before committing to the tie fixture: check whether a mutated value's output could coincide with a
+specific fixture's own correct answer by chance, before trusting a green result. The fix pass ran
+exactly that check — a two-file tie was tested directly and found safe but thin, so the group was
+widened to six and the coincidence checked again before the fixture was written. But every one of the
+eighth's own tallied instances involves a surprise: an unpredicted kill, a prediction proven wrong, a
+coincidence discovered only after a mutation had already run and produced a result nobody expected. This
+pass had none of that — the fixture-sizing check was made in advance, confirmed the design safe, and the
+three mutations that followed matched their predicted kill sets exactly, with no divergence to report.
+Applying an already-stated rule correctly, landing exactly where the check said it would, is not a new
+instance of the rule finding a gap; it is the rule working, which this document has consistently held
+apart from the rule being extended.
+
+**Two further candidates checked and also declined, for completeness rather than closeness.** The fifth,
+tracing is not running — this pass ran everything it reported rather than tracing it, the opposite of
+that pattern's own failure shape. The tenth, shared extraction makes symmetric mutations invisible to
+comparison assertions — no shared helper sits between the comparison sides in any of the three
+mutations; each targets a distinct expression with its own, individually-confirmed-unique grep target.
+
+**No candidate — declined**, on the same precedent this document's own essays already cite for declining
+to generalize from a single occurrence, applied here to decline before a single occurrence is even
+counted: a landed fix whose predictions all matched carries no lesson of its own, and recording that is
+the honest result rather than manufacturing one to fill the section.
+
 **Where the code lives:** the gate, its marker, the two early returns, the forced-steps regeneration
 and the body-seeding caps are all in `runOneShotInner`, `cli/dispatch.ts`; both lead-verb predicates,
 and the problem-word predicate the two refusal exits now pair with the narrower of them, are in
