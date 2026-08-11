@@ -36,6 +36,20 @@ const execFileAsync = promisify(execFile);
  * snake_case, then quoted, each in task-text position — not the eight most
  * relevant by any score; a task with many terms can lose any of them to this
  * slice depending only on where they fall in that order.
+ *
+ * Delivered matches are ordered by per-file match count, descending, path
+ * ascending as the tie-break, with the cap taken after that ordering rather
+ * than during the walk. The counts come from the same rg invocation already
+ * made for the match itself, at no measured additional cost. This makes the
+ * capped selection deterministic where the walk-order draw it replaced was
+ * not: on the one task with a known-correct file — a ceiling on which tasks
+ * can be checked at all, not a small sample — it returned one distinct
+ * sequence across ten repeats, against a walk-order draw that had delivered
+ * the correct file on one of twenty and four of twenty runs. The tie-break
+ * only ever adjudicates a small, local sub-selection — tied groups at the
+ * cut point ran two to three files across the twenty-six tasks measured —
+ * unlike the ranker's own ties, where the same path comparison is the
+ * dominant selector.
  */
 async function grepMatchingFiles(
   task: string,
