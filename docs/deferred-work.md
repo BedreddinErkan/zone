@@ -7305,6 +7305,92 @@ governs the promotion question as before: a correction to already-landed materia
 Checked in the other direction, unchanged: items 61 and 78 both hold closed parts and stayed Neither,
 and none of the references to this entry elsewhere cites it for a bucket precedent. **Neither.**
 
+**The two cap sites are not independent; one is silently subordinate, confirmed at the intermediate
+value rather than inferred from the total.** The matcher's own default (`cap = 4`) is enforced by a
+size guard inside it; the plan-context assembly re-slices the deduped extras to four again, downstream.
+One caller, no cap argument passed. Verified by running: raising the matcher's cap alone moves its
+reported match count to twenty while delivered paths stay at nine — five ranked plus four extras, the
+same total a nine-wide window could in principle produce on its own, so the two were checked apart
+rather than left as one number standing for both. The deduped set immediately before the second site's
+slice, measured directly rather than inferred from the totals, is nineteen: the second site is not
+redundant with anything downstream, it is the thing cutting nineteen to four. The consequence holds
+regardless of which of the two binds: the marker payload would report the larger figure while delivery
+was unchanged, so the telemetry would confirm a change that had not taken effect.
+
+**A fourth provenance shape, recorded without widening the taxonomy.** Both sites arrived in one commit
+whose entire message is a one-line subject naming three lettered work items, no body; the doc comment
+says nothing about the cap; neither site carries a rationale comment. The three shapes already on
+record — deliberate and pinned; written narrow, applied broad; deliberate but unpinned — all presuppose
+recoverable intent, and none exists here. The closest true description is unexplained at birth, pinned
+retroactively: a collected test now asserts the four-file cap, added seventy days later, pinning a value
+nobody had justified. One instance, recorded as a fourth shape rather than forced into one of the
+three — the same restraint `326234f3`'s third remainder case already applied to its own single instance.
+
+**The discard rate, stated once.** Across the nineteen tasks with a non-empty pool: four thousand three
+hundred sixty-four pool files, seventy-six delivered, four thousand two hundred eighty-eight discarded.
+Per-task loss seventy-three to ninety-nine percent, seven tasks above ninety-seven. Exactly one task's
+pool is at or under the cap.
+
+**The cap's value is inert; the surrounding constants bind first.** The ranker returns exactly five and
+both nine-wide consumers take nine, so the grep half's window is exactly four and the current value
+fills it precisely. Raising both sites to twenty produces twenty-four paths of which fifteen are read by
+nothing. The four consumers and their widths, recorded so the window is not re-derived: the two
+nine-wide prompts, the five-wide quick path that takes only ranked entries, and the three-wide
+scope-guard floor. Any increase is moot unless the nine-wide consumers move.
+
+**The instability belongs to the draw, and the earlier framing of the question was malformed.** This
+pass's own repeats: a pool at the cap yields one distinct membership; pools of fifteen, twenty-two,
+fifty-six and three hundred fifty-nine yield nine, nine, eleven and five. Instability appears the moment
+the pool exceeds the cap and does not scale with how far it exceeds it. No cap value below pool size
+fixes it.
+
+**An ordered draw is available and the ranking version is free.** Sorting the walk makes it
+deterministic at a small measured cost. Returning per-file match counts costs nothing at all — same
+invocation, same measured time — and ordering by that count yields one identical set on every repeat. On
+the one ground task with a label it contains the correct file on every run, against one of twenty and
+four of twenty for the walk-order draw measured earlier in this arc. The surface already computes this
+signal and discards it.
+
+**The ground cannot discriminate on a cap value, the fourth consecutive question it has failed on.**
+Four ground tasks have empty pools, one is the control, one has its correct file absent from the pool at
+any cap value, one is already at the cap with the file always delivered. Exactly one task has its
+correct file in a pool larger than the cap. A value large enough to catch every observed draw on that
+one task is a sample of a lottery and exceeds the nine-wide window regardless.
+
+**Read-not-run, marked where it applies.** The two sites' locations, the single caller, and the absence
+of any stated rationale are reads. The cap-raising experiment, the intermediate deduped count, the
+discard counts, the consumer widths, the repeat distributions, and the match-count ordering are runs.
+
+**"The four caps" in the enumerated remainder are not these two sites.** Confirmed by shape: every
+place this entry has enumerated the remainder's caps by name — the generation prompt's render slice in
+`executionPlan.ts`, the investigation prompt's own file cap in `planInvestigation.ts`, the body-seeding
+caps in `dispatch.ts` — points at render-time consumer widths, downstream of `relevantFilePaths`, never
+at `grepMatchingFiles`'s own cap or the merge's extras slice, which sit upstream of it in
+`preparePlanContext.ts` and have never been named among the four.
+
+**F6 differs in kind from the two surfaces this entry has already recorded as unbuildable, and that
+difference is named without changing the verdict.** The guard-substitution measurement and the
+per-consumer frequency filter were closed as not worth building — one unmeasurable, one measurable but
+data-starved. The count-ordered draw is neither: it is cheap, deterministic, and shows a positive,
+directional result on the one labeled case available. It is not closed here — it is recorded, open,
+promising, and unbuilt, because no specific fix is proposed and this pass's own scope excluded designing
+one. A promising direction does not make an entry actionable any more than a closed part does; the bar
+is a fix specified with nothing left to learn, and none is specified.
+
+**Re-checked a twenty-fourth time, after an establish pass that measures the four-match cap's
+provenance and cost and finds its value inert.** The rule needs no judgement: a closure moves the
+enumerated remainder only if the thing closed was enumerated in it, and the remainder is the routing
+predicate, the three step-guaranteeing mechanisms, the four caps, and the thirty-session expiry. This
+pass touches none of them, checked against each explicitly above: it decides nothing about the routing
+predicate, touches none of the three step-guaranteeing mechanisms, changes none of the four render caps
+(a different, downstream set from the two grep-cap sites this pass measured), and says nothing about the
+thirty-session expiry. Closing the cap's-value question is therefore body material closing body
+material — the ninth/twelfth situation, not the thirteenth's, since no counted remainder item is
+involved and `326234f3`'s third case does not apply. Item 78's note governs the promotion question as
+before: neither the closure nor the open, promising, unspecified ordering surface promotes the entry.
+Checked in the other direction, unchanged: items 61 and 78 both hold closed parts and stayed Neither,
+and none of the references to this entry elsewhere cites it for a bucket precedent. **Neither.**
+
 **Where the code lives:** the gate, its marker, the two early returns, the forced-steps regeneration
 and the body-seeding caps are all in `runOneShotInner`, `cli/dispatch.ts`; both lead-verb predicates,
 and the problem-word predicate the two refusal exits now pair with the narrower of them, are in
@@ -8567,6 +8653,19 @@ hundred and forty-eight. This one is an intervention that **completely achieves 
 is then absorbed downstream. Filing them as one shape would erase the difference between *too small* and
 *absorbed*, which is precisely the distinction a later pass choosing between options has to make. Two
 records, deliberately.
+
+**A sixth instance, and the first proactive one — caught before a change was made rather than audited
+after a claim was written.** An establish pass evaluating whether the grep surface's four-match cap
+could simply be raised traced the value forward before proposing it: raising the matcher's own cap
+default did increase its reported match count, but a second, independent slice further down the same
+function re-imposed exactly four on the delivered result, confirmed by measuring the intermediate value
+rather than inferred from the totals. The marker payload would have reported the larger figure while
+delivery stayed unchanged — the claimed payoff belonged to a field nothing downstream reads, the
+founding instances' shape, not the fifth's under-determination: nothing here ties, the value is
+overwritten outright. What is new is timing rather than mechanism: every other instance in this essay
+traces a claim already made, in this ledger or in code already shipped; this one heads one off before it
+existed, applying the essay's own prescribed check to a change under consideration rather than to a
+change already claimed.
 
 ## A seventeenth pattern: a freshly written entry is the least-checked text in this document, not the most current
 
