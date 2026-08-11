@@ -7515,6 +7515,40 @@ to generalize from a single occurrence, applied here to decline before a single 
 counted: a landed fix whose predictions all matched carries no lesson of its own, and recording that is
 the honest result rather than manufacturing one to fill the section.
 
+**Re-checked a twenty-sixth time, after a fix pass that lands the strand-one predicate's anchor
+repair.** `ed5754b7` and `8e124cd8` close the specific defect this entry's own strand one measures
+without naming: the routing predicate's own regular expression was anchored to the task's literal
+first word, so any lead-in text ahead of the verb defeated it — a same-intent rephrasing of a
+pure-addition task routed to the full investigation branch this predicate exists to skip. Fixed by
+two bounded strips before the existing anchor, not by widening the anchor itself; thirteen of sixty
+measured texts changed verdict, zero regressed, and the fix pass's own perturbation operator only
+prepends text, so its one-directional result is partly a property of the operator rather than a
+property established about the regular expression in general — carried here so a later reader does
+not read one-directionality as a proven property of the anchor.
+
+**What closes and what does not, checked against this entry's own enumerated remainder.** The routing
+predicate is named in that remainder, and this closes the one defect measured against it — the anchor
+defeat. What strand one's own opening sentence states is unchanged and still holds exactly as
+written: the gate consults nothing but this one predicate, not the classifier, not the repo, not the
+file list — the fix makes the predicate itself more accurate about what a pure addition looks like;
+it does not add a second signal beside it. The three step-guaranteeing mechanisms, the four caps, and
+the thirty-session expiry are untouched, as before. **Neither, unchanged, by the same rule the
+twenty-fifth re-check applied:** a closure moves the enumerated remainder only if the thing closed was
+enumerated in it, and what closed here is a real defect inside the named predicate, not the
+predicate's own structural limits — the two are different claims, and only the first was ever
+proposed as fixed.
+
+**A second consumer shares the predicate, and the fix's own established pass found it live before
+committing.** The two refusal exits this entry's own file listing already names — paired with the
+narrower lead-verb predicate, gating whether a plan's cannot-verify or no-change verdict is honored —
+read the identical function. Of the changed texts, most left that gate structurally closed regardless
+— a separate condition on problem words in the task text was already false for them. Four did not:
+one task's rephrasings carry both an additive lead verb and problem-adjacent vocabulary elsewhere in
+its own text, and for those four the fix closes a gate that was open before it, converging that shape
+onto the same task's own unperturbed behavior, where the gate was already closed. Checked and landed
+in the same commit as the routing fix rather than split out, on the reasoning that both consumers ask
+the identical question of the identical predicate.
+
 **Where the code lives:** the gate, its marker, the two early returns, the forced-steps regeneration
 and the body-seeding caps are all in `runOneShotInner`, `cli/dispatch.ts`; both lead-verb predicates,
 and the problem-word predicate the two refusal exits now pair with the narrower of them, are in
@@ -7977,11 +8011,227 @@ that bypasses `schemaMultiplier`, are in `core/computeRiskScore.ts`. The two liv
 `core/runLlmPatchFlow.ts` and `core/runAgent.ts`; the second is reached from `cli/index.ts`'s task-only
 flow. See item 82 for the removal that left the table in this state.
 
+## 84. Seven scoring and confidence mechanisms are unreachable, invisible to a naive import graph, and one of them is misattributed by name in both a source comment and CLAUDE.md
+
+**What it is.** Seven mechanisms in the scoring/confidence surface have zero live callers, at
+`5eb4486e`: `computeConfidenceBreakdown` and its `CONFIDENCE_RULES` table
+(`core/scoring/confidenceRules.ts`), `decideExecutionMode`, `confidenceScore.ts`,
+`buildConfidenceBreakdownFromSignals`, and the semantic-risk family — `scoreSemanticRisk`,
+`detectSemanticRisks`, `semanticRiskRules`. The chain runs `confidenceRules` ← `computeConfidenceBreakdown`
+← `decideExecutionMode` ← nothing: no production module imports `decideExecutionMode` as a value
+anywhere in the tree.
+
+**A naive import graph misses this, for a specific reason rather than a general fuzziness.**
+`runAgent.ts` imports `decideExecutionMode`'s result type with `import type`, a TypeScript construct
+erased entirely at compile time — no module load, no runtime edge. A graph built by matching every
+`from` clause without separating a type-only clause from a value one counts that import as live
+anyway. Measured directly: a value-only graph reports 299 of 397 production modules reachable from
+the CLI entry point; the same graph counting every import clause equally reports 332. Thirty-three
+modules sit in that gap — graph-reachable, never loaded. Confirmed against the built output too: in
+`dist/`, every file referencing `decideExecutionMode.js` is a `.d.ts` declaration file, none of them
+a module that runs.
+
+**The daily USD cap is enforced, and not by the function named for it.** `resolveDailyUsdCap`
+(`llm/usdCapResolver.ts`) is the live mechanism — imported by `agentLoop.ts`, producing the
+`daily_usd_cap_exceeded` termination reason. `checkDailyCap` (`llm/checkDailyCap.ts`) has zero
+production importers. A comment inside `agentLoop.ts` names `checkDailyCap` as the thing that
+rejected the run; CLAUDE.md attributes the cap to the same, wrong module. The capability is real and
+live; the name attached to it in both places is not the module that provides it.
+
+**A name collision sits beside the dead chain, not inside it.** `core/scoring/` holds
+`computeConfidenceScore.ts` — live, `runAgent.ts`'s own caller — and `computeConfidenceBreakdown.ts`
+— dead — side by side, sharing no code and differing by one word.
+
+**Read-not-run, marked where it applies.** The chain's own import statements, the
+`checkDailyCap`/`resolveDailyUsdCap` naming, and the `core/scoring/` collision are readings. The
+value-vs-type graph comparison and the `dist/` confirmation are runs.
+
+**Where the code lives:** `core/scoring/computeConfidenceBreakdown.ts`,
+`core/scoring/confidenceRules.ts`, `core/decision/decideExecutionMode.ts`,
+`core/scoring/confidenceScore.ts`, `core/buildConfidenceBreakdownFromSignals.ts`,
+`semantic/scoreSemanticRisk.ts`, `semantic/detectSemanticRisks.ts`, and
+`semantic/semanticRiskRules.ts` are the seven unreachable mechanisms. The live daily-cap path is
+`llm/usdCapResolver.ts`, consumed by `llm/agentLoop.ts`; the dead, misattributed module is
+`llm/checkDailyCap.ts`. The live sibling beside the dead chain is `core/scoring/computeConfidenceScore.ts`,
+consumed by `core/runAgent.ts`.
+
+## 85. Six threshold-level decisions across five scoring mechanisms have no recorded reason anywhere, and resolveSafetyLevel's own comment names a mapping that does not exist
+
+**What it is, counted precisely rather than left as "every."** Six threshold-level decision points
+across five mechanisms gate real outcomes on numeric constants, at `5eb4486e`: `computeRiskScore`'s
+own output is gated twice within the main patch flow — an environment-split early-return (item 86) and
+a minimal-safe-patch fast-path at ten — and gated a third way, fixed at seventy-one regardless of
+environment, by `mapScoreToMode` on the task-only path; `checkConfidenceGate` gates apply at a default
+of sixty; `enforceMicroEditProtection` gates a forced-preview downgrade at forty changed lines; and
+`resolveSafetyLevel` gates its own hard block at seventy-one. Searched exhaustively for a reason behind
+any of the six: inline comments at each constant, commit messages across every ref for each
+threshold's own identifier, and this document. Every search returns nothing — with one qualification
+recorded rather than smoothed over: the task-only cutoff carries a comment stating it is meant to
+match `resolveSafetyLevel`'s own hard-block number, which explains an intended relationship between
+two of the six, not a reason for either number itself.
+
+**Deliberately excluded, and why: the weights that produce the score these thresholds compare
+against.** `computeRiskScore`'s own `ROLE_MODIFIERS` table — the per-role multipliers deciding how a
+raw signal becomes the number these six thresholds gate on — is a different kind of quantity, already
+covered in its own right by item 83. This entry is about the cutoffs a score is compared against, not
+the formula that produces the score.
+
+**Three of `resolveSafetyLevel`'s own four thresholds change no decision at all, and the fourth's
+narrowness has already collapsed downstream by the time it would matter.**
+`PREVIEW_QUALITY_THRESHOLD`, `REVIEW_QUALITY_THRESHOLD`, and the confidence-below-seventy test only
+ever select between `safe_with_review` and `safe_auto_apply` — not part of the six this entry opened
+with, since neither changes what the run does. Only `HIGH_RISK_THRESHOLD` does, which is why it is the
+one of the four counted. Outside the resolver's own module, the only place any of its four values is read at all
+is a single inequality against `high_risk_blocked` in `runLlmPatchFlow.ts` — the other three survive
+equally past it regardless of which of them fires. On an exhaustive 2,688-point grid across every input
+combination the resolver accepts, `safe_auto_apply` is reached by twelve points — well under one
+percent — and even those collapse into the same downstream branch as `safe_with_review` once past the
+resolver.
+
+**The resolver's own comment names a mapping that is not in the file it points to, though what the
+comment concludes from it happens to be true anyway.** It states that `runLlmPatchFlow` maps both
+`safe_auto_apply` and `safe_with_review` to the same safe-to-apply decision mode. No such mapping
+exists there — that decision mode is computed independently, by a code path that never reads
+`safetyLevel` at all. The comment's conclusion (neither level gates apply) is correct; the mechanism
+it names for that conclusion does not exist. Outside its own module and `runLlmPatchFlow.ts`'s one
+inequality, every other reader of `safetyLevel` is a test file.
+
+**Read-not-run, marked where it applies.** The six thresholds' own definitions, the exhaustive search
+for a recorded reason, and the comment's claimed mapping are readings. The grid probe and the trace
+confirming no such mapping exists are runs.
+
+**Where the code lives:** `computeRiskScore`'s three downstream gates are in `core/runLlmPatchFlow.ts`
+(the environment-split early-return and the minimal-safe-patch fast-path) and `core/runAgent.ts`
+(`mapScoreToMode`); `checkConfidenceGate`'s default is `core/confidenceGate.ts`; `resolveSafetyLevel`'s
+four thresholds and its own mapping comment are `engine/safetyLevelResolver.ts`;
+`enforceMicroEditProtection`'s limit is `engine/microEditProtection.ts`. See item 82 for
+`checkConfidenceGate`'s own history, item 83 for `computeRiskScore`'s `ROLE_MODIFIERS`, and item 86 for
+the one pair of thresholds in this set with a measured environment-dependent split between them.
+
+## 86. computeRiskScore's early-return threshold is 95 outside production and 71 inside it; a second, downstream consumer of the same score is fixed at 71 with no such split
+
+**What it is.** `runLlmPatchFlow.ts`'s own risk-score gate — the threshold at which patch generation
+never starts and the model is never invoked — reads a different value depending on `NODE_ENV`:
+ninety-five everywhere `NODE_ENV` is not literally `production`, seventy-one where it is. No comment
+marks the split; measured, not inferred, in item 85's own exhaustive search for a reason behind any
+threshold in this surface. Dogfooding and any local run sit on the ninety-five side by default; a
+deployed instance with `NODE_ENV=production` set sits on the seventy-one side.
+
+**A second, downstream consumer of the identical kind of score carries no such split, checked by shape
+rather than assumed to match.** `runAgent.ts`'s own `mapScoreToMode`, gating the task-only flow between
+`blocked` and `safe_to_apply`, reads a fixed seventy-one regardless of `NODE_ENV` — the same number the
+production side of the first gate lands on, never the ninety-five side, in any environment. Its own
+comment states the number is meant to match `resolveSafetyLevel`'s own high-risk threshold, also
+seventy-one; neither comment explains why seventy-one rather than any other number. So the environment
+split belongs to one site, not to `computeRiskScore`'s output in general: the main path's early-return
+gate moves with `NODE_ENV`, the task-only path's own gate on the identical kind of score does not.
+
+**The consequence is measured, not projected, for the site that does split.** Run against a
+fifteen-entry probe corpus — the seven frozen ground tasks plus eight adversarial and ordinary probes —
+the main-path gate fires on three entries at seventy-one and two at ninety-five. One entry falls
+between the two thresholds outright: a schema-and-destructive task scoring seventy-three for the role
+the main path carries and eighty for the absent-role default this arc's own removal pass left live —
+blocked under the production threshold, not blocked under the default one, on the identical task and
+the identical code. Where the gate fires, the consequence is concrete and asymmetric: the user sees a
+rendered message naming the blocked score; the agent sees nothing, because the run never reaches a
+model call for it to observe.
+
+**Recorded as what was measured, proposing no fix and taking no position on which threshold, at either
+site, is the intended one.**
+
+**Where the code lives:** the environment-split threshold and the early return it gates are in
+`core/runLlmPatchFlow.ts`, beside the `computeRiskScore` call; the fixed threshold on the same kind of
+score is `mapScoreToMode` in `core/runAgent.ts`. See item 85 for the full six-threshold count this pair
+belongs to, and item 83 for the `ROLE_MODIFIERS` divergence the schema-and-destructive probe's own
+developer/absent split is an instance of.
+
+## 87. Four sites decide what the agent may do, none of them share state, and mode — which looks like the thing that should differentiate them — controls none of the four fields it appears to
+
+**What it is.** Four sites determine the agent's tool set and behavior, at three layers, sharing no
+state with each other, at `5eb4486e`. `shouldInvestigate` in `cli/dispatch.ts` — an anchored regular
+expression on the task's first word, item 79's own subject — chooses between a full investigation
+loop and a single lexical planning call. A chitchat/vague-task short-circuit, a closed token set,
+replies without invoking a model at all. `shouldUseAgentLoop`, a closure in `core/runLlmPatchFlow.ts`,
+chooses between the agent tool loop and a full-patch generation path. `buildPipelineConfig`, keyed on
+an archetype the task classifier derives with a real model call, produces a capability filter. The
+fourth can label a task investigation while the first three have already committed the run to a
+literal patch mode — the four never consult each other's verdicts.
+
+**Mode is not what differentiates them, despite naming the thing that looks like it should.**
+`runLlmPatchFlow` types its own mode as one of two literal values and maps the second onto the first,
+so every run reaching the main path carries the same mode value regardless of what the four sites
+decided. Read-only behavior comes entirely from the fourth site's own capability filter, which never
+touches mode at all. The source states this outright at its own dead-code guard: a read-only check
+there cannot be true on any path that reaches it, because a read-only *pipeline* strips write tools
+without ever touching the mode field a nearby check reads. A second mode value is never passed to a
+production caller at all — the chat branch of the agent loop's own system-prompt selection sits
+behind a condition that cannot be true, because nothing in production ever sets that mode literally.
+**Item 70's own closure independently states the same underlying fact from a different angle** — the
+mode-keyed fast-paths it records are unreachable for the identical reason, because every
+`runLlmPatchFlow` call site in the same file passes the same literal mode.
+
+**Four fields any of the four sites might plausibly be expected to control are identical regardless
+of which branch runs.** Iteration budget, token budget, write capability, and scope-guard
+configuration are all the same across every branch any of the four sites can select. `scopeGuard.ts`
+— the module that enforces which files a write may target — contains no reference to mode at all, in
+either direction.
+
+**No verdict is revisable once a run starts, and the one in-loop capability change that exists is
+narrower than it looks.** Mode itself is never mutated after a run begins, on any path. One mechanism
+does relax the tool set mid-run — triggered by observed failure and repeated reads, not by anything
+the agent requests, and fired at most once per run. A second mechanism notices when a run has no
+write-capable tool at all and records that it noticed; its own comment states plainly that the
+observation changes no control flow. Nothing tells the agent a tool it was not given exists, or why —
+contrast the write-scope guard, whose denial of an out-of-plan write returns to the agent as an
+ordinary tool result, visible from inside the loop the moment it happens.
+
+**One tool exists that could in principle let the agent argue for a different scope, and on the main
+path it is a no-op by construction, not by omission.** Its own recording branch requires
+investigation mode, which the main path never carries; its own plan-revision branch requires an
+environment flag this arc found off by default. Building an equivalent for mode itself would need
+most of what this one tool's own wiring already provides, spread across ten files: a capability
+declaration, an executor-level interception, a validated multi-field argument shape standing in for a
+severity level, a mode gate, a one-shot guard, and a synthesized approval round-trip — plus the one
+thing this tool never needed: a way past the fact that mode is fixed before the loop is entered, not
+after.
+
+**Read-not-run, marked where it applies.** The four sites' own decision inputs, the mode-typing, the
+scope-guard's own absence of the string, and the wiring inventory are readings. The identical-fields
+comparison and the dead-guard confirmation are runs.
+
+**Where the code lives:** `shouldInvestigate` and the chitchat/vague short-circuit are in
+`cli/dispatch.ts`; `shouldUseAgentLoop` is in `core/runLlmPatchFlow.ts`; `buildPipelineConfig` is
+`llm/archetypeDispatcher.ts`. The mode type, its normalization, the dead read-only guard, the
+one-shot capability relaxation, the write-capability-absent notice, and one of `suggest_scope_change`'s
+own wiring sites are all in `llm/agentLoop.ts`. `scopeGuard.ts` is `tools/scopeGuard.ts`.
+`suggest_scope_change`'s remaining wiring is `tools/toolDefinitions.ts`, `tools/builtinCapabilities.ts`,
+`tools/toolExecutor.ts`, `llm/archetypeDispatcher.ts`, `llm/subagents.ts`, `llm/antiThrash.ts`,
+`llm/compaction/classifyTurns.ts`, `cli/tui/components/toolCallFormat.ts`, and
+`core/toolCallIdentifyingArg.ts` — ten files in total. See item 79 for the first of the four sites in
+its own depth, and item 70 for the independent confirmation that every call site passes the same
+literal mode.
+
+**Essay decision — two candidates, both declined, one instance each.** Checked against all eighteen
+by title first. The closest by subject for the import-graph candidate is the thirteenth — a string's
+presence is evidence about the text, not about the behavior — but the mechanism differs: the
+thirteenth's own instances are all searches that undercount, missing a valid syntactic form a real
+edge takes. This finding runs the opposite direction — a correctly-parsed edge that is syntactically
+present and does not survive to a runtime edge, because TypeScript erases it. An undercounting search
+and an overcounting graph are not the same failure. The closest for the naming candidate is also the
+thirteenth, its own second half — a name in a comment is a claim to verify, not a citation — but that
+half's own instances are comments claiming a specific function is reachable when it is not; this
+finding is a comment correctly implying a capability exists, which it does, while naming the wrong
+function for it — a misattribution between two live-vs-dead siblings, not an overclaimed reachability.
+Related to the thirteenth in both cases, an instance of it in neither. Declined, one instance each;
+essay count stays eighteen. Reopening condition, named for both: a second instance of either — another
+type-erased import mistaken for a runtime edge, or another capability correctly attributed to the
+wrong sibling module — reopens the question on two instances rather than one.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 83 to find out which ones still need something. No index of
+reader the trouble of reading all 87 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -7994,9 +8244,9 @@ first (0):
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (7): 1, 4, 18, 23, 57, 63, 75
 
-**Neither — a structural fact recorded, with no fix proposed** (36): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (40): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
-81, 83
+81, 83, 84, 85, 86, 87
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, and 79 are partially closed or corrected; the
 classification above covers only the portion still open, not the whole entry.
