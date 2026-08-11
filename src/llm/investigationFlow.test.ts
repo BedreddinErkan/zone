@@ -102,7 +102,7 @@ describe("runInvestigationFlow — prompt injection", () => {
     expect(systemMsg!.content.toLowerCase()).toMatch(/read-only|investigation mode/);
   });
 
-  it("system prompt does not mention apply_patch or write_file tools", async () => {
+  it("system prompt does not offer apply_patch or write_file as callable tools", async () => {
     mocks.createChatCompletion.mockResolvedValueOnce(
       textResponse("## Answer\nNothing to report.")
     );
@@ -117,8 +117,17 @@ describe("runInvestigationFlow — prompt injection", () => {
     const firstCall = mocks.createChatCompletion.mock.calls[0];
     const messages: Array<{ role: string; content: string }> = firstCall[0].messages ?? firstCall[0];
     const systemMsg = messages.find((m) => m.role === "system");
-    expect(systemMsg!.content).not.toContain("apply_patch");
-    expect(systemMsg!.content).not.toContain("write_file");
+    // Narrowed from a blanket not.toContain (this session's tool-absence-notice
+    // arc): the investigation system prompt now legitimately names withheld tools
+    // by exact name, in a comma-list sentence, precisely so the agent knows not to
+    // attempt them ("TOOLS NOT AVAILABLE THIS RUN ... apply_patch, write_file ...
+    // not a permission error"). That is correct, intended behaviour, not a leak.
+    // What this test actually guards against — apply_patch/write_file being
+    // described as AVAILABLE tools — is the "- toolname" bullet format the
+    // "Tools available:" section renders every offered tool in; the notice's own
+    // prose never takes that shape, so this stays a precise, not weakened, check.
+    expect(systemMsg!.content).not.toMatch(/^- apply_patch\b/m);
+    expect(systemMsg!.content).not.toMatch(/^- write_file\b/m);
   });
 });
 

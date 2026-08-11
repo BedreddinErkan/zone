@@ -908,6 +908,12 @@ function assembleChatSystemPrompt(input: {
   repoPath: string;
   projectMemoryBlock: string;
   baseMaxIterations: number;
+  /** "" (or omitted) when nothing is withheld. Chat mode's own tool set is fixed
+   *  (CHAT_TOOLS), not task-dependent, so when non-empty this is the same block
+   *  on every call — no production caller sets mode:"chat" today, so this has no
+   *  observed behaviour change; wired for completeness with the other two
+   *  assemblers, which both now receive it. */
+  toolAbsenceBlock?: string;
 }): string {
   return [
     "You are Zone, answering conversationally about the user's codebase.",
@@ -918,6 +924,7 @@ function assembleChatSystemPrompt(input: {
     "- Use read_file and list_files only when code context is needed.",
     "- If the user asks for an edit, tell them to switch to patch mode.",
     "- Be concise, but include file references when they help.",
+    ...(input.toolAbsenceBlock ? ["", input.toolAbsenceBlock.replace(/\n+$/, "")] : []),
     "",
     `Repo path: ${input.repoPath}`,
     input.projectMemoryBlock,
@@ -965,6 +972,14 @@ export function assembleInvestigationSystemPrompt(input: {
    *  and INVESTIGATION_OUTPUT_FORMAT suppression for plan investigation. */
   commandTool?: "run_command" | "run_command_readonly" | null;
   suppressOutputFormat?: boolean;
+  /** "" (or omitted) when nothing is withheld. Live for two production callers —
+   *  investigationFlow.ts (/init) and planInvestigation.ts (plan-mode investigation)
+   *  — both set mode:"investigation", which normalizeAgentLoopMode maps to
+   *  "investigate", which selects this assembler over assembleAgentSystemPrompt.
+   *  Additive to forbidLine below, which already hand-writes a narrower, partial
+   *  version of this same disambiguation for the run_command/run_command_readonly
+   *  pair specifically. */
+  toolAbsenceBlock?: string;
 }): string {
   const ct = input.commandTool ?? null;
 
@@ -1080,6 +1095,7 @@ export function assembleInvestigationSystemPrompt(input: {
     "Do NOT end with offers to continue ('shall I dig deeper?', 'would you like me to explore further?', etc.) — the user already asked the question. Deliver the full answer now.",
     "FINAL SUMMARY: End with a brief 2-3 sentence prose summary of your findings. No code blocks, no markdown section headers beyond what the answer requires.",
     forbidLine,
+    ...(input.toolAbsenceBlock ? ["", input.toolAbsenceBlock.replace(/\n+$/, "")] : []),
     `Maximum iterations: ${input.baseMaxIterations} (already enforced; be targeted).`,
     `Repository path: ${input.repoPath}`,
     ...(input.projectMemoryBlock ? ["", input.projectMemoryBlock] : []),
@@ -2971,6 +2987,7 @@ Example:
         repoPath: input.repoPath,
         projectMemoryBlock,
         baseMaxIterations,
+        toolAbsenceBlock,
       })
     : isInvestigationMode
       ? assembleInvestigationSystemPrompt({
@@ -2980,6 +2997,7 @@ Example:
         agentIntro,
         commandTool: investigationCommandTool,
         suppressOutputFormat: input.suppressOutputFormat,
+        toolAbsenceBlock,
       })
       : assembleAgentSystemPrompt({
         agentIntro,
