@@ -7666,9 +7666,14 @@ the flow; the test-engineer branch printed its delegation line and ran framework
 only on a missing API key, past every gate that matters.
 
 **The CLI advertises three role values; one has no flow at all, and the flag itself is unvalidated.**
-`--role` accepts `developer`, `test_engineer` and `data_analyst`, but no module implements the developer
-flow — that value falls through to the ordinary path — and nothing constrains the flag to any of the
-three; an unrecognized string falls through the same way.
+`--role` accepts `developer`, `test_engineer` and `data_analyst`. `cli/index.ts` branches on role in
+exactly two places, neither for developer — so no module implements a developer flow there, and that
+value falls through to the ordinary path; nothing constrains the flag to any of the three, and an
+unrecognized string falls through the same way. A separate site, `buildFinalPrompt`'s own switch, does
+carry a `case "developer"` arm — but two prompt modules for the developer role are both confirmed at
+`c488aff1` to reach no model: `prompts/developerPrompt.ts`, a module-level orphan whose only importer
+is its own test, and the module behind that case arm, a dead branch reached only through a live static
+import whose sole caller passing "developer" is the orphan.
 
 **Reachability runs through four conditions, and the fourth was invisible to reading.** The legacy CLI
 branch (entered only when not headless, with no positional task argument, and only via the deprecated
@@ -7743,11 +7748,15 @@ through a role branch; three neither consume one nor sit behind one. None of the
 role names one in its own body in any load-bearing way — the module written for the role with no flow
 is generic guidance that would read the same on the main path.
 
-**On the live path the role contributes nothing, established by running rather than inferred.** For the
-only role the main path can carry, every role-keyed value equals its own absent-role default: the risk
-score returns an identical object, the confidence threshold is the same number, the validation
-multiplier is the same. The two flow roles do move those values; an unvalidated role lands on the
-default rather than throwing. The absent case is not a degraded path — it is the same path.
+**On the three scoring sites — risk score, confidence threshold, validation multiplier — the role
+contributes nothing on the live path, established by running rather than inferred.** For the only role
+the main path can carry, every role-keyed value at those three sites equals its own absent-role
+default: the risk score returns an identical object, the confidence threshold is the same number, the
+validation multiplier is the same. The two flow roles do move those values; an unvalidated role lands
+on the default rather than throwing. The absent case is not a degraded path at these three sites — it
+is the same path. This does not extend to `buildFinalPrompt`: role there is a required field with no
+default branch at all, so there is no absent-role case to compare against — a different site, checked
+separately.
 
 **The capability is reachable from the default path without new plumbing, and wiring it in today would
 produce nothing.** Every input it needs already exists on the main path, checked by signature. But run
@@ -7761,11 +7770,14 @@ written for a differently shaped codebase, inert here.
 **The three removal shapes cost different test surfaces.** Dropping the entry point alone deletes
 nothing but leaves the whole attached suite testing unreachable code — the only-caller-is-its-own-test
 condition this entry already established neither flow was in. Removing everything takes the attached
-suite with it, plus two already-orphaned modules as collateral: one whose only importer is its own
-tests, one a duplicate implementation of a module that also exists live in the roles directory. Keeping
-the capability without the role preserves the large majority of the attached tests with their subject
-unchanged, loses the flow-attached ones, and splits the one role-consuming prompt module's tests by
-whether they name role selection.
+suite with it. Two more modules are unreachable already, confirmed at `c488aff1`, independent of any
+removal, and are not part of the nineteen: `prompts/developerPrompt.ts`, whose only importer is its own
+test, and `prompts/testEngineerContext.ts`, which shares three function names with
+`roles/testEngineerContext.ts` — three of the ten in `prompts/`, three of the twenty-seven in
+`roles/` — a materially different implementation, not a duplicate. Keeping the capability without the
+role preserves the large majority of the attached tests with their subject unchanged, loses the
+flow-attached ones, and splits the one role-consuming prompt module's tests by whether they name role
+selection.
 
 **Read-not-run for this pass, marked where it applies.** The signature and branch analysis, the prompt
 classification, and the test-subject mapping are readings. The two-detector comparison, the absent-role
@@ -7803,10 +7815,12 @@ concept beyond the flows is in `core/computeRiskScore.ts`, `core/confidenceGate.
 `core/scoring/computeConfidenceBreakdown.ts`, `core/scoring/confidenceRules.ts`,
 `prompts/buildFinalPrompt.ts`, `types/conversation.ts`, `billing/conversationRepository.ts`, and the
 orphaned `core/validateLlmOutput.ts`. This pass's own comparison used `repo/detectFramework.ts` as the
-live path's independent detector, against `roles/detectTestFramework.ts`; the two orphaned modules
-taken as collateral by a full removal are `prompts/developerPrompt.ts` and `prompts/testEngineerContext.ts`,
-the second a duplicate of `roles/testEngineerContext.ts`. See item 81 for the category-field
-investigation this pass followed from, and the thirteenth and fifth patterns for the two essay checks.
+live path's independent detector, against `roles/detectTestFramework.ts`; the two modules unreachable
+independent of any removal, confirmed at `c488aff1`, are `prompts/developerPrompt.ts` and
+`prompts/testEngineerContext.ts`, the second sharing three function names with the live
+`roles/testEngineerContext.ts` — three of ten in `prompts/`, three of twenty-seven in `roles/` — not a
+duplicate. See item 81 for the category-field investigation this pass followed from, and the thirteenth
+and fifth patterns for the two essay checks.
 
 ## Status snapshot — a partition, not a priority ordering
 
