@@ -59,6 +59,31 @@ export const PURE_ADDITION_LEAD_VERBS = [
 const PURE_ADDITION_RE = /^(add|create|implement|build|scaffold|introduce|generate|write|set ?up|new)\b/i;
 
 /**
+ * Leading text that carries no bearing on whether the task is a pure addition but
+ * sits ahead of the lead verb PURE_ADDITION_RE anchors on, defeating the match.
+ * Two shapes, each justified by a measured case, not a general filler scan:
+ *
+ * - FRAMING: a closed set of request-framing phrases a same-intent rephrasing can
+ *   prepend with zero added meaning (please / can you / I need you to / let's).
+ *   Measured directly — a perturbation harness applying these four exact templates
+ *   flipped isPureAddition on every additive task it touched and none of the rest.
+ * - LOCATIVE: "In <path>, " naming the target file before the instruction. Requires
+ *   the pre-comma token to contain "/" or "." (file-path-shaped) rather than
+ *   matching any leading comma-clause — "In general, add X" is not the same claim
+ *   as a file reference, and a bare "In <name> <verb>" with no comma (no locative
+ *   clause to strip at all) is deliberately left alone.
+ *
+ * Applied once each, framing then locative, not looped to a fixed point — a task
+ * chaining more than one such clause is outside the two shapes this was built for.
+ */
+const LEADING_FRAMING_RE = /^(please|can you|i need you to|let'?s)\s+/i;
+const LEADING_LOCATIVE_RE = /^in\s+[^\s,]*[./][^\s,]*,\s*/i;
+
+function stripLeadingPreamble(task: string): string {
+  return task.trim().replace(LEADING_FRAMING_RE, "").replace(LEADING_LOCATIVE_RE, "");
+}
+
+/**
  * True ONLY for clear pure-addition tasks — adding brand-new code that doesn't touch existing
  * logic (add/create/scaffold/…). Structural verbs (refactor/rename/extract/migrate/convert),
  * the ambiguous "make", all problem tasks, and all unrecognized/ambiguous phrasings return false.
@@ -67,7 +92,7 @@ const PURE_ADDITION_RE = /^(add|create|implement|build|scaffold|introduce|genera
  * planning ONLY when this returns true. When in doubt → false → investigate.
  */
 export function isPureAddition(task: string): boolean {
-  return PURE_ADDITION_RE.test(task.trim());
+  return PURE_ADDITION_RE.test(stripLeadingPreamble(task));
 }
 
 /**
@@ -76,7 +101,13 @@ export function isPureAddition(task: string): boolean {
  * gate needs to record what its decision keyed on, not just the boolean
  * result, since [zone-plan-mode]'s `mode` field alone can't be trusted when
  * an env override forced a branch independent of what this predicate says.
+ *
+ * Reads the same stripped text isPureAddition decides on, so a returned verb can
+ * be one the raw task string does not itself start with (e.g. "add" for "Please
+ * add X"). Intentional: this describes what the router decided on, not the raw
+ * string — a later reader comparing [zone-plan-mode]'s leadVerb field against the
+ * task text should expect that mismatch, not read it as a bug.
  */
 export function matchedLeadVerb(task: string): string | null {
-  return PURE_ADDITION_RE.exec(task.trim())?.[0]?.toLowerCase() ?? null;
+  return PURE_ADDITION_RE.exec(stripLeadingPreamble(task))?.[0]?.toLowerCase() ?? null;
 }
