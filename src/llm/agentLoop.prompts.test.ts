@@ -768,4 +768,46 @@ describe('item 100: offeredToolNames param — condition prompt instructions on 
       expect(prompt).toContain("TEST FAILURES — investigate, don't summarize:");
     });
   });
+
+  describe('find_references, search_in_files — DIVERGENCE CHECK tri-state', () => {
+    // The one block naming two tools in a single instruction. subagent:worker's own real
+    // shape offers search_in_files but not find_references -- a bare "gate on at least one
+    // offered" would keep the block but still wrongly name find_references, so this names
+    // only the tool(s) actually offered instead.
+    it('names both tools when both are offered', () => {
+      const prompt = assembleAgentSystemPrompt({
+        ...PATCH_INPUT,
+        offeredToolNames: new Set(['read_file', 'find_references', 'search_in_files']),
+      });
+      expect(prompt).toContain('use find_references or search_in_files on the shared');
+    });
+
+    it('names only search_in_files when find_references is withheld', () => {
+      const prompt = assembleAgentSystemPrompt({
+        ...PATCH_INPUT,
+        offeredToolNames: new Set(['read_file', 'search_in_files']),
+      });
+      expect(prompt).toContain('use search_in_files on the shared');
+      expect(prompt).not.toContain('find_references or search_in_files');
+      expect(prompt).not.toContain('use find_references on the shared');
+    });
+
+    it('names only find_references when search_in_files is withheld', () => {
+      const prompt = assembleAgentSystemPrompt({
+        ...PATCH_INPUT,
+        offeredToolNames: new Set(['read_file', 'find_references']),
+      });
+      expect(prompt).toContain('use find_references on the shared');
+      expect(prompt).not.toContain('find_references or search_in_files');
+      expect(prompt).not.toContain('use search_in_files on the shared');
+    });
+
+    it('omits the whole directive when neither is offered', () => {
+      const prompt = assembleAgentSystemPrompt({
+        ...PATCH_INPUT,
+        offeredToolNames: new Set(['read_file']),
+      });
+      expect(prompt).not.toContain('DIVERGENCE CHECK.');
+    });
+  });
 });

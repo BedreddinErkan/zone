@@ -565,13 +565,32 @@ const ASK_USER_DIRECTIVE =
   `BAD: a preference you can default (pick it, note it in the summary); anything readable from the repo; permission to proceed; re-confirming an approved plan.\n` +
   `Ask before the work the answer would invalidate, not after. One bundled question: state the options and the default you take if declined.\n\n`;
 
-const DIVERGENCE_CHECK_DIRECTIVE =
-  `DIVERGENCE CHECK. When you trace a path that handles a cross-cutting concern — ` +
-  `credential/key/provider/model resolution, auth, config loading, persistence, path handling — ` +
-  `check the 1-2 most relevant concerns: use find_references or search_in_files on the shared ` +
-  `helper to enumerate sibling call sites, then confirm the path under review is among them. ` +
-  `Flag any path that re-implements logic available in a shared helper, or diverges from the ` +
-  `dominant pattern — a path that works in isolation is a latent bug if it has drifted from its siblings.\n\n`;
+// Item 100 fix: the only defective block naming two tools in one instruction. Block-level
+// gating alone (suppress the whole directive unless at least one of the two is offered)
+// would leave subagent:worker's own real shape wrong — it offers search_in_files but not
+// find_references, so a bare "or" gate would keep the block but still name a tool it
+// doesn't have. Names only the tool(s) actually offered; falls back to naming both
+// (today's unchanged text) when offered is unset, same "assume offered" direction as
+// isOffered's own fallback in assembleAgentSystemPrompt.
+function buildDivergenceCheckDirective(offered: ReadonlySet<string> | undefined): string {
+  const hasFindReferences = offered?.has("find_references") ?? true;
+  const hasSearchInFiles = offered?.has("search_in_files") ?? true;
+  if (!hasFindReferences && !hasSearchInFiles) return "";
+  const tool =
+    hasFindReferences && hasSearchInFiles
+      ? "find_references or search_in_files"
+      : hasFindReferences
+        ? "find_references"
+        : "search_in_files";
+  return (
+    `DIVERGENCE CHECK. When you trace a path that handles a cross-cutting concern — ` +
+    `credential/key/provider/model resolution, auth, config loading, persistence, path handling — ` +
+    `check the 1-2 most relevant concerns: use ${tool} on the shared ` +
+    `helper to enumerate sibling call sites, then confirm the path under review is among them. ` +
+    `Flag any path that re-implements logic available in a shared helper, or diverges from the ` +
+    `dominant pattern — a path that works in isolation is a latent bug if it has drifted from its siblings.\n\n`
+  );
+}
 
 // Patch-branch only, and suppressed when input.planApproved is true — an approved plan
 // already carries write permission for its steps; capping prose to one sentence per tool
@@ -775,7 +794,7 @@ export function assembleAgentSystemPrompt(input: {
           `- You have a tight iteration budget — use it efficiently: one search to locate the concern, one find_references to check sibling call sites (DIVERGENCE CHECK), one synthesis.\n` +
           `- Use search_in_files and find_references; read source files as needed. Do NOT avoid source reads — they are the point.\n` +
           `- Final response: prose summary covering what was found, what was NOT checked, and any divergence/drift detected.\n\n` +
-          DIVERGENCE_CHECK_DIRECTIVE +
+          buildDivergenceCheckDirective(input.offeredToolNames) +
           WEB_SEARCH_DIRECTIVE
         : `BREVITY RULES (read once, apply always):\n\n` +
           `Default to action over explanation. Tools speak louder than narration.\n` +
@@ -787,7 +806,7 @@ export function assembleAgentSystemPrompt(input: {
           `Read counter: every read_file ≥1.5KB tokens. 5+ reads of the same file is a smell.\n` +
           `Iter counter: you have a finite iteration budget (typically 10-15). After ~70% of your budget, you should be patching not exploring.\n\n` +
           ASK_USER_DIRECTIVE +
-          DIVERGENCE_CHECK_DIRECTIVE +
+          buildDivergenceCheckDirective(input.offeredToolNames) +
           `GIT CONTEXT: when the task involves recent changes, regressions, or "what changed" — inspect git before reading broadly. Bounded only: git log -n 10 --oneline, git diff --stat, git blame -L <range> <file>, git show <ref> -- <file>. Skip git entirely when the task has no historical dimension; never dump a full repo diff.\n\n` +
           WEB_SEARCH_DIRECTIVE) +
     (input.hasFramework ? `${input.frameworkLines.join("\n")}\n\n` : "") +
