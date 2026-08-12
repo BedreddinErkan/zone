@@ -6,6 +6,7 @@ import {
   buildCaptureRecord,
   suppressNonOffered,
   restoreSuppressed,
+  buildCreditProbeParams,
 } from "./notice-regression-probe.mjs";
 import { resolveToolList, listRegisteredTools, registerTool } from "../src/tools/toolRegistry.js";
 
@@ -132,5 +133,19 @@ describe("suppressNonOffered / restoreSuppressed — arm A's registry seam, agai
 
     const restored = resolveToolList(undefined).map((t) => t.name).sort();
     expect(restored).toEqual(before);
+  });
+});
+
+describe("buildCreditProbeParams — the one provider-shaped assumption in the credit probe", () => {
+  it("uses max_tokens: 16 for openai — the measured floor, not the anthropic default", () => {
+    const params = buildCreditProbeParams("gpt-5.6-luna", "openai");
+    expect(params.max_tokens).toBe(16);
+    expect(params.model).toBe("gpt-5.6-luna");
+    expect(params.messages).toEqual([{ role: "user", content: "hi" }]);
+  });
+
+  it("uses max_tokens: 1 for anthropic — unaffected by the openai-specific floor", () => {
+    const params = buildCreditProbeParams("claude-sonnet-4-6", "anthropic");
+    expect(params.max_tokens).toBe(1);
   });
 });

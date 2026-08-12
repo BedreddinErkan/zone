@@ -151,12 +151,36 @@ export function restoreSuppressed(disabled, { registerTool }) {
   for (const t of disabled) registerTool(t);
 }
 
+/**
+ * OpenAI's Responses API rejects max_output_tokens below this floor — measured directly
+ * (not assumed, not read from a comment): a probe call with max_tokens:1 returned
+ * `400 Invalid 'max_output_tokens': integer below minimum value. Expected a value >= 16,
+ * but got 1 instead.` There is nothing to reuse instead of this number: the adapter's own
+ * conversion (responsesConvertParams.ts's max_output_tokens mapping) is a bare pass-through
+ * with no floor or clamp anywhere in the chain, and the installed openai SDK's own type
+ * definitions for max_output_tokens carry no documented minimum either — this constant is
+ * the API's own stated validation rule, quoted exactly, not padded or rounded.
+ */
+const OPENAI_MIN_OUTPUT_TOKENS = 16;
+
+/**
+ * Pure: the credit probe's request parameters, per provider. Separated from probeCredit
+ * itself specifically so the one provider-shaped assumption in this file (the output-token
+ * floor above) is testable without a call — the gap the first OpenAI run of this instrument
+ * found: it gates every run on both providers and was not among the four pure parts pinned
+ * when this file was first committed.
+ */
+export function buildCreditProbeParams(model, provider) {
+  const maxTokens = provider === "openai" ? OPENAI_MIN_OUTPUT_TOKENS : 1;
+  return { model, messages: [{ role: "user", content: "hi" }], max_tokens: maxTokens };
+}
+
 // ---------- Not pure: makes a real, billed call ----------
 
-/** Minimal decisive credit check: one token, one word. Never used for the arm itself. */
-export async function probeCredit(client, model) {
+/** Minimal decisive credit check: as few tokens as each provider's own API accepts. Never used for the arm itself. */
+export async function probeCredit(client, model, provider) {
   try {
-    await client.createChatCompletion({ model, messages: [{ role: "user", content: "hi" }], max_tokens: 1 });
+    await client.createChatCompletion(buildCreditProbeParams(model, provider));
     return { ok: true };
   } catch (e) {
     return { ok: false, message: String(e && e.message ? e.message : e) };
@@ -213,7 +237,7 @@ async function main() {
   }
 
   const client = createLLMClient({ provider, apiKey });
-  const credit = await probeCredit(client, model);
+  const credit = await probeCredit(client, model, provider);
   if (!credit.ok) {
     console.error(`[notice-arm] CREDIT PROBE FAILED — stopping before any task. ${credit.message}`);
     process.exit(3);
