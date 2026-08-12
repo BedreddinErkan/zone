@@ -8240,7 +8240,7 @@ essay count stays eighteen. Reopening condition, named for both: a second instan
 type-erased import mistaken for a runtime edge, or another capability correctly attributed to the
 wrong sibling module — reopens the question on two instances rather than one.
 
-## 88. Closed — the agent now receives a system-prompt notice naming every withheld tool and why, byte-identical for runs where nothing is withheld
+## 88. Closed — a system-prompt notice names every withheld tool and why, byte-identical for runs where nothing is withheld; whether it is safe in practice is item 90's open question
 
 **What the notice says, and what it deliberately does not.** A system-prompt block, rendered once
 before the loop starts, names every tool absent from the run and the cause: this task's tier for a
@@ -8266,9 +8266,17 @@ a stray separator would still change every cached prefix for the runs that need 
 full assembled system prompt for a `targeted_fix`-shaped run before this change and again after:
 14,138 characters, zero-line diff.
 
-**`listRegisteredTools()` gained its first production consumer.** Exported specifically to recover the
-full tool set from the module-scoped registry, with no caller anywhere in the tree before this. The
-notice is what it was exported for.
+**`listRegisteredTools()` did not gain a production consumer, and this item's own framing needs the same
+correction.** The false claim, found while measuring the notice's own behavioural effect: the notice calls
+`resolveToolList(undefined)` directly, not `listRegisteredTools()` — whose only occurrence anywhere in the
+tree remains its own definition, unchanged by this item's fix. The larger overclaim is this item's own
+heading: a notice that names every withheld tool "and why" is not the same claim as a notice the agent uses
+safely, and the difference is not academic — item 90 measured this exact notice suppressing the agent's own
+use of tools it still held, in a regression this item did not anticipate and does not test for. Item 90 is
+Blocked on data, not Closed: its own fix has never been re-verified behaviourally. This item's Closed status
+covers what was actually built and independently verified below — the notice's structural facts, the token
+costs, the byte-identical empty case — not a claim that receiving it is safe, which remains item 90's open
+subject.
 
 **The bound this leaves, carried explicitly rather than estimated.** `assembleAgentSystemPrompt` has
 exactly one call site, confirmed by direct search, textually before the iteration loop begins — enough
@@ -8280,8 +8288,8 @@ unmeasured rather than guessed at.
 **Where the code lives:** the notice itself is `llm/toolAbsenceNotice.ts`; it is computed once, beside
 `emitWriteCapabilityAbsent`, and threaded through `assembleAgentSystemPrompt`'s existing block-
 concatenation pattern, all in `llm/agentLoop.ts`. See item 87 for the finding this closes and the two
-findings it carries that this does not touch, and item 89 for what the notice's own one-shot timing
-leaves open.
+findings it carries that this does not touch, item 89 for what the notice's own one-shot timing leaves
+open, and item 90 for a regression this notice caused that a later pass in this arc found and fixed.
 
 **Essay decision — declined, and the reason is sharper than a mechanism mismatch: this document
 already has an established shape for it, and it isn't an essay.** The candidate — information computed
@@ -8337,28 +8345,159 @@ recomputation of the offered tool set are all in the same file, inside the itera
 for the notice this leaves stale, and item 87 for the mode-revisability finding this residue sits
 beside.
 
+## 90. The tool-absence notice item 88 shipped suppressed shell use in a measured regression, fixed by a rule this pass never re-ran behaviourally
+
+**What was measured, and by what design.** Three arms, seven frozen ground tasks, `claude-sonnet-4-6`, one
+run per cell, question archetype (eighteen absent tools). Arm A: the notice's own registry-suppression seam
+disabled, offered set unchanged. Arm B: the notice rendered as item 88 shipped it. Arm C, three of the seven
+tasks only: the notice rendered with `run_command` alone dropped from its named list, everything else —
+including the prohibition sentence — unchanged. Arm A issued fifteen shell calls across seven tasks, ten of
+them discovery. Arm B issued zero, on every task. Arm C returned to arm A's exact counts on its three tasks,
+including the identical command on two of them.
+
+**Two false negatives, both in arm B.** Asked whether a symbol appears anywhere in the repository, arm B
+answered it does not; arms A and C each found it in ten places across four files with one grep. Asked to
+locate a file at an unconfirmed path, arm B said it could not list directories, tools withheld this run —
+while holding `run_command_readonly`, whose whitelist includes `ls` and `find`.
+
+**The prohibition sentence — "do not attempt these via another tool or a shell workaround" — is present in
+both arm B and arm C and cannot explain the difference between them; that sentence's own marginal
+contribution is unseparated by this design and remains so.** What separates the two arms is that arm B's
+notice names `run_command` as withheld while the agent holds `run_command_readonly`; arm C's does not. The
+model reads the withheld general name as covering the offered, more specific one sharing its prefix, and
+stops using the shell entirely rather than risk it.
+
+**The fix generalises the rule, not the one pair.** A withheld tool name is suppressed from the notice only
+when it is a strict prefix of an offered tool's name — the direction where the withheld name reads as
+already covering what's offered. The reverse direction — an offered general tool, a withheld specific
+sibling — is left alone, since the offered tool is a strict superset and naming the narrower sibling absent
+is true and harmless. Exactly two strict-prefix pairs exist in the twenty-tool registry, both rooted at
+`run_command`; only the withheld-root-covers-offered-extension direction of either pair is the dangerous
+one. Landed with unit tests pinning six measured notice configurations by name; a mutation predicted a kill
+set of three and found five — `tier=simple` and `tier=medium` carry the identical reverse-direction shape
+the design didn't originally name.
+
+**A separate, incidental finding from the same fix arc: `assembleAgentSystemPrompt`'s `toolAbsenceBlock`
+field was required, and fourteen test call sites across the tree called it without one.** Each silently
+passed `undefined`, string-concatenated into the assembled prompt as the literal nine characters
+`"undefined"`. `tsc --noEmit` never caught it — this project's tsconfig excludes `*.test.ts` — and no
+existing assertion in any of those fourteen files happened to inspect that region of the string. Made
+optional with an empty-string fallback, and pinned with a test asserting the assembled prompt contains no
+literal `"undefined"` when the field is omitted — the test that would have caught the defect, not merely the
+fallback that fixes it.
+
+**Every count in this item is n=1** — one run per cell, not a rate, and none is presented as one. Nothing
+here generalises past the seven frozen tasks and the one archetype they were run under.
+
+**Unverified, and this matters more than any figure in this item: the fix landed on master and its
+behavioural effect has never been measured.** The re-run this arm's own design calls for — the same seven
+tasks, the same arm-B configuration, against the shipped fix — was never executed; provider credit was
+exhausted before it started, confirmed persistent by retry. A prediction was registered before the fix
+landed: per-task discovery-command counts matching arm C's own measured counts, and both false negatives
+resolving. That prediction stands unchecked. A reader should not infer the regression is closed because the
+fix is on master — closing this item requires the observation this paragraph names, and that observation
+does not yet exist.
+
+**Where the code lives:** the notice is `llm/toolAbsenceNotice.ts`, `buildToolAbsenceBlock`; the
+prefix-suppression rule is inside it. The splice fix is in `assembleAgentSystemPrompt`, `llm/agentLoop.ts`.
+See item 88 for the notice this regression came from, and item 89 for a different, unrelated way the same
+notice can go stale.
+
+## 91. Closed — `run_command_readonly`'s description named no discovery binary, at either of the two sites that state its capability
+
+**What it is.** Across seventeen commands recovered from a session establish and re-checked directly
+against the built `checkCommandSafe`, zero were refused — the model never touched the whitelist boundary in
+any run measured. This sits beside item 90's regression but is a different defect: not suppressed capability,
+missing disclosure. The tool's own schema description said only "read-only git/filesystem inspection,"
+naming no binary, while a fifty-six-entry whitelist includes `ls`, `find`, `fd`, `grep`, `rg`, and ten
+read-only `git` subcommands among them.
+
+**Fixed at two sites, one live and one not.** The tool-schema description (`toolDefinitions.ts`) is live
+wherever `run_command_readonly` is offered, in any mode — now names the five discovery binaries and six
+read-only `git` verbs, plus the structural constraints a refusal would otherwise be the only way to learn:
+no chaining, no shell substitution, no write redirects. `commandToolLine`, the same capability's second,
+independently-worded statement inside `assembleInvestigationSystemPrompt` (`agentLoop.ts`), was edited to
+match — despite having no reachable production caller today, traced exhaustively: the one caller offering
+only read-only tools withholds `shell.exec` entirely, the one caller offering a command tool in
+investigation mode offers the full `run_command` and takes the sibling branch, and the `verifier` subagent
+kind that would reach this one is unreachable — see item 92. Edited for consistency between the two
+statements of one capability, not for behaviour; its own runtime cost today is zero.
+
+**A pre-existing cumulative description-length ceiling caught the first draft in flight.** The tool-schema
+addition's first form pushed the sum of every `ZONE_TOOLS` description past a 4400-character regression
+guard, to 4469; caught by the full suite, not anticipated. Trimmed the least-essential addition (a
+pipes-allowed aside, never part of the measured gap) and one redundant phrase, landing at 4372 — every
+discovery binary and all three structural constraints survived the trim.
+
+**Anti-drift pinning, checked against the real whitelist rather than re-hardcoding it, in both directions.**
+Each site gets a word-boundary text assertion per named binary and a live `checkCommandSafe` gate assertion
+per named binary, so either can go stale independently and be caught. Two mutations, opposite directions,
+both exactly as predicted: removing a whitelist entry fails only the gate assertions at both sites, with
+their text assertions unaffected; removing a binary from one site's description text fails only that site's
+text assertion, with its gate assertion unaffected.
+
+**What stays open.** The refusal text a blocked command actually returns (`toolExecutor.ts`) is a third,
+independent statement of this same capability, untouched by this item; its whitelist-miss variant still
+redirects the agent to `run_command`, which several archetypes — including the one item 90 measured — do
+not offer. Its own behavioural effect is unmeasured, as is the scope guard's; neither this fix nor item 90's
+has been re-run against a live model, for the same reason — provider credit exhausted at the time of both.
+
+**Where the code lives:** `toolDefinitions.ts`, the `run_command_readonly` tool entry; `commandToolLine`
+inside `assembleInvestigationSystemPrompt`, `agentLoop.ts`; pinning tests in
+`toolDescriptions.compression.test.ts` and `agentLoop.prompts.test.ts`.
+
+## 92. A third instance of a value that reads as reachable and isn't — plumbed through seven files' type signatures, a correct capability-filter case, and no dispatch path, mechanically distinct from the other two
+
+**What it is.** `resolveSubagentCapabilityFilter` (`subagentDispatch.ts`) has a correct `case "verifier"`,
+returning exactly the capability set — `fs.read` plus `shell.exec` — that would grant `run_command_readonly`
+without granting `run_command`. The type `"worker" | "explore" | "verifier"` is threaded through seven
+files: `agentLifecycleEvents.ts`, `openaiContext.ts`, `modelRouting.ts`, `subagentDispatch.ts`,
+`agentLoop.ts`, `usageTracker.ts`, `toolExecutor.ts`. No file dispatches it. The `Task` tool's own runtime
+validation checks `subagentType` against `VALID_SUBAGENT_TYPES`, which is `["worker", "explore"]` —
+`"verifier"` is absent from the one list that actually gates a call.
+
+**Not the same mechanism as item 84's `checkDailyCap`, or as `listRegisteredTools()` (item 88, corrected),
+despite reading as the same shape.** Both of those are invisible to a naive import graph — nothing anywhere
+imports or calls them. `verifier` is the opposite: typed, greppable, and sitting inside a function that is
+itself imported and called correctly. What excludes it is a value-level check at a different call site, not
+an absent reference in the graph. The three share a symptom — a capability that reads as available in the
+code and cannot be exercised — and nothing below that level. Recorded separately for that reason, not
+merged into item 84.
+
+**Where the code lives:** `case "verifier"` is in `subagentDispatch.ts`, `resolveSubagentCapabilityFilter`.
+The excluding check is `VALID_SUBAGENT_TYPES` in `subagents.ts`, read at the `Task` tool's own validation in
+`toolExecutor.ts`. The seven type-signature sites are named above.
+
+**Essay decision — declined on category, the same ground item 88 already recorded for the nearest
+comparable candidate.** Checked directly against all eighteen: every one is about this document's own
+investigative methodology — stale references, mutation-testing pitfalls, tracing versus running,
+measurement windows — and this is a fact about `Task` tool dispatch validation, not about how this document
+investigates anything. Item 88's own declination set the precedent that a code shape defaults to a numbered
+item rather than an essay; this is independently also a code shape, by the same test, without needing its
+own reopening condition.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 89 to find out which ones still need something. No index of
+reader the trouble of reading all 92 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (41): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88
+**Closed** (42): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (0):
 
-**Blocked on data** — closing requires an observation that doesn't exist yet (7): 1, 4, 18, 23, 57, 63, 75
+**Blocked on data** — closing requires an observation that doesn't exist yet (8): 1, 4, 18, 23, 57, 63, 75, 90
 
-**Neither — a structural fact recorded, with no fix proposed** (41): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (42): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
-81, 83, 84, 85, 86, 87, 89
+81, 83, 84, 85, 86, 87, 89, 92
 
-Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, and 79 are partially closed or corrected; the
+Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, and 88 are partially closed or corrected; the
 classification above covers only the portion still open, not the whole entry.
 
 ---
