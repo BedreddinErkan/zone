@@ -759,6 +759,28 @@ describe('item 100: offeredToolNames param — condition prompt instructions on 
     });
   });
 
+  describe('Task — the "or Task" clause inside APPLY_ROLLED_BACK', () => {
+    // simple_add/tier:simple/tier:medium/subagent:worker all offer apply_patch but not
+    // Task -- the bundle-level gate above keeps this section open (apply_patch alone is
+    // enough), but the retry sentence named Task regardless.
+    it('names Task when Task is offered alongside apply_patch', () => {
+      const prompt = assembleAgentSystemPrompt({
+        ...PATCH_INPUT,
+        offeredToolNames: new Set(['read_file', 'apply_patch', 'Task']),
+      });
+      expect(prompt).toContain('retry with apply_patch or Task (≥3-file edits).');
+    });
+
+    it('drops "or Task" when Task is withheld but apply_patch is offered', () => {
+      const prompt = assembleAgentSystemPrompt({
+        ...PATCH_INPUT,
+        offeredToolNames: new Set(['read_file', 'apply_patch']),
+      });
+      expect(prompt).toContain('retry with apply_patch.');
+      expect(prompt).not.toContain('or Task (≥3-file edits)');
+    });
+  });
+
   describe('apply_patch — TEST FAILURES block', () => {
     it('is omitted when apply_patch is withheld', () => {
       const prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, offeredToolNames: new Set(['read_file']) });

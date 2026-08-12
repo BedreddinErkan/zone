@@ -853,7 +853,10 @@ export function assembleAgentSystemPrompt(input: {
     `APPLY_ROLLED_BACK — when apply_patch returns a result beginning with "APPLY_ROLLED_BACK":\n` +
     `- Patch reverted — disk is at pre-apply state for paths listed under "Files restored to pre-apply state".\n` +
     `- Read the error list. "Suggested: " lines are hints for coordinated multi-file edits.\n` +
-    `- Do NOT use shell commands to bypass. Re-investigate, then retry with apply_patch or Task (≥3-file edits).\n\n` +
+    // Item 100 fix: simple_add/tier:simple/tier:medium/subagent:worker all offer apply_patch
+    // but not Task — the bundle-level gate above keeps this section open, but the sentence
+    // itself named Task regardless of whether this run actually has it.
+    `- Do NOT use shell commands to bypass. Re-investigate, then retry with apply_patch${isOffered("Task") ? " or Task (≥3-file edits)" : ""}.\n\n` +
     `VERIFICATION WARNINGS — when a run summary contains a "VERIFICATION WARNINGS" block:\n` +
     `- Your patches are on disk. The verifier found new errors your changes introduced.\n` +
     `- Options: (a) read error locations and patch to fix; (b) call revert_patch({path}) to undo specific files; (c) accept if errors are pre-existing or out-of-scope.\n` +
