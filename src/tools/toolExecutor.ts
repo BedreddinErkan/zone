@@ -25,12 +25,46 @@ import { generateFileOutline } from "./fileOutline.js";
 import { findCheckerForFile, trackCheckerUnavailableWarning } from "./syntaxCheckers.js";
 import { classifyShellExit } from "./classifyShellExit.js";
 import { validateRunEnvironment } from "./runEnvironment.js";
-import { checkCommandSafe } from "../llm/runCommandSafe.js";
+import { checkCommandSafe, type CatchAllClass } from "../llm/runCommandSafe.js";
 import { hashStagingState } from "../llm/loopDetector.js";
 import { MEMORY_WARN_THRESHOLD_BYTES } from "../memory/constants.js";
 import { segmentPatchBlocks } from "../utils/patchBlocks.js";
 
 const execAsync = promisify(exec);
+
+// Item 93 fix: human-language rejection text for run_command_readonly's catch-all (variant
+// C), keyed by the class checkCommandSafe now reports directly via `tag` — no more
+// substring-sniffing the regex-bearing `reason` string. One rule per class, stated
+// completely before any example (the TUI's own title render is a 100-char slice — see
+// runLlmPatchFlow.ts's onToolResult — so the rule itself fits inside that budget with room
+// for the "Command blocked: " prefix; any example follows and may be truncated there without
+// losing the rule). Rephrasing named only where item 93's own verdict matrix proved it passes
+// the live gate; the five classes whose entire content IS the disallowed operation
+// (file-mutation, git-mutation, network-mutation, process-kill, empty-command) name nothing.
+// Framed as "for example" / "such as" throughout, never as the sole route — the tool-absence
+// regression this arc already lived through came from a named alternative reading as
+// exhaustive. Never contains "run_command" (a substring of run_command_readonly itself) or
+// "separate call" (chain's own distinguishing phrase) — enforced by
+// runCommandSafe.catchAllText.test.ts across every entry, not spot-checked.
+export const CATCH_ALL_TEXT: Record<CatchAllClass, string> = {
+  "find-write-exec": "this find flag writes or runs a program. List without it, for example find . -type f.",
+  "fd-exec": "this fd flag runs another program per match. List without it, for example fd -e txt src/.",
+  "rg-preprocessor": "rg --pre / --pre-glob runs an external program. Search without it, for example rg pat src/.",
+  "file-mutation": "this modifies or removes files (rm, mv, cp, touch, mkdir, chmod, chown). The read-only shell has no equivalent for it.",
+  "write-redirect": "this writes output to a file with > or >>. Output is captured automatically, for example ls -la.",
+  "tee": "tee writes its input to a file. Output is captured automatically, for example ls.",
+  "package-mutation": "this installs or changes dependencies. The read-only shell has no equivalent; for example, cat package.json shows declared dependencies.",
+  "git-injection": "this git flag can run an arbitrary program or write a file. Re-run the same subcommand without it, for example git log.",
+  "git-mutation": "this git subcommand changes repository state. The read-only shell has no equivalent for it.",
+  "git-branch-mutation": "this git branch flag deletes, renames, or re-points a branch. List without it, for example git branch.",
+  "network-mutation": "this sends a network write (POST/PUT/DELETE/PATCH, wget, nc). No read-only network command is available here.",
+  "shell-substitution": "backticks and $(...) run a nested command this check can't inspect. Run the inner command first, for example git rev-parse --show-toplevel.",
+  "sort-o": "sort -o / --output writes to a file. Output is captured automatically, for example ls | sort.",
+  "privilege-escalation": "sudo, su, and doas escalate privileges. Re-run without them, for example ls.",
+  "process-kill": "this terminates a process (kill, pkill, killall). The read-only shell has no equivalent for it.",
+  "pipe-to-non-utility": "this pipes into a program that isn't a read-only text utility. For example, pipe into head, tail, grep, rg, wc, sort, uniq, cut, column, jq, less, more, or cat instead.",
+  "empty-command": "no command was supplied.",
+};
 
 // Ledger item 18: shared by the match-time normalization below and the detection-only
 // telemetry pre-pass, so both read the same transformation instead of two hand-maintained
@@ -1162,22 +1196,19 @@ export async function executeTool(
           command: command.slice(0, 200),
           reason: safety.reason,
         }));
-        const isChainBlock =
-          typeof safety.reason === "string" &&
-          safety.reason.startsWith("blocked pattern:") &&
-          (safety.reason.includes("&&") ||
-            safety.reason.includes(";\\s") ||
-            safety.reason.includes("\\|\\|"));
-        const isWhitelistMiss =
-          typeof safety.reason === "string" &&
-          safety.reason.startsWith("not in whitelist");
+        // Item 93 fix: routed by the structured tag checkCommandSafe now returns, not by
+        // substring-sniffing `reason`. Chain and catch-all no longer interpolate `reason`
+        // into the rendered message at all — for the catch-all it was the raw regex source
+        // (`blocked pattern: ...`); for chain it was the same. Whitelist-miss is the
+        // deliberate exception: its own reason carries the allowed-prefix list, real content,
+        // not a pattern, so it stays interpolated.
         return {
           success: false,
-          output: isChainBlock
-            ? `Command blocked: ${safety.reason}. Chained commands aren't supported on the read-only shell — run each command (e.g. \`git status -s\` and \`git diff --stat\`) as a separate call. For file contents or line ranges, use the read_file tool (lineRange:[start,end]) or head/tail/cat.`
-            : isWhitelistMiss
+          output: safety.tag === "chain"
+            ? `Command blocked: Chained commands aren't supported on the read-only shell — run each command (e.g. \`git status -s\` and \`git diff --stat\`) as a separate call. For file contents or line ranges, use the read_file tool (lineRange:[start,end]) or head/tail/cat.`
+            : safety.tag === "whitelist-miss"
               ? `Command blocked: ${safety.reason}. This command isn't on the no-approval read-only allowlist — if it's a safe read, run it via the approval-gated shell (run_command) instead.`
-              : `Command blocked: ${safety.reason}. Use only whitelisted read-only commands. For file contents or line ranges, use the read_file tool (lineRange:[start,end]) or head/tail/cat.`,
+              : `Command blocked: ${CATCH_ALL_TEXT[safety.tag]}`,
         };
       }
 

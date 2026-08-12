@@ -55,70 +55,108 @@ const WHITELIST_PREFIXES = [
   "which",
 ] as const;
 
-/** Reject if ANY pattern matches the command. Blacklist takes priority over whitelist. */
-const BLACKLIST_PATTERNS: RegExp[] = [
+/**
+ * Item 93 fix: every rejection reason belongs to one of 19 classes, carried alongside the
+ * pattern that produces it (or assigned inline for the three non-pattern-driven causes) so
+ * the consumer can select a human-language message by class instead of substring-sniffing
+ * the regex-bearing `reason` string. `chain` and `whitelist-miss` route to their own
+ * dedicated, already-human-language variants (A and B) — see `CatchAllClass` below for the
+ * 17 that reach the shared catch-all (variant C).
+ */
+export type RejectionClass =
+  | "find-write-exec"
+  | "fd-exec"
+  | "rg-preprocessor"
+  | "file-mutation"
+  | "write-redirect"
+  | "tee"
+  | "package-mutation"
+  | "git-injection"
+  | "git-mutation"
+  | "git-branch-mutation"
+  | "network-mutation"
+  | "shell-substitution"
+  | "chain"
+  | "sort-o"
+  | "privilege-escalation"
+  | "process-kill"
+  | "pipe-to-non-utility"
+  | "empty-command"
+  | "whitelist-miss";
+
+/** The 17 classes that reach the shared catch-all (variant C) — everything except the two
+ *  classes with their own dedicated variant (`chain` → A, `whitelist-miss` → B). */
+export type CatchAllClass = Exclude<RejectionClass, "chain" | "whitelist-miss">;
+
+/** Reject if ANY pattern matches the command. Blacklist takes priority over whitelist.
+ *  Order is load-bearing (first match wins) — do not reorder without re-checking every
+ *  command whose verdict depends on an earlier pattern firing first. */
+const BLACKLIST_PATTERNS: { pattern: RegExp; tag: RejectionClass }[] = [
   // find write/exec action flags — block before the whitelist match can fire
-  /\bfind\b.*\s(?:-delete|-exec(?:dir)?|-ok(?:dir)?|-fprint|-fprintf|-fls)\b/,
+  { pattern: /\bfind\b.*\s(?:-delete|-exec(?:dir)?|-ok(?:dir)?|-fprint|-fprintf|-fls)\b/, tag: "find-write-exec" },
   // fd exec flags — anchored to command start (fd is NOT a PIPE_READ_UTIL so it only runs as
   // the head command; anchoring prevents false-positives like "ls fd -x" or "grep fd.txt -x foo")
-  /^\s*fd\b.*\s(?:-[xX]|--exec(?:-batch)?)(?:\s|$|=)/,
+  { pattern: /^\s*fd\b.*\s(?:-[xX]|--exec(?:-batch)?)(?:\s|$|=)/, tag: "fd-exec" },
   // rg pre-processor flags — UNANCHORED because rg IS a PIPE_READ_UTIL and must be caught
   // mid-pipeline (e.g. "cat file.txt | rg --pre ./evil.sh pattern")
-  /\brg\b.*\s--pre(?:-glob)?(?:\s|$|=)/,
+  { pattern: /\brg\b.*\s--pre(?:-glob)?(?:\s|$|=)/, tag: "rg-preprocessor" },
   // Mutations
-  /\brm\s/,
-  /\bmv\s/,
-  /\bcp\s/,
-  /\btouch\s/,
-  /\bmkdir\s/,
-  /\bchmod\s/,
-  /\bchown\s/,
+  { pattern: /\brm\s/, tag: "file-mutation" },
+  { pattern: /\bmv\s/, tag: "file-mutation" },
+  { pattern: /\bcp\s/, tag: "file-mutation" },
+  { pattern: /\btouch\s/, tag: "file-mutation" },
+  { pattern: /\bmkdir\s/, tag: "file-mutation" },
+  { pattern: /\bchmod\s/, tag: "file-mutation" },
+  { pattern: /\bchown\s/, tag: "file-mutation" },
   // Redirects / pipes-to-write
-  />\s*(?:[^&\s\/]|\/(?!dev\/null(?:\s|$)))/,  // block write redirects to real files; allow /dev/null sinks and fd merges (2>&1)
-  />>\s*\S/,
-  /\btee\s/,
+  // block write redirects to real files; allow /dev/null sinks and fd merges (2>&1)
+  { pattern: />\s*(?:[^&\s\/]|\/(?!dev\/null(?:\s|$)))/, tag: "write-redirect" },
+  // >> is a strict subset of the > pattern above (always fires first) — kept as its own
+  // entry for clarity, but unreachable on its own; shares write-redirect's tag deliberately.
+  { pattern: />>\s*\S/, tag: "write-redirect" },
+  { pattern: /\btee\s/, tag: "tee" },
   // Package mutations
-  /\bnpm\s+(install|i|update|uninstall|remove)\b/,
-  /\byarn\s+(add|remove|install)\b/,
-  /\bpnpm\s+(add|remove|install|update)\b/,
-  /\bpip\s+install\b/,
-  /\bcargo\s+install\b/,
+  { pattern: /\bnpm\s+(install|i|update|uninstall|remove)\b/, tag: "package-mutation" },
+  { pattern: /\byarn\s+(add|remove|install)\b/, tag: "package-mutation" },
+  { pattern: /\bpnpm\s+(add|remove|install|update)\b/, tag: "package-mutation" },
+  { pattern: /\bpip\s+install\b/, tag: "package-mutation" },
+  { pattern: /\bcargo\s+install\b/, tag: "package-mutation" },
   // Git injection vectors: block before the git-read whitelist can fire.
   // -c key=val: arbitrary command execution via diff.external, core.pager, etc.
-  /\bgit\s+-c\s/,
+  { pattern: /\bgit\s+-c\s/, tag: "git-injection" },
   // --exec-path=: loads executables from an arbitrary path
-  /\bgit\b.*\s--exec-path=/,
+  { pattern: /\bgit\b.*\s--exec-path=/, tag: "git-injection" },
   // --upload-pack: network-facing, runs an arbitrary program
-  /\bgit\b.*\s--upload-pack\b/,
+  { pattern: /\bgit\b.*\s--upload-pack\b/, tag: "git-injection" },
   // --ext-diff: external diff driver → arbitrary command execution
-  /\bgit\b.*\s--ext-diff\b/,
+  { pattern: /\bgit\b.*\s--ext-diff\b/, tag: "git-injection" },
   // git diff --output=: writes the diff to a file instead of stdout
-  /\bgit\s+diff\b.*\s--output=/,
+  { pattern: /\bgit\s+diff\b.*\s--output=/, tag: "git-injection" },
   // Git mutations
-  /\bgit\s+(push|pull|fetch|commit|merge|rebase|reset\s+--hard|checkout\s+-\s)/,
+  { pattern: /\bgit\s+(push|pull|fetch|commit|merge|rebase|reset\s+--hard|checkout\s+-\s)/, tag: "git-mutation" },
   // Git branch mutations (prefix "git branch" is in the whitelist, so block destructive flags explicitly)
-  /\bgit\s+branch\s+(-[dDmMcCu]|--delete\b|--move\b|--copy\b|--set-upstream)/,
+  { pattern: /\bgit\s+branch\s+(-[dDmMcCu]|--delete\b|--move\b|--copy\b|--set-upstream)/, tag: "git-branch-mutation" },
   // Network mutations
-  /\bcurl\s+.*-X\s*(POST|PUT|DELETE|PATCH)/i,
-  /\bwget\s/,
-  /\bnc\s/,
+  { pattern: /\bcurl\s+.*-X\s*(POST|PUT|DELETE|PATCH)/i, tag: "network-mutation" },
+  { pattern: /\bwget\s/, tag: "network-mutation" },
+  { pattern: /\bnc\s/, tag: "network-mutation" },
   // Shell substitution — backticks and $(...) bypass the prefix check
-  /`/,
-  /\$\(/,
+  { pattern: /`/, tag: "shell-substitution" },
+  { pattern: /\$\(/, tag: "shell-substitution" },
   // Chain operators — single command only
-  /;\s*\S/,
-  /&&\s*\S/,
-  /\|\|\s*\S/,
+  { pattern: /;\s*\S/, tag: "chain" },
+  { pattern: /&&\s*\S/, tag: "chain" },
+  { pattern: /\|\|\s*\S/, tag: "chain" },
   // sort -o/-output writes to a file without '>'; block it independently of the redirect guard
-  /\bsort\b[^|]*(\s-o(\s|=|$)|--output)/,
+  { pattern: /\bsort\b[^|]*(\s-o(\s|=|$)|--output)/, tag: "sort-o" },
   // Privilege escalation
-  /\bsudo\b/,
-  /\bsu\b/,
-  /\bdoas\b/,
+  { pattern: /\bsudo\b/, tag: "privilege-escalation" },
+  { pattern: /\bsu\b/, tag: "privilege-escalation" },
+  { pattern: /\bdoas\b/, tag: "privilege-escalation" },
   // Process kill
-  /\bkill\s/,
-  /\bpkill\s/,
-  /\bkillall\s/,
+  { pattern: /\bkill\s/, tag: "process-kill" },
+  { pattern: /\bpkill\s/, tag: "process-kill" },
+  { pattern: /\bkillall\s/, tag: "process-kill" },
 ];
 
 const PIPE_READ_UTILS = new Set([
@@ -167,26 +205,32 @@ function hasUnsafeRealPipe(cmd: string): boolean {
   return false;
 }
 
-export interface CommandSafetyResult {
-  safe: boolean;
-  reason?: string;
-}
+/**
+ * Item 93 fix: discriminated union on `safe`, not an optional `tag?`. A rejection path that
+ * forgot to set `tag` under an optional field would silently reach the consumer's message
+ * lookup as `undefined` — the discriminated union makes the compiler reject any `safe: false`
+ * return missing `tag`, at every rejection return site below. `reason` is unchanged in shape
+ * and, for every existing input, unchanged in value.
+ */
+export type CommandSafetyResult =
+  | { safe: true }
+  | { safe: false; reason: string; tag: RejectionClass };
 
 export function checkCommandSafe(command: string): CommandSafetyResult {
   const trimmed = command.trim();
-  if (!trimmed) return { safe: false, reason: "empty command" };
+  if (!trimmed) return { safe: false, reason: "empty command", tag: "empty-command" };
 
   // Blacklist takes priority over whitelist.
-  for (const pattern of BLACKLIST_PATTERNS) {
+  for (const { pattern, tag } of BLACKLIST_PATTERNS) {
     if (pattern.test(trimmed)) {
-      return { safe: false, reason: `blocked pattern: ${pattern.source}` };
+      return { safe: false, reason: `blocked pattern: ${pattern.source}`, tag };
     }
   }
 
   // Quote/escape-aware pipe check: block real pipes to non-read-only utilities.
   // Runs after the blacklist so the || guard and substitution guards fire first.
   if (hasUnsafeRealPipe(trimmed)) {
-    return { safe: false, reason: "pipe to non-whitelisted command" };
+    return { safe: false, reason: "pipe to non-whitelisted command", tag: "pipe-to-non-utility" };
   }
 
   // Command must START WITH one of the whitelisted prefixes.
@@ -202,6 +246,7 @@ export function checkCommandSafe(command: string): CommandSafetyResult {
     return {
       safe: false,
       reason: `not in whitelist. Allowed prefixes: ${sample}, ...`,
+      tag: "whitelist-miss",
     };
   }
 
