@@ -723,6 +723,26 @@ describe('item 100: offeredToolNames param — condition prompt instructions on 
     });
   });
 
+  describe('multi_edit — the cross-file rename bullet inside PATCH RULES', () => {
+    it('is dropped when multi_edit is withheld but apply_patch/write_file are offered (subagent:worker shape)', () => {
+      const prompt = assembleAgentSystemPrompt({
+        ...PATCH_INPUT,
+        offeredToolNames: new Set(['read_file', 'apply_patch', 'write_file']),
+      });
+      expect(prompt).toContain('PATCH RULES:');
+      expect(prompt).not.toContain('Cross-file rename/codemod');
+      expect(prompt).not.toContain('use multi_edit(');
+    });
+
+    it('is present when multi_edit is offered', () => {
+      const prompt = assembleAgentSystemPrompt({
+        ...PATCH_INPUT,
+        offeredToolNames: new Set(['read_file', 'apply_patch', 'write_file', 'multi_edit']),
+      });
+      expect(prompt).toContain('Cross-file rename/codemod (same find→replace in multiple files): use multi_edit(');
+    });
+  });
+
   describe('apply_patch, Task, revert_patch — the four-block recovery cluster', () => {
     it('is omitted when apply_patch, Task, AND revert_patch are all withheld', () => {
       const prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, offeredToolNames: new Set(['read_file']) });

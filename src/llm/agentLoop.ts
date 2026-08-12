@@ -829,7 +829,13 @@ export function assembleAgentSystemPrompt(input: {
     `- FIND: copy verbatim from read_file output, 1-5 lines, unique in the file.\n` +
     `- REPLACE: one local substitution of FIND. Never copy in code from elsewhere in the file — use a second block instead.\n` +
     `- Same file, N edits: batch all into ONE apply_patch call with N blocks (rename 8 occurrences → 1 call, not 8 calls).\n` +
-    `- Cross-file rename/codemod (same find→replace in multiple files): use multi_edit({files:[...], find, replace}) in ONE call — do NOT use separate apply_patch calls per file.\n` +
+    // Item 100 fix: subagent:worker offers apply_patch/write_file but not multi_edit — the
+    // bundle-level gate above keeps this section open (apply_patch alone is enough), but
+    // this one bullet still needs its own gate since it's the only content in the section
+    // naming multi_edit specifically.
+    (isOffered("multi_edit") ?
+    `- Cross-file rename/codemod (same find→replace in multiple files): use multi_edit({files:[...], find, replace}) in ONE call — do NOT use separate apply_patch calls per file.\n`
+    : "") +
     `- intent='add' (default, REPLACE = FIND + additions). To add lines ABOVE/BELOW existing code (JSDoc, imports, decorators): FIND the anchor line(s); include added lines together with the anchor in REPLACE. Nothing may precede \`--- FIND ---\`. 'modify' (REPLACE = edited FIND), 'delete' (REPLACE shorter than FIND, may be empty).\n` +
     `- MINIMUM CHANGE: preserve every existing line the user didn't ask to change.\n` +
     `- scope: OMIT by default. Only set when FIND occurs multiple times AND the target is inside a NAMED function/class. Never for arrow-const, default exports, or React components.\n` +
