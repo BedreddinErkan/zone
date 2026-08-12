@@ -8595,28 +8595,32 @@ build`, refused as a whitelist miss with no equivalent inside the read-only shel
 **Read-not-run, and the largest gap left unmeasured.** All of the above is read from source and confirmed by
 direct calls to the built `checkCommandSafe` and `executeTool` — decidable offline, since the gate is a pure
 function evaluated before any process spawns. What none of it establishes: the behavioural effect of
-receiving any of these five texts. No run in any data captured this arc — the seventeen commands behind item
-91, or the arms behind item 90 — ever received a refusal; the whitelist boundary was never touched. Whether
-an agent shown the catch-all's raw regex, or pointed at `run_command` while holding only
-`run_command_readonly`, does anything different from an agent that was never refused at all remains exactly
-as unmeasured as item 90's and item 91's own behavioural effects.
+receiving any of these five texts. No run in the data behind item 91's seventeen commands or item 90's own
+arms ever received a refusal; the whitelist boundary was never touched by any of them. A later measurement
+did receive one — see item 96 — the chain-operator variant, not the whitelist-miss variant; the whitelist
+boundary itself was still never touched by any run measured this arc, including that one. Whether an agent
+shown the catch-all's raw regex, or pointed at `run_command` while holding only `run_command_readonly`, does
+anything different from an agent that was never refused at all remains exactly as unmeasured as item 90's and
+item 91's own behavioural effects — item 96 answers this for one of the five texts, leaving the other four
+exactly where they stood.
 
 **Where the code lives:** the three `run_command_readonly` variants are in `toolExecutor.ts`, keyed off
 `checkCommandSafe`'s `reason` string (`runCommandSafe.ts`); the hard safety block is `isBlockedCommand` in
 `toolExecutor.ts`, guarding `run_command` and `run_command_background`; the approval denial is the
 `onApprovalRequired` branch on `run_command` in the same file. `consecutiveScopeBlocks` is in
 `handleToolResult.ts` and `agentLoop.ts`, for comparison. See item 91 for the description fix this sits
-beside, and item 90 for the notice regression sharing its unmeasured-behaviour status.
+beside, and item 90 for the notice regression sharing its unmeasured-behaviour status, and item 96 for the
+first behavioural data point against this item's own gap.
 
-## 94. `gpt-5.6-luna` did the discovery work on both T2 and T4 — a portability finding, not item 90's verification
+## 94. `gpt-5.6-luna` ran all seven ground tasks — five correct, two wrong on task interpretation, not item 90's verification
 
-**What this measures, and what it does not.** Two cells, T2 and T4, one run each, on `gpt-5.6-luna`
-(OpenAI) — not `claude-sonnet-4-6`, and not a substitute for it. Item 90's own pending observation names
-that model specifically; this pass answers a different question — whether the notice, the description, and
-the tool schema all reach an OpenAI run unchanged, and whether an OpenAI model does the discovery work the
-shipped configuration is supposed to enable. It does not, and cannot, close item 90 or item 91's own
-unmeasured-behaviour caveat — no OpenAI run has ever seen the pre-fix, broken notice, so there is no OpenAI
-arm B to compare against, only the Anthropic one.
+**What this measures, and what it does not.** Seven cells, the full ground, one run each, on `gpt-5.6-luna`
+(OpenAI) — not `claude-sonnet-4-6`, and not a substitute for it. Item 90's own pending observation names that
+model specifically; this pass answers a different question — whether the notice, the description, and the
+tool schema all reach an OpenAI run unchanged, and whether an OpenAI model does the discovery work the
+shipped configuration is supposed to enable, across the complete ground rather than a sample of it. It does
+not, and cannot, close item 90 or item 91's own unmeasured-behaviour caveat — no OpenAI run has ever seen the
+pre-fix, broken notice, so there is no OpenAI arm B to compare against, only the Anthropic one.
 
 **Provider-path findings, established free before any call.** The Responses-API tool conversion is a
 structural unnest only — description text, including item 91's fix, passes through unchanged. `toolCallLog`
@@ -8627,12 +8631,33 @@ way. `openaiContext.ts`, despite its name, is a generic request-context module w
 tool-schema logic in it at all; the working hypothesis that it might reshape either was checked directly and
 does not hold.
 
+**T1, `$0.016167`, two iterations, natural completion.** One `run_command_readonly` call, discovery-shaped,
+correct. The call itself was noisy — an `rg` search across three path arguments, two of which (`test`,
+`tests`) don't exist in this tree, errored at exit code two and returned roughly 756KB before the tool's own
+truncation — and the model still named `src/cli/dispatch.ts`, all three constants (`QUICK_PLAN_FILES`,
+`QUICK_PLAN_FILE_CAP`, `QUICK_PLAN_TOTAL_CAP`), and worked out the break-versus-skip semantics correctly, with
+a specific line citation. A noisy call and a correct, detailed answer together — see the essay decision below
+for the same shape landing the opposite way on T7.
+
 **T2, `$0.009046`, two iterations, natural completion.** One `run_command_readonly` call (`rg -n --hidden
 --glob '!node_modules' --glob '!dist' 'problemWordsPresent' .`), then a correct final answer naming four
 real files. A fifth citation is a spurious self-match — the ground-task snapshot file carries this task's
 own description text, picked up because this command had no type filter, unlike the Anthropic arms'
 `--include`. Arm B's false negative on this task ("the symbol does not appear anywhere in the repository")
 did not reproduce.
+
+**T3, `$0.013854`, three iterations, token budget exceeded.** Reproduce-first confirmed: `npm test`
+succeeded, a chained `git diff --stat && git status --short` was blocked — see item 96 for the refusal
+itself — then the same request retried as bare `git diff --stat`, which succeeded. Zero discovery-shaped
+calls, matching arm A's own zero on this task. The final summary, reached via budget exhaustion rather than a
+clean completion, explicitly declined to invent a fix, reporting the passing test suite and the one unrelated
+working-tree change instead — correct against this pass's own registered bar for a task with no `correctFile`
+to have. Arm A reached five calls on this task; this run's own iteration cap is three, visible directly in
+the capture, and one of those three went to the blocked chain rather than new information. Arm A's original
+harness configuration was not re-derived, so this three-versus-five comparison is not on equal footing;
+settling it needs either arm A's own original iteration-cap value, recovered from outside the session
+transcript this instrument was built to stop depending on, or a re-run of arm A itself through this same
+instrument, where the cap is fixed at three by construction.
 
 **T4, `$0.008508`, three iterations, token budget exceeded.** Three tool calls: a wrong-path `read_file`
 returning a plain file-not-found (not a whitelist refusal), a `find` locating the real file, then a
@@ -8641,14 +8666,77 @@ TypeScript-family tolerance, by name and line range. Arm B's false negative on t
 alternate path... tools withheld") did not reproduce — and this run read further and answered more
 completely than any of the three Anthropic arms managed within their own iteration cap.
 
-**Cost and predictions.** Total spent `$0.017554` against an `$0.85` budget, roughly a sixth of the
-Anthropic arms' own per-task figures (item 90: `$0.73` over fourteen task-runs). Five predictions registered
-before the first call — discovery-command count and false-negative resolution for each task, plus whether
-any command would be refused — all five held; nothing here was a miss.
+**T5, `$0.021768`, three iterations, natural completion.** Two discovery-shaped `rg` calls, correct, landing
+`src/llm/agentLoop.ts` with `BASE_MAX_ITERATIONS`, `ESCALATION_BONUS_ITERATIONS`, the tier-based default, and
+the `maxIterationsOverride` enforcement, each with its own line citation — more thorough than a minimal
+answer needed to be. Arm A and arm C both needed three calls on this task, including an identical command on
+two of them; this run needed two. Efficient search and a correct, detailed answer together, not a trade-off
+between the two.
 
-**The n=1 bound applies exactly as it always has.** Two cells, one run each, one model, one provider.
-Nothing here is a rate, and a match on these two cells says nothing about the other five tasks arms A and C
-also measured.
+**T6, `$0.009209`, two iterations, natural completion, INCORRECT.** One discovery-shaped `find` call for
+marker files (`package.json`, `tsconfig.json`, `README.md`), fewer than arm A's two. The failure is not a
+search-quality one: the model read "how do we tell what kind of projects this contains" as a literal question
+about this repository's own nature rather than about Zone's own project-type-detection code, and answered
+that the repository is a TypeScript/Node.js project. It never searched for, touched, or named
+`src/repo/detectProjectStructure.ts`. A cheap, efficient search aimed at the wrong target from its first
+call.
+
+**T7, `$0.014287`, two iterations, natural completion, INCORRECT — the most divergent of the seven.** One
+`rg` call, broad and untyped, matching on `api.?key`, `access.?key`, `secret`, `token`, and bare `key` across
+`src`, `package.json`, and `README.md`, returned roughly 814KB before truncation; the slice the model actually
+saw was dominated by unrelated matches under `src/remote/`. No guess-first false start this time — the
+prediction anticipating one, drawn from T4's own behaviour, did not transfer. The model concluded the task
+meant finding and redacting an exposed secret, named `src/remote/controlServer.ts`'s session-token field as
+the exposed value, and reported it could not act because file-editing tools were unavailable — a discovery
+question answered as an unactionable patch task. It never found, searched for, or named
+`src/cli/tui/components/ApiKeysView.tsx` or `maskKey`.
+
+**Essay candidate — declined on category, not on mechanism overlap with a specific essay: checked against all
+nineteen.** T1's and T7's own searches share a shape worth naming precisely: an untyped query returning
+hundreds of kilobytes, the tool's own truncation deciding what actually reaches the model, and the visible
+slice crowded by an unrelated directory either way — T1's own noisy call still landed the right file; T7's
+did not. Closest by surface vocabulary is the thirteenth pattern — both concern search reliability — but its
+mechanism is the investigator grepping the wrong file and mistaking a coincidental number match for
+confirmation, a mistake in this document's own verification technique. This candidate is a fact about the
+subject being measured — the model's own query choice, interacting with Zone's own pre-existing truncation —
+not a mistake in how this arc investigated anything; the search was `gpt-5.6-luna`'s, not this pass's own.
+Item 95's own acceptance reasoning for the nineteenth pattern drew exactly this boundary ("not a fact about
+`src/`") when explaining why that candidate qualified, and this one sits on the other side of it. Declined on
+category. Reopening condition: if a future pass's own verification instrument — not the model being measured
+— issues an unbounded, untyped query as part of its own harness or comparison logic, and truncation crowds
+out a signal that pass itself needed, the mistake moves to the investigator's own side of this boundary and
+reopens the question. Essay count stays nineteen.
+
+**Cost and predictions.** Total spent `$0.092838` across all seven cells — `$0.017554` from T2 and T4 against
+an `$0.85` budget, `$0.075284` from the remaining five against a separate `$0.832446` budget. Per-task average
+across all seven is roughly a quarter of the Anthropic arms' own per-task figure (item 90: `$0.73` over
+fourteen task-runs), not the sixth the first two cells alone suggested — T5 alone cost more than double either
+T2 or T4's own figures and pulls the full-ground average up with it. Five predictions registered before T2 and
+T4's own first call — discovery-command count and false-negative resolution for each task, plus whether any
+command would be refused — all five held. A second, richer set registered before the remaining five cells'
+own first call, naming a discovery-count direction and a correctness expectation for each task: T1 hit on
+both; T3 hit on its discovery count, its reproduce-first shape, and its own registered correctness bar, and
+missed on the shared refusal prediction; T5 hit on correctness and missed on discovery count, which came in
+under the anchor rather than at or over it; T6 and T7 both missed on correctness, the two cells detailed
+above.
+
+**The n=1 bound, and the two comparison bounds that sit beside it every time this measurement is read.**
+Seven cells, one run each, one model, one provider. Nothing here is a rate — five correct and two incorrect
+is seven and two data points, not seventy percent, and a repeat of any of these seven tasks on the same model
+could land differently. Arm A ran with the notice's suppression seam disabled; every OpenAI cell here runs the
+shipped notice and description — model and configuration move together, and a difference between sides is
+never attributable to either alone. No OpenAI run has ever seen the pre-fix, broken notice, so nothing here
+speaks to the collision fix's behavioural safety on this provider, only to whether the shipped, already-fixed
+configuration produces working discovery behaviour here.
+
+**One cross-cell observation, the n=1 bound attached to every task inside it.** In no cell did this model use
+more discovery-shaped calls than arm A or arm C's own figure for that task: three matched exactly (T1, T2,
+and T4's discovery-specific count), four came in under (T3 at zero, matching arm A's own zero, plus T5, T6,
+T7). T4's total tool-call count did exceed arm A's, but only from a non-discovery wrong-path read attempt
+before the discovery call that worked — discovery count itself still matched. Separately: the two incorrect
+cells, T6 and T7, both involved a task phrase readable either as a question about Zone's own code or as a
+literal question about the repository or a security concern, and both times this model took the literal
+reading — two cells sharing a mechanism, not a rate, and not evidence about the other five.
 
 **Where this leaves items 90 and 91.** Both remain exactly as they were before this pass — item 90 Blocked
 on data, item 91 Closed with its own unmeasured-behaviour caveat intact. A same-tasks run on a different
@@ -8656,8 +8744,8 @@ model is consistent with the shipped configuration being sound in general; it is
 item names, and does not supply it.
 
 **Where the code lives:** the measurement instrument is `scripts/notice-regression-probe.mjs`; see item 95
-for its own history, the bug this run first surfaced, and the fix. See item 90 for the regression this
-measures around, and item 91 for the description fix it also concerns.
+for its own history, the bug this run first surfaced, and the fix, and item 96 for the refusal T3 recorded.
+See item 90 for the regression this measures around, and item 91 for the description fix it also concerns.
 
 ## 95. Closed — the credit probe was the one path every run on either provider passes through, and it was not among the four parts a prior pass called pinned
 
@@ -8727,11 +8815,44 @@ becomes nineteen.
 `buildCreditProbeParams` and the two tests naming it, in `scripts/notice-regression-probe.test.ts`. See item
 94 for the measurement this fix unblocked, and items 90 and 91 for what the instrument exists to verify.
 
+## 96. The first refusal this arc has recorded — item 93's chain-operator variant, once, on one OpenAI cell
+
+**What happened.** T3 (`fix the bug in the app`, arm B, `gpt-5.6-luna`, item 94) attempted `git diff --stat
+&& git status --short` at its second of three allowed iterations. Blocked by item 93's own first-catalogued
+variant — the chain-operator block, naming the offending operator (`&&\s*\S`) and pointing at splitting the
+call into separate commands. This is the first refusal of any kind recorded across this entire arc: arms A,
+B, and C, item 94's own T2 and T4, and this same pass's own T1 all had zero.
+
+**What the agent did next answers, for this one variant, a question item 93 itself named as unmeasured.** Its
+very next call was the exact rephrasing the refusal text prescribed — the same two pieces of information as
+two separate calls, retrying as bare `git diff --stat`, which succeeded immediately. No repeated attempts
+against the same blocked shape, no confusion, no wasted call beyond the one already spent. Item 93's own
+"Read-not-run" paragraph asked whether an agent shown one of these five texts does anything different from an
+agent that was never refused at all — for the chain-operator variant, on this one model, on this one cell,
+the answer is: it recovers cleanly, using the rephrasing the text itself offers.
+
+**What it cost the run.** One of only three iterations the question archetype allows on this run, spent on a
+blocked call rather than new information. The run finished on budget exhaustion rather than a clean
+completion, though the final summary it still produced was substantively correct against this pass's own
+registered bar — see item 94's own T3 discussion for the full outcome and for the separate question of
+whether arm A's own five-call figure on this task is even on equal footing with this run's three-call
+ceiling.
+
+**The bound, stated precisely.** One refusal, one of the five variants item 93 catalogues, one model, one
+cell. Whether this same variant behaves the same on `claude-sonnet-4-6` remains unmeasured, and the other
+four — the whitelist-miss block, the catch-all, the hard safety block, and the approval-denial — are exactly
+as unmeasured as before this run, as is the scope guard's own behavioural effect, item 93's own comparison
+point throughout.
+
+**Where the code lives:** the chain-operator variant is one of the three `run_command_readonly` texts in
+`toolExecutor.ts`, keyed off `checkCommandSafe`'s `reason` string (`runCommandSafe.ts`); see item 93 for the
+full catalogue of five and item 94 for the run this came from.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 95 to find out which ones still need something. No index of
+reader the trouble of reading all 96 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -8744,11 +8865,11 @@ first (0):
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (8): 1, 4, 18, 23, 57, 63, 75, 90
 
-**Neither — a structural fact recorded, with no fix proposed** (44): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (45): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
-81, 83, 84, 85, 86, 87, 89, 92, 93, 94
+81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96
 
-Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, and 91 are partially closed or corrected; the
+Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, and 93 are partially closed or corrected; the
 classification above covers only the portion still open, not the whole entry.
 
 ---
