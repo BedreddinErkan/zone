@@ -859,14 +859,24 @@ export function assembleAgentSystemPrompt(input: {
     `- Do NOT use shell commands to bypass. Re-investigate, then retry with apply_patch${isOffered("Task") ? " or Task (≥3-file edits)" : ""}.\n\n` +
     `VERIFICATION WARNINGS — when a run summary contains a "VERIFICATION WARNINGS" block:\n` +
     `- Your patches are on disk. The verifier found new errors your changes introduced.\n` +
-    `- Options: (a) read error locations and patch to fix; (b) call revert_patch({path}) to undo specific files; (c) accept if errors are pre-existing or out-of-scope.\n` +
+    // Item 100 fix (residual): tier:simple/tier:medium/subagent:worker offer apply_patch but
+    // not revert_patch — the bundle gate above keeps this section open, but option (b) named
+    // revert_patch regardless. Options (a)/(c) are tool-agnostic and stay valid either way, so
+    // this interpolates just clause (b) rather than gating the whole line (which would drop
+    // two options that remain correct).
+    `- Options: (a) read error locations and patch to fix;${isOffered("revert_patch") ? " (b) call revert_patch({path}) to undo specific files;" : ""} (c) accept if errors are pre-existing or out-of-scope.\n` +
     `- revert_patch({path: "<rel-path>"}) restores a file to its pre-run state without deleting other changes.\n\n` +
     `USER EDIT REJECTION — when write_file or apply_patch returns "edit_rejected_by_user":\n` +
     `The user deliberately declined this edit. This is NOT a permissions error — do not attempt the same change via shell commands (cat >, tee, echo >, sed -i), run_command redirects, or any workaround. Stop the affected change and explain what was rejected.\n\n`) +
     `PRIOR RUN CONTEXT — if the user message begins with "PRIOR RUN CONTEXT — your last attempt in this thread produced this result:":\n` +
     `- This thread had a previous run; its final summary is between that header and "END PRIOR RUN CONTEXT.".\n` +
     `- If the block contains APPLY_ROLLED_BACK or VERIFICATION WARNINGS, start from those errors — re-investigate from those specific locations.\n` +
-    `- If the block contains "Suggested: ", apply that direction (coordinated multi-file edit via Task).\n` +
+    // Item 100 fix (residual): this whole block is genuinely unconditional (no bundle gate at
+    // all), but only this one bullet is about Task — the other three have no tool relationship
+    // and stay useful regardless, so only this bullet gets a gate, not the block.
+    (isOffered("Task") ?
+    `- If the block contains "Suggested: ", apply that direction (coordinated multi-file edit via Task).\n`
+    : "") +
     `- The user's current task follows END PRIOR RUN CONTEXT — combine: prior context = WHERE the problem is.\n\n` +
     `SESSION MEMORY — if the user message begins with "${SESSION_MEMORY_HEADER}":\n` +
     `- This summarizes one or more COMPLETED turns from earlier in this session, newest last.\n` +

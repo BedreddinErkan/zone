@@ -781,6 +781,59 @@ describe('item 100: offeredToolNames param — condition prompt instructions on 
     });
   });
 
+  describe('revert_patch — option (b) inside VERIFICATION WARNINGS', () => {
+    // tier:simple/tier:medium/subagent:worker offer apply_patch but not revert_patch -- the
+    // bundle-level gate above keeps this section open (apply_patch alone is enough), but
+    // option (b) named revert_patch regardless. Options (a)/(c) are tool-agnostic and stay
+    // present either way -- gated at the clause, not the whole line.
+    it('names revert_patch in option (b) when revert_patch is offered alongside apply_patch', () => {
+      const prompt = assembleAgentSystemPrompt({
+        ...PATCH_INPUT,
+        offeredToolNames: new Set(['read_file', 'apply_patch', 'revert_patch']),
+      });
+      expect(prompt).toContain(
+        '- Options: (a) read error locations and patch to fix; (b) call revert_patch({path}) to undo specific files; (c) accept if errors are pre-existing or out-of-scope.'
+      );
+    });
+
+    it('drops option (b) but keeps (a) and (c) when revert_patch is withheld but apply_patch is offered', () => {
+      const prompt = assembleAgentSystemPrompt({
+        ...PATCH_INPUT,
+        offeredToolNames: new Set(['read_file', 'apply_patch']),
+      });
+      expect(prompt).toContain(
+        '- Options: (a) read error locations and patch to fix; (c) accept if errors are pre-existing or out-of-scope.'
+      );
+      expect(prompt).not.toContain('(b) call revert_patch');
+    });
+  });
+
+  describe('Task — the "Suggested:" bullet inside PRIOR RUN CONTEXT', () => {
+    // PRIOR RUN CONTEXT itself is genuinely unconditional -- no bundle gate at all -- but only
+    // this one bullet is about Task; the other three bullets have no tool relationship and
+    // stay present regardless of whether Task is offered.
+    it('is present when Task is offered', () => {
+      const prompt = assembleAgentSystemPrompt({
+        ...PATCH_INPUT,
+        offeredToolNames: new Set(['read_file', 'apply_patch', 'Task']),
+      });
+      expect(prompt).toContain(
+        'If the block contains "Suggested: ", apply that direction (coordinated multi-file edit via Task).'
+      );
+    });
+
+    it("is dropped when Task is withheld, but the block's other bullets stay present", () => {
+      const prompt = assembleAgentSystemPrompt({
+        ...PATCH_INPUT,
+        offeredToolNames: new Set(['read_file', 'apply_patch']),
+      });
+      expect(prompt).not.toContain('apply that direction (coordinated multi-file edit via Task)');
+      expect(prompt).toContain('PRIOR RUN CONTEXT — if the user message begins with');
+      expect(prompt).toContain('If the block contains APPLY_ROLLED_BACK or VERIFICATION WARNINGS');
+      expect(prompt).toContain("The user's current task follows END PRIOR RUN CONTEXT");
+    });
+  });
+
   describe('apply_patch — TEST FAILURES block', () => {
     it('is omitted when apply_patch is withheld', () => {
       const prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, offeredToolNames: new Set(['read_file']) });
