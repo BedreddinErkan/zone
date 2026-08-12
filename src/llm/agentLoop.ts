@@ -750,7 +750,7 @@ export function assembleAgentSystemPrompt(input: {
       : effectiveArchetype === "question"
       ? `${QA_HEADER}\n` +
         `- Use ONE shell command via ${qaCmd} (e.g. find . -name "*.ts" -type f | sort, ls -la, grep -rn pattern src/) to answer the query.\n` +
-        `- For enumeration: PREFER find ... -type f | sort — returns the FULL accurate listing. Do NOT use list_files (truncates) or search_in_files (paginates).\n` +
+        `- For enumeration: PREFER find ... -type f | sort — returns a full, accurate listing; unlike list-style tools, it neither truncates nor paginates.\n` +
         `- Do NOT read source files unless the user explicitly asks for context.\n` +
         `- Final response: full command output plus a one-sentence summary.\n` +
         `- Iteration budget is 3 — one command, optional confirmation, one summary.\n\n` +

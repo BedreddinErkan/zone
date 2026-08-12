@@ -587,4 +587,20 @@ describe('item 98: qaCommandTool param — Q&A preamble tool-naming variants', (
       expect(checkCommandSafe(cmd).safe).toBe(true);
     }
   });
+
+  // The old "Do NOT use list_files (truncates) or search_in_files (paginates)" line
+  // presupposed a choice the question archetype never actually offers -- neither tool is
+  // ever present alongside this preamble (allowExploration:false, unconditional for this
+  // archetype). The comparative reasoning (why find is preferred) is kept; the false-choice
+  // imperative is not.
+  it('does NOT tell the agent not to use tools it was never offered', () => {
+    const prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, archetype: 'question' });
+    expect(prompt).not.toMatch(/Do NOT use list_files/);
+    expect(prompt).not.toContain('search_in_files (paginates)');
+  });
+
+  it('keeps the comparative reasoning for preferring find', () => {
+    const prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, archetype: 'question' });
+    expect(prompt).toContain('neither truncates nor paginates');
+  });
 });
