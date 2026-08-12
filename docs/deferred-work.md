@@ -8930,33 +8930,52 @@ conditional that selects the investigation archetype's own block. See item 94 fo
 item 98 for the three internal contradictions the same preamble carries, and item 99 for the clarification
 path this archetype withholds.
 
-## 98. The question archetype's preamble names tools the run doesn't have — one deliberately unlisted as absent, two explicitly listed as absent — and specifies two different final-response formats
+## 98. Closed — the question archetype's preamble named tools the run didn't have — one deliberately unlisted as absent, two explicitly listed as absent — and specified two different final-response formats
 
-**First: `run_command`, instructed and deliberately unlisted.** The preamble's own first line tells the agent
+**First: `run_command`, instructed and deliberately unlisted.** The preamble's own first line told the agent
 to "Use ONE shell command via run_command" — a tool this archetype does not offer; the run holds only
 `run_command_readonly`. The tool-absence notice does not name `run_command` as withheld, and this is by
-design, not an oversight this item is reporting: item 90's own fix suppresses a withheld name from the notice
+design, not an oversight this item reported: item 90's own fix suppresses a withheld name from the notice
 when it is a strict prefix of an offered tool's name, specifically so the notice stops reading as though the
 more specific tool were withheld too — the regression that fix closed was measured and real, and this item
-does not revisit that. What is new here is narrower: the preamble, a separate piece of text from the notice,
-still instructs the withheld name directly, in a run where the notice correctly says nothing about it. An
-agent that follows the preamble's own first instruction is pointed at a tool call the request never includes.
+did not revisit that. What was new here was narrower: the preamble, a separate piece of text from the notice,
+still instructed the withheld name directly, in a run where the notice correctly said nothing about it. An
+agent that followed the preamble's own first instruction was pointed at a tool call the request never
+includes. **Fixed in `dcc86f75`:** the line now names whichever command tool the archetype actually offers,
+reusing `assembleInvestigationSystemPrompt`'s own already-computed tri-state (`investigationCommandTool`)
+rather than deriving anything new. The new field was made optional, deliberately, its own decision: this
+file's own history already carries a field made required that silently spliced the literal string
+"undefined" into fourteen call sites (`toolAbsenceBlock`, item 88) — the same lesson applied a second time,
+not re-learned.
 
 **Second: `list_files` and `search_in_files`, referenced and explicitly withheld.** The preamble's own second
-line names both — "Do NOT use list_files (truncates) or search_in_files (paginates)" — as alternatives to
+line named both — "Do NOT use list_files (truncates) or search_in_files (paginates)" — as alternatives to
 avoid. Both are in the notice's own withheld list for this archetype, unlike `run_command`; the preamble
-argues against using tools that are already correctly flagged absent, the opposite failure mode from the
-first.
+argued against using tools that were already correctly flagged absent, the opposite failure mode from the
+first. **Fixed in `4594494a`:** the imperative half is dropped; the comparative reasoning for preferring
+`find` — a full listing that neither truncates nor paginates — stays, restated as a positive claim about
+`find` itself rather than a prohibition on tools the agent never had.
 
-**Third: two final-response specifications for the same run.** The preamble's own line states the deliverable
+**Third: two final-response specifications for the same run.** The preamble's own line stated the deliverable
 as "full command output plus a one-sentence summary." A later, always-included block for this archetype —
 `ANSWER_SUMMARY`, included because the question archetype is read-only — states instead: "Answer the question
-directly, in prose," with file-and-line provenance required on every behavioural claim. The same run carries
-both specifications, one naming raw command output as the answer, the other naming cited prose.
+directly, in prose," with file-and-line provenance required on every behavioural claim. The same run carried
+both specifications, one naming raw command output as the answer, the other naming cited prose. **Fixed in
+`d6b4dea4`:** the preamble's own line is deleted, `ANSWER_SUMMARY` stands alone. Intent recovered from source,
+not chosen: the preamble's line entered at `dc1d7287` (2026-05-24), `ANSWER_SUMMARY` entered later at
+`0d2a0000` (2026-08-01), whose own commit message states it gives the answer shape its own output contract,
+with surrounding source comments already describing this exact class of two-texts-disagreeing conflict as a
+known, deliberately-addressed concern for a different field (citations). The two didn't just differ
+stylistically — the preamble wanted the full raw output pasted in, `ANSWER_SUMMARY` explicitly states pasting
+a file's body is not wanted, citations are required instead.
+
 `ANSWER_SUMMARY` also states, unconditionally on this path, "this run was approved as answer-only" — the
 harness never sets `answerOnly`; the block is included through the read-only-archetype branch of the same
 condition, not the explicit-approval one, so every question-archetype run carries an assertion about its own
-approval status that was never actually made for it this way.
+approval status that was never actually made for it this way. **This is not part of what closes here.** It
+lives inside `ANSWER_SUMMARY` itself, shared with the investigation archetype and with genuinely
+plan-approved answer-only runs — outside this item's own subject, the preamble. Reported when the fix pass
+found it, not fixed, and stands exactly as it was.
 
 **None of these three is item 97's own mechanism.** They are stale or contradictory references sitting beside
 that finding in the same block, not separate instances of it — the first is an instruction naming an absent
@@ -8964,15 +8983,21 @@ tool the notice correctly doesn't flag, the second is friction against tools alr
 third is two answer formats plus one unearned approval claim. What connects them to item 97 is only that they
 live in the same text, not a shared cause.
 
-**What would show whether the first one matters.** No run captured this arc has measured what a model does
-when it follows the preamble's instruction to call `run_command` and the tool is not in the request — whether
-it attempts the call and receives an error, silently substitutes `run_command_readonly`, or does something
-else. Unmeasured, not estimated.
+**Whether this question survives the fix, checked rather than assumed.** Within this item's own scope it's
+retired: the fixed preamble no longer instructs calling anything absent, so there is nothing left here to
+measure. The broader question — whether any part of the assembled prompt still does this — does not close
+with it. Checked directly against the current built prompt, not swept exhaustively: `SEARCH FIRST`, a
+separate, always-included block unrelated to this preamble, unconditionally states "use search_in_files
+BEFORE read_file" — and `search_in_files` is absent from this same archetype's own offered set, for the
+identical structural reason `run_command` was. One concrete example found while checking whether this
+question survived, not a completed accounting of the prompt; whether a model actually attempts it, and what
+happens if it does, remains exactly as unmeasured as before.
 
-**Where the code lives:** all three sit inside the same question-archetype preamble in
+**Where the code lives:** all three sat inside the same question-archetype preamble in
 `assembleAgentSystemPrompt`, `agentLoop.ts`; `ANSWER_SUMMARY` is a separate constant in the same file, included
-through the archetype's own read-only branch. See item 97 for the finding this item's own contradictions sit
-beside, and item 90 for the suppression rule the first contradiction does not revisit.
+through the archetype's own read-only branch. Fixed at `dcc86f75`, `4594494a`, and `d6b4dea4`, pinned in
+`agentLoop.prompts.test.ts`. See item 97 for the finding this item's own contradictions sat beside, and item
+90 for the suppression rule the first contradiction did not revisit.
 
 ## 99. The question archetype withholds `ask_user` and never instructs flagging an ambiguous task instead of picking a reading
 
@@ -9015,16 +9040,16 @@ priority ordering" cautions against ranking by importance, which this section do
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (43): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95
+**Closed** (44): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (0):
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (8): 1, 4, 18, 23, 57, 63, 75, 90
 
-**Neither — a structural fact recorded, with no fix proposed** (48): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (47): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
-81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 98, 99
+81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, and 93 are partially closed or corrected; the
 classification above covers only the portion still open, not the whole entry.
@@ -10399,3 +10424,38 @@ subject was measured under, in full, at least once — especially when that inst
 investigator's own harness assembled and already has on disk. An observation and its cause are not the same
 claim, and the cause is the one a later pass, reading the same artefact for a different reason, can still
 overturn.
+
+## A twenty-second pattern: a text-matching assertion needs to be scoped to the specific region a fix touches, not the whole document that region sits inside
+
+Pinning a fix to one line inside a large, static system prompt, the first draft of the new test scanned the
+whole assembled prompt for the tool name the fix corrects, word-boundaried to avoid a substring collision
+with a longer sibling tool name. It failed immediately — not because the boundary was wrong, but because the
+same bare word appears, correctly and unrelatedly, in two other blocks of the same prompt that render
+unconditionally for every archetype: a workaround-refusal note explaining what "run_command redirects" are,
+and a note about interpreting "every run_command result"'s exit code. Neither has anything to do with the
+line the fix changed.
+
+The prompt this document's own instrument assembles is not one text — it is dozens of independently-authored
+blocks concatenated into one string, each written for its own purpose, routinely reusing the same words (tool
+names chief among them) for reasons that have nothing to do with each other. A word-boundary match answers
+"is this the same word," not "is this the same occurrence of the word the fix touched" — and only the second
+question is what a pinning test for one line actually needs answered. Scoping a check to the whole document
+when the fix touched one line inside it inherits every other block's own vocabulary as a source of false
+signal.
+
+Related to, and not the same as, two earlier findings in this document that also concern a tool name read
+against surrounding text — checked directly rather than assumed similar. Item 90's own regression is a name
+read as covering a different name sharing its prefix — a hierarchy collision, live inside the model's own
+interpretation of the notice, never caught until a dedicated measurement pass found it. Item 91's own
+anti-drift pinning is word-boundary matching used correctly from the first commit, verified by mutation in
+both directions — a countermeasure, not an incident; nothing there was ever caught because nothing there ever
+collided. This is neither: no name reads as covering another, and no drift was ever at risk of going
+unnoticed. The word matched exactly what it was supposed to match, in a place that had nothing to do with the
+fix — a scope failure, not a hierarchy failure or an undefended one. Also checked against comparing two counts
+that measure different things, the twentieth pattern's own mechanism — a different object again: nothing here
+is a count, and nothing here was compared against the wrong quantity.
+
+The rule: before writing a text-matching assertion against a large, block-concatenated document, anchor the
+match to the smallest region the fix actually changed — a specific line, a specific bullet, the exact
+surrounding phrase — rather than the whole document the region sits inside. The document's own size and
+authorship-by-many-separate-additions is not incidental to this risk; it is the source of it.
