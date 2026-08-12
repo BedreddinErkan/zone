@@ -8011,7 +8011,7 @@ that bypasses `schemaMultiplier`, are in `core/computeRiskScore.ts`. The two liv
 `core/runLlmPatchFlow.ts` and `core/runAgent.ts`; the second is reached from `cli/index.ts`'s task-only
 flow. See item 82 for the removal that left the table in this state.
 
-## 84. Seven scoring and confidence mechanisms are unreachable, invisible to a naive import graph, and one of them is misattributed by name in both a source comment and CLAUDE.md
+## 84. Nine unreachable mechanisms share one shape — invisible to a naive import graph — across three unrelated subsystems; one is misattributed by name in a comment and in CLAUDE.md
 
 **What it is.** Seven mechanisms in the scoring/confidence surface have zero live callers, at
 `5eb4486e`: `computeConfidenceBreakdown` and its `CONFIDENCE_RULES` table
@@ -8042,6 +8042,36 @@ live; the name attached to it in both places is not the module that provides it.
 `computeConfidenceScore.ts` — live, `runAgent.ts`'s own caller — and `computeConfidenceBreakdown.ts`
 — dead — side by side, sharing no code and differing by one word.
 
+**A recount, this pass: the heading's own "one of them" folded the daily-cap finding above into "the
+seven," and it was never one of them.** The seven enumerated in "What it is," and the seven files "Where the
+code lives" already names, are the scoring/confidence family alone. `checkDailyCap` sits in `llm/`, not
+`core/scoring/` or `semantic/`, and is a cost cap, not a scoring or confidence mechanism — introduced in its
+own paragraph above, never counted in either enumeration. Undercounted by one before this pass touched it,
+not something this pass introduced.
+
+**A ninth, found in a later pass, sharing the identical mechanism from a third domain: subagent
+tool-capability filtering.** `AUDIT_ALLOWED_TOOLS` (`llm/subagents.ts`) is exported and defined, referenced
+only inside two source comments (`agentLoop.ts`, `cli/tui/store-core.ts`) that describe what it is for,
+never imported or read by any production module. Its two siblings, `WORKER_ALLOWED_TOOLS` and
+`EXPLORE_ALLOWED_TOOLS`, each have a real call site building a capability filter; this one does not.
+Confirmed by reapplying the same test item 92 later used to keep a different, symptom-alike finding out of
+this item: nothing anywhere imports or calls it, which is this item's own mechanism, not item 92's
+value-level exclusion at a call site that runs correctly. Joins on that test, not on topic.
+
+**Essay decision on the pattern this makes visible — declined, not a new candidate: already the eleventh's
+own rule, applied a second time.** The eleventh's rule, stated generally: "before reusing a precedent, name
+the specific condition that makes it safe where it already sits, then check whether that condition holds at
+the new site. Surface similarity... is not that condition." That is exactly what decided this join, what
+decided this item's own recount, and what decided item 92's original split — the same symptom checked against the
+actual mechanism each time, not assumed from resemblance or reused from a differently-mechanised precedent.
+Declined as an extension of the eleventh, filed as its own instance here, on item 82's *shape* — not item
+82's own reopening condition, which was about a different, unrelated mechanism (a directional
+inbound/outbound verification gap) and does not hold at this site. **Reopening condition, written for this
+candidate specifically:** if a future ledger-bucketing decision follows the eleventh's own rule — name the
+mechanism, check it at the new site — and that check itself turns out insufficient to decide correctly, that
+is evidence the eleventh's rule does not fully generalise from precedent-reuse to item-bucketing, and reopens
+the question of a dedicated nineteenth pattern for the ledger-specific version.
+
 **Read-not-run, marked where it applies.** The chain's own import statements, the
 `checkDailyCap`/`resolveDailyUsdCap` naming, and the `core/scoring/` collision are readings. The
 value-vs-type graph comparison and the `dist/` confirmation are runs.
@@ -8053,7 +8083,8 @@ value-vs-type graph comparison and the `dist/` confirmation are runs.
 `semantic/semanticRiskRules.ts` are the seven unreachable mechanisms. The live daily-cap path is
 `llm/usdCapResolver.ts`, consumed by `llm/agentLoop.ts`; the dead, misattributed module is
 `llm/checkDailyCap.ts`. The live sibling beside the dead chain is `core/scoring/computeConfidenceScore.ts`,
-consumed by `core/runAgent.ts`.
+consumed by `core/runAgent.ts`. The ninth is `AUDIT_ALLOWED_TOOLS` in `llm/subagents.ts`, referenced only in
+comments at `llm/agentLoop.ts` and `cli/tui/store-core.ts`.
 
 ## 85. Six threshold-level decisions across five scoring mechanisms have no recorded reason anywhere, and resolveSafetyLevel's own comment names a mapping that does not exist
 
@@ -8409,8 +8440,32 @@ notice can go stale.
 against the built `checkCommandSafe`, zero were refused — the model never touched the whitelist boundary in
 any run measured. This sits beside item 90's regression but is a different defect: not suppressed capability,
 missing disclosure. The tool's own schema description said only "read-only git/filesystem inspection,"
-naming no binary, while a fifty-six-entry whitelist includes `ls`, `find`, `fd`, `grep`, `rg`, and ten
+naming no binary, while a forty-five-entry whitelist includes `ls`, `find`, `fd`, `grep`, `rg`, and fourteen
 read-only `git` subcommands among them.
+
+**Both those counts were wrong when this item was written — fifty-six and ten — and the fix itself never
+depended on either.** Counted directly from `WHITELIST_PREFIXES` with comments stripped and duplicates
+checked: forty-five entries, fourteen of them read-only `git` subcommands. Fifty-six was never a count at
+all — it is the line number on which the array's closing bracket sits in `runCommandSafe.ts`, read as if it
+were the array's length. The anti-drift pinning below was never at risk: both mutations check the live
+`checkCommandSafe`, not this prose. Swept the rest of this document by shape for either wrong figure, for
+the correct ones, and for any other whitelist or blacklist count: this sentence was the only place either
+error appeared, and neither correct figure existed anywhere else to have been overwritten by it.
+
+**Essay decision — declined, one instance, checked directly rather than inherited from item 88's or item
+92's category declination: this candidate sits in the methodology category those two are not, and still
+doesn't qualify.** A position (a line number) read as a magnitude (a count), checked against all eighteen by
+title first, the three most plausible in full: the first's own subject is stale or wrong-on-arrival
+*pointers* — a reference whose target moved or was never right — and this number was never functioning as a
+pointer, so there is nothing here for a reader to follow to a wrong place; the thirteenth's subject is two
+independently-obtained values coincidentally agreeing, mistaken for confirmation — there was only one
+measurement act here, not two agreeing ones; the seventeenth's subject is a fresh entry's unearned trust
+from recency alone, true of the surrounding sentence but about *when* a check happens, not about *this*
+substitution. None of the eighteen states the mechanism this item's own drafting error actually has. Declined
+anyway, on one instance — this document's own practice for a genuinely new, single-occurrence mechanism, per
+item 87's precedent. Essay count stays eighteen. Reopening condition: a second instance of a positional
+reference — a line number, an index, an offset — read and recorded as if it were a cardinal count reopens
+the question on two instances rather than one.
 
 **Fixed at two sites, one live and one not.** The tool-schema description (`toolDefinitions.ts`) is live
 wherever `run_command_readonly` is offered, in any mode — now names the five discovery binaries and six
@@ -8476,11 +8531,86 @@ investigates anything. Item 88's own declination set the precedent that a code s
 item rather than an essay; this is independently also a code shape, by the same test, without needing its
 own reopening condition.
 
+## 93. Five refusal texts exist for `run_command_readonly` and its siblings, not three; one names a remedy unreachable in two live configurations, and none is counted
+
+**What it is.** Five variants, not the three item 91 left as an open pointer. Three belong to
+`run_command_readonly` itself, keyed off `checkCommandSafe`'s own reason string: a chain-operator block
+naming the offending operator and pointing at splitting the call plus `read_file(lineRange)` plus
+`head`/`tail`/`cat`; a whitelist-miss block printing the first eight `WHITELIST_PREFIXES` entries and naming
+exactly one remedy, `run_command`; and a catch-all for everything else — 37 of `BLACKLIST_PATTERNS`'s 40
+entries plus the pipe rule and the empty-command case, not find/arg-specific as an earlier pass of mine
+described it. Two more exist on the sibling tools: a hard safety block on `run_command` and
+`run_command_background`, firing on `rm -rf /`, a Windows recursive delete, a bare `format`, or a SQL
+client's `DROP TABLE`/`DROP DATABASE`, naming no remedy at all and not saying which of those four matched;
+and an approval-denial on `run_command`, naming a rephrasing — drop the metacharacters, re-run bare.
+
+**The catch-all covers the majority of what the whitelist actually blocks, and renders the one thing it
+uniquely knows as a raw regex.** Measured directly against the real gate, by source: three of the forty
+blacklist patterns — the three chain operators — route to the chain variant; the other thirty-seven, plus
+the pipe-to-non-utility rule, route to the catch-all. For a write-redirect refusal the agent is shown the
+pattern's own source, `>\s*(?:[^&\s\/]|\/(?!dev\/null(?:\s|$)))`, verbatim. Its other content — "use only
+whitelisted read-only commands" and the `read_file(lineRange)` pointer — repeats what item 91's fix already
+put in the tool's own description; `head`/`tail`/`cat` is the one thing it adds that the description does
+not name.
+
+**The whitelist-miss remedy is reachable in five of the nine configurations that offer
+`run_command_readonly`, not four, and two of those four are themselves unreachable by anything.** Resolved
+through the real `resolveToolList` against every archetype pipeline, tier subset, mode default, the two
+direct investigation-flow filters, and each subagent kind. Reachable: `simple_add`, `targeted_fix`,
+`refactor`, tier complex, and mode patch — configurations that already hold both tools, where "run it via
+`run_command` instead" is correct and does what it says. Unreachable: the question and investigation
+archetypes — the two live configurations where an agent actually holding only `run_command_readonly` can be
+refused and pointed at a tool it doesn't have — plus `AUDIT_ALLOWED_TOOLS` and the `verifier` subagent kind,
+which this item's own tracing and item 92 both establish are not reachable by anything today regardless. The
+live gap is exactly two configurations.
+
+**The prefix list this variant prints is generated from the live whitelist and cannot itself drift, and
+still carries no discovery binary.** It is `WHITELIST_PREFIXES.slice(0, 8).join(", ")` — always in sync with
+the array by construction — but the array's own order, counted directly from its source, puts every test
+runner first: the eight printed are `npx vitest, vitest, npm test, npm run test, pnpm test, yarn test, jest,
+pytest`. `ls` sits at index thirty-four of forty-five, `find` thirty-nine, `grep` forty, `rg` forty-one, `fd`
+forty-two — all past the slice. An agent refused for `sed` or `tree` is shown eight test runners and an
+ellipsis.
+
+**No apparatus exists for a refusal the way one exists for a scope block.** `consecutiveScopeBlocks` counts
+consecutive scope-blocked writes, with a coaching nudge at three, a circuit breaker at five, a dedicated exit
+path, its own termination reason, and a reset on any successful write. Nothing plays that role for a refused
+command: no counter increments, no threshold fires, there is no dedicated exit or termination reason, and
+there is nothing to reset. A refusal does set the loop's ordinary failure flags — `failureDetected`, the
+failed-tool fields — and does feed the loop detector on repeated identical commands, but no
+`SelfCorrectTrigger` anywhere in `src/llm/` keys on any of these five texts; a refusal reaches the coaching
+controller as an undifferentiated tool failure. It is not protected from compaction the way `apply_patch`,
+`update_memory`, and `Task` are, or pinned the way `suggest_scope_change` is.
+
+**In every class measured but one, a reachable rephrasing exists inside `run_command_readonly` itself, and
+none of the five texts name it.** Checked directly against the gate: a `sed`/`tree` whitelist-miss has
+`head`, `cat`, or `find -type d` available; a chain block has its own two halves as separate calls; a
+write-redirect or a pipe-to-a-non-utility has the same command with the offending clause dropped, since
+output is captured either way; a destructive `find` has its read-only form. The one exception is `npm run
+build`, refused as a whitelist miss with no equivalent inside the read-only shell — `npx tsc --noEmit` and
+`npm test` pass the gate but are different operations.
+
+**Read-not-run, and the largest gap left unmeasured.** All of the above is read from source and confirmed by
+direct calls to the built `checkCommandSafe` and `executeTool` — decidable offline, since the gate is a pure
+function evaluated before any process spawns. What none of it establishes: the behavioural effect of
+receiving any of these five texts. No run in any data captured this arc — the seventeen commands behind item
+91, or the arms behind item 90 — ever received a refusal; the whitelist boundary was never touched. Whether
+an agent shown the catch-all's raw regex, or pointed at `run_command` while holding only
+`run_command_readonly`, does anything different from an agent that was never refused at all remains exactly
+as unmeasured as item 90's and item 91's own behavioural effects.
+
+**Where the code lives:** the three `run_command_readonly` variants are in `toolExecutor.ts`, keyed off
+`checkCommandSafe`'s `reason` string (`runCommandSafe.ts`); the hard safety block is `isBlockedCommand` in
+`toolExecutor.ts`, guarding `run_command` and `run_command_background`; the approval denial is the
+`onApprovalRequired` branch on `run_command` in the same file. `consecutiveScopeBlocks` is in
+`handleToolResult.ts` and `agentLoop.ts`, for comparison. See item 91 for the description fix this sits
+beside, and item 90 for the notice regression sharing its unmeasured-behaviour status.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 92 to find out which ones still need something. No index of
+reader the trouble of reading all 93 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -8493,11 +8623,11 @@ first (0):
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (8): 1, 4, 18, 23, 57, 63, 75, 90
 
-**Neither — a structural fact recorded, with no fix proposed** (42): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (43): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
-81, 83, 84, 85, 86, 87, 89, 92
+81, 83, 84, 85, 86, 87, 89, 92, 93
 
-Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, and 88 are partially closed or corrected; the
+Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, and 91 are partially closed or corrected; the
 classification above covers only the portion still open, not the whole entry.
 
 ---
