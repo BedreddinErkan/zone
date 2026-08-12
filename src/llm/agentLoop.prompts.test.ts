@@ -527,3 +527,64 @@ describe('RC1-fix: commandTool param — investigation prompt tool/mandate varia
     });
   });
 });
+
+describe('item 98: qaCommandTool param — Q&A preamble tool-naming variants', () => {
+  // The block used to hardcode "Use ONE shell command via run_command" regardless of what
+  // the question archetype actually offers — only run_command_readonly, never run_command,
+  // since the archetype's own capability filter denies every fs.write-declaring tool by
+  // construction. Mirrors the RC1-fix commandTool block above exactly: a describe per
+  // variant, presence/absence pairs naming the right tool and excluding the wrong one.
+  // Assertions are scoped to the exact "Use ONE shell command via ..." line, not a
+  // whole-prompt scan for bare "run_command": PATCH RULES' own USER EDIT REJECTION note
+  // ("run_command redirects") and INTERPRETING COMMAND OUTPUT ("every run_command result")
+  // both render unconditionally for every archetype and both contain a bare "run_command" —
+  // a whole-prompt \brun_command\b scan collides with them regardless of this fix.
+  describe('qaCommandTool: "run_command"', () => {
+    let prompt: string;
+    beforeEach(() => {
+      prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, archetype: 'question', qaCommandTool: 'run_command' });
+    });
+
+    it('names run_command in the "Use ONE shell command via" line', () => {
+      expect(prompt).toContain('Use ONE shell command via run_command (e.g.');
+    });
+
+    it('does NOT name run_command_readonly in that line', () => {
+      expect(prompt).not.toContain('Use ONE shell command via run_command_readonly');
+    });
+  });
+
+  describe('qaCommandTool: "run_command_readonly"', () => {
+    let prompt: string;
+    beforeEach(() => {
+      prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, archetype: 'question', qaCommandTool: 'run_command_readonly' });
+    });
+
+    it('names run_command_readonly in the "Use ONE shell command via" line', () => {
+      expect(prompt).toContain('Use ONE shell command via run_command_readonly (e.g.');
+    });
+
+    it('does NOT name bare run_command in that line', () => {
+      expect(prompt).not.toContain('Use ONE shell command via run_command (e.g.');
+    });
+  });
+
+  describe('qaCommandTool: omitted (backward-compat default)', () => {
+    it('falls back to run_command_readonly, the archetype\'s own real default', () => {
+      const prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, archetype: 'question' });
+      expect(prompt).toContain('Use ONE shell command via run_command_readonly (e.g.');
+      expect(prompt).not.toContain('Use ONE shell command via run_command (e.g.');
+    });
+  });
+
+  it('all three worked examples in the preamble pass the real whitelist', () => {
+    const examples = [
+      'find . -name "*.ts" -type f | sort',
+      'ls -la',
+      'grep -rn pattern src/',
+    ];
+    for (const cmd of examples) {
+      expect(checkCommandSafe(cmd).safe).toBe(true);
+    }
+  });
+});

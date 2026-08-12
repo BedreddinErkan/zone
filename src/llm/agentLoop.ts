@@ -609,6 +609,15 @@ export function assembleAgentSystemPrompt(input: {
   importContextSummary?: string;
   baseMaxIterations: number;
   canRunCommand: boolean;
+  /** Fix pass (item 98): which command tool the Q&A/LISTING MODE preamble should name in
+   *  its "Use ONE shell command via ..." line — mirrors assembleInvestigationSystemPrompt's
+   *  own `commandTool` field exactly, same tri-state, same caller-computed value
+   *  (investigationCommandTool). The block previously hardcoded `run_command` regardless of
+   *  what was actually offered; the question archetype's own capability filter never offers
+   *  it, only `run_command_readonly`. Optional, defaults to `run_command_readonly` when
+   *  omitted or null — the archetype's own real, empirically-confirmed default — never left
+   *  unset to avoid naming no tool at all. */
+  qaCommandTool?: "run_command" | "run_command_readonly" | null;
   backgroundCommandBlock: string;
   repoPath: string;
   planProgressBlock?: string;
@@ -721,6 +730,12 @@ export function assembleAgentSystemPrompt(input: {
   // effectiveArchetype to undefined via planApproved above, so this stays false for that
   // case without a second check.
   const isReadOnlyArchetype = effectiveArchetype === "question" || effectiveArchetype === "investigation";
+  // Item 98: the Q&A block below used to hardcode `run_command` regardless of what this
+  // archetype actually offers (only `run_command_readonly`, never `run_command` — the
+  // question archetype's own capability filter denies every fs.write-declaring tool by
+  // construction). Falls back to `run_command_readonly`, the archetype's own real default,
+  // rather than leaving the instruction naming no tool at all.
+  const qaCmd = input.qaCommandTool ?? "run_command_readonly";
 
   return (
     `${input.agentIntro}\n\n` +
@@ -734,7 +749,7 @@ export function assembleAgentSystemPrompt(input: {
         WEB_SEARCH_DIRECTIVE
       : effectiveArchetype === "question"
       ? `${QA_HEADER}\n` +
-        `- Use ONE shell command via run_command (e.g. find . -name "*.ts" -type f | sort, ls -la, grep -rn pattern src/) to answer the query.\n` +
+        `- Use ONE shell command via ${qaCmd} (e.g. find . -name "*.ts" -type f | sort, ls -la, grep -rn pattern src/) to answer the query.\n` +
         `- For enumeration: PREFER find ... -type f | sort — returns the FULL accurate listing. Do NOT use list_files (truncates) or search_in_files (paginates).\n` +
         `- Do NOT read source files unless the user explicitly asks for context.\n` +
         `- Final response: full command output plus a one-sentence summary.\n` +
@@ -3007,6 +3022,7 @@ Example:
         importContextSummary: input.importContextSummary,
         baseMaxIterations,
         canRunCommand,
+        qaCommandTool: investigationCommandTool,
         backgroundCommandBlock,
         repoPath: input.repoPath,
         planProgressBlock,
