@@ -8680,7 +8680,8 @@ between the two.
 marker files (`package.json`, `tsconfig.json`, `README.md`), fewer than arm A's two. The failure is not a
 search-quality one: the model read "how do we tell what kind of projects this contains" as a literal question
 about this repository's own nature rather than about Zone's own project-type-detection code, and answered
-that the repository is a TypeScript/Node.js project. It never searched for, touched, or named
+that the repository is a TypeScript/Node.js project — the reading the question archetype's own preamble
+prescribes for every cell run under it, see item 97. It never searched for, touched, or named
 `src/repo/detectProjectStructure.ts`. A cheap, efficient search aimed at the wrong target from its first
 call.
 
@@ -8691,8 +8692,10 @@ saw was dominated by unrelated matches under `src/remote/`. No guess-first false
 prediction anticipating one, drawn from T4's own behaviour, did not transfer. The model concluded the task
 meant finding and redacting an exposed secret, named `src/remote/controlServer.ts`'s session-token field as
 the exposed value, and reported it could not act because file-editing tools were unavailable — a discovery
-question answered as an unactionable patch task. It never found, searched for, or named
-`src/cli/tui/components/ApiKeysView.tsx` or `maskKey`.
+question answered as an unactionable patch task. The same source-reading-discouraged environment as T6 (item
+97) surrounds this cell too, though the fit is looser there — nothing in the preamble specifically suggests a
+security reading, only the conditions that make one easier to reach unchecked. It never found, searched for,
+or named `src/cli/tui/components/ApiKeysView.tsx` or `maskKey`.
 
 **Essay candidate — declined on category, not on mechanism overlap with a specific essay: checked against all
 nineteen.** T1's and T7's own searches share a shape worth naming precisely: an untyped query returning
@@ -8774,7 +8777,8 @@ item names, and does not supply it.
 
 **Where the code lives:** the measurement instrument is `scripts/notice-regression-probe.mjs`; see item 95
 for its own history, the bug this run first surfaced, and the fix, and item 96 for the refusal T3 recorded.
-See item 90 for the regression this measures around, and item 91 for the description fix it also concerns.
+See item 90 for the regression this measures around, and item 91 for the description fix it also concerns,
+and items 97 through 99 for the preamble those two cells ran under.
 
 ## 95. Closed — the credit probe was the one path every run on either provider passes through, and it was not among the four parts a prior pass called pinned
 
@@ -8877,11 +8881,135 @@ point throughout.
 `toolExecutor.ts`, keyed off `checkCommandSafe`'s `reason` string (`runCommandSafe.ts`); see item 93 for the
 full catalogue of five and item 94 for the run this came from.
 
+## 97. The question archetype's own preamble prescribes the reading two of item 94's cells took, gated on archetype alone, not on tool availability
+
+**What the preamble says, verbatim where the wording is the finding, and what it is titled.** The question
+archetype's own preamble is gated on the archetype alone (`effectiveArchetype === "question"`) inside
+`assembleAgentSystemPrompt`, `agentLoop.ts` — not on whether a shell tool is actually offered; this pass's own
+harness set `canRunCommand` false and the preamble still rendered unchanged. Its own header is "Q&A / LISTING
+MODE"; its three worked examples are all filesystem-state commands (`find . -name "*.ts" -type f | sort`,
+`ls -la`, `grep -rn pattern src/`); it states "PREFER find ... -type f | sort — returns the FULL accurate
+listing"; it states "Do NOT read source files unless the user explicitly asks for context"; it defines the
+final response as "full command output plus a one-sentence summary"; its own iteration-budget line reads
+"Iteration budget is 3 — one command, optional confirmation, one summary."
+
+**T6 followed this prescription exactly.** One `find` call for marker files, no source read, an answer built
+from the command's own output plus one sentence — the preamble's own deliverable, produced by its own
+preferred command, on a task with no code anchor to search for instead. See item 94's own T6 paragraph for the
+full outcome.
+
+**The investigation archetype states the opposite for the same underlying activity.** Its own preamble — the
+adjacent branch of the same conditional, same file — reads: "Use search_in_files and find_references; read
+source files as needed. Do NOT avoid source reads — they are the point." Two archetypes, one static block of
+prompt text each, opposite instructions for what a question about the repository should do with source code.
+
+**What this establishes about T7, and what it does not.** T7 ran in the same environment — source reads
+discouraged, the deliverable framed as command output — but the fit is looser than T6's: nothing in the
+preamble specifically suggests a security reading of an ambiguous word. What the preamble supplies for T7 is
+the conditions that make an unchecked reading easier to reach, not a directive pointing at that reading the
+way "Do NOT read source files" points T6's. See item 94's own T7 paragraph.
+
+**The ground these two cells sit on was not built to test this.** T6's and T7's own `exposes` field, in the
+snapshot the instrument reads, describes ranker difficulty — a blocklist entry, an un-boundaried substring
+match inside a camelCase hump — not interpretation ambiguity; both tasks were authored as file-ranking stress
+tests, deliberately terse to defeat filename matching, and neither the field nor the tasks' own authors
+labelled the dimension this item is about. That terseness is what makes the two readings possible, but the
+measurement was not designed around it. This narrows what the finding generalises to without erasing what it
+found: two cells did fail, and the preamble does prescribe the reading at least one of them took.
+
+**What survives does not say whether arm A hit the same wall.** Arm A's capture files are confirmed destroyed;
+the transcript preserves only the printed line for each task — iteration count, cost, wall time, tool-call
+count, git-clean status — no answer text, no correctness verdict, for any task. Item 90 assessed correctness
+only for T2 and T4, the two tasks with a recorded false negative; it never recorded a T6 or T7 verdict for
+either arm. Whether this is a shared prompt defect or a model-specific tendency under an identical prompt
+cannot be settled from what survives. Settling it needs a re-run of arm A itself, through the committed
+instrument, on `claude-sonnet-4-6` — Anthropic credit, item 90's own standing blocker.
+
+**Where the code lives:** the preamble is inside `assembleAgentSystemPrompt`, `agentLoop.ts`, in the same
+conditional that selects the investigation archetype's own block. See item 94 for the two cells this explains,
+item 98 for the three internal contradictions the same preamble carries, and item 99 for the clarification
+path this archetype withholds.
+
+## 98. The question archetype's preamble names tools the run doesn't have — one deliberately unlisted as absent, two explicitly listed as absent — and specifies two different final-response formats
+
+**First: `run_command`, instructed and deliberately unlisted.** The preamble's own first line tells the agent
+to "Use ONE shell command via run_command" — a tool this archetype does not offer; the run holds only
+`run_command_readonly`. The tool-absence notice does not name `run_command` as withheld, and this is by
+design, not an oversight this item is reporting: item 90's own fix suppresses a withheld name from the notice
+when it is a strict prefix of an offered tool's name, specifically so the notice stops reading as though the
+more specific tool were withheld too — the regression that fix closed was measured and real, and this item
+does not revisit that. What is new here is narrower: the preamble, a separate piece of text from the notice,
+still instructs the withheld name directly, in a run where the notice correctly says nothing about it. An
+agent that follows the preamble's own first instruction is pointed at a tool call the request never includes.
+
+**Second: `list_files` and `search_in_files`, referenced and explicitly withheld.** The preamble's own second
+line names both — "Do NOT use list_files (truncates) or search_in_files (paginates)" — as alternatives to
+avoid. Both are in the notice's own withheld list for this archetype, unlike `run_command`; the preamble
+argues against using tools that are already correctly flagged absent, the opposite failure mode from the
+first.
+
+**Third: two final-response specifications for the same run.** The preamble's own line states the deliverable
+as "full command output plus a one-sentence summary." A later, always-included block for this archetype —
+`ANSWER_SUMMARY`, included because the question archetype is read-only — states instead: "Answer the question
+directly, in prose," with file-and-line provenance required on every behavioural claim. The same run carries
+both specifications, one naming raw command output as the answer, the other naming cited prose.
+`ANSWER_SUMMARY` also states, unconditionally on this path, "this run was approved as answer-only" — the
+harness never sets `answerOnly`; the block is included through the read-only-archetype branch of the same
+condition, not the explicit-approval one, so every question-archetype run carries an assertion about its own
+approval status that was never actually made for it this way.
+
+**None of these three is item 97's own mechanism.** They are stale or contradictory references sitting beside
+that finding in the same block, not separate instances of it — the first is an instruction naming an absent
+tool the notice correctly doesn't flag, the second is friction against tools already correctly flagged, the
+third is two answer formats plus one unearned approval claim. What connects them to item 97 is only that they
+live in the same text, not a shared cause.
+
+**What would show whether the first one matters.** No run captured this arc has measured what a model does
+when it follows the preamble's instruction to call `run_command` and the tool is not in the request — whether
+it attempts the call and receives an error, silently substitutes `run_command_readonly`, or does something
+else. Unmeasured, not estimated.
+
+**Where the code lives:** all three sit inside the same question-archetype preamble in
+`assembleAgentSystemPrompt`, `agentLoop.ts`; `ANSWER_SUMMARY` is a separate constant in the same file, included
+through the archetype's own read-only branch. See item 97 for the finding this item's own contradictions sit
+beside, and item 90 for the suppression rule the first contradiction does not revisit.
+
+## 99. The question archetype withholds `ask_user` and never instructs flagging an ambiguous task instead of picking a reading
+
+**No clarification path exists in this archetype.** `ask_user` is a real, registered tool — resolved directly
+against the tool registry, not inferred — and is not part of the two-tool set this archetype offers
+(`read_file`, `run_command_readonly`). The notice names it as withheld, with the same "not a permission error"
+framing every withheld tool gets, and the same instruction not to work around the absence via another tool or
+a shell command.
+
+**Nothing in the prompt instructs stating an ambiguity instead of resolving it.** Scanned the full assembled
+prompt for ambiguity, clarification, interpretation, and asking-the-user vocabulary: three matches, none about
+reading a task — one concerns prior-turn content missing from disk, one is the sole occurrence of "interpret"
+and concerns shell exit codes. The prompt never states the agent is working on a codebase rather than in an
+environment, never states a question is more likely about how the code works than about the repository's
+current state, and never instructs the agent to say a task admits two readings rather than choose one. All
+three absent, tested by scanning the assembled text, not inferred from its surrounding framing.
+
+**What the rest of the prompt pushes toward instead.** `ANSWER_SUMMARY`, included for this archetype, states
+"Answer the question directly, in prose" — an instruction toward resolution, not toward flagging doubt. Bare
+identity and location lines are the only framing the agent gets ("You are Zone." and the repository path);
+neither carries any instruction about how to read what "the repository" means in a given question.
+
+**What this establishes, precisely.** Not that a model would ask if it could — that remains untested, since no
+cell in this arc ran with `ask_user` offered. Only that if a model recognises a task as ambiguous under this
+archetype, it has no tool to act on that recognition and no instruction to say so instead of guessing.
+
+**Where the code lives:** `ask_user`'s registration is in the tool registry; its absence from this archetype's
+offered set resolves through the same capability filter item 94's own measurement used,
+`buildDispatcherCapabilityFilter` against `QUESTION_PIPELINE`. The notice is `llm/toolAbsenceNotice.ts`. See
+item 97 for the two cells this absence left unable to ask, and item 98 for the other defects in the same
+preamble.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 96 to find out which ones still need something. No index of
+reader the trouble of reading all 99 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -8894,9 +9022,9 @@ first (0):
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (8): 1, 4, 18, 23, 57, 63, 75, 90
 
-**Neither — a structural fact recorded, with no fix proposed** (45): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (48): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
-81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96
+81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 98, 99
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, and 93 are partially closed or corrected; the
 classification above covers only the portion still open, not the whole entry.
@@ -10246,3 +10374,28 @@ names describe the same instrument reading the same scope — the same event typ
 dispatched call, and the same breadth, a task's total activity versus one category within it — before
 treating their difference or their agreement as informative. A five and a three describing the same run can
 still be incomparable; a one and a three can still be equal.
+
+## A twenty-first pattern: attributing a measured outcome to the subject is unverified until the instrument producing it has been read
+
+A behavioural measurement's own two failing cells were attributed, in this document's own published text, to
+the model's own reading of an ambiguous task — a claim about the subject being measured. A later pass read
+the prompt those cells actually ran under, an artefact this arc's own harness had already written to disk on
+every invocation, and found it prescribes the reading one of the two cells took: titled listing mode, three
+filesystem-state worked examples, a direct instruction against reading source unless asked, a deliverable
+defined as command output. The attribution was not wrong about what happened. It was wrong about the more
+load-bearing why, and the why was sitting in a file already captured, unread, the entire time between the
+measurement and the pass that finally opened it.
+
+The mechanism is not "read more before running" — the run had already happened, the outcome was already
+known, and rereading the code that produced a change is a different discipline from checking the artefact a
+live measurement operated inside. A measurement produces an observation, and a conclusion about the subject is
+a second, separate claim layered on top of it: that the subject, not the apparatus it was measured through,
+produced the result. The apparatus here was cheaper to check than the measurement had been to run — an
+already-captured file, not a new call — and checking it changed which of the two cells' failures generalise
+past this one model and which do not.
+
+The rule: before an attribution names the subject as the cause of a measured outcome, read the instrument the
+subject was measured under, in full, at least once — especially when that instrument is something the
+investigator's own harness assembled and already has on disk. An observation and its cause are not the same
+claim, and the cause is the one a later pass, reading the same artefact for a different reason, can still
+overturn.
