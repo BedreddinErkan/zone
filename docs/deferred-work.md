@@ -9030,7 +9030,7 @@ offered set resolves through the same capability filter item 94's own measuremen
 item 97 for the two cells this absence left unable to ask, and item 98 for the other defects in the same
 preamble.
 
-## 100. Nine of nineteen configurations carry a prompt instruction naming a tool that configuration doesn't offer — Task in every one, TodoWrite and revert_patch tied second, search_in_files the case that found it and smaller than all but one of the others
+## 100. Closed — Nine of nineteen configurations carry a prompt instruction naming a tool that configuration doesn't offer — Task in every one, TodoWrite and revert_patch tied second, search_in_files the case that found it and smaller than all but one of the others
 
 **What it is, by block.** Prompt blocks divide three ways: gated on the offered tool set directly, and correct
 by construction (`backgroundCommandBlock`, the Q&A preamble's own command-tool name since item 97's fix, the
@@ -9111,6 +9111,12 @@ own text, not carried into the essay: it is a transcription error against alread
 construction error in what was measured, and matches no mechanism this pass checked closely enough to claim
 novelty for.
 
+**Closed.** Every configuration and tool this item catalogued is resolved, across six commits (`a8b40589`,
+`4080f9e2`, `3a1bc7cf`, `77fbd3e1`, `eb0a3d25`, `19fc8712`) — see item 101 for the fix and item 102 for the
+classifier committed alongside it, neither repeated here. This item's own stated bound — `planAnnotationsBlock`
+left unenumerated, named once and rendering only when a plan carries a subagent-eligible step — was resolved
+during the fix; no bound this item named stands open.
+
 **Where the code lives:** the nine defective configurations resolve through
 `buildDispatcherCapabilityFilter`, `tierToolFilter`, and `resolveSubagentCapabilityFilter`
 (`archetypeDispatcher.ts`, `tierToolSubsets.ts`, `subagentDispatch.ts`); the instruction text itself is spread
@@ -9118,26 +9124,120 @@ across `assembleAgentSystemPrompt` and `assembleInvestigationSystemPrompt`, both
 for the one instance already fixed, item 98 for the question that led here, and item 99 for the clarification
 path none of these nine offer either.
 
+## 101. Closed — item 100's nine configurations and eight tools, resolved across six commits; the binary configuration count could not show it happening
+
+**Mechanism: one new field, threaded from where the offered set was already computed.** `offeredToolNames` — a
+`ReadonlySet<string>` — added to `assembleAgentSystemPrompt`'s own input, computed once at the single
+production call site from the same `toolsForLLM` already read there to derive `canRunCommand` and
+`qaCommandTool`; an `isOffered(name)` helper inside the function reuses the `(condition ? content : "")` shape
+the function already used for `hasFramework`, `projectMemoryBlock`, `planProgressBlock`, and the `answerOnly`
+gates on `PATCH RULES` and its neighbors — extending an existing pattern, not inventing one.
+
+**Two mechanisms rejected, both checked against this document's own record before being set aside.**
+Per-sentence conditioning — the most precise option — was rejected as the direction that makes the assembler
+hardest to maintain: most defective blocks are wholly about one or a few tools, so block-level granularity
+already fits without it. A single filter over the assembled text was rejected as essay 22's own warned-against
+shape exactly: text-matching a document that is dozens of independently-authored blocks concatenated into one
+string, rather than anchoring to the specific region a fix touches.
+
+**The fallback assumes offered — the opposite direction from item 98's own fallback, for a stated reason.**
+`input.offeredToolNames?.has(name) ?? true`: an unset field reproduces prior, unconditional behavior exactly,
+for every caller across the codebase's fourteen call sites that don't yet pass it. Item 98's own fallback
+(`?? "run_command_readonly"`) defaulted to the archetype's own narrow, real value — the safe direction there.
+Here the unsafe failure is the opposite: a tool a run genuinely has going unmentioned would be a regression
+wider than the one this item catalogued, so the fallback has to assume offered, not assume withheld.
+
+**Five special cases, one shared shape, named once rather than five times: a bundle gate correct for the
+bundle can still leave one bullet inside it naming a tool the configuration lacks.**
+`DIVERGENCE_CHECK_DIRECTIVE`, naming `find_references` and `search_in_files` in one sentence, became a
+four-way branching function rather than a flat gate — `subagent:worker` offers one of the two, not both, so a
+bundle-level "at least one offered" gate would have kept the sentence naming the tool it doesn't have. The
+`multi_edit` bullet inside `PATCH RULES`, the `"or Task"` clause inside `APPLY_ROLLED_BACK`, the options line
+inside `VERIFICATION WARNINGS`, and the `"Suggested:"` bullet inside `PRIOR RUN CONTEXT` are four more
+instances of the identical shape: `apply_patch` alone (or, for the last, nothing at all) keeps the surrounding
+bundle open, but one piece of text inside names a different tool that isn't offered. Each got its own gate at
+the bullet or clause it actually concerns, not at the bundle around it.
+
+**The measurement needed correcting before the fix could be confirmed complete: pairs, not configurations.**
+The first four commits (`a8b40589`, `4080f9e2`, `3a1bc7cf`, `77fbd3e1`) resolved 29 of the 41 original
+(tool, configuration) pairs this item's own table implies — but the binary count of defective configurations
+stayed at 9 of 19 configurations after all four, because `PRIOR RUN CONTEXT`'s own `Task` mention, genuinely
+unconditional, alone kept every one of the nine configurations flagged regardless of the other 28 pairs
+already fixed. A configuration-level count is binary — at least one instruction-grade mention or none — and
+cannot show partial progress inside a configuration that still has one. The two remaining commits (`eb0a3d25`,
+`19fc8712`) closed the last 12 pairs: `Task` via `PRIOR RUN CONTEXT`'s own bullet, in all 9 configurations;
+`revert_patch` via `VERIFICATION WARNINGS`' own options line, in 3 configurations.
+
+**Re-measured after the last commit, predicted before running: zero.** Zero defective (tool, configuration)
+pairs, zero defective configurations, out of the 19 configurations tested — both matching what was predicted
+before the classifier ran, recorded by the instrument item 102 describes, not estimated by hand.
+
+**Where the code lives:** the `offeredToolNames` field and `isOffered` helper are in `assembleAgentSystemPrompt`,
+`agentLoop.ts`; the five special cases sit at `buildDivergenceCheckDirective` (converted from a module-level
+const to a function) and three interpolated or nested gates in the same function. Pinned per tool and per
+special case in `agentLoop.prompts.test.ts`. See item 100 for the class this resolves and item 102 for the
+classifier that produced the pair and configuration figures above.
+
+## 102. Closed — the tool-mention defect sweep behind items 100 and 101's own figures is committed, after being rebuilt from scratch twice
+
+**What it is and where it lives.** `scripts/tool-mention-defect-sweep.mjs`, with a companion
+`scripts/tool-mention-defect-sweep.test.ts` pinning its pure parts — the second instrument this arc has
+committed after losing an earlier one to scratchpad clears, following the precedent
+`scripts/notice-regression-probe.mjs` already set (`08ceb75e`) for exactly this problem.
+
+**Why committing it mattered, not just building it.** The classifier behind item 100's own figures was built
+once for the establish pass that produced them, and did not survive between sessions; rebuilt a second time
+for the fix pass's own re-measurement, in a scratchpad that also would not have survived past this arc's own
+current session. An instrument worth re-running belongs in the repository, not in a session transcript.
+
+**What it measures, and the correction from line-level to sentence-level.** For each of the 19 configurations
+item 100 originally tested, resolves the real offered tool set through `resolveToolList`, assembles the real
+prompt through `assembleAgentSystemPrompt` or `assembleInvestigationSystemPrompt` — threading
+`offeredToolNames` correctly, which the establish pass's own first classifier never did, so a naive re-run of
+it would have kept reporting pre-fix behavior even after the fix landed — and classifies at the sentence
+level, not the line level: a rendered line can carry a prohibition about one tool and an instruction about a
+different one, and a whole-line verdict can only report one of them. This is the shape that let both of item
+101's own final two pairs survive one full line-level measurement pass before a direct source read caught
+them.
+
+**Reports pairs as the headline, the binary count as secondary.** The binary configuration count is what hid
+29 already-resolved pairs behind an apparently unchanged 9 of 19 configurations after the first four commits
+(item 101) — the script's own output leads with the pair matrix, and prints the binary count as one summary
+line below it.
+
+**Fails loudly, not silently — essay 23's own mechanism, applied here as a countermeasure rather than
+repeated as a mistake.** `planProgressBlock`'s real text is a local constant inside `agentLoop.ts`'s own
+caller, not exported, so this script cannot import it verbatim; it uses a documented placeholder and asserts —
+throws, not warns — that the placeholder is non-empty and carries the real header before sweeping. An empty
+or drifted placeholder here would silently repeat exactly the mistake essay 23 records: the establish pass's
+own first sweep passed an empty `planProgressBlock` before confirming its inclusion condition, and silently
+dropped `TodoWrite`'s entire defect from that sweep's results.
+
+**Where the code lives:** `scripts/tool-mention-defect-sweep.mjs`, pure exports `maskedLine`,
+`splitSentences`, `classifySentence`, `assertPlaceholderSane`, `buildConfigs`, `sweepConfig`; pinned in the
+companion `.test.ts`, 16 tests, two representative mutations both confirmed by name. Committed at `19fc8712`.
+See item 100 for what it measures and item 101 for the fix it verified at zero.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 100 to find out which ones still need something. No index of
+reader the trouble of reading all 102 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (44): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98
+**Closed** (47): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (0):
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (8): 1, 4, 18, 23, 57, 63, 75, 90
 
-**Neither — a structural fact recorded, with no fix proposed** (48): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (47): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
-81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 100
+81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, and 93 are partially closed or corrected; the
 classification above covers only the portion still open, not the whole entry.
@@ -10569,3 +10669,53 @@ for each part that wasn't the real, produced value — and confirm each stand-in
 a real invocation gives, not assumed harmless because it was easy to leave blank. An empty default is not
 neutral. It is a specific, wrong answer to the question of what a field contains, and it reads as silence
 exactly where the real content might have been the loudest thing in the artefact.
+
+## A twenty-fourth pattern, beside the twenty-second: a mis-scoped assertion can pass silently as easily as it can fail loudly, and only a mutation can tell the two apart
+
+The twenty-second pattern is about a text-matching assertion, freshly written, that collided with unrelated
+text elsewhere in the same block-concatenated prompt and failed immediately — loud, caught at the moment of
+writing. This is the same underlying failure, checked here from its quiet side for the first time: a
+pre-existing assertion, in `priorRunSummary.test.ts`'s own "system prompt documents PRIOR RUN CONTEXT" test,
+checks for a regex matching a `"Suggested:"` cue followed eventually by "coordinated multi-file edit" —
+written to confirm one specific bullet inside `PRIOR RUN CONTEXT`, but scoped to neither that bullet nor that
+block. A
+second, unrelated `"Suggested:"` mention lives inside `APPLY_ROLLED_BACK`'s own text, always present under
+this test's own default fixture. When item 101's own fix gated `PRIOR RUN CONTEXT`'s bullet and a mutation
+inverted that gate to confirm the test would catch it, the test kept passing — not because the gate was
+wrong, but because the assertion was never actually reading the region it was written to check. The test
+would pass with the targeted bullet deleted outright, today, in the tree, unfixed: this pattern records the
+finding, not a correction — closing it is out of the scope of the pass that found it.
+
+**Checked against the twenty-second by mechanism, not by theme, and found to differ in the direction that
+matters.** Both share the identical root cause — an assertion scoped to a whole document rather than the
+region a fix actually touches. But the twenty-second's own rule ("anchor the match... before writing a
+text-matching assertion") is a write-time discipline: it tells the author of a new assertion how to avoid the
+mistake, and would not by itself catch an existing assertion that already has it, since an over-scoped
+assertion that happens to find its collision is invisible in every way a working test normally is — it's
+green. What separates this instance is the discovery path, not just the direction of failure: the
+twenty-second's own instance was caught by review, at the moment of writing, because it failed; this instance
+was caught only because a mutation predicted a kill that did not happen — deliberately breaking the region an
+assertion claims to guard, and checking whether the assertion actually noticed. Nothing about reading the
+test, the fix, or the prompt would have surfaced this; only running the test against a version of the code
+where it should have failed did.
+
+**Checked against the sixth and eighth too, since both concern a mutation revealing less than it appears to
+— and found to be a different mechanism from either.** The sixth is about a mutation blind because a
+downstream guard suppresses regardless of which route a change takes; there is no guard here, and the
+mutation reached exactly the code it targeted. The eighth is about a mutation blind because one test's own
+correct answer coincidentally equals the substituted value; there is no value-coincidence here either — the
+assertion never read the value the fix produces, in either direction. This instance is neither: the mutation
+worked exactly as intended, changing exactly the text it targeted. The assertion was never actually anchored
+to that text in the first place.
+
+**Novel. Recorded as the twenty-fourth pattern.**
+
+**The rule: a mutation that fails to kill a test is not evidence the code is correct — it can equally be
+evidence the test was never actually checking that code.** Before accepting a survived-mutation result as
+confirmation of correctness, read what the surviving assertion actually matches against, the same way the
+twenty-second pattern already asks of a new assertion before it's written — except here the read has to
+happen after a test already exists and already passes, since passing is exactly the state that hides this.
+
+**Where it stands:** `priorRunSummary.test.ts`, "Phase J.5 — system prompt documents PRIOR RUN CONTEXT," its
+third pillar's own regex assertion. Not fixed here — out of the scope of the pass that found it — and stated
+plainly so a later reader does not assume otherwise.
