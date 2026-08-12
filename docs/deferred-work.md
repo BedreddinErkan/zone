@@ -8652,12 +8652,15 @@ itself — then the same request retried as bare `git diff --stat`, which succee
 calls, matching arm A's own zero on this task. The final summary, reached via budget exhaustion rather than a
 clean completion, explicitly declined to invent a fix, reporting the passing test suite and the one unrelated
 working-tree change instead — correct against this pass's own registered bar for a task with no `correctFile`
-to have. Arm A reached five calls on this task; this run's own iteration cap is three, visible directly in
-the capture, and one of those three went to the blocked chain rather than new information. Arm A's original
-harness configuration was not re-derived, so this three-versus-five comparison is not on equal footing;
-settling it needs either arm A's own original iteration-cap value, recovered from outside the session
-transcript this instrument was built to stop depending on, or a re-run of arm A itself through this same
-instrument, where the cap is fixed at three by construction.
+to have. Both runs shared an identical iteration cap of three, confirmed directly: arm A's own recorded output shows
+this same task at three of three iterations with five tool calls, the identical shape this run's own T3
+carried — three iterations, three calls, one of them the blocked chain rather than new information. The cap
+governs iterations, not tool calls; one iteration dispatches as many calls as a single response returns, with
+no per-iteration limit anywhere in the loop, so five calls sitting inside three iterations was never a
+mismatch needing to be settled. The comparison was on equal footing throughout, and settling it needed neither
+a re-derivation from outside the transcript nor a re-run: the transcript that recovered this instrument
+already held the original harness's own source, deriving the cap through the identical expression this one
+uses, and arm A's own runtime output stating the cap directly.
 
 **T4, `$0.008508`, three iterations, token budget exceeded.** Three tool calls: a wrong-path `read_file`
 returning a plain file-not-found (not a whitelist refusal), a `find` locating the real file, then a
@@ -8729,14 +8732,40 @@ never attributable to either alone. No OpenAI run has ever seen the pre-fix, bro
 speaks to the collision fix's behavioural safety on this provider, only to whether the shipped, already-fixed
 configuration produces working discovery behaviour here.
 
-**One cross-cell observation, the n=1 bound attached to every task inside it.** In no cell did this model use
-more discovery-shaped calls than arm A or arm C's own figure for that task: three matched exactly (T1, T2,
-and T4's discovery-specific count), four came in under (T3 at zero, matching arm A's own zero, plus T5, T6,
-T7). T4's total tool-call count did exceed arm A's, but only from a non-discovery wrong-path read attempt
-before the discovery call that worked — discovery count itself still matched. Separately: the two incorrect
-cells, T6 and T7, both involved a task phrase readable either as a question about Zone's own code or as a
-literal question about the repository or a security concern, and both times this model took the literal
-reading — two cells sharing a mechanism, not a rate, and not evidence about the other five.
+**One cross-cell observation on discovery calls, the n=1 bound attached to every task inside it.** In no cell
+did this model use more discovery-shaped calls than arm A or arm C's own figure for that task: four matched
+exactly (T1, T2, and T4 on their own count, T3 at zero matching arm A's own zero), three came in under (T5,
+T6, T7). Separately: the two incorrect cells, T6 and T7, both involved a task phrase readable either as a
+question about Zone's own code or as a literal question about the repository or a security concern, and both
+times this model took the literal reading — two cells sharing a mechanism, not a rate, and not evidence about
+the other five.
+
+**A second cross-cell observation, on total tool calls rather than discovery calls specifically, with the
+same bound attached.** Under the identical iteration cap of three established above, the two models spent
+that budget differently: arm A issued twenty-nine tool calls over twenty iterations across its seven cells,
+roughly one and a half per iteration; this pass's OpenAI runs issued twelve over seventeen, roughly
+seven-tenths. Per task, arm A against this pass: T1 three against one, T2 one against one, T3 five against
+three, T4 three against three, T5 five against two, T6 six against one, T7 six against one. These are totals
+across seven cells each, not a per-task expectation. The same bounds apply as everywhere else in this item:
+arm A ran with the notice suppressed while this pass ran the shipped configuration, so model and configuration
+move together, and no OpenAI run has ever seen the broken notice this measurement counts around. A
+model-behaviour difference, not a configuration artifact — the configuration that could have differed, the
+iteration cap, was identical throughout.
+
+**A second essay candidate from this same item — accepted: two comparisons between counts that don't measure
+the same thing, both in this item's own prior text, both surviving a full review before being read again.**
+The retired iteration-cap caveat compared a tool-call count against an iteration cap directly, calling five
+against three a mismatch requiring a re-run to settle; the cap bounds iterations, not calls, and never needed
+settling. The cross-cell observation's own prior text compared one run's total tool-call count against
+another run's shell-call count for the same task and called the difference an excess; the two totals were
+equal, and the excess was manufactured entirely by comparing across two differently-scoped counts. Checked
+against all nineteen essays by mechanism: none states this one. Closest by theme is the thirteenth, whose own
+sharper half is a coincidental digit match mistaken for confirmation — the opposite direction of this error,
+where two different digits are mistaken for a real difference because neither figure's own scope was named
+before the comparison was written. This sits squarely in this document's own investigative-methodology
+category, matching the boundary item 95 drew for the nineteenth: both instances are facts about how this arc
+wrote its own comparisons, not facts about the subject being measured. Accepted as the twentieth pattern,
+below. Essay count becomes twenty.
 
 **Where this leaves items 90 and 91.** Both remain exactly as they were before this pass — item 90 Blocked
 on data, item 91 Closed with its own unmeasured-behaviour caveat intact. A same-tasks run on a different
@@ -8834,9 +8863,9 @@ the answer is: it recovers cleanly, using the rephrasing the text itself offers.
 **What it cost the run.** One of only three iterations the question archetype allows on this run, spent on a
 blocked call rather than new information. The run finished on budget exhaustion rather than a clean
 completion, though the final summary it still produced was substantively correct against this pass's own
-registered bar — see item 94's own T3 discussion for the full outcome and for the separate question of
-whether arm A's own five-call figure on this task is even on equal footing with this run's three-call
-ceiling.
+registered bar — see item 94's own T3 discussion for the full outcome. Arm A's own recorded output shows this
+same task at the identical three-iteration cap with five tool calls of its own; the two runs shared the same
+budget throughout, established directly rather than left as an open question.
 
 **The bound, stated precisely.** One refusal, one of the five variants item 93 catalogues, one model, one
 cell. Whether this same variant behaves the same on `claude-sonnet-4-6` remains unmeasured, and the other
@@ -10193,3 +10222,27 @@ answers the wrong question. Before trusting the sentence "the pure parts are pin
 question directly: which of these functions does every execution pass through regardless of arm, task, or
 provider, and is that one on the list — not because it was easy to pin, but because a bug in it is guaranteed
 to be reached on the very first run.
+
+## A twentieth pattern: a comparison between two counts is only informative once both sides are named as counting the same thing
+
+Two instances of the same category error landed in one item, in one pass, and both survived a full review
+before being read again. The first: an item stated that one task's tool-call count and that same task's
+iteration cap were not on equal footing because five calls sat against a cap of three, treating the mismatch
+as evidence a fair comparison was impossible. It was never a mismatch — an iteration cap bounds loop
+iterations, and one iteration can dispatch several tool calls in a single pass; the run being compared
+against had already recorded five calls inside three iterations on the very same task. The second, several
+paragraphs later in the same item: a claim that one run's total tool-call count exceeded another run's own
+figure for the same task, where the figure being exceeded was that other run's shell-call count, a strict
+subset of its own total that happened to be reported alongside it. The two runs' actual totals were equal.
+
+Both errors have the same shape. Two figures, each a small integer, each genuinely true of its own
+measurement, sit next to each other in a sentence that treats their proximity as comparability. Nothing about
+the sentence is false in isolation — the cap was three, the shell count was one, the tool-call total was
+three — and that is exactly what let both survive a review pass aimed at checking whether each number was
+right rather than whether the two numbers being set against each other were the same kind of number.
+
+The rule: before writing a sentence that compares two counts, name what each one counts, and confirm the two
+names describe the same instrument reading the same scope — the same event type, an iteration versus a
+dispatched call, and the same breadth, a task's total activity versus one category within it — before
+treating their difference or their agreement as informative. A five and a three describing the same run can
+still be incomparable; a one and a three can still be equal.
