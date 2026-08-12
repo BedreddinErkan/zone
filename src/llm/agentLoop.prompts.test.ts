@@ -80,6 +80,19 @@ describe('UI.6.2: read-only archetypes get the answer contract, patch keeps four
     expect(prompt).not.toContain('FINAL SUMMARY (required');
   });
 
+  // Item 98's third contradiction: the Q&A preamble's own "Final response: full command
+  // output plus a one-sentence summary" line used to disagree with ANSWER_SUMMARY's "Answer
+  // the question directly, in prose" -- the two even actively conflicted (the preamble
+  // wanted full raw output pasted, ANSWER_SUMMARY forbids pasting a file's body). The two
+  // always co-occur (isReadOnlyArchetype's own first disjunct is effectiveArchetype ===
+  // "question"), so this is the assertion the prior toContain('FINAL ANSWER (required')
+  // check above would NOT have caught if a second spec were reintroduced.
+  it('question archetype carries exactly one response specification, not the preamble\'s own retired one', () => {
+    const prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, archetype: 'question' });
+    expect(prompt).toContain('FINAL ANSWER (required');
+    expect(prompt).not.toContain('Final response: full command output');
+  });
+
   it('investigation archetype (no answer-only plan) gets FINAL ANSWER, not the four-section contract', () => {
     const prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, archetype: 'investigation' });
     expect(prompt).toContain('FINAL ANSWER (required');
