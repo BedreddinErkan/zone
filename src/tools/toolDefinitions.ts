@@ -549,7 +549,7 @@ required: ["id", "content", "description", "status"],
       name: "run_command_readonly",
       strict: true,
       description:
-        "Execute a read-only shell command from a strict whitelist (test runners, type checks, lint, read-only git/filesystem inspection). Use this to reproduce failing tests, see actual error messages, run typecheck, or inspect git state. Output truncated to head 100 + tail 50 lines. Timeout: 120s. Blocked: file mutations, network mutations, package installs, shell substitution, chain operators, sudo. For file contents or line ranges, use read_file(lineRange) — not sed/awk.",
+        "Execute a read-only shell command from a strict whitelist: search/list (ls, find, fd, grep, rg), read-only git (log, diff, show, blame, grep, ls-files), test runners, type checks, and lint. Use this to reproduce failing tests, see actual error messages, run typecheck, or inspect git state. One command per call: no chaining (;, &&, ||), no shell substitution, no write redirects. Output truncated to head 100 + tail 50 lines. Timeout: 120s. Blocked: file mutations, network mutations, package installs, sudo. For file contents or line ranges, use read_file(lineRange) — not sed/awk.",
       parameters: {
         type: "object",
         properties: {

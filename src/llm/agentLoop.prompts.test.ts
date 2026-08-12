@@ -6,6 +6,7 @@ import {
   type SelfCorrectTrigger,
 } from './agentLoop.js';
 import { ZONE_TOOLS } from '../tools/toolDefinitions.js';
+import { checkCommandSafe } from './runCommandSafe.js';
 
 const PATCH_INPUT = {
   agentIntro: 'You are Zone, a coding agent.',
@@ -436,6 +437,47 @@ describe('RC1-fix: commandTool param — investigation prompt tool/mandate varia
 
     it('contains NO PROBLEM FOUND block', () => {
       expect(prompt).toContain('NO PROBLEM FOUND');
+    });
+
+    // Fix pass (2026-08-12): commandToolLine used to say only "read-only git inspection"
+    // with no discovery binaries named — same omission as the tool-schema description in
+    // toolDefinitions.ts, a separate hand-written duplicate. This branch has no reachable
+    // production caller today (traced in the plan: /init withholds shell.exec entirely;
+    // plan-mode investigation offers full run_command, hitting the OTHER branch above;
+    // the "verifier" subagent kind that would reach this one is unreachable — see
+    // toolAbsenceNotice-adjacent findings). Edited for consistency with the live
+    // tool-schema description, not because this text is currently rendered to any agent.
+    it.each([
+      ['ls', /\bls\b/],
+      ['find', /\bfind\b/],
+      ['fd', /\bfd\b/],
+      ['grep', /\bgrep\b/],
+      ['rg', /\brg\b/],
+      ['git log', /\blog\b/],
+      ['git diff', /\bdiff\b/],
+      ['git show', /\bshow\b/],
+      ['git blame', /\bblame\b/],
+    ])('names discovery binary: %s', (_label, re) => {
+      expect(prompt).toMatch(re as RegExp);
+    });
+
+    it.each([
+      ['ls -la', true],
+      ["find . -name '*.ts'", true],
+      ['fd pattern', true],
+      ['grep -rn pattern src', true],
+      ['rg pattern src', true],
+      ['git log --oneline -5', true],
+      ['git diff --stat', true],
+      ['git show HEAD', true],
+      ['git blame src/foo.ts', true],
+    ])('named binary passes the real whitelist: checkCommandSafe(%s).safe === %s', (cmd, expected) => {
+      expect(checkCommandSafe(cmd as string).safe).toBe(expected);
+    });
+
+    it('states the structural constraints: no chaining, no substitution', () => {
+      expect(prompt).toMatch(/chain/i);
+      expect(prompt).toMatch(/substitution/i);
     });
   });
 
