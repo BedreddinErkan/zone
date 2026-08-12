@@ -8422,12 +8422,13 @@ here generalises past the seven frozen tasks and the one archetype they were run
 
 **Unverified, and this matters more than any figure in this item: the fix landed on master and its
 behavioural effect has never been measured.** The re-run this arm's own design calls for — the same seven
-tasks, the same arm-B configuration, against the shipped fix — was never executed; provider credit was
-exhausted before it started, confirmed persistent by retry. A prediction was registered before the fix
-landed: per-task discovery-command counts matching arm C's own measured counts, and both false negatives
-resolving. That prediction stands unchecked. A reader should not infer the regression is closed because the
-fix is on master — closing this item requires the observation this paragraph names, and that observation
-does not yet exist.
+tasks, `claude-sonnet-4-6`, the same arm-B configuration, against the shipped fix — was never executed;
+Anthropic credit was exhausted before it started, confirmed persistent by retry. A same-tasks run on a
+different model does not close this — see item 94. A prediction was registered before the fix landed:
+per-task discovery-command counts matching arm C's own measured counts, and both false negatives resolving.
+That prediction stands unchecked. A reader should not infer the regression is closed because the fix is on
+master — closing this item requires the observation this paragraph names, and that observation does not yet
+exist.
 
 **Where the code lives:** the notice is `llm/toolAbsenceNotice.ts`, `buildToolAbsenceBlock`; the
 prefix-suppression rule is inside it. The splice fix is in `assembleAgentSystemPrompt`, `llm/agentLoop.ts`.
@@ -8494,8 +8495,9 @@ text assertion, with its gate assertion unaffected.
 **What stays open.** The refusal text a blocked command actually returns (`toolExecutor.ts`) is a third,
 independent statement of this same capability, untouched by this item; its whitelist-miss variant still
 redirects the agent to `run_command`, which several archetypes — including the one item 90 measured — do
-not offer. Its own behavioural effect is unmeasured, as is the scope guard's; neither this fix nor item 90's
-has been re-run against a live model, for the same reason — provider credit exhausted at the time of both.
+not offer. Its own behavioural effect is unmeasured on `claude-sonnet-4-6`, as is the scope guard's; neither
+this fix nor item 90's has been re-run against that model, for the same reason — Anthropic credit exhausted
+at the time of both. See item 94: a different provider does not supply this.
 
 **Where the code lives:** `toolDefinitions.ts`, the `run_command_readonly` tool entry; `commandToolLine`
 inside `assembleInvestigationSystemPrompt`, `agentLoop.ts`; pinning tests in
@@ -8606,26 +8608,145 @@ as unmeasured as item 90's and item 91's own behavioural effects.
 `handleToolResult.ts` and `agentLoop.ts`, for comparison. See item 91 for the description fix this sits
 beside, and item 90 for the notice regression sharing its unmeasured-behaviour status.
 
+## 94. `gpt-5.6-luna` did the discovery work on both T2 and T4 — a portability finding, not item 90's verification
+
+**What this measures, and what it does not.** Two cells, T2 and T4, one run each, on `gpt-5.6-luna`
+(OpenAI) — not `claude-sonnet-4-6`, and not a substitute for it. Item 90's own pending observation names
+that model specifically; this pass answers a different question — whether the notice, the description, and
+the tool schema all reach an OpenAI run unchanged, and whether an OpenAI model does the discovery work the
+shipped configuration is supposed to enable. It does not, and cannot, close item 90 or item 91's own
+unmeasured-behaviour caveat — no OpenAI run has ever seen the pre-fix, broken notice, so there is no OpenAI
+arm B to compare against, only the Anthropic one.
+
+**Provider-path findings, established free before any call.** The Responses-API tool conversion is a
+structural unnest only — description text, including item 91's fix, passes through unchanged. `toolCallLog`
+populates identically on both providers: each adapter normalizes its own response shape to the same
+`tool_calls` structure before any provider-agnostic orchestration runs. System-prompt transport is
+symmetric — Anthropic into a `system` field, OpenAI into an `instructions` field — content unchanged either
+way. `openaiContext.ts`, despite its name, is a generic request-context module with no prompt or
+tool-schema logic in it at all; the working hypothesis that it might reshape either was checked directly and
+does not hold.
+
+**T2, `$0.009046`, two iterations, natural completion.** One `run_command_readonly` call (`rg -n --hidden
+--glob '!node_modules' --glob '!dist' 'problemWordsPresent' .`), then a correct final answer naming four
+real files. A fifth citation is a spurious self-match — the ground-task snapshot file carries this task's
+own description text, picked up because this command had no type filter, unlike the Anthropic arms'
+`--include`. Arm B's false negative on this task ("the symbol does not appear anywhere in the repository")
+did not reproduce.
+
+**T4, `$0.008508`, three iterations, token budget exceeded.** Three tool calls: a wrong-path `read_file`
+returning a plain file-not-found (not a whitelist refusal), a `find` locating the real file, then a
+successful read. The final answer correctly describes `checkWriteScope`'s actual same-dir/same-stem
+TypeScript-family tolerance, by name and line range. Arm B's false negative on this task ("cannot locate an
+alternate path... tools withheld") did not reproduce — and this run read further and answered more
+completely than any of the three Anthropic arms managed within their own iteration cap.
+
+**Cost and predictions.** Total spent `$0.017554` against an `$0.85` budget, roughly a sixth of the
+Anthropic arms' own per-task figures (item 90: `$0.73` over fourteen task-runs). Five predictions registered
+before the first call — discovery-command count and false-negative resolution for each task, plus whether
+any command would be refused — all five held; nothing here was a miss.
+
+**The n=1 bound applies exactly as it always has.** Two cells, one run each, one model, one provider.
+Nothing here is a rate, and a match on these two cells says nothing about the other five tasks arms A and C
+also measured.
+
+**Where this leaves items 90 and 91.** Both remain exactly as they were before this pass — item 90 Blocked
+on data, item 91 Closed with its own unmeasured-behaviour caveat intact. A same-tasks run on a different
+model is consistent with the shipped configuration being sound in general; it is not the observation either
+item names, and does not supply it.
+
+**Where the code lives:** the measurement instrument is `scripts/notice-regression-probe.mjs`; see item 95
+for its own history, the bug this run first surfaced, and the fix. See item 90 for the regression this
+measures around, and item 91 for the description fix it also concerns.
+
+## 95. Closed — the credit probe was the one path every run on either provider passes through, and it was not among the four parts a prior pass called pinned
+
+**What happened, in order.** `08ceb75e` committed a verification instrument specifically so the arm A/B/C
+harness would survive a third scratchpad clear — it had already been destroyed twice, recovered both times
+from a session transcript that is itself not durable, growing every turn and not something a later session
+can rely on. That commit pinned four pure parts: ground-task loading, predictions-file parsing,
+capture-record building, and the registry-suppression seam arm A depends on — each with its own test, each
+still passing. It made `--provider` and `--model` CLI arguments rather than hardcoded values, on the
+reasoning that an instrument built to survive should not be tied to one provider's availability. It was
+never actually run against OpenAI before landing.
+
+**The first real OpenAI invocation — item 94's own T2, first attempt — failed at the very first gate.**
+`probeCredit` hardcoded `max_tokens: 1`; OpenAI's Responses API rejects any `max_output_tokens` below
+sixteen. Not a credit issue — a provider-shaped assumption in the one function every run, on both providers,
+passes through before the measurement loop is ever reached. Checked for an existing floor or mapping before
+picking sixteen from the error string: the adapter's own `max_output_tokens` conversion is a bare
+pass-through with no clamp anywhere in the chain, and the installed SDK's own type definitions carry no
+documented minimum either — there was nothing to reuse, and the API's own validation response is the only
+source of truth available in this tree. Checked, separately, whether `max_tokens` was the only untested
+assumption in the probe: read the message-translation path the probe's plain single-string request takes,
+and the `instructions` field it never sets — found nothing else, though this is not a guarantee a second
+issue isn't hiding behind the first, only that reading the code surfaced one defect and not two.
+
+**The transferable finding is not the number.** `08ceb75e`'s own commit message and this document's own
+record of it both said the pure parts were pinned, and that sentence was true — each of the four named
+functions has a real test, and none of those tests were wrong. It was also insufficient, and the two
+properties that made it insufficient are not the same property. Purity is a fact about a function's own
+implementation: does it call out, does it touch shared state. Criticality is a fact about the call graph: how
+many of the paths through this program pass through this function before anything else can run. The two
+usually move together — a function that's hard to test because it makes a real call is often also incidental,
+one of several ways to reach the same place. Here they came apart in the direction that matters: the credit
+probe was the one function every invocation passed through regardless of arm, task, or provider, and it was
+also the one function excluded from pinning for the same reason it was worth pinning — it makes a real call,
+so it wasn't a candidate under the criterion the prior pass used.
+
+**Fixed, and the parameter construction pinned this time — separated from the call specifically so this does
+not recur unnoticed.** `buildCreditProbeParams(model, provider)` extracted as a pure function; the probe
+itself calls it rather than constructing its request inline. Two tests, one per provider, plus a mutation
+swapping the per-provider branch: predicted and actual kill set both exactly the two assertions that name
+each provider's own expected value. Verified working on the one provider this fix touched, not just tested
+in isolation — item 94's own T2 and T4 both completed on the first attempt after this fix landed. That is
+not the same claim as the instrument having served its original purpose: every run since `08ceb75e` has been
+against OpenAI, item 90's own pending observation needs `claude-sonnet-4-6`, and this fix did not touch the
+Anthropic branch at all — that path was never blocked by this bug, only by the same credit exhaustion that
+has blocked it since before the instrument existed. The bug is resolved; the instrument has still never once
+produced the observation it exists to produce.
+
+**Essay decision — accepted, not declined: checked directly against all eighteen, by mechanism rather than
+by title, and none of them state this one.** The closest by surface vocabulary is the fourteenth, itself
+about a test's own scope — but the fourteenth's mechanism is a runtime marker-search silently narrowing to an
+arbitrary slice, or a forbidden-string assertion applied over too wide a block of prose; neither is about
+choosing which functions get a test written for them in the first place. The ninth's mechanism is a known,
+already-written prescription that a later pass read and did not execute; here nothing was prescribed and
+skipped — the selection criterion ran to completion exactly as intended, and its own blindness to criticality
+is the defect, not a missed step. The seventeenth's mechanism is recency mistaken for scrutiny; this finding
+has no freshness dimension at all — the flaw is structural in the criterion, independent of how long the
+suite had existed. Checked the second, seventh, and eighth as well, the other candidates matching on "test"
+alone: the second is about one assertion's own internal construction, the seventh is a git-workflow hazard
+during mutation-testing reverts, the eighth diagnoses an already-fixed test set's mutation results — none of
+the three touches a selection criterion across candidate functions either. This is squarely this document's
+own investigative-methodology category, not a Zone code shape: the object is how a verification pass in this
+arc decided what to pin, not a fact about `src/`. Recorded as the nineteenth pattern, below. Essay count
+becomes nineteen.
+
+**Where the code lives:** the instrument is `scripts/notice-regression-probe.mjs`; the fix is
+`buildCreditProbeParams` and the two tests naming it, in `scripts/notice-regression-probe.test.ts`. See item
+94 for the measurement this fix unblocked, and items 90 and 91 for what the instrument exists to verify.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 93 to find out which ones still need something. No index of
+reader the trouble of reading all 95 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (42): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91
+**Closed** (43): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (0):
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (8): 1, 4, 18, 23, 57, 63, 75, 90
 
-**Neither — a structural fact recorded, with no fix proposed** (43): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (44): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
-81, 83, 84, 85, 86, 87, 89, 92, 93
+81, 83, 84, 85, 86, 87, 89, 92, 93, 94
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, and 91 are partially closed or corrected; the
 classification above covers only the portion still open, not the whole entry.
@@ -9919,3 +10040,35 @@ assembling. **The check this adds is one question asked when an instrument is bu
 it is read: how many states reach this value?** If more than one does, the field is a record of
 something, but not of what it appears to name — and unlike the absence problem above, waiting does
 not resolve it, because the ambiguity is in the mapping rather than in the timing.
+
+## A nineteenth pattern: pinning the parts a change touches can be true and still miss the one path nothing runs without
+
+A verification instrument's own test suite pinned four functions, chosen because each was pure — no network
+call, no shared-state mutation, straightforward to extract and assert against directly. That work was real
+and correctly done, and the sentence describing it — the pure parts are pinned — was true.
+
+It was also insufficient, and the two properties that made it insufficient are not the same property. Purity
+is a fact about a function's own implementation. Criticality is a fact about the call graph: how many of the
+paths through the program pass through this function before anything else can run. The two usually move
+together, which is what makes the gap between them easy to miss — a function that's hard to test because it
+makes a real call is often also incidental, one of several ways to reach the same place. Here they came apart
+in the direction that matters: the one function every invocation passed through, on either supported
+provider, regardless of which task was being run, was also the one function a purity-based selection
+excluded, for the very reason that made it worth including — it makes a real call, so it wasn't a candidate.
+
+The bug this let through was not subtle once found — a hardcoded value valid for one provider and rejected
+outright by the other's own API — but it was invisible to every check the pinning pass ran, because none of
+those checks were pointed at this function at all. A coverage claim can be entirely honest — every named
+function really does have a real test, every test really does pass — while the one thing every execution
+depends on sits outside the list, because the criterion that built the list was never asked whether it
+tracked criticality, only whether it tracked testability. Fixing the one function a failure surfaced does not
+retire the question either: whether that same function carried a second, different assumption was checked by
+reading it once, after the failure had already pointed at it — a read prompted by what had already gone
+wrong, not an audit that set out to enumerate every assumption and found none. It ruled the one hazard in. It
+did not rule a second one out.
+
+The corrective is not "pin more things" — a criterion applied more diligently to the wrong question still
+answers the wrong question. Before trusting the sentence "the pure parts are pinned," ask the different
+question directly: which of these functions does every execution pass through regardless of arm, task, or
+provider, and is that one on the list — not because it was easy to pin, but because a bug in it is guaranteed
+to be reached on the very first run.
