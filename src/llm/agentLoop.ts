@@ -618,6 +618,17 @@ export function assembleAgentSystemPrompt(input: {
    *  omitted or null — the archetype's own real, empirically-confirmed default — never left
    *  unset to avoid naming no tool at all. */
   qaCommandTool?: "run_command" | "run_command_readonly" | null;
+  /** Item 100 fix: every tool name actually offered to this run (toolsForLLM at the call
+   *  site, via getZoneToolName) — threads real availability into several blocks below that
+   *  otherwise instruct a tool unconditionally regardless of whether this configuration
+   *  offers it (TodoWrite, Task, search_in_files, and write-tool blocks previously gated on
+   *  answerOnly alone, which missed question/investigation/tier/subagent configurations that
+   *  also lack these tools without being answerOnly). Optional; unset defaults every
+   *  isOffered(...) check below to true. That is the opposite direction from
+   *  qaCommandTool's own fallback above: the unsafe failure here is a tool the run truly has
+   *  going unmentioned, not the reverse, so an unset field must reproduce today's
+   *  unconditional behaviour exactly rather than default to "nothing offered". */
+  offeredToolNames?: ReadonlySet<string>;
   backgroundCommandBlock: string;
   repoPath: string;
   planProgressBlock?: string;
@@ -736,6 +747,10 @@ export function assembleAgentSystemPrompt(input: {
   // construction). Falls back to `run_command_readonly`, the archetype's own real default,
   // rather than leaving the instruction naming no tool at all.
   const qaCmd = input.qaCommandTool ?? "run_command_readonly";
+  // Item 100 fix: unset offeredToolNames assumes offered (true), not withheld — the unsafe
+  // failure direction here is a real tool going unmentioned, so a caller not yet passing
+  // this field must reproduce today's unconditional behaviour exactly.
+  const isOffered = (name: string): boolean => input.offeredToolNames?.has(name) ?? true;
 
   return (
     `${input.agentIntro}\n\n` +
@@ -782,12 +797,14 @@ export function assembleAgentSystemPrompt(input: {
         input.importContextSummary + `\n` +
         `(End related files context)\n\n`
       : "") +
-    (input.planProgressBlock ? `${input.planProgressBlock}\n\n` : "") +
-    (input.planAnnotationsBlock ? `${input.planAnnotationsBlock}\n\n` : "") +
+    (input.planProgressBlock && isOffered("TodoWrite") ? `${input.planProgressBlock}\n\n` : "") +
+    (input.planAnnotationsBlock && isOffered("Task") ? `${input.planAnnotationsBlock}\n\n` : "") +
     // answerOnly has had no write tools since R4 — apply_patch/write_file rules describe
-    // tools this run shape is never offered. Gated here rather than removed: question and
-    // investigation still reach this block unconditionally (open item, not this pass).
-    (input.answerOnly ? "" :
+    // tools this run shape is never offered. Item 100 fix: also require at least one of the
+    // three write tools this whole block is about — closes the gap the answerOnly-only gate
+    // left open for question/investigation/tier/subagent configurations that lack them
+    // without being answerOnly.
+    ((input.answerOnly || !(isOffered("apply_patch") || isOffered("write_file") || isOffered("multi_edit"))) ? "" :
     `PATCH RULES:\n` +
     `- apply_patch for EXISTING files; write_file ONLY for new files.\n` +
     `- FIND: copy verbatim from read_file output, 1-5 lines, unique in the file.\n` +
@@ -802,8 +819,10 @@ export function assembleAgentSystemPrompt(input: {
     // triggers for answer_only, which offers neither tool since R4. Gated together because
     // they're contiguous and share the same "unconditionally inapplicable" reasoning;
     // PRIOR RUN CONTEXT/SESSION MEMORY below stay unconditional, so this cannot become a
-    // range gate without moving them too.
-    (input.answerOnly ? "" :
+    // range gate without moving them too. Item 100 fix: also require at least one of the
+    // tools this cluster names (apply_patch, Task, revert_patch) — closes the same gap as
+    // PATCH RULES above, for the same reason.
+    ((input.answerOnly || !(isOffered("apply_patch") || isOffered("Task") || isOffered("revert_patch"))) ? "" :
     `PRE-EXISTING BROKEN FILE — when apply_patch returns rejectionReason 'file_already_broken_pre_patch':\n` +
     `The file had a syntax error before your patch. Read it, locate the line/col in the rejection, then write ONE apply_patch that fixes the pre-existing error AND makes your change (pass scope: null — scope resolution cannot work on an unparseable file).\n\n` +
     `APPLY_ROLLED_BACK — when apply_patch returns a result beginning with "APPLY_ROLLED_BACK":\n` +
@@ -831,21 +850,26 @@ export function assembleAgentSystemPrompt(input: {
     // prescribed action presupposes a change that was made ("caused by your change", "your
     // mistake") or a write tool to fix with ("apply_patch... re-run tests") — neither holds
     // for this shape. Separate gate from the cluster above: not contiguous with it, and the
-    // reasoning is content-inapplicability, not an unreachable trigger.
-    (input.answerOnly ? "" :
+    // reasoning is content-inapplicability, not an unreachable trigger. Item 100 fix: also
+    // require apply_patch offered — the only tool this block's own fix instruction names.
+    ((input.answerOnly || !isOffered("apply_patch")) ? "" :
     `TEST FAILURES — investigate, don't summarize:\n` +
     `- Read the file/line in the error. Decide: caused by your change, or pre-existing?\n` +
     `- Pre-existing: fix if simple, else note as out-of-scope in your final summary.\n` +
     `- Your mistake: fix with apply_patch (intent='modify' or 'delete'), re-run tests.\n` +
     `- Only give up after a self-correction attempt.\n\n`) +
+    (isOffered("Task") ?
     `TASK SUBAGENTS (Task) — dispatch cap: 2/run (WORKER_MAX_ITER=6).\n` +
     `GOOD signals: step marked \`subagentEligible: true\` (check plan-annotations block); same change across 5+ files (multi_file_fanout: rename, codemod, Worker); step requiring 10+ parent iterations (long_isolated_step: complex extraction/migration).\n` +
     `BAD signals (stay single-thread): 1-2 file edits, line-edit task, shared mutation state, uncertain scope, patch-then-verify cycles.\n` +
-    `DISPATCH REASON required — prefix Task description: "multi_file_fanout: rename foo→bar in src/api/ (8 files)" or "long_isolated_step: extract auth module".\n\n` +
+    `DISPATCH REASON required — prefix Task description: "multi_file_fanout: rename foo→bar in src/api/ (8 files)" or "long_isolated_step: extract auth module".\n\n`
+    : "") +
     `NARRATION: before each tool call, write one short sentence in plain English describing what you're about to do and why. ` +
     `Examples: "Reading the README to find the existing structure.", "Patching package.json to add the dev dependency.", "Searching for callers of the renamed function." ` +
     `One line, no bullets, no markdown headers, no emoji. Shown as live narration. Don't repeat in the final summary.\n\n` +
-    `SEARCH FIRST: for symbol/pattern queries (find a function call, find usages, locate a definition), use search_in_files BEFORE read_file. search_in_files now supports regex, output_mode, and context_lines. Reading entire files to find a single symbol is the most common wasteful pattern.\n\n` +
+    (isOffered("search_in_files") ?
+    `SEARCH FIRST: for symbol/pattern queries (find a function call, find usages, locate a definition), use search_in_files BEFORE read_file. search_in_files now supports regex, output_mode, and context_lines. Reading entire files to find a single symbol is the most common wasteful pattern.\n\n`
+    : "") +
     `READ_FILE ECONOMY: ≤10K chars returns full content (no line-number prefix — safe to copy into FIND). >10K returns numbered head (lines 1-100) + outline + numbered tail — use lineRange: [start, end] (1-indexed inclusive) to read the specific region before patching. When you receive a FILE OUTLINE (file too large for full read), your next action MUST be read_file with lineRange covering the symbol or region you need — the outline alone is insufficient context for editing.\n\n` +
     `INTERPRETING COMMAND OUTPUT: every run_command result starts with [exit_code=N — ...]. exit_code=0 ⇒ success — DO NOT retry based on output text (e.g. "Tests: N failed" may be pre-existing failures unrelated to your patch). exit_code≠0 ⇒ failure — read the tail for the reason. When verifying your own patch, focus only on tests that cover files you modified. If a command exited 0, do not run additional commands to verify or investigate its output. Trust the exit code as final and move on.\n\n` +
     // @protected-until 2026-08-18 (commit 472efc9, post-mortem pipe-noise retry fix)
@@ -2978,6 +3002,10 @@ async function runAgentLoopScoped(input: AgentLoopInput, stats: LoopRunStats): P
   const hasRunCommandReadonly = toolsForLLM.some((t) => getZoneToolName(t) === "run_command_readonly");
   const investigationCommandTool: "run_command" | "run_command_readonly" | null =
     canRunCommand ? "run_command" : hasRunCommandReadonly ? "run_command_readonly" : null;
+  // Item 100 fix: same toolsForLLM already read two lines up for canRunCommand/
+  // hasRunCommandReadonly — one more derived Set, threaded into assembleAgentSystemPrompt
+  // so prompt blocks can condition on real tool availability instead of staying unconditional.
+  const offeredToolNames = new Set(toolsForLLM.map((t) => getZoneToolName(t)));
   const backgroundCommandBlock = canRunCommand
     ? `\nBACKGROUND COMMANDS: for long-lived processes (npm run dev, vite, watchers, tail -f), use \`run_command_background\` — returns a handle so you can keep working. Poll output with \`read_background_output\` (pass since_offset from the prior read to get only new bytes). \`kill_background\` when done; processes are also auto-killed at run end. Poll sparingly (every 2-3 iters, not every iter). One-shot commands (build, test, lint, tsc, pytest) → \`run_command\`.\n\n`
     : "";
@@ -3022,6 +3050,7 @@ Example:
         baseMaxIterations,
         canRunCommand,
         qaCommandTool: investigationCommandTool,
+        offeredToolNames,
         backgroundCommandBlock,
         repoPath: input.repoPath,
         planProgressBlock,

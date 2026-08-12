@@ -617,3 +617,155 @@ describe('item 98: qaCommandTool param — Q&A preamble tool-naming variants', (
     expect(prompt).toContain('neither truncates nor paginates');
   });
 });
+
+describe('item 100: offeredToolNames param — condition prompt instructions on the offered tool set', () => {
+  // Eight blocks named a tool unconditionally, regardless of whether this run's own
+  // capability filter actually offered it. offeredToolNames threads the real
+  // toolsForLLM-derived set in; isOffered(name) defaults an unset field to true (assume
+  // offered) so every PATCH_INPUT-based test above that never passes it keeps today's
+  // behaviour unchanged. Assertions below are scoped to the specific block/bullet a gate
+  // touches, not a whole-prompt scan -- the same discipline the qaCommandTool block above
+  // already established: PATCH RULES' own USER EDIT REJECTION note ("run_command redirects")
+  // and INTERPRETING COMMAND OUTPUT ("every run_command result") both render unconditionally
+  // and both contain unrelated bare tool-adjacent text.
+
+  describe('TodoWrite — PLAN VISIBILITY block', () => {
+    it('is omitted when TodoWrite is withheld', () => {
+      const prompt = assembleAgentSystemPrompt({
+        ...PATCH_INPUT,
+        planProgressBlock: 'PLAN VISIBILITY (TodoWrite):',
+        offeredToolNames: new Set(['read_file']),
+      });
+      expect(prompt).not.toContain('PLAN VISIBILITY (TodoWrite):');
+    });
+
+    it('is present when TodoWrite is offered', () => {
+      const prompt = assembleAgentSystemPrompt({
+        ...PATCH_INPUT,
+        planProgressBlock: 'PLAN VISIBILITY (TodoWrite):',
+        offeredToolNames: new Set(['read_file', 'TodoWrite']),
+      });
+      expect(prompt).toContain('PLAN VISIBILITY (TodoWrite):');
+    });
+  });
+
+  describe('Task — TASK SUBAGENTS block', () => {
+    it('is omitted when Task is withheld', () => {
+      const prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, offeredToolNames: new Set(['read_file']) });
+      expect(prompt).not.toContain('TASK SUBAGENTS (Task) — dispatch cap:');
+    });
+
+    it('is present when Task is offered', () => {
+      const prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, offeredToolNames: new Set(['read_file', 'Task']) });
+      expect(prompt).toContain('TASK SUBAGENTS (Task) — dispatch cap:');
+    });
+  });
+
+  describe('Task — planAnnotationsBlock inclusion', () => {
+    const ANNOTATIONS = 'PLAN ANNOTATIONS — delegatable steps in this run:\nplaceholder';
+
+    it('is omitted when Task is withheld, even with non-empty planAnnotationsBlock content', () => {
+      const prompt = assembleAgentSystemPrompt({
+        ...PATCH_INPUT,
+        planAnnotationsBlock: ANNOTATIONS,
+        offeredToolNames: new Set(['read_file']),
+      });
+      expect(prompt).not.toContain(ANNOTATIONS);
+    });
+
+    it('is present when Task is offered', () => {
+      const prompt = assembleAgentSystemPrompt({
+        ...PATCH_INPUT,
+        planAnnotationsBlock: ANNOTATIONS,
+        offeredToolNames: new Set(['read_file', 'Task']),
+      });
+      expect(prompt).toContain(ANNOTATIONS);
+    });
+  });
+
+  describe('search_in_files — SEARCH FIRST block', () => {
+    it('is omitted when search_in_files is withheld', () => {
+      const prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, offeredToolNames: new Set(['read_file']) });
+      expect(prompt).not.toContain('SEARCH FIRST: for symbol/pattern queries');
+    });
+
+    it('is present when search_in_files is offered', () => {
+      const prompt = assembleAgentSystemPrompt({
+        ...PATCH_INPUT,
+        offeredToolNames: new Set(['read_file', 'search_in_files']),
+      });
+      expect(prompt).toContain('SEARCH FIRST: for symbol/pattern queries');
+    });
+  });
+
+  describe('apply_patch, write_file — PATCH RULES bundle', () => {
+    it('is omitted when apply_patch, write_file, AND multi_edit are all withheld', () => {
+      const prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, offeredToolNames: new Set(['read_file']) });
+      expect(prompt).not.toContain('PATCH RULES:');
+    });
+
+    it('is present, naming both, when only apply_patch is offered of the three', () => {
+      const prompt = assembleAgentSystemPrompt({
+        ...PATCH_INPUT,
+        offeredToolNames: new Set(['read_file', 'apply_patch']),
+      });
+      expect(prompt).toContain('PATCH RULES:');
+      expect(prompt).toContain('- apply_patch for EXISTING files; write_file ONLY for new files.');
+    });
+
+    it('is present, naming both, when only write_file is offered of the three', () => {
+      const prompt = assembleAgentSystemPrompt({
+        ...PATCH_INPUT,
+        offeredToolNames: new Set(['read_file', 'write_file']),
+      });
+      expect(prompt).toContain('PATCH RULES:');
+      expect(prompt).toContain('- apply_patch for EXISTING files; write_file ONLY for new files.');
+    });
+  });
+
+  describe('apply_patch, Task, revert_patch — the four-block recovery cluster', () => {
+    it('is omitted when apply_patch, Task, AND revert_patch are all withheld', () => {
+      const prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, offeredToolNames: new Set(['read_file']) });
+      expect(prompt).not.toContain('PRE-EXISTING BROKEN FILE — when apply_patch returns');
+    });
+
+    it('is present, naming revert_patch, when only revert_patch is offered of the three', () => {
+      const prompt = assembleAgentSystemPrompt({
+        ...PATCH_INPUT,
+        offeredToolNames: new Set(['read_file', 'revert_patch']),
+      });
+      expect(prompt).toContain('PRE-EXISTING BROKEN FILE — when apply_patch returns');
+      expect(prompt).toContain('call revert_patch({path}) to undo specific files');
+    });
+  });
+
+  describe('apply_patch — TEST FAILURES block', () => {
+    it('is omitted when apply_patch is withheld', () => {
+      const prompt = assembleAgentSystemPrompt({ ...PATCH_INPUT, offeredToolNames: new Set(['read_file']) });
+      expect(prompt).not.toContain("TEST FAILURES — investigate, don't summarize:");
+    });
+
+    it('is present when apply_patch is offered', () => {
+      const prompt = assembleAgentSystemPrompt({
+        ...PATCH_INPUT,
+        offeredToolNames: new Set(['read_file', 'apply_patch']),
+      });
+      expect(prompt).toContain("TEST FAILURES — investigate, don't summarize:");
+    });
+  });
+
+  describe('offeredToolNames omitted (backward-compat default)', () => {
+    it('assumes every tool offered — every block above still renders unconditionally', () => {
+      const prompt = assembleAgentSystemPrompt({
+        ...PATCH_INPUT,
+        planProgressBlock: 'PLAN VISIBILITY (TodoWrite):',
+      });
+      expect(prompt).toContain('PLAN VISIBILITY (TodoWrite):');
+      expect(prompt).toContain('TASK SUBAGENTS (Task) — dispatch cap:');
+      expect(prompt).toContain('SEARCH FIRST: for symbol/pattern queries');
+      expect(prompt).toContain('PATCH RULES:');
+      expect(prompt).toContain('PRE-EXISTING BROKEN FILE — when apply_patch returns');
+      expect(prompt).toContain("TEST FAILURES — investigate, don't summarize:");
+    });
+  });
+});
