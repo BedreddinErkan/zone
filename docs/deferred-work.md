@@ -9620,11 +9620,46 @@ that tier reaches only `tokenBudgetCap` for five of seven archetypes, so a low a
 the tier harmful and a high one would not have made it load-bearing. That question is the behavioural
 measurement, still unrun.
 
+**Two further arms, and the headline is neither one's percentage.** Both ran the same forty tasks against the
+same frozen labels on gpt-4o-mini. Arm B (`6cdb722b`) softened the COMPLEX trigger block's header and
+returned 62.5 percent, 25 of 40, four tasks moving. The null arm (`dbf37726`) changed nothing at all — arm A's
+prompt re-run, confirmed byte-identical to `49aa3615` before the first call — and returned 55.0 percent, 22 of
+40, three tasks moving. Costs recounted from the three results files: arm A $0.006797, arm B $0.006812, the
+null arm $0.006788.
+
+**Arm B's movement is not distinguishable from run-to-run variance: four movers under the intervention
+against three under a pure repeat, on forty tasks.** A decision rule was registered at `231c8a40` before the
+first billed call and applied afterwards unchanged — four movers or more meant variance matched the
+intervention and arm B established nothing; one or fewer meant variance was small and arm B merited further
+arms; two or three was indeterminate. A secondary criterion on overall spread, and a conjunction requiring
+both to land favourably, were registered with it. The null arm returned three movers and a spread of exactly
+zero, so the primary criterion lands on indeterminate, the secondary lands favourably, and the conjunction is
+not met. **Arm B is neither established nor refuted and needs repetition.** Recorded as the rule states it
+rather than slid toward either extreme: the branch for "established nothing" did not fire, and neither did
+the branch for an effect worth pursuing.
+
+**The decomposition is the more useful finding, because the aggregate hides it.** The null arm's three movers
+cancelled to a net of zero — one task lost agreement, one gained it, and one crossed sideways without
+changing whether it agreed — so overall agreement was identical to arm A at 55.0 percent while per-task
+assignment was not. Two separate quantities: agreement against the frozen labels, and the count of tasks
+whose returned tier differs between two runs of the same input. **Aggregate stability is not per-task
+stability**, and a measurement reporting only the first cannot see the second at all.
+
+**The ceiling registered in advance, which still applies.** One null run is a single draw of variance, not a
+distribution. Three movers is one observation of how far this classifier moves against itself, not an
+estimate of how far it can.
+
 **What the two measurements would cost.** Agreement against hand labels needs one classifier call per
 task and nothing else — 40 calls is about eight cents on the default Anthropic model and about one cent on
 the OpenAI one, effectively free. The behavioural question needs three forced-tier arms over the same
-tasks; 20 tasks is 60 full runs, at roughly thirty cents to a dollar each, so 18 to 60 dollars. **The first
-has now been run and its estimate held.** Forty calls billed $0.006797 against the one cent predicted here,
+tasks; 20 tasks is 60 full runs, at roughly thirty cents to a dollar each, so 18 to 60 dollars. **That
+design is now known to be underpowered, which the costing did not account for.** If forty tasks produce
+three movers from variance alone, twenty tasks across three arms cannot separate a tier effect from noise:
+the noise floor is a substantial fraction of any effect the arms could show, and a single run per cell has
+no way to tell one from the other. What it would take instead — recorded so the costed design is not run as
+though it were sufficient, and not proposed here — is repetition within each arm rather than one run per
+cell, enough tasks that per-task churn averages out, and a variance estimate drawn from more than one null
+run. **The first measurement has now been run and its estimate held.** Forty calls billed $0.006797 against the one cent predicted here,
 the undershoot coming from OpenAI's automatic prefix cache engaging from the second call onward — $0.000265
 for the first call, $0.000165 median across the rest. The Anthropic figure in this paragraph stays an
 estimate, since that arm was not run. The behavioural measurement has not been run.
@@ -10052,10 +10087,23 @@ single task that moved *away* from its label is breadth-carrying, and its new re
 **What arm B does not settle, registered before the run rather than conceded after.** A result here is
 consistent with two states this pass cannot separate: the trigger list not firing, or the softened header
 being compensated by the two untouched forms of the same instruction. Separating them needs an arm that
-softens those too. And arm A was never re-run under arm B's conditions, so run-to-run variance is not
-separated from the intervention — four movers on forty is small enough that a null arm is needed before 7.5
-points reads as an effect. Zero downward disagreements in either arm: the upward-only bias survives the
-change intact.
+softens those too.
+
+**The null arm this entry called for has since run, and it answers the second question against arm B.**
+The clause here was not wrong, only incomplete — it named a measurement that did not yet exist. At
+`dbf37726` arm A's prompt was re-run unchanged: three tasks moved against arm B's four, on forty tasks, so
+the 7.5 points does not read as an effect. The pre-registered rule's conjunction is not met and arm B is
+indeterminate; see item 110 for the rule and its verdict, and item 127 for what the variance figure
+constrains generally.
+
+**Two claims this entry previously carried, both now false, corrected rather than left standing.** It said
+zero downward disagreements occurred in either arm and that the upward-only bias survived intact. The null
+arm produced one downward disagreement — a task labelled medium returned simple — the first in any arm, so
+the bias is strong but not absolute, and "every arm" was only ever two arms. It also implied, by attributing
+the reasoning text to the intervention, that arm B's prompt change moved how the model justified itself.
+It did not: arm B's reasoning was byte-identical to arm A's on 21 of 40 tasks, and a pure repeat with no
+prompt change at all is identical on **16 of 40**. The unchanged prompt churns *more* than the changed one
+did, so the text movement was sampling.
 
 ## 124. `rankerBaseline.snapshot.json` embeds frozen copies of sixty-two test files, and the test consuming it never compares them against the live tree
 
@@ -10142,11 +10190,79 @@ specified and nothing new needs learning first, which presupposes the fix is out
 the convention amendment in this same commit. Checked the other way too — nothing sitting in Actionable now
 lacks a still-pending fix.
 
+## 127. Run-to-run variance at temperature zero: three of forty tier movers on byte-identical input, and this bounds every single-run measurement in this repository
+
+**What it is.** The null arm at `dbf37726` re-ran the classifier against forty tasks whose text, labels,
+prompt, harness, options and model were all confirmed identical to the arm A run it was compared against.
+Temperature is zero at the call site and nothing downstream strips it for this model. Against that
+byte-identical input the second run produced **three of forty tasks returning a different tier**, **twenty-four
+of forty reasoning strings differing** from the first run's, **one task degrading to a fallback it had not
+hit before** — having previously returned a tier at confidence 1.0 — and **one request timing out**, which
+the harness retried and recorded.
+
+**Why it is recorded as a constraint rather than a curiosity.** Any measurement in this repository that runs
+a classification once per cell and compares cells is reading a signal against a noise floor of roughly three
+movers in forty. Arm B is the worked example: a four-mover intervention against a three-mover null, which the
+pre-registered rule could not separate. The figure is not specific to that experiment. It applies to
+measurement (b) in item 110, whose costed design of three arms over twenty tasks is underpowered by exactly
+this margin, and to any future arm framed as one run per condition.
+
+**What the number is and is not.** It is one draw. Three movers is a single observation of how far this
+classifier moves against itself between two runs, not an estimate of the distribution, and a second null run
+could return a different figure in either direction. Recorded so the three is used as evidence that variance
+is non-trivial, never as a variance estimate to compute against.
+
+**Where it can be checked:** the three arms' committed results files under `scripts/`, whose per-task rows
+carry the returned tier, the confidence, the fallback flag and the model's own reasoning for each run.
+
+## 128. The invalid-tier degradation fired once in one run and twice in a repeat of that same run, and the results files cannot tell you so
+
+**What it is.** Item 122 records the mechanism: the model puts an archetype value in the tier slot, the
+parser rejects it, substitutes medium and zeroes the confidence, and the archetype survives. Across the three
+arms on the same frozen forty, that path fired **once in arm A, once in arm B, and twice in the null arm** —
+the null arm being a repeat of arm A on byte-identical input. So the mechanism's rate is not stable across
+repeats of the same measurement, which is the same finding as item 127 arriving on a different surface.
+
+**The count's provenance, stated because the artefact cannot support it.** Those figures come from the
+`[zone-classifier-fallback]` markers emitted during each run, not from the committed results files. The files
+record a derived `fallbackKind`, and that field collapses this path into `low_confidence` — correctly, since
+the parser zeroes the confidence and the result really does travel through the low-confidence gate. The
+consequence is that **a reader with only the results files cannot distinguish a model that had no usable tier
+opinion from one whose tier opinion went into the wrong field.** The distinguishing evidence exists only in
+the run's own log output, which no artefact here retains.
+
+**No fix proposed.** Recording the rejected value on the returned classification would separate them, but
+that is a production shape change on a diagnostic path, and whether the distinction is worth a field is not
+this entry's call.
+
+## 129. `docs/determinism.md` states that randomness from the model is controlled by temperature zero, without the scoping its own header carries
+
+**What it is.** The document's header scopes its claim to determinism "within a single server process
+lifetime", and its first invariant rests on the in-process cache — identical task strings resolve to the same
+cache slot after the first call. That is a sound claim about Zone's own behaviour and **is not what this
+entry is about.** A later sentence in the same document carries no scoping at all: it states that randomness
+from the LLM itself is controlled by `temperature: 0`.
+
+**Why it is overstated.** Item 127's measurement is the counter-example, and it was taken deliberately
+outside the cached path — the arms pass `skipCache` from a fresh process, so the cache invariant is untouched
+and unrefuted. What the measurement shows is that at temperature zero, on byte-identical input, the hosted
+model returned a different tier on three of forty tasks, different reasoning text on twenty-four, and a
+fallback on a task that had previously answered at full confidence. Temperature zero constrains sampling; it
+does not make a hosted model reproducible across calls, and the sentence as written invites a reader to
+assume it does.
+
+**The fix, specified.** Give the sentence the same scoping the header already has: temperature zero removes
+Zone's own contribution to sampling variance and is what makes repeated calls *comparable*, while
+reproducibility across calls comes from the cache rather than from the temperature. Nothing further needs
+establishing — item 127 carries the measurement and the arms carry the data. Not applied here: this pass's
+scope is this document, and the correction belongs to a pass that can also re-read the rest of
+`determinism.md` for the same class of claim.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 126 to find out which ones still need something. No index of
+reader the trouble of reading all 129 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -10155,14 +10271,14 @@ first.
 **Closed** (51): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 111, 117, 120, 126
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (3): 108, 113, 116
+first (4): 108, 113, 116, 129
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (9): 1, 4, 18, 23, 57, 63, 75, 90, 110
 
-**Neither — a structural fact recorded, with no fix proposed** (63): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (65): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
-119, 121, 122, 123, 124, 125
+119, 121, 122, 123, 124, 125, 127, 128
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
