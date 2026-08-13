@@ -1,0 +1,87 @@
+{
+  "purpose": "Frozen hand-label set for measuring classifier/label tier agreement (docs/deferred-work.md item 110, registered prediction 70-85%).",
+  "frozenAtCommit": "5f3ee09c",
+  "labelAnchor": {
+    "rule": "The tier DEFINITION block of CLASSIFIER_SYSTEM_PROMPT only: simple <=2 files/<=10 iters, medium 3-8 files/10-25 iters, complex 9+ files/25+ iters, and 'Tier accounts for the LARGER of edit scope and investigation scope'.",
+    "deliberatelyExcluded": [
+      "the test-fix default to MEDIUM",
+      "classify-up conservatism ('if uncertain, classify UP')",
+      "signal words that raise tier by one (stale/outdated/refactor/Phase X/recent change)",
+      "the COMPLEX tier trigger list"
+    ],
+    "whyExcluded": "Labelling with the heuristics would measure whether the classifier obeys its own instructions - near-tautological. Anchoring to the scope rule alone makes each disagreement attributable to a named excluded heuristic, or unexplained.",
+    "statedConstraint": "These labels were frozen by a reader who had already read the classifier's system prompt. Anchoring to the scope rule narrows that but does not remove it. Any agreement figure computed here is between the classifier and a scope judgement made by a reader of its own prompt. It CANNOT be reported as agreement with a naive human label."
+  },
+  "labellingProcedure": {
+    "order": "The `index` field is the labelling order. Each task was labelled from its own text before the next was read.",
+    "noRevision": "No label was revised after assignment. Any exception must be named in the report with its reason.",
+    "sourceAIsolation": "Source A task strings were extracted with the adjacent `expected:` archetype STRIPPED, so the archetype label sitting next to them in the corpus file could not steer the tier.",
+    "sourcesLocked": "The three sources are fixed. A shortfall is reported as a shortfall; no source is substituted mid-measurement."
+  },
+  "sources": {
+    "A": {
+      "n": 20,
+      "what": "Verbatim task strings from src/llm/taskClassifier.archetype.test.ts",
+      "poolSize": 40,
+      "poolSizeCommand": "grep -c '^  { task: ' src/llm/taskClassifier.archetype.test.ts",
+      "selectionRule": "Every other entry (1-based odd indices 1,3,...,39), deterministic, spanning all archetype groups since the corpus is archetype-ordered. Not cherry-picked.",
+      "knownBias": "These were authored to exercise this classifier, making them the least neutral source. May be easier (designed to be classifiable) or harder (designed to probe edges) - the report states which the observed pattern suggests rather than picking in advance."
+    },
+    "B": {
+      "n": 10,
+      "what": "Verbatim task spans from this arc's on-disk plan files and this session's user-issued briefs",
+      "note": "Plan-file entries are commit-level headings with the 'Commit N - ' prefix stripped; that normalization is the only edit."
+    },
+    "C": {
+      "n": 10,
+      "what": "Verbatim commit subjects, git log --format=%s, the 10 most recent at frozen HEAD",
+      "registerCaveat": "A commit subject describes work already done, after the fact; a task is a request issued before it. If disagreements cluster here the finding is about register, not the classifier's judgement - to be checked specifically before attributing."
+    }
+  },
+  "labelDistribution": { "simple": 27, "medium": 11, "complex": 2, "ambiguous": 12 },
+  "distributionCaveat": "The label set is skewed toward simple (27/40), a property of the material: the corpus carries many listing/question tasks and Source C carries many single-file docs commits. A sparse complex row makes the confusion matrix weak in that cell, and agreement could be inflated if the classifier also defaults toward one tier. Reported, not corrected for.",
+  "tasks": [
+    { "index": 1,  "source": "A", "provenance": "archetype corpus entry 1",  "task": "Add a /api/health endpoint to src/api/server.ts that returns { status: 'ok' }", "label": "simple", "ambiguous": false, "rationale": "One named file, trivial addition." },
+    { "index": 2,  "source": "A", "provenance": "archetype corpus entry 3",  "task": "Add a TypeScript type RunMetadata to src/types/run.ts with fields runId, startedAt, completedAt, archetype", "label": "simple", "ambiguous": false, "rationale": "One named file, type addition." },
+    { "index": 3,  "source": "A", "provenance": "archetype corpus entry 5",  "task": "Add a 'Cancel run' button to src/ui/index.html, wired to POST /api/cancel/:runId", "label": "simple", "ambiguous": false, "rationale": "One named file; 'wired to' implies an existing endpoint. Even if the endpoint needs adding, that is 2 files, still <=2." },
+    { "index": 4,  "source": "A", "provenance": "archetype corpus entry 7",  "task": "The /api/version response uses readFileSync but doesn't import it — fix the missing import in src/api/server.ts", "label": "simple", "ambiguous": false, "rationale": "One named file, one line." },
+    { "index": 5,  "source": "A", "provenance": "archetype corpus entry 9",  "task": "The 'Approve scope revision' button doesn't disable while the request is in flight, causing double-clicks. Fix in src/ui/index.html", "label": "simple", "ambiguous": false, "rationale": "One named file, localized state fix." },
+    { "index": 6,  "source": "A", "provenance": "archetype corpus entry 11", "task": "The cost dashboard at /api/cost shows 0 for runs with subagent calls — recordingClient isn't capturing subagent costs. Fix in src/llm/recordingClient.ts", "label": "medium", "ambiguous": false, "rationale": "Edit scope 1 named file, but investigation spans the subagent cost path: recordingClient, the aggregation point, and the /api/cost consumer. Larger of the two scopes governs: 3-8." },
+    { "index": 7,  "source": "A", "provenance": "archetype corpus entry 13", "task": "Replace all process.env['ZONE_DAILY_USD_CAP'] reads with a centralized getDailyUsdCap() function", "label": "medium", "ambiguous": false, "rationale": "'all reads' means locating every call site plus adding the helper: 3-8 files." },
+    { "index": 8,  "source": "A", "provenance": "archetype corpus entry 15", "task": "Convert all then/catch promise chains in src/api/server.ts to async/await syntax", "label": "simple", "ambiguous": true,  "rationale": "Edit scope is one explicitly named file, which is decisive on the file axis. Ambiguous because a large file could exceed 10 iterations and cross into medium on the iteration axis." },
+    { "index": 9,  "source": "A", "provenance": "archetype corpus entry 17", "task": "Zone-bench fixture renameDetectFramework fails on npm test step with exit code 2, no test name reported. Diagnose and fix", "label": "medium", "ambiguous": true,  "rationale": "No file named; diagnosis requires reading the fixture, the runner and the failing step. Ambiguous because once diagnosed the fix could be a single file." },
+    { "index": 10, "source": "A", "provenance": "archetype corpus entry 19", "task": "Production run 45079eda shows cache_read drop to 3879 at iter 12. Investigate why and fix the cache bust", "label": "medium", "ambiguous": true,  "rationale": "Cache investigation spans param conversion, cache-control helpers and the history pipeline: 3-8. Ambiguous because that path is wide enough to reach 9+." },
+    { "index": 11, "source": "A", "provenance": "archetype corpus entry 21", "task": "How does Phase AS audit decide between 'major' and 'minor' severity?", "label": "simple", "ambiguous": false, "rationale": "Question, zero edit scope; investigation is a small number of files." },
+    { "index": 12, "source": "A", "provenance": "archetype corpus entry 23", "task": "What's the difference between Anthropic and OpenAI prompt caching in terms of cost economics?", "label": "simple", "ambiguous": false, "rationale": "Question, zero edit scope, largely answerable without repo traversal." },
+    { "index": 13, "source": "A", "provenance": "archetype corpus entry 25", "task": "List all TypeScript files in src/llm/", "label": "simple", "ambiguous": false, "rationale": "Listing, zero edit scope, one directory read." },
+    { "index": 14, "source": "A", "provenance": "archetype corpus entry 27", "task": "Which files in src/ import from taskClassifier.ts?", "label": "simple", "ambiguous": false, "rationale": "Single search, zero edit scope." },
+    { "index": 15, "source": "A", "provenance": "archetype corpus entry 29", "task": "How many source files are in src/llm/?", "label": "simple", "ambiguous": false, "rationale": "Single count, zero edit scope." },
+    { "index": 16, "source": "A", "provenance": "archetype corpus entry 31", "task": "What files are in src/cli/tui/components/?", "label": "simple", "ambiguous": false, "rationale": "Single directory listing, zero edit scope." },
+    { "index": 17, "source": "A", "provenance": "archetype corpus entry 33", "task": "Find all *.test.ts files that import from archetypeDispatcher", "label": "simple", "ambiguous": false, "rationale": "Single search, zero edit scope." },
+    { "index": 18, "source": "A", "provenance": "archetype corpus entry 35", "task": "Add a 'Replay' feature: users can re-run a previous task with the same inputs. Needs UI button, /api/replay endpoint, run state restoration, telemetry", "label": "medium", "ambiguous": true,  "rationale": "Four enumerated components at roughly 1-2 files each: 4-8. Ambiguous because run-state restoration could ripple past 8." },
+    { "index": 19, "source": "A", "provenance": "archetype corpus entry 37", "task": "Add MCP server support so users can plug in external tool servers via Settings UI", "label": "complex", "ambiguous": false, "rationale": "A whole subsystem: protocol client, connection lifecycle, tool registration, settings UI, persistence. 9+." },
+    { "index": 20, "source": "A", "provenance": "archetype corpus entry 39", "task": "Implement BYOM.2 multi-key storage: save multiple API keys per provider in Settings, switch between them mid-run gracefully", "label": "medium", "ambiguous": true,  "rationale": "Storage schema, settings UI, key resolution, mid-run switching: 5-8. Ambiguous because graceful mid-run switching could ripple to 9+." },
+
+    { "index": 21, "source": "B", "provenance": "plan file noble-nibbling-aho.md, Commit 1", "task": "disable ligatures in code contexts", "label": "simple", "ambiguous": false, "rationale": "A CSS/font-feature change in one or two style surfaces." },
+    { "index": 22, "source": "B", "provenance": "plan file noble-nibbling-aho.md, Commit 2", "task": "brand lockup stays monochrome", "label": "simple", "ambiguous": false, "rationale": "Styling change confined to the lockup's own definition." },
+    { "index": 23, "source": "B", "provenance": "plan file snuggly-herding-wolf.md, Commit 1", "task": "write-tool detail opens by default", "label": "simple", "ambiguous": false, "rationale": "A default flip in the component owning that disclosure state." },
+    { "index": 24, "source": "B", "provenance": "plan file snuggly-herding-wolf.md, Commit 2", "task": "trailing tool activity reads as a footnote", "label": "simple", "ambiguous": false, "rationale": "Rendering change in the transcript component." },
+    { "index": 25, "source": "B", "provenance": "plan file snuggly-herding-wolf.md, Commit 3", "task": "the user's prompt gets its own weight", "label": "simple", "ambiguous": false, "rationale": "Typographic emphasis change at one render site." },
+    { "index": 26, "source": "B", "provenance": "plan file snuggly-herding-wolf.md, Commit 4", "task": "stop spending the accent everywhere", "label": "medium", "ambiguous": true,  "rationale": "'everywhere' implies auditing accent usage across several components: 3-8. Ambiguous because a single shared token definition could make it one file." },
+    { "index": 27, "source": "B", "provenance": "plan file snuggly-herding-wolf.md, Commit 5", "task": "quiet the report's internal typography", "label": "simple", "ambiguous": true,  "rationale": "Reads as one report-rendering surface. Ambiguous because 'internal typography' could span several report components." },
+    { "index": 28, "source": "B", "provenance": "this session's item-120 brief, Step 1", "task": "Verify both commits, confirm no occurrence of the pointer/filename survives in src/, rewrite the sentence in place", "label": "simple", "ambiguous": false, "rationale": "One documentation sentence edited; the verification is read-only search, not edit scope." },
+    { "index": 29, "source": "B", "provenance": "this session's item-120 brief, Step 2-3", "task": "derive ad7818b8's full deletion set directly from the commit's own diff, sweep unfiltered for every residual mock of anything in that set, classify each, then remove them in small groups running tests after each group", "label": "complex", "ambiguous": false, "rationale": "'every residual mock' across a whole deletion set is a find-and-modify across N call sites; investigation spans the commit diff plus every matching file. 9+." },
+    { "index": 30, "source": "B", "provenance": "this session's item-120 brief, Step 3 Group A", "task": "Remove the hoisted declaration line, remove readAuditModeSetting from inside the combined vi.mock factory line, remove the .mockReturnValue(\"auto\") call from the file-level beforeEach", "label": "simple", "ambiguous": true,  "rationale": "The text describes a three-line edit to one file's pattern and names no file count. Ambiguous because the same pattern could repeat across many files." },
+
+    { "index": 31, "source": "C", "provenance": "commit 5f3ee09c", "task": "docs(CLAUDE.md),test(dispatch,agentLoop): item 120 rewrite + residual audit-setting mock stubs removed", "label": "medium", "ambiguous": true,  "rationale": "Three named surfaces: a doc plus two test modules. 3-8. Ambiguous because 'stubs' plural across two modules could exceed 8." },
+    { "index": 32, "source": "C", "provenance": "commit 41081a0d", "task": "test(dispatch): item 117 -- remove the auditPipeline mock stubs", "label": "medium", "ambiguous": true,  "rationale": "Plural stubs within one test module: 3-8. Ambiguous because it could be confined to one or two files." },
+    { "index": 33, "source": "C", "provenance": "commit 44926286", "task": "docs(deferred-work): item 111 corrected and closed at ad7818b8; items 117-121; a third essay candidate rejected", "label": "simple", "ambiguous": true,  "rationale": "One documentation file. Ambiguous because the volume of content could exceed 10 iterations." },
+    { "index": 34, "source": "C", "provenance": "commit ad7818b8", "task": "fix(runCommandSafe): item 111 -- remove the orphaned scope-audit remainder", "label": "medium", "ambiguous": false, "rationale": "Removing a subsystem remainder touches its definition plus every site referencing it: 3-8." },
+    { "index": 35, "source": "C", "provenance": "commit 83e433e8", "task": "docs(deferred-work): items 109-116 from the tier classifier establish; a second essay candidate rejected", "label": "simple", "ambiguous": false, "rationale": "One documentation file." },
+    { "index": 36, "source": "C", "provenance": "commit 3ed5bc33", "task": "docs(CLAUDE.md): accuracy repair -- one live falsehood, one wrong clause, six drifted figures", "label": "simple", "ambiguous": false, "rationale": "One documentation file; the verification behind it is read-only." },
+    { "index": 37, "source": "C", "provenance": "commit 5a0b24c6", "task": "fix(runCommandSafe): item 108 -- discovery-first curated sample in the whitelist-miss message", "label": "simple", "ambiguous": false, "rationale": "A message-text change in one or two files." },
+    { "index": 38, "source": "C", "provenance": "commit f7a9593b", "task": "docs(deferred-work): item 93's partial close; items 103-108; item 90 gains a second prediction", "label": "simple", "ambiguous": false, "rationale": "One documentation file." },
+    { "index": 39, "source": "C", "provenance": "commit 6f9c9a69", "task": "fix(runCommandSafe): item 93 -- human-language rejection text, class-tagged", "label": "medium", "ambiguous": true,  "rationale": "Rejection text plus a class tag spans the safety module and its renderer, with tests: 3-8. Ambiguous because the edit could be confined to 2 files." },
+    { "index": 40, "source": "C", "provenance": "commit 565c6a98", "task": "docs(deferred-work): item 100 closes; items 101-102 record the fix and the classifier; essay 24", "label": "simple", "ambiguous": false, "rationale": "One documentation file." }
+  ]
+}
