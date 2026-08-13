@@ -1,0 +1,56 @@
+{
+  "purpose": "Null arm of the tier-agreement measurement: the unchanged arm A prompt re-run against the same 40 tasks and the same frozen labels, to size run-to-run variance. Prediction AND decision rule registered and committed before the first billed call, because setting a threshold after seeing the result is the failure this file exists to prevent.",
+  "arm": "null (no change; arm A's prompt re-run)",
+  "frozenLabelsCommit": "6b7c966d",
+  "frozenLabelsSha256": "1a7cc72ce17a0add2f7de0f1d1fbb26ae7c3cc23a130c75753d972b76bfd883b",
+  "armACommit": "49aa3615",
+  "armBSetupCommit": "c380bc59",
+  "armBResultsCommit": "6cdb722b",
+  "revertCommit": "8da3ecbd",
+
+  "identityConfirmedBeforeRunning": {
+    "promptIdenticalToArmA": "git diff --quiet 49aa3615 HEAD -- src/llm/taskClassifier.ts -> clean",
+    "promptIdenticalToPreSetup": "git diff --quiet c380bc59^ HEAD -- src/llm/taskClassifier.ts -> clean",
+    "labelsIdentical": "git diff --quiet 6b7c966d HEAD -- scripts/tier-agreement-labels.json -> clean",
+    "temperature": "temperature: 0 is passed at the classifier's createChatCompletion call site; nothing downstream strips or overrides it for gpt-4o-mini, whose adapter path is the pass-through branch (the rewrite branch keys on gpt-5). Any movement in this arm is movement at temperature 0."
+  },
+
+  "quantities": {
+    "M_null": "tasks whose returned tier differs between arm A and this arm, out of 40",
+    "A_null": "this arm's overall agreement against the frozen labels, percent",
+    "D_null": "absolute difference between A_null and arm A's 55.0, in percentage points",
+    "R_null": "reasoning strings byte-identical to arm A's, out of 40"
+  },
+  "armBComparators": { "M_B": 4, "A_B": 62.5, "D_B": 7.5, "R_B": "21 of 40" },
+
+  "decisionRule": {
+    "primary_moverCount": {
+      "M_null >= 4": "Variance alone produces movement at least as large as arm B's. Arm B established NOTHING about the intervention and its 7.5 points is not evidence.",
+      "M_null <= 1": "Variance is small relative to arm B's movement, which therefore merits further arms.",
+      "M_null in {2,3}": "Indeterminate. Arm B is neither established nor refuted and needs repetition."
+    },
+    "secondary_overallSpread": {
+      "D_null >= 7.5": "The 7.5-point gap is fully within observed noise.",
+      "D_null <= 2.5": "The gap exceeds observed noise. 2.5 points is one net agreement on n=40.",
+      "otherwise": "Indeterminate."
+    },
+    "conjunction": "Arm B counts as an effect worth further arms ONLY IF both M_null <= 1 AND D_null <= 2.5. If either criterion lands in the variance-is-large region, the verdict is that arm B is uninterpretable.",
+    "whyAsymmetric": "Over-reading a weak effect is the costlier error here. This arc has already produced one refuted prediction and one misattribution, both from reading a figure as more than it was.",
+    "ceilingOnTheFavourableBranch": "One null run is a single draw of variance, not a distribution. M_null = 0 does not show variance is zero; it shows one repetition produced no movement. The favourable branch supports 'worth further arms' and never 'established'."
+  },
+
+  "prediction": {
+    "M_null": "0 to 2 movers",
+    "R_null": "at least 30 of 40 reasoning strings byte-identical to arm A",
+    "basis": "Temperature 0 on a short, highly structured JSON output should repeat closely.",
+    "statedUncertainty": "Registered rather than hedged afterwards: arm B's 21-of-40 reasoning identity is low enough that part of that churn may have been sampling rather than the intervention. If R_null comes back near 21 of 40, the text churn arm B recorded was mostly sampling and not its prompt change.",
+    "priorRecord": "The arm B prediction registered at c380bc59 predicted approximately zero movers and was refuted by four. That refutation is why this arm exists and is not adjusted for here."
+  },
+
+  "whatThisArmCannotTest": {
+    "determinismDocScope": "docs/determinism.md scopes its determinism claim to 'within a single server process lifetime' and rests the first invariant on the in-process cache. This arm passes skipCache: true from a fresh process, so it runs deliberately outside that scope and cannot falsify the cache-scoped header.",
+    "theUnscopedSentence": "The same document states, without any scoping, 'Randomness from the LLM itself is controlled by temperature: 0.' Movement in this arm would show that sentence overstated -- temperature 0 constrains sampling, it does not make a hosted model reproducible across calls. Any finding is recorded against that sentence specifically, and a ledger follow-up is a separate pass."
+  },
+
+  "holdsRegardless": "Zero downward disagreements in every arm measured so far. The upward-only bias survived arm A and arm B; whether it survives this arm is reported either way."
+}
