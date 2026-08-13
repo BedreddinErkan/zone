@@ -8430,10 +8430,28 @@ That prediction stands unchecked. A reader should not infer the regression is cl
 master — closing this item requires the observation this paragraph names, and that observation does not yet
 exist.
 
+**A second prediction registered against this item's mechanism, from a different surface, and equally
+unmeasured.** The regression this item records is a naming effect: a name that appears in the prompt is read
+as covering more than it says, and the agent narrows its behaviour to match. Item 93's fix at 6f9c9a69 puts
+a named example into twelve of the seventeen catch-all refusal texts — "for example `ls -la`", "such as
+`find . -type f`" — deliberately phrased as an example rather than as the remedy, precisely because of what
+this item measured. The prediction registered before any observation exists: naming one rephrasing may still
+read as the exhaustive permitted set, and reduce the count of distinct whitelisted binaries an agent reaches
+for after a refusal, relative to a text naming none. **Confirming signal:** post-refusal commands concentrate
+on the exact binary the text named, distinct-binary count at or near one, on tasks where more than one binary
+would serve. **Refuting signal:** distinct-binary count after a refusal holds or rises against the pre-fix
+text, and the named binary is not over-represented among what follows. **The confounder that would make
+either reading unsafe:** the new texts are also shorter and plainer than the raw-pattern texts they replaced,
+so any measured difference could belong to length or readability rather than to the naming, and separating
+them needs an arm that varies only whether the example is present while holding length roughly constant.
+None of this has been run. Anthropic credit is zero, the same exhaustion that left this item's own primary
+re-run unexecuted, and this prediction stands in exactly the same state — registered, not evidence, and not
+to be read as either confirmation or refutation of the anti-narrowing choice item 93 made.
+
 **Where the code lives:** the notice is `llm/toolAbsenceNotice.ts`, `buildToolAbsenceBlock`; the
 prefix-suppression rule is inside it. The splice fix is in `assembleAgentSystemPrompt`, `llm/agentLoop.ts`.
 See item 88 for the notice this regression came from, and item 89 for a different, unrelated way the same
-notice can go stale.
+notice can go stale, and item 93 for the second surface this item's own mechanism was applied to in advance.
 
 ## 91. Closed — `run_command_readonly`'s description named no discovery binary, at either of the two sites that state its capability
 
@@ -8533,11 +8551,13 @@ investigates anything. Item 88's own declination set the precedent that a code s
 item rather than an essay; this is independently also a code shape, by the same test, without needing its
 own reopening condition.
 
-## 93. Five refusal texts exist for `run_command_readonly` and its siblings, not three; one names a remedy unreachable in two live configurations, and none is counted
+## 93. Five refusal texts exist for `run_command_readonly` and its siblings, not three; the catch-all's raw regex and the substring classifier behind it are fixed in 6f9c9a69, and the remedy one of them names is still unreachable in two live configurations
 
 **What it is.** Five variants, not the three item 91 left as an open pointer. Three belong to
-`run_command_readonly` itself, keyed off `checkCommandSafe`'s own reason string: a chain-operator block
-naming the offending operator and pointing at splitting the call plus `read_file(lineRange)` plus
+`run_command_readonly` itself, keyed off `checkCommandSafe`'s own reason string until 6f9c9a69 and off a
+structured `tag` since: a chain-operator block naming the offending operator — it no longer names it, for the
+reason the "What 6f9c9a69 changed" section gives — and pointing at splitting the call plus
+`read_file(lineRange)` plus
 `head`/`tail`/`cat`; a whitelist-miss block printing the first eight `WHITELIST_PREFIXES` entries and naming
 exactly one remedy, `run_command`; and a catch-all for everything else — 37 of `BLACKLIST_PATTERNS`'s 40
 entries plus the pipe rule and the empty-command case, not find/arg-specific as an earlier pass of mine
@@ -8546,14 +8566,17 @@ described it. Two more exist on the sibling tools: a hard safety block on `run_c
 client's `DROP TABLE`/`DROP DATABASE`, naming no remedy at all and not saying which of those four matched;
 and an approval-denial on `run_command`, naming a rephrasing — drop the metacharacters, re-run bare.
 
-**The catch-all covers the majority of what the whitelist actually blocks, and renders the one thing it
-uniquely knows as a raw regex.** Measured directly against the real gate, by source: three of the forty
-blacklist patterns — the three chain operators — route to the chain variant; the other thirty-seven, plus
-the pipe-to-non-utility rule, route to the catch-all. For a write-redirect refusal the agent is shown the
-pattern's own source, `>\s*(?:[^&\s\/]|\/(?!dev\/null(?:\s|$)))`, verbatim. Its other content — "use only
-whitelisted read-only commands" and the `read_file(lineRange)` pointer — repeats what item 91's fix already
-put in the tool's own description; `head`/`tail`/`cat` is the one thing it adds that the description does
-not name.
+**The catch-all covers the majority of what the whitelist actually blocks, and rendered the one thing it
+uniquely knows as a raw regex until 6f9c9a69.** Measured directly against the real gate, by source: three of
+the forty blacklist patterns — the three chain operators — route to the chain variant; the other
+thirty-seven, plus the pipe-to-non-utility rule, route to the catch-all. That routing is unchanged by the
+fix, which moved no pattern and added none — it is still three and thirty-seven-plus-one today. What is no
+longer true is the rest of this paragraph as it was first written: for a write-redirect refusal the agent was
+shown the pattern's own source, `>\s*(?:[^&\s\/]|\/(?!dev\/null(?:\s|$)))`, verbatim, and its other content
+— "use only whitelisted read-only commands" and the `read_file(lineRange)` pointer — repeated what item 91's
+fix had already put in the tool's own description, with `head`/`tail`/`cat` the one thing it added that the
+description did not name. All three of those statements describe the text as it stood at 565c6a98 and none
+describes the text today.
 
 **The whitelist-miss remedy is reachable in five of the nine configurations that offer
 `run_command_readonly`, not four, and two of those four are themselves unreachable by anything.** Resolved
@@ -8585,12 +8608,75 @@ controller as an undifferentiated tool failure. It is not protected from compact
 `update_memory`, and `Task` are, or pinned the way `suggest_scope_change` is.
 
 **In every class measured but one, a reachable rephrasing exists inside `run_command_readonly` itself, and
-none of the five texts name it.** Checked directly against the gate: a `sed`/`tree` whitelist-miss has
+none of the five texts named it until 6f9c9a69 — three of the five name one now, and the two on the sibling
+tools still do not.** The clause that changed is the naming, not the availability. Checked directly against
+the gate: a `sed`/`tree` whitelist-miss has
 `head`, `cat`, or `find -type d` available; a chain block has its own two halves as separate calls; a
 write-redirect or a pipe-to-a-non-utility has the same command with the offending clause dropped, since
 output is captured either way; a destructive `find` has its read-only form. The one exception is `npm run
 build`, refused as a whitelist miss with no equivalent inside the read-only shell — `npx tsc --noEmit` and
 `npm test` pass the gate but are different operations.
+
+**What 6f9c9a69 changed, by mechanism.** Three files, no fourth — `runCommandSafe.ts`, `toolExecutor.ts`,
+and `toolExecutor.readonlyStaging.test.ts`. `BLACKLIST_PATTERNS` became an array of `{ pattern, tag }` pairs
+rather than bare regexes, same forty literals in the same order, so the class a refusal belongs to is carried
+from the pattern that produced it instead of being re-derived downstream. The three non-pattern causes —
+`empty-command`, `pipe-to-non-utility`, `whitelist-miss` — carry theirs inline at their own return sites.
+`CommandSafetyResult` became a discriminated union on `safe` rather than an interface with an optional field,
+so a rejection path that forgets its tag fails to compile instead of reaching the consumer as `undefined`.
+The consumer's substring classifier is gone: it had been matching against a string whose content is a
+serialized regex source, so a pattern whose source happened to contain the sniffed substring would have been
+misclassified, and the message table is now a `Record<CatchAllClass, string>` keyed by the tag, with
+`CatchAllClass` defined as the union minus the two classes holding their own dedicated text. `reason` is
+untouched on every path and byte-identical for every input; only its appearance inside the rendered message
+changed.
+
+**Named quantities, each stating what it counts.** Forty regex literals in `BLACKLIST_PATTERNS`, collapsing
+into sixteen pattern-derived classes — nine multi-pattern groups plus seven singletons. Three non-pattern
+causes bring the total to nineteen classes. Two of the nineteen hold dedicated text, leaving seventeen that
+reach the shared catch-all, and the message table has exactly seventeen keys, counted from the live object.
+Of those seventeen, twelve name a rephrasing that this pass re-confirmed passes the live gate and five name
+none, because none exists inside the read-only shell for them. The rendered prefix `Command blocked: ` is
+seventeen characters, leaving eighty-three of the hundred-character TUI title slice for a class's own rule
+sentence. The touched test file went from eleven tests to thirty-four, both counted by running that file —
+eleven at 565c6a98 in a detached worktree, thirty-four at 6f9c9a69 — a delta of twenty-three that equals the
+whole-suite delta exactly. The whole suite reads five thousand six hundred and one passing across four
+hundred and forty-eight files at 6f9c9a69, re-run this pass with seventeen skipped and none failing; the
+five thousand five hundred and seventy-eight before-figure is that number less the twenty-three rather than
+an independent run, and is named here as derived so a later pass does not treat it as one.
+
+**The figure this item should not carry forward: the fix report's own "213 to 34" set two different
+quantities against each other.** Two hundred thirteen is the establish pass's three-file blast-radius total
+at 565c6a98 — `runCommandSafe.test.ts` at one hundred eighty-seven, `runCommandSafe.fdRgExec.test.ts` at
+fifteen, `toolExecutor.readonlyStaging.test.ts` at eleven — re-run this pass and confirmed to sum to two
+hundred thirteen. Thirty-four is one of those three files alone, after. The before-figure for that one file
+is eleven. Nothing was wrong with either measurement; they were placed on either side of an arrow that
+implied one instrument reading one scope.
+
+**The finding this item did not start with: the chain branch rendered a raw regex too.** This entry recorded
+the raw-regex leak as a property of the catch-all variant alone, and the fix was planned the same way. Read by shape before editing, all
+three variants turned out to interpolate `reason` identically, so a chain refusal rendered `Command blocked:
+blocked pattern: &&\s*\S. Chained commands aren't supported...` — the same raw-regex leak, on a second live
+branch, that no reading of this entry would have predicted. Both dropped the interpolation. `whitelist-miss`
+deliberately keeps it, because its reason carries the generated prefix sample rather than a pattern, and that
+sample is the only real content variant B has. One consequence is a small loss and is recorded as one: the
+chain text no longer names which operator tripped it, since the operator was only ever identified through the
+regex that has been removed.
+
+**What did not close, verified live this pass rather than assumed.** Variant B still points at
+`run_command`, so an agent in the question or investigation archetype — the two configurations holding
+`run_command_readonly` without `run_command`, per this item's own resolution, and untouched by a commit that
+changed no capability filter — is still refused and pointed at a tool it does not have. That is the second
+defect in this entry's own title and it is exactly where it was. So is the third: nothing counts a refusal,
+no threshold fires, and there is still no dedicated exit path. The two sibling-tool texts were not touched.
+The item stays out of the closed set for those reasons, not for want of a fix having landed.
+
+**The verdict matrix behind the new text covered eighteen of the nineteen classes, by scope and not by
+oversight.** Seventeen catch-all classes plus `chain`; `whitelist-miss` was excluded because variant B's text
+was outside the fix's scope and stayed byte-identical. It is not a class without a rephrasing: `sed -n
+'1,20p' <file>` is refused as a whitelist miss and `head -20 <file>` passes the gate, re-run this pass, as
+does the same substitution for `awk`. Counting it in would make the matrix nineteen rows with fourteen
+carrying a rephrasing, not eighteen with thirteen.
 
 **Read-not-run, and the largest gap left unmeasured.** All of the above is read from source and confirmed by
 direct calls to the built `checkCommandSafe` and `executeTool` — decidable offline, since the gate is a pure
@@ -8604,13 +8690,16 @@ anything different from an agent that was never refused at all remains exactly a
 item 91's own behavioural effects — item 96 answers this for one of the five texts, leaving the other four
 exactly where they stood.
 
-**Where the code lives:** the three `run_command_readonly` variants are in `toolExecutor.ts`, keyed off
-`checkCommandSafe`'s `reason` string (`runCommandSafe.ts`); the hard safety block is `isBlockedCommand` in
-`toolExecutor.ts`, guarding `run_command` and `run_command_background`; the approval denial is the
-`onApprovalRequired` branch on `run_command` in the same file. `consecutiveScopeBlocks` is in
-`handleToolResult.ts` and `agentLoop.ts`, for comparison. See item 91 for the description fix this sits
-beside, and item 90 for the notice regression sharing its unmeasured-behaviour status, and item 96 for the
-first behavioural data point against this item's own gap.
+**Where the code lives:** the three `run_command_readonly` variants are in `toolExecutor.ts`, selected on
+`checkCommandSafe`'s `tag` since 6f9c9a69 and on its `reason` string before, with the seventeen catch-all
+strings in `CATCH_ALL_TEXT` in the same file and `RejectionClass`/`CatchAllClass` in `runCommandSafe.ts`; the
+hard safety block is `isBlockedCommand` in `toolExecutor.ts`, guarding `run_command` and
+`run_command_background`; the approval denial is the `onApprovalRequired` branch on `run_command` in the same
+file. `consecutiveScopeBlocks` is in `handleToolResult.ts` and `agentLoop.ts`, for comparison. See item 91
+for the description fix this sits beside, and item 90 for the notice regression sharing its
+unmeasured-behaviour status, and item 96 for the first behavioural data point against this item's own gap.
+Items 103 through 107 record five properties of the gate that the class-tagging work surfaced without
+changing, and item 108 carries the prefix-slice fix this pass measured and did not apply.
 
 ## 94. `gpt-5.6-luna` ran all seven ground tasks — five correct, two wrong on task interpretation, not item 90's verification
 
@@ -9218,11 +9307,192 @@ dropped `TodoWrite`'s entire defect from that sweep's results.
 companion `.test.ts`, 16 tests, two representative mutations both confirmed by name. Committed at `19fc8712`.
 See item 100 for what it measures and item 101 for the fix it verified at zero.
 
+## 103. `BLACKLIST_PATTERNS`'s append-redirect entry is permanently unreachable, and shares its shadow's tag, so nothing can exercise it
+
+**What it is.** The array holds two write-redirect entries. The first matches a single `>` that is not
+followed by `&`, whitespace, or a `/dev/null` sink; the second, `>>\s*\S`, sits after it. Matching is
+first-match-wins over the array in source order, so the second never decides a verdict.
+
+**Why it can never fire, as a property rather than a sample.** Wherever `>>\s*\S` matches, the entry ahead of
+it matches at the same position: having consumed the first `>`, its own `\s*` matches the empty string and
+the second `>` satisfies the `[^&\s\/]` branch, since `>` is not an ampersand, not whitespace, and not a
+slash. The trailing `\S` the append entry requires is not even needed for the shadow to hold. Checked
+exhaustively as well as argued: over an alphabet of six characters — `>`, space, `x`, `/`, `&`, tab — every
+string of length one through six, 55,986 of them, of which 4,524 match the append entry and zero of those
+escape the entry ahead of it; and over a second corpus built from eight realistic tokens across lengths one
+through four, 4,680 strings, 1,680 append matches, again none unshadowed. A prior pass proved the same thing
+independently; this is the second proof, not a restatement of the first.
+
+**The source already says so, and the tag choice makes it untestable rather than merely dead.** The entry
+carries a comment recording that it is a strict subset of the one ahead of it, kept for clarity, and it is
+tagged `write-redirect` — the same class as its shadow, deliberately. That combination means no test can
+distinguish it: any command written to exercise it is decided by the entry ahead, and would pass identically
+with the append entry deleted. It follows that a mutation altering only its tag kills nothing. That last
+statement is derived from the unreachability rather than run, because this pass changed no source.
+
+**Where the code lives:** `BLACKLIST_PATTERNS` in `runCommandSafe.ts`, the two adjacent redirect entries. See
+item 92 for the other shape of the same category — a value plumbed through type signatures with no dispatch
+path reaching it — and item 105 for a consequence of this specific shadow that is not merely cosmetic.
+
+## 104. A chained command containing a mutation verb never reaches the chain guidance, because the mutation entry is matched first
+
+**What it is.** `git status && rm foo.log` is refused with the file-mutation text — "this modifies or removes
+files ... The read-only shell has no equivalent for it" — and never with the chain text. Confirmed against
+the live gate this pass, along with `ls; rm -rf build` and `git diff || mv a b`, all three tagged
+`file-mutation`. A chain of two reads, `git status -s && git diff --stat`, does reach the chain class.
+
+**The mechanism is ordering, not classification.** The seven file-mutation entries sit ahead of the three
+chain-operator entries in the array — by source offset, the `rm` entry at 3435 against the first chain entry
+at 6149 — and the loop returns on first match. Every mutation verb in the blacklist has the same relationship
+to the chain operators, so the property holds for the class, not just for `rm`.
+
+**Why it is worth recording even though the verdict is right.** Refusing is correct here, and refusing on the
+more serious of the two properties is the right precedence: a command that mutates should be refused as a
+mutation whether or not it also chains. What is lost is only the guidance. The agent is told that the shell
+has no equivalent for what it asked, which is true of the `rm` half and false of the `git status` half, and
+is not told the thing that would actually unblock it — that the read half is runnable on its own. The chain
+text, which does say exactly that, is unreachable for every command that trips a mutation entry first.
+
+**Where the code lives:** the loop in `checkCommandSafe` and the array order in `runCommandSafe.ts`; the
+class texts in `CATCH_ALL_TEXT` in `toolExecutor.ts`. See item 93 for the texts themselves and item 106 for a
+second case where the first match is the wrong thing to explain.
+
+## 105. `ls > /dev/null` passes the gate and `ls >> /dev/null` does not, and the message the second one renders describes both operators as blocked
+
+**What it is.** Verified directly against the live gate this pass: `ls > /dev/null` is safe, `ls >> /dev/null`
+is refused with tag `write-redirect`, `ls 2>&1` is safe, `ls > out.txt` is refused, `cat f > /dev/null` is
+safe. Nothing in the source addresses the divergence — no comment anywhere in the file mentions `>>` and
+`/dev/null` together, checked by pattern over the whole file.
+
+**The mechanism is item 103's shadow, with a visible consequence.** The single-`>` entry carves out
+`/dev/null` with a negative lookahead, and reaches that lookahead only when the character after `>` and any
+whitespace is not itself consumed by the `[^&\s\/]` branch. With `>>`, the second `>` satisfies that branch
+immediately, so the carve-out is never consulted. The append form is refused not because appending to
+`/dev/null` was judged different from writing to it, but because the entry that would have exempted it stops
+one character earlier.
+
+**Whether it is intended: the evidence says no.** The carve-out's own comment states the intent as allowing
+`/dev/null` sinks and fd merges, and an append to `/dev/null` is the same sink by any reading. The append
+entry's comment records that it is shadowed but not that the shadow changes any verdict. No comment, test, or
+message states a reason to treat the two forms differently. The direction is the safe one — it fails closed,
+refusing something harmless rather than admitting something harmful — which is presumably why it has
+survived unnoticed.
+
+**The rendered message makes a claim that is false of the sibling operator.** The write-redirect class reads
+"this writes output to a file with > or >>. Output is captured automatically, for example ls -la." Naming
+both operators is accurate for a real file and wrong for `/dev/null`, where one form passes and the other
+does not. The remedy the message gives — drop the redirect, output is captured anyway — does work, so an
+agent following it is not stuck; it is only misinformed about which operator was the problem.
+
+**Where the code lives:** the two redirect entries in `BLACKLIST_PATTERNS` and the `write-redirect` entry of
+`CATCH_ALL_TEXT`. No fix is proposed here: correcting the verdict widens what a safety gate permits, and
+correcting only the message means explaining a distinction that nothing else in the system explains. See item
+103 for the shadow this rests on.
+
+## 106. A search for dangerous text is refused for the text it searches for, and the class-tagged rewrite left every one of those routes where it found them
+
+**What it is.** The blacklist is matched against the whole command string, so a pattern appearing inside a
+quoted search term is indistinguishable from the same pattern appearing as a command. Four cases run against
+the live gate this pass: `grep -rn "a && b" src/` is tagged `chain`; `grep -rn "rm -rf" src/` is tagged
+`file-mutation`; `rg "sudo" src/` is tagged `privilege-escalation`; `grep -rn "curl -X POST" src/` is tagged
+`network-mutation`. All four are ordinary read-only searches.
+
+**The file already contains the quoting model that would prevent this, and the blacklist runs before it.**
+`splitOnRealShellPipes` models single quotes as fully literal, honours backslash escapes inside double
+quotes, and treats `||` as a token rather than a pipe boundary — a careful model, written for the pipe check.
+That check runs after the blacklist has already returned. The blacklist itself does no quote handling at all.
+
+**What 6f9c9a69 changed here, verified rather than assumed: the routing, not at all.** The commit changed the
+message text and the selection mechanism while holding `BLACKLIST_PATTERNS` membership and order fixed, so
+each of the four lands on exactly the class it landed on before. In two of them the replacement text is
+arguably further from useful than what it replaced: the old catch-all said little beyond a raw pattern and a
+pointer to the allowlist, whereas the `file-mutation` and `network-mutation` texts now assert that the
+read-only shell has no equivalent for what was asked — a confident statement about mutation, delivered to a
+command that only reads, whose equivalent is itself. The chain case is the one the brief for this pass named,
+and its advice — run each command as a separate call — would have the agent split a search string in half.
+
+**Where the code lives:** the blacklist loop in `checkCommandSafe`, ahead of `hasUnsafeRealPipe`, in
+`runCommandSafe.ts`. No fix is proposed: teaching the blacklist the quoting model that already sits below it
+changes verdicts on a safety gate, and the failure direction today is the closed one. See item 104 for the
+neighbouring case where first-match-wins picks the wrong thing to explain, and item 93 for the texts.
+
+## 107. `tsc --noEmit` type-checks no test file in this repository, and 593 errors stand in the excluded tree — fifteen of them created by 6f9c9a69 itself
+
+**What it is.** `tsconfig.json` excludes `src/**/*.test.ts`, `src/**/*.test.tsx`, and `src/**/__tests__/**`,
+alongside `dist`, `node_modules`, and `src/extension.ts`. The consequence is not that test files are checked
+loosely; it is that they are not checked at all, and no type error in any of them can ever fail a build,
+a typecheck, or CI. Established mechanically rather than by reading the config: `tsc --noEmit --listFiles`
+under the repo's own configuration loads zero files matching `*.test.ts` or `*.test.tsx`.
+
+**The scale, measured this pass.** Same `compilerOptions` as the repo's own, with the exclude list reduced to
+`dist`, `node_modules`, and `src/extension.ts`: 593 error lines across 144 files. Of those, 345 fall in 113
+files named `*.test.ts` or `*.test.tsx` and 248 fall in 31 files under `__tests__/`, which sums to the 593.
+The largest single contributor is a manual harness script rather than a test — 49 errors in one
+`__tests__/run*Manual.ts` file — but real test files follow immediately behind it at 40 and 20. The two most
+common codes are implicit-`any` parameters at 141 and unused declarations at 63, the latter a consequence of
+this project's `noUnusedLocals` and `noUnusedParameters` both being on.
+
+**Fifteen of the 593 were created by the commit this pass is recording.** Seven in `runCommandSafe.test.ts`
+and eight in `toolExecutor.readonlyStaging.test.ts`, every one of them the same shape: a property read off
+`checkCommandSafe`'s result without narrowing, which the discriminated union 6f9c9a69 introduced makes an
+error on the `{ safe: true }` arm. The tests pass, because Vitest strips types without checking them. The
+commit's own report said `tsc --noEmit` was clean and narrowed that claim to production callers, which was
+correct on both counts — this item records what a clean result under this configuration is structurally
+unable to cover.
+
+**Precedent, checked in both directions.** Item 90 already carries one instance of this exact mechanism, from
+a different fix arc: `assembleAgentSystemPrompt`'s `toolAbsenceBlock` was a required field that fourteen test
+call sites called without, each silently concatenating the literal nine characters `"undefined"` into the
+assembled prompt, with the entry noting that `tsc --noEmit` never caught it for this reason. That instance is
+recorded inside the item it was found in. This one is repo-wide and carries the first count, so it is filed
+on its own rather than appended there.
+
+**Where the code lives:** the `exclude` array in `tsconfig.json`. No fix is proposed, and the number is the
+reason: 593 errors across 144 files is not a change that needs nothing learned first — it needs a triage of
+593. What would close it is a decision about which of the three excluded globs to reclaim and in what order,
+which is a scoping question this item does not answer.
+
+## 108. Variant B prints eight allowlist prefixes and the TUI title shows none of the five discovery binaries; a curated eight-entry sample puts four of them on screen
+
+**What it is.** The whitelist-miss refusal prints `WHITELIST_PREFIXES.slice(0, 8).join(", ")`, always in sync
+with the array by construction, and the array's own order puts every test runner first. Indices parsed from
+source this pass: `ls` at 34, `find` at 39, `grep` at 40, `rg` at 41, `fd` at 42, of 45. All five discovery
+binaries sit past the slice, so an agent refused for `sed` or `tree` is shown eight test runners and an
+ellipsis.
+
+**Three candidate samples, measured. Token figures are `ceil(chars / 4)` and are named as a proxy, because
+no tokenizer ships in this repository's dependencies.** The current first-eight sample is 78 characters, 20
+tokens by that proxy, rendering a 277-character message. The full 45-entry list is 461 characters, 116
+tokens, rendering 660. A curated eight — `npm test, npx vitest, tsc, ls, find, grep, rg, fd` — is 49
+characters, 13 tokens, rendering 248, which is shorter than what ships today.
+
+**The distinguishing measurement is not message length, and a prior framing of this got that wrong.** It was
+previously put as though overflowing the hundred-character TUI title slice were a property of the full list.
+All three overflow it, including the 277 characters that ship today. The fixed lead before the sample is 53
+characters, so the title shows the first 47 characters of whichever sample is used, and the real comparison
+is what lands inside them. Today, zero of the five discovery binaries. The full list produces a
+byte-identical title to today's while adding 383 characters to the message body — it buys nothing visible and
+costs the most of the three. The curated sample puts `ls`, `find`, `grep`, and `rg` in the title and clips
+`fd`, four of five.
+
+**Why it is worth doing rather than merely possible.** The two configurations item 93 identifies — the
+question and investigation archetypes — hold `run_command_readonly` without `run_command`, and the same
+message that truncates away the discovery binaries is the one that points at `run_command` as the remedy. For
+an agent in those two, naming the read-only binaries it does hold is the only part of that message that is
+actionable at all. The trailing ellipsis stays either way, so the sample continues to read as a sample rather
+than as the whole allowlist.
+
+**Where the code lives:** the whitelist-miss return in `checkCommandSafe` (`runCommandSafe.ts`) and the
+variant B render in `toolExecutor.ts`. The fix is a one-expression change to a pure function with no verdict
+consequence — it alters only the text of a refusal that already happens — and it was measured and
+deliberately not applied at 6f9c9a69, whose scope held variant B byte-identical. See item 93 for the refusal
+family and item 91 for the description fix that made the same omission on a different surface.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 102 to find out which ones still need something. No index of
+reader the trouble of reading all 108 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -9231,13 +9501,13 @@ first.
 **Closed** (47): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (0):
+first (1): 108
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (8): 1, 4, 18, 23, 57, 63, 75, 90
 
-**Neither — a structural fact recorded, with no fix proposed** (47): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (52): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
-81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99
+81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, and 93 are partially closed or corrected; the
 classification above covers only the portion still open, not the whole entry.
@@ -10719,3 +10989,51 @@ happen after a test already exists and already passes, since passing is exactly 
 **Where it stands:** `priorRunSummary.test.ts`, "Phase J.5 — system prompt documents PRIOR RUN CONTEXT," its
 third pillar's own regex assertion. Not fixed here — out of the scope of the pass that found it — and stated
 plainly so a later reader does not assume otherwise.
+
+**A second instance, found in the item 93 rewrite and standing unfixed for the same reason.**
+`runCommandSafe.test.ts` carries a test named "returns reason string on rejection" whose entire body asserts
+that `reason` is of type string and that its length exceeds zero. It passes under any content whatsoever: the
+raw regex source it used to hold, the human-language sentences that replaced it, a single space. Item 93's
+fix rewrote every catch-all string in the file that test nominally guards, and the test's own result was
+identical before and after — it was never reading the text it is named for. This is the quiet side again,
+with one addition the first instance did not have: the same assertion is also one of the seven type errors
+item 107 counts in this file, because it reads `reason` off the union without narrowing. A test can be blind
+to its subject and unchecked by the compiler at once, and neither condition surfaces the other. Recorded, not
+fixed — the pass that found it was scoped to message text and class routing.
+
+## A candidate pattern considered this pass and not promoted: a prose restatement of a computed figure diverging from the computation
+
+Two instances arose in one session, both inside plan text for the item 93 fix. A script parsed all forty
+blacklist literals, assigned each a class, and summed the assignment mechanically. The plan then restated
+that result in prose — nine groups of stated sizes plus a remaining bucket — and the prose's own numbers
+summed to thirty-nine and fifteen where the script had produced forty and sixteen. Separately, the same plan
+stated the rendered prefix at eighteen characters where measuring it gives seventeen. In both cases the
+computation was right, the restatement was wrong, and the restatement was what the following steps were about
+to be built on. Both were caught before any edit, by the reader, not by the writer.
+
+**Compared against the twentieth pattern, which is the closest existing relative, and found to differ in
+mechanism.** The twentieth is about two figures produced by two different instruments, each true of its own
+measurement, set against one another in a sentence that treats proximity as comparability; its rule is to
+name what each figure counts before comparing them. The candidate has one quantity and one instrument. Naming
+was never the failure — "pattern literals" and "classes" were correctly named on both sides — and the
+twentieth's rule, applied faithfully, would not have caught either instance, because both names were already
+right and only the arithmetic in the copy was wrong. The mechanism is a copy decaying in transit from a
+computation that stayed correct, not a category error between two readings.
+
+**Distinct, and still not promoted, for three reasons.** Every pattern recorded in this document is a
+mechanism by which a wrong artefact *survives* — a stale reference that ships, a test standing green while
+guarding nothing, a measurement whose window has expired, a mutation revealing less than it appears to. Both
+instances here were caught before execution and neither reached a committed artefact, so what the candidate
+describes is a drafting error with a review that worked, not a mechanism that defeats review. Second, the
+corrective it would prescribe — re-derive from the computation rather than from the paraphrase — was already
+in place and was the thing that produced the right answer both times; the script existed, and the failure was
+declining to read it. Third, both instances come from one author's drafting inside one session rather than
+from two passes independently meeting the same wall, and two instances is not by itself a criterion.
+
+**The condition under which it reopens.** If a prose restatement of a computed figure survives into a
+committed artefact — this document, a source comment, a test name — rather than being caught in a plan, or if
+a later pass reads and acts on the restatement instead of the computation, the mechanism is no longer a
+drafting error with a working review and belongs on record. At that point it must be checked against the
+first pattern in this document as well as the twentieth, because a wrong figure that ships and is later
+trusted is the same failure as a reference that was stale from the moment it was written, and the difference
+would have to be argued rather than assumed.
