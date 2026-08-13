@@ -10009,34 +10009,81 @@ itself, reading the live function rather than the entry, and the natural_complet
 `5f3ee09c`'s own commit message. None arrived later or from anywhere unstated; all five were re-verified
 against source while writing this closure.
 
-## 121. `tierLimits.test.ts` and `tierSettings.test.ts` fail three of four runs when executed together, and it pre-dates the removal
+## 121. Closed — `tierLimits.test.ts` and `tierSettings.test.ts` raced over one settings file; fixed at `52165f92`, and five of this entry's own claims were wrong
 
-**What it is.** `resolveTierLimits` returns the shared `TIER_LIMITS[tier]` object itself when no user
-override exists, and a freshly built object when one does. `tierLimits.test.ts` asserts
-`expect(limits).toBe(TIER_LIMITS.medium)` — identity, not equality. `tierSettings.test.ts` writes and deletes
-the settings file that both read. Run in the same invocation they race: whichever test observes the file
-mid-write gets the fresh object and the identity assertion fails.
+**What it is.** Both files read and write `join(homedir(), ".zone", "tier-limits.json")`, resolved at call
+time, and the suite redirects `HOME` to a single temp home for every worker — so one path, shared. Each file
+runs the same backup-delete-write-read-restore sequence against it. Run together they race, and every
+interleaving breaks something: one file's `beforeEach` deletes the file between the other's write and read,
+or one file's `afterEach` restores its own snapshot over the other's fresh write.
 
-**Measured, both sides of the removal.** Three of four runs fail at `ad7818b8`, and three of four fail at
-`ad7818b8^`. The removal neither introduced nor worsened it. Each file passes alone —
-`tierLimits.test.ts` 23 of 23, `tierSettings.test.ts` 18 of 18 with 3 skipped.
+**Two distinct failure modes, and this entry described the one that never fired.** As first written it said
+`expect(limits).toBe(TIER_LIMITS.medium)` — identity, not equality — is what breaks. The observed failures
+are numeric: `expect(limits.softIterWarn).toBe(18)` in one file and
+`expect(loaded.medium?.tokenBudgetCap).toBe(500_000)` in the other, both in tests that write an override and
+then read it back. The identity mode is nevertheless **genuinely reachable**, which is why this is recorded
+as a second mode rather than as a misnamed test: the `describe("resolveTierLimits")` block's `beforeEach`
+clears only `ZONE_FORCE_TIER` and never touches the settings file, so an override leaked from the other file
+would leave `resolveTierLimits` returning a freshly built object and that identity assertion would fail.
+Reachable, and not once observed across the measured runs. The fix closes both, since per-file paths remove
+the leakage the latent mode depends on as well as the overlap the observed one does.
 
-**Why full-suite runs stay green.** Sharding usually places the two files in different workers, so the
-448-file and 445-file runs across this arc all passed. The defect is invisible at the granularity anyone
-normally runs.
+**Measured, and the rate recorded here was low.** This entry said three of four. Two later samples of the
+same quantity: **11 of 12** runs failed when the establish pass measured it, and **10 of 12** when the fix
+pass re-measured it immediately before changing anything. Both are recorded rather than one chosen — they
+are two draws of a probabilistic rate, not competing figures. Each file passes alone: `tierLimits.test.ts`
+23 of 23, and `tierSettings.test.ts` **15 passed with 3 skipped of 18 total**, not the 18 of 18 recorded
+here. Both sides of the removal still hold — the removal neither introduced nor worsened it.
+
+**Both files are writer and reader, which this entry's framing missed.** It cast `tierSettings.test.ts` as
+the one that writes and `tierLimits.test.ts` as the victim. Of the establish pass's 11 failures,
+`tierLimits` lost 8 and `tierSettings` lost 3. Whichever file's read lands after the other's write is the
+one that fails, and that is symmetric by construction.
+
+**Why full-suite runs stay green — and the reason recorded here was wrong.** This entry said sharding places
+the two files in different workers. Worker separation is irrelevant: the two files share a filesystem path
+regardless of which worker runs them, and vitest's default already gives each test file its own OS process.
+What actually dilutes the race is **temporal distance** — with 445 files the two are scheduled far enough
+apart that their write-then-read windows rarely overlap. Measured: the pair alone failed 11 of 12 runs, the
+pair with eight other files added still failed 5 of 6, and four full-suite runs were clean. Eight extra
+files barely dilute it; four hundred do. The defect is invisible at the granularity anyone normally runs,
+which was the entry's correct conclusion reached through a wrong mechanism.
 
 **What it blocks, recorded because this arc walked into it.** Any pass that runs these two files together as
 its own verification gate — which is exactly what happened while recounting test totals for this entry —
-will see a red result its change did not cause. A pass seeing `tierLimits.test.ts` fail on "returns medium
-limits for a medium classification" should read this entry before concluding it broke something, and should
-re-run the file alone rather than begin bisecting. Because the failure is order-dependent rather than
-deterministic, one green run is not evidence of absence either.
+will see a red result its change did not cause. A pass seeing either of these files fail should read this
+entry before concluding it broke something, and should re-run the file alone rather than begin bisecting.
+One green run was never evidence of absence either. **"Order-dependent" was the wrong word**, in this
+entry's original title and here: ordering is not the variable. Forcing both files into a single vitest fork
+— which serialises them without changing any ordering — made the failure vanish across 6 of 6 runs. It is a
+filesystem concurrency race between separate OS processes sharing one path, and vitest's default already
+gives each test file its own process.
 
-**No fix proposed.** Changing `toBe` to `toEqual` weakens an assertion that is deliberately checking identity
-— the function's contract is to return the shared object untouched on the no-override path. Isolating the
-settings file per test file fixes the race without weakening anything, at the cost of a fixture change in
-two files. These are different repairs with different consequences and choosing between them is not this
-entry's call.
+**The two repairs this entry weighed, and one of them could never have worked.** It declined to choose
+between changing `toBe` to `toEqual` and isolating the settings file per test file. The first is not a
+repair at all: the assertions that actually fail compare numbers, where `toBe` and `toEqual` behave
+identically, so the change would have touched only the fifteen identity assertions — none of which was
+failing — and weakened a deliberate check while leaving the race exactly where it was. The reasoning was
+sound about what `toEqual` would cost and wrong about what it would fix.
+
+**Closed at `52165f92` by the second repair.** `tierSettings.ts` gains `_setTierSettingsPathForTest`,
+following the shape of the existing test-override family; each test file takes its own `mkdtemp` path, set
+before its settings-path constant is read and cleared in `afterAll` rather than `afterEach`, since the
+override has to survive every test in the file rather than only the first. With no override set the path
+resolves exactly as before, verified by running the module's own home-resolution test rather than asserted.
+
+**Rates before and after, each with its denominator.** The pair together went **10 of 12 failures to 0 of
+12**. The sharper shape — the pair plus eight other files, where dilution had left 5 of 6 failing — went to
+**0 of 6**. The full suite was unchanged at 445 files, 5542 passed, 17 skipped.
+
+**The fix's effect is falsifiable rather than merely observed, and how the mutation was built is the reason.**
+Reverting both files to the real unoverridden path returned the failure at **7 of 12**. That reconstruction
+was chosen over pointing both files at a second shared temporary directory: whether a fresh directory
+reproduces the original race window is an unverified claim, so a null result under it would have been
+indistinguishable between "isolation is not what fixed this" and "the reconstruction was too weak to fire".
+Reverting to the actual pre-fix path has no such ambiguity. See item 131 for the failure class this belongs
+to, item 132 for a rule the fix depends on that nothing enforces, and item 133 for the shared-object
+inconsistency the identity assertions pin.
 
 ## 122. An archetype value in the tier slot degrades the tier and keeps the archetype, and nothing in this document recorded that path
 
@@ -10325,27 +10372,101 @@ nothing. Nothing further needs establishing: the mechanism, the excluded set and
 measured before this entry was written. See the twenty-fifth pattern for the general mechanism, and item 118
 for the author-written form of the same failure.
 
+## 131. A failure class that is near-certain in targeted runs and invisible in the full suite, because dilution is temporal rather than structural
+
+**What it is.** Item 121's race is the worked example, and the shape generalises past it. Two test files
+sharing a mutable resource fail together at near-certainty when run as a pair, and effectively never when
+run inside the whole suite. Measured across three shapes: the pair alone failed **11 of 12** runs, the pair
+with eight other files added still failed **5 of 6**, and **four full-suite runs** were clean.
+
+**Why, and the intuitive explanation is wrong.** It is not that the runner separates the two files — vitest
+gives each test file its own OS process by default, and a shared filesystem path is shared across processes
+regardless. What changes is scheduling distance: among 445 files the two are started far enough apart that
+their conflicting windows do not overlap. Eight extra files barely move the rate; four hundred suppress it
+entirely. The suppression is a property of how many other files are queued, not of any isolation the runner
+provides.
+
+**The consequence, which is the reason to record it.** The run everyone treats as authoritative is the one
+least likely to surface this class, and the small targeted run — the natural shape of a verification gate
+after a focused change — is the one most likely to. This arc used the two-file shape as a gate twice and met
+the failure both times, and read it as noise on the first encounter. A green full suite is therefore not
+evidence that a shared-resource race is absent; it is evidence the suite is large.
+
+**No fix proposed.** Detecting this class in general would mean either running targeted subsets as a routine
+gate, which multiplies suite time, or auditing test files for shared mutable resources, which has no
+mechanical form today. Item 121's own repair — per-file resource isolation — is what removes an instance,
+and instances are what this document records.
+
+## 132. The call-time path-resolution rule is real, load-bearing and mechanically unenforced for this module
+
+**What it is.** CLAUDE.md requires that any writer under the user home resolve `homedir()` at call time
+rather than capturing a path into a module-level constant, because the test suite redirects `HOME` and a
+captured path would ignore the redirect. `tierSettings.ts` follows it, and item 121's fix depends on it: the
+per-file override only works because the path is recomputed on every call.
+
+**What a mutation established.** Hoisting the override's read out of the function body into a module-scope
+constant — the exact violation the rule names — did not fail loudly. The suite's home guard **never fired
+across twelve runs**, and the only symptom was item 121's race returning at **9 of 12**. The prediction
+registered before running was deliberately disjunctive: either the home guard catches it, or isolation
+breaks silently. It resolved to the second branch, and the reason is precise: `HOME` is redirected through
+vitest's `test.env`, which lands before any user module evaluates, so a hoisted path still resolves under
+the **test** home. It never escapes to the real one, which is the only thing the guard watches for.
+
+**So the guard's scope and the rule's scope are not the same, and the gap is the finding.** The home guard
+protects the real `~/.zone` from stray writes. The rule protects per-call redirection generally — including
+redirections that happen after module load, which is what every `_set*ForTest` override is. A violation that
+stays inside the test home is invisible to the guard and shows up only as whatever downstream behaviour
+happened to depend on late resolution.
+
+**No fix proposed.** A guard would have to assert that a module's resolved path changes after a redirect
+applied post-load, which is a different check from the one that exists and would need writing per module or
+as a shared harness. Naming what such a check would have to do is not the same as specifying it.
+
+## 133. `resolveTierLimits` returns a shared object on one path and a fresh one on another — inert today, and the assertions pinning it are deliberate
+
+**What it is.** With no user override the function returns `TIER_LIMITS[tier]` itself; with one it returns a
+freshly built object. Two callers of the same function receive values with different aliasing properties
+depending on a settings file's contents.
+
+**Established inert rather than assumed inert.** The single production caller is in `agentLoop.ts`, which
+binds the result to a `const` and only ever reads properties off it — every reference is a read, and a scan
+for property assignment against that binding found none. Nothing mutates the shared object, so the
+inconsistency causes nothing today. Recorded with that verification attached so a future pass does not
+re-derive it, and so that a pass encountering the inconsistency does not assume the worse case.
+
+**Why the identity assertions matter.** Roughly fifteen assertions of the form
+`expect(limits).toBe(TIER_LIMITS.simple)` pin the shared-object return deliberately — they are asserting the
+no-override path hands back the shared object untouched, which is a real property and not an accident of how
+the test was written. Item 121 considered weakening them to equality and this document now records why that
+would cost something: it would stop pinning the one property that makes the aliasing inconsistency
+observable at all. A pass that decides the inconsistency should be removed should change the function and
+the assertions together, not the assertions alone.
+
+**No fix proposed.** Making the return always fresh is a source change with no present defect motivating it,
+and it would break the fifteen assertions that currently document the behaviour. Whether the consistency is
+worth that is not this entry's call.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 130 to find out which ones still need something. No index of
+reader the trouble of reading all 133 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (51): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 111, 117, 120, 126
+**Closed** (52): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 111, 117, 120, 121, 126
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (5): 108, 113, 116, 129, 130
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (9): 1, 4, 18, 23, 57, 63, 75, 90, 110
 
-**Neither — a structural fact recorded, with no fix proposed** (65): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (67): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
-119, 121, 122, 123, 124, 125, 127, 128
+119, 122, 123, 124, 125, 127, 128, 131, 132, 133
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
