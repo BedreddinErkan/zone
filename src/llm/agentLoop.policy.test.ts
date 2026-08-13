@@ -47,9 +47,7 @@ vi.mock("../usage/usageTracker.js", () => ({
 vi.mock("../visual/tierSettings.js", () => ({
   readDailyUsdCapOverride: mocks.readDailyUsdCapOverride,
   readTierSettings: vi.fn(() => ({})),
-  readAutoAuditSetting: vi.fn(() => true),
   writeTierSettings: vi.fn(),
-  writeAutoAuditSetting: vi.fn(),
   writeDailyUsdCapOverride: vi.fn(),
   getTierSettingsPath: vi.fn(() => "/tmp/tier-limits.json"),
 }));

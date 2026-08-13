@@ -12,7 +12,6 @@ const mockBuildCliSink = vi.hoisted(() => vi.fn(() => ({ onProgress: vi.fn() }))
 const mockCreateSpinner = vi.hoisted(() => vi.fn(() => ({ stop: vi.fn() })));
 const mockPreparePlanContext = vi.hoisted(() => vi.fn());
 const mockGenerateExecutionPlan = vi.hoisted(() => vi.fn());
-const mockReadAuditModeSetting = vi.hoisted(() => vi.fn(() => "auto"));
 const mockLoadDiskModelSync = vi.hoisted(() => vi.fn(() => null));
 const mockRunPlanInvestigation = vi.hoisted(() => vi.fn());
 const mockIsNoChangePlan = vi.hoisted(() => vi.fn());
@@ -56,7 +55,7 @@ vi.mock("../llm/executionPlan.js", async (importOriginal) => {
     }),
   };
 });
-vi.mock("../visual/tierSettings.js", () => ({ readAuditModeSetting: mockReadAuditModeSetting, readDailyUsdCapOverride: vi.fn() }));
+vi.mock("../visual/tierSettings.js", () => ({ readDailyUsdCapOverride: vi.fn() }));
 vi.mock("../api/diskModel.js", () => ({ loadDiskModelSync: mockLoadDiskModelSync }));
 vi.mock("../api/diskKeys.js", () => ({
   loadDiskKeys: vi.fn().mockResolvedValue({ version: 1 as const, keys: [] }),

@@ -14,7 +14,6 @@ const mockBuildCliSink = vi.hoisted(() => vi.fn(() => ({ onProgress: vi.fn() }))
 const mockCreateSpinner = vi.hoisted(() => vi.fn(() => ({ stop: vi.fn() })));
 const mockPreparePlanContext = vi.hoisted(() => vi.fn());
 const mockGenerateExecutionPlan = vi.hoisted(() => vi.fn());
-const mockReadAuditModeSetting = vi.hoisted(() => vi.fn(() => "auto"));
 const mockLoadDiskModelSync = vi.hoisted(() => vi.fn(() => null));
 const mockRunPlanInvestigation = vi.hoisted(() => vi.fn());
 const mockIsNoChangePlan = vi.hoisted(() => vi.fn());
@@ -77,7 +76,7 @@ vi.mock("../llm/executionPlan.js", async (importOriginal) => {
     }),
   };
 });
-vi.mock("../visual/tierSettings.js", () => ({ readAuditModeSetting: mockReadAuditModeSetting, readDailyUsdCapOverride: vi.fn() }));
+vi.mock("../visual/tierSettings.js", () => ({ readDailyUsdCapOverride: vi.fn() }));
 vi.mock("../api/diskModel.js", () => ({ loadDiskModelSync: mockLoadDiskModelSync }));
 vi.mock("../llm/planInvestigation.js", () => ({ runPlanInvestigation: mockRunPlanInvestigation }));
 
@@ -112,7 +111,6 @@ beforeEach(() => {
   mockCreateSpinner.mockReturnValue({ stop: vi.fn() });
   mockPreparePlanContext.mockResolvedValue({ projectSummary: "A TS project", relevantFilePaths: [] });
   mockGenerateExecutionPlan.mockResolvedValue({ objective: "x", steps: [{ title: "s", filesLikely: [] }], riskHints: [], scopeSummary: "" });
-  mockReadAuditModeSetting.mockReturnValue("auto");
   mockLoadDiskModelSync.mockReturnValue(null);
   mockRunPlanInvestigation.mockResolvedValue({ objective: "x", steps: [{ title: "s", filesLikely: [] }], riskHints: [], scopeSummary: "" });
   mockIsNoChangePlan.mockReturnValue(false);
