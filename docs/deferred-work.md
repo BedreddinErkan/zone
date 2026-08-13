@@ -10016,22 +10016,46 @@ application sites, since the bump runs both after a response and again on a cach
 `parseClassifierResponse`, and the confidence gate they funnel into, both in `taskClassifier.ts`. One
 observation in forty calls; see item 110 for the measurement that produced it.
 
-## 123. COMPLEX-trigger vocabulary in a task string halves classifier agreement
+## 123. Breadth vocabulary in a task string halves classifier agreement, and the effect is scope-mediated rather than trigger-driven
 
-**What it is.** On the forty-task measurement at `49aa3615`, tasks whose text carries the vocabulary the
-classifier's own COMPLEX trigger list keys on — "all", "every", "everywhere", "across the codebase" and their
-relatives — agree with the frozen label 28.6 percent of the time, 2 of 7. Tasks carrying none agree 60.6
-percent, 20 of 33. Both sides count the same quantity: tasks whose text matches that alternation against
-tasks whose text does not, over the same forty calls, against the same labels.
+**What it is.** On the forty-task measurement at `49aa3615`, tasks whose text carries breadth vocabulary —
+"all", "every", "everywhere", "across the codebase" and their relatives — agree with the frozen label 28.6
+percent of the time, 2 of 7. Tasks carrying none agree 60.6 percent, 20 of 33. Both sides count the same
+quantity: tasks whose text matches that alternation against tasks whose text does not, over the same forty
+calls, against the same labels.
 
-**Why it matters more than the headline percentage.** Every disagreement in that measurement runs upward, and
-this is the largest single named driver of it. Of the eighteen disagreements, eight trace to a heuristic the
-labelling deliberately excluded, and seven of those eight are the trigger list.
+**The attribution this entry originally carried was wrong, and the correction is the more useful half.** As
+first written it called that vocabulary "the vocabulary the classifier's own COMPLEX trigger list keys on"
+and said seven of the eight heuristic-attributable disagreements were the trigger list. Neither holds. The
+alternation was a regex written for the arm A analysis, not the prompt's stated conditions, and the two do
+not coincide: **zero of the forty tasks** match the trigger list's literal phrases, which it further requires
+be combined with a count of three or more, and **one of the forty** matches the looser
+Classification-heuristics bullet. The seven matched almost entirely on a bare "all" — "Replace all…",
+"Convert all…", "List all…", "Find all…". The mistake was the analysis's, not the measurement's: the 28.6
+and 60.6 figures stand exactly as recorded.
 
-**What it does not show.** That the trigger list is wrong. The label anchor excluded it on purpose, so a
-disagreement here means the classifier followed an instruction the label ignored — true by construction, not
-a defect. What the figure establishes is the magnitude of that instruction's effect on tier output, which
-nothing had measured.
+**What the model actually says it is doing, which is how the correction was found.** All seven reasoning
+strings cite multi-file scope — "across multiple files", "multiple call sites", "coordinated updates" — and
+none cites a trigger condition, a count threshold, or the sufficiency framing. Across all forty, trigger-style
+justification appears once. The mechanism running is breadth vocabulary read as inferred scope, decided by
+the scope rule; the trigger list is not what fires.
+
+**Tested directly at `6cdb722b`, and the result refutes the prediction registered before it ran.** Arm B
+softened the trigger block's "any one is sufficient" header to make it advisory, changed nothing else, and
+re-ran the same forty tasks against the same labels. The prediction was that approximately nothing would
+move, on the ground that the list never fires here. Four tasks moved, overall agreement went 55.0 to 62.5
+percent, and the non-trigger guard rose rather than fell, 60.6 to 66.7. Two of the four movers carry no
+breadth vocabulary at all, so half the improvement comes from tasks the change should not have reached. The
+single task that moved *away* from its label is breadth-carrying, and its new reasoning cites "all instances"
+— the phrase belonging to the untouched heuristics bullet, not to the softened header.
+
+**What arm B does not settle, registered before the run rather than conceded after.** A result here is
+consistent with two states this pass cannot separate: the trigger list not firing, or the softened header
+being compensated by the two untouched forms of the same instruction. Separating them needs an arm that
+softens those too. And arm A was never re-run under arm B's conditions, so run-to-run variance is not
+separated from the intervention — four movers on forty is small enough that a null arm is needed before 7.5
+points reads as an effect. Zero downward disagreements in either arm: the upward-only bias survives the
+change intact.
 
 ## 124. `rankerBaseline.snapshot.json` embeds frozen copies of sixty-two test files, and the test consuming it never compares them against the live tree
 
