@@ -9583,18 +9583,32 @@ restore guard and the filter precedence chain all in `agentLoop.ts`; `buildDispa
 same zero-credit constraint — the two are the pending measurements this arc is holding. See item 109 for
 why a wrong tier cannot be recovered from, and item 116 for the CLAUDE.md sentence this item falsifies.
 
-## 111. `auditIterCap` has no reader, and the audit gate it belongs to has no production caller — the sixth accumulated constraint measured to do less than expected
+## 111. Closed — the orphaned scope-audit remainder is removed at `ad7818b8`; two of this entry's own three claims were false, manufactured by an exclusion-scoped grep
 
-**What it is.** Of the four fields in `TIER_LIMITS`, one is read by nothing. `auditIterCap` — 0, 6 and 8
-by tier, counting iterations allowed to the audit investigation — has no consumer anywhere outside its own
-definition. Cross-checked in both directions before recording: a search for the identifier across the
-source tree returns its declaration and no use.
+**Two sentences in this entry were wrong and are corrected before the closure, so nothing false is closed
+over.** As first written it claimed `auditIterCap` "has no consumer anywhere outside its own definition"
+and that `shouldRunAudit`/`isLowRiskPlan` "are referenced only by `auditMode.test.ts`". Both are false. The
+true claims — which still support the removal — are that neither had a **production** reader or caller.
 
-**The gate it serves is itself unreachable.** `shouldRunAudit` and `isLowRiskPlan` are referenced only by
-`auditMode.test.ts`. No production module calls either. So the `auditMode=auto` branch, the tier-equals-
-simple audit skip inside it, and the low-risk-plan skip beside that are all dead in the shipped product.
-This is consistent with the project's own description of its default plan path as executing once with no
-audit — the machinery survives, the path to it does not.
+**What it is.** Of the four fields in `TIER_LIMITS`, one was read by no production code. `auditIterCap` —
+0, 6 and 8 by tier, counting iterations allowed to the audit investigation — had **8** references in
+`tierLimits.test.ts`, and none anywhere else outside its own defining file. The original "no consumer
+anywhere" reading came from a search that had already filtered the consumers out.
+
+**The gate it served had no production caller either.** `shouldRunAudit` and `isLowRiskPlan` were called by
+`auditMode.test.ts`, by `scopeAuditGate.test.ts` — **29** references there, though to a same-named function
+that file defined itself, not to the real export — and, for `isLowRiskPlan`, by `shouldRunAudit` itself. No
+production module called either. So the `auditMode=auto` branch, the tier-equals-simple audit skip inside
+it, and the low-risk-plan skip beside that were all dead in the shipped product. This is consistent with the
+project's own description of its default plan path as executing once with no audit — the machinery survived,
+the path to it did not.
+
+**How the false claims were produced.** A reachability grep scoped `grep -v "\.test\." | grep -v <defining
+file>` returns nothing when every match sits in a test file or in the defining file — which is exactly where
+these matches were. The empty result was reported as absence. It stood for two passes. Item 118 records the
+mechanism; the corrective is to name what a search counts, not to search harder.
+
+**Closed at `ad7818b8`** — see the removal record below.
 
 **The sixth in an accumulated series, cross-referenced by recorded shape.** Five constraints in this
 codebase have already been measured and found to do less than their surface suggests: item 81, every
@@ -9605,9 +9619,49 @@ unreachable mechanisms sharing one shape across three subsystems, invisible to a
 item 92, a value plumbed through seven files' type signatures with no dispatch path reaching it. This is
 the sixth, and it is the first where the dead field sits inside a table whose other three fields are live.
 
-**Where the code lives:** the field in `tierLimits.ts`; the two functions in `auditMode.ts`; the test that
-is their only caller alongside them. No fix is proposed — whether to delete the machinery or restore a
-path to it is a scoping decision this entry does not make.
+**What `ad7818b8` removed, each quantity naming what it counts.** Twelve files changed, 8 insertions and
+1,038 deletions. Four files deleted: `auditMode.ts`, `auditMode.test.ts`, `scopeAuditGate.test.ts`,
+`auditHandoff.test.ts`. Six exported symbols went with `auditMode.ts` — the `AuditMode` type,
+`DEFAULT_AUDIT_MODE`, `isLowRiskPlan`, `ShouldRunAuditParams`, `ShouldRunAuditResult`, `shouldRunAudit` —
+plus one module-private regex and one telemetry marker that only its own dead branch could emit. One
+interface field left `TierLimits`, with its three per-tier values and one pass-through in
+`resolveTierLimits`. Two interface fields left `PipelineConfig`, touching five pipeline constants; both were
+write-only everywhere including inside their own defining file, so no consumer needed updating. Four
+functions, two disk keys and two `TierSettingsFile` fields left `tierSettings.ts`. In `agentLoop.ts` and
+`runLlmPatchFlow.ts`, a twelve-field input type, a forty-five-line block that built an AUDIT CONTEXT string,
+two splice terms inside otherwise-live user-content concatenation, one inline prompt parameter and one
+module-private directive constant.
+
+**Tests removed: 66, counted by running each file rather than by grep.** Grep undercounted two of them as 18
+and 19 where the real figures are 24 and 24, because `it.each` and generated loops expand at runtime.
+`auditMode.test.ts` 24, `scopeAuditGate.test.ts` 24, `auditHandoff.test.ts` 12, `tierLimits.test.ts` 1 of
+24, `tierSettings.test.ts` 5 of 23. The suite moved from 448 files and 5,608 passing to 445 and 5,542, 17
+skipped on both sides — minus three files and minus 66 tests, reconciling exactly against those five
+components.
+
+**This closes `577f1edb`'s remainder, which is a different record from a mechanism that never worked.**
+That commit retired the chain's body — `auditPipeline.ts`, `scopeJudge.ts`, `investigateScope`, the
+`ZONE_PLAN_LEGACY_AUDIT` escape hatch, 1,510 deletions — and left the gate, the config, the budget field and
+the dispatcher flags standing. The mechanism was built, measured and deliberately superseded by the
+plan-first default; only the cleanup was outstanding. A reader should not file this beside the
+never-reachable cases.
+
+**Left standing deliberately, each for its own reason.** The thirteen `auditPipeline.js` mocks — a different
+subject, recorded as item 117. `src/audit/`, a live and unrelated subsystem reached from the
+`--audit`/`--audit-out`/`--audit-replay`/`--audit-diff` flags, which shares only the word. CLAUDE.md's FINAL
+SUMMARY bullet, now item 120.
+
+**An incidental defect, closed by removal rather than left open.** `isLowRiskPlan`'s JSDoc said the plan must
+touch "≤ 2 distinct files", its inline comment said "≤ 3", and its code tested `> 3` — three statements, two
+of them contradicting the executable one. The function is deleted, so the disagreement is resolved by
+removal and needs no separate fix. Recorded because a reader finding the same shape elsewhere should know it
+was noticed rather than missed.
+
+**Where the code lived:** the field in `tierLimits.ts`; the gate in `auditMode.ts`; the settings accessors
+in `tierSettings.ts`; the pipeline flags in `archetypeDispatcher.ts`; the prompt plumbing in `agentLoop.ts`
+and `runLlmPatchFlow.ts`. See item 118 for the measurement failure that made this entry wrong for two
+passes, item 117 for the two essay-24 instances found on this surface, and item 121 for a test-isolation
+defect this surface's own verification uncovered.
 
 ## 112. The classification call is never cached — the prompt misses the per-model minimum by 2,199 characters, so every dispatch re-bills it in full
 
@@ -9723,26 +9777,156 @@ together.
 archetype dispatcher paragraph respectively; the third is item 113. Nothing is applied here — this entry
 exists so the next docs pass has a target it does not have to rediscover.
 
+## 117. Two instances of the twenty-fourth pattern on one surface — one closed by removal, one still standing in thirteen files
+
+**What it is.** The scope-audit surface carried two tests that could not fail for reasons unrelated to what
+they appeared to check. They are worth recording together because they are the same mechanism at different
+stages of decay.
+
+**The closed one.** `scopeAuditGate.test.ts` opened with a comment explaining that the function it wanted to
+test was "not exported from `server.ts` (it's inlined), so we test the same logic here as a standalone
+helper" — and then defined its own three-argument `shouldRunAudit(tier, perRunOverride, autoAuditSetting)`
+returning a bare boolean. The real export took a single params object keyed on a three-valued mode string
+and returned `{shouldRun, reason}`: not a different call shape but a different design, since the local
+copy's central input was a boolean where the real one's was a three-way enum. The file never imported the
+real function. Twenty-four tests exercised a reimplementation of logic from a module that had already been
+deleted, and would have passed with the whole of `src/` removed. Gone at `ad7818b8`.
+
+**The live one.** Thirteen `dispatch.*.test.ts` files carry `vi.mock("../llm/auditPipeline.js", …)` for a
+module that does not exist — `577f1edb` deleted it. One of them asserts
+`expect(mockRunAuditPipeline).not.toHaveBeenCalled()`, which has been vacuously true ever since: `vi.mock`
+intercepts an import that the module under test never makes, so the mock records no calls whatever the code
+does. The count of thirteen was re-verified for this entry rather than carried. Nothing is proposed here —
+removing them touches thirteen files on a subject unrelated to the audit removal, and the negative assertion
+needs a decision about what, if anything, replaces it.
+
+**Where it stands:** the thirteen mocks in `src/cli/dispatch.*.test.ts`. See the twenty-fourth pattern for
+the mechanism, and item 111 for the removal that closed the first instance.
+
+## 118. A reachability search scoped with exclusions reports absence as evidence, and the exclusion is invisible in the result
+
+**What it is.** Item 111 asserted that a field had "no consumer anywhere outside its own definition" and
+that two functions were "referenced only by" one test file. Both were false, and both came from one search
+shape: `grep -rn <name> src/ | grep -v "\.test\." | grep -v <defining file>`. Every real consumer sat in a
+test file or in the defining file, so the filters removed all of them and the command printed nothing. An
+empty result looks identical whether nothing matched or everything that matched was filtered out first.
+
+**Why it survived.** The finding was written from the empty output, recorded in the ledger, and read back by
+two later passes as established fact. Nothing about the recorded claim carried the scope that produced it,
+so no reader could see that "no consumer" meant "no consumer among the things I did not exclude". The
+correction came only when a removal pass re-ran the search unfiltered and classified what came back.
+
+**The corrective is naming, not searching harder.** The search was not broken — grep returned exactly what
+it was asked for. What was wrong was the question, and the fix is to state what a search counts before
+reporting what it found: not "readers" but "readers outside tests and outside the defining file". Named
+honestly, the claim is still true and still supports the removal; named as "readers", it is false.
+
+**Where it sits among the recorded patterns.** Cross-checked against item 84, which is the closest recorded
+relative: there a naive import graph counted 33 modules reachable that were not, because it treated a
+type-only import as a runtime edge. Same family — a query answering a narrower or wider question than the
+one asked — but that one's filter was the tool's semantics and this one's was three characters the author
+typed. Considered as a twenty-fifth pattern and rejected; see the candidate section following the
+twenty-fourth for the mechanism argument and the condition under which it reopens.
+
+## 119. `resumeBlock` is consumed at three sites, and warm resume routes around the one a surgical edit is most likely to touch
+
+**What it is.** In `agentLoop.ts`, `resumeBlock` is built once from `resumeContextBlock` and
+`carriedAnswerBlock`, then consumed three times: in the prior-run branch of the user-content ternary, in
+that ternary's else branch, and again in a warm-resume message-array splice that builds its own `role:"user"`
+message. The first two are the cold path. The third is not.
+
+**The routing that makes it a trap.** `isWarmResume` is `!!input.resumeMessages?.length`. When it holds, the
+loop takes `reconcileDanglingToolCalls` and assembles its message array from the restored conversation —
+bypassing the `userContent` concatenation entirely. So a change to the cold-path concatenation is invisible
+to any test that supplies `resumeMessages`, and a change to the warm splice is invisible to any test that
+does not.
+
+**How it was established, which is the reason to record it.** A mutation deleting the `resumeBlock` term
+from the cold-path concatenation was predicted to kill a test in `agentLoop.resumeFidelity.test.ts` that
+sets `resumeContextBlock` and asserts the rendered message contains its text. The mutation survived: that
+test also sets `resumeMessages`, so it exercises the warm path. The real cold-path coverage is
+`agentLoop.parkDurability.test.ts`'s "still reaches the model when the conversation was too large to save",
+whose own comment states the case — `messagesOmitted` means `resumeMessages` is undefined, which is what
+makes it the cold branch. Retargeted, the same mutation killed exactly that test and nothing else.
+
+**Why it is worth a record.** Two live blocks sit in that same concatenation — `restageSeedBlock` and
+`planContextBlock` — beside `sessionMemBlock`. The next surgical edit near it faces the identical question,
+and the intuitive test to reach for is the one named after the feature rather than the one that covers the
+branch.
+
+## 120. CLAUDE.md's FINAL SUMMARY bullet describes a prompt pointer that no longer exists
+
+**What is not the defect, established before the defect itself.** The bullet references
+`.zone/audits/final-summary-recovery-examples.md`, and this document previously called the file's absence a
+defect — twice. That was wrong. `cf15224`'s own commit message says the file is "gitignored; created locally
+per-repo on demand". Absence is the design.
+
+**The actual defect.** `cf15224` reduced the FINAL SUMMARY worked examples from three to one and put a
+bracket pointer in the assembled prompt in place of the two it dropped, naming that path. `27c5a8eb`
+("collapse patch summary templates to one free-form contract") later removed the pointer. Verified for this
+entry: neither `final-summary-recovery-examples` nor `Recovery-mode examples` occurs anywhere in `src/`
+today. So the examples were not moved anywhere still reachable from the prompt — they were dropped, and the
+pointer with them. CLAUDE.md still describes the intermediate state.
+
+**Separately confirmed, because it changes what the sentence could ever have meant:** nothing in `src/` reads
+`.zone/audits/` at runtime. Even while the pointer existed, no prompt loaded the file; the bracket line was a
+reference for a human or an agent to follow by hand.
+
+**The fix, specified.** Rewrite the clause to say the two recovery-mode examples were dropped from the prompt
+at `cf15224` and their pointer removed at `27c5a8eb`, rather than "moved to" a path. Nothing further needs
+establishing — both commits and the current absence are confirmed above. Not applied here: this pass's scope
+is this document, and CLAUDE.md was corrected at `ad7818b8` on a different surface.
+
+## 121. `tierLimits.test.ts` and `tierSettings.test.ts` fail three of four runs when executed together, and it pre-dates the removal
+
+**What it is.** `resolveTierLimits` returns the shared `TIER_LIMITS[tier]` object itself when no user
+override exists, and a freshly built object when one does. `tierLimits.test.ts` asserts
+`expect(limits).toBe(TIER_LIMITS.medium)` — identity, not equality. `tierSettings.test.ts` writes and deletes
+the settings file that both read. Run in the same invocation they race: whichever test observes the file
+mid-write gets the fresh object and the identity assertion fails.
+
+**Measured, both sides of the removal.** Three of four runs fail at `ad7818b8`, and three of four fail at
+`ad7818b8^`. The removal neither introduced nor worsened it. Each file passes alone —
+`tierLimits.test.ts` 23 of 23, `tierSettings.test.ts` 18 of 18 with 3 skipped.
+
+**Why full-suite runs stay green.** Sharding usually places the two files in different workers, so the
+448-file and 445-file runs across this arc all passed. The defect is invisible at the granularity anyone
+normally runs.
+
+**What it blocks, recorded because this arc walked into it.** Any pass that runs these two files together as
+its own verification gate — which is exactly what happened while recounting test totals for this entry —
+will see a red result its change did not cause. A pass seeing `tierLimits.test.ts` fail on "returns medium
+limits for a medium classification" should read this entry before concluding it broke something, and should
+re-run the file alone rather than begin bisecting. Because the failure is order-dependent rather than
+deterministic, one green run is not evidence of absence either.
+
+**No fix proposed.** Changing `toBe` to `toEqual` weakens an assertion that is deliberately checking identity
+— the function's contract is to return the shared object untouched on the no-override path. Isolating the
+settings file per test file fixes the race without weakening anything, at the cost of a fixture change in
+two files. These are different repairs with different consequences and choosing between them is not this
+entry's call.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 116 to find out which ones still need something. No index of
+reader the trouble of reading all 121 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (47): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102
+**Closed** (48): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 111
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (3): 108, 113, 116
+first (4): 108, 113, 116, 120
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (9): 1, 4, 18, 23, 57, 63, 75, 90, 110
 
-**Neither — a structural fact recorded, with no fix proposed** (57): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (60): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
-81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 111, 112, 114, 115
+81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 117, 118,
+119, 121
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, and 93 are partially closed or corrected; the
 classification above covers only the portion still open, not the whole entry.
@@ -11310,3 +11494,40 @@ actually misled a reader — the failure has become a verification failure and b
 pattern, argued on that basis. Reopen also if the shape recurs a third time whether or not anyone was
 misled, since three independent instances would make it something this codebase reliably produces rather
 than one item that happened once.
+
+## A third candidate considered and not promoted: a reachability search scoped with exclusions reports absence as evidence
+
+The mechanism, from item 118. A search is run to establish that nothing references a symbol. Its scope is
+narrowed by exclusions — skip the tests, skip the file that defines it — and every real reference happens to
+live in exactly what was excluded. The command prints nothing. Nothing is reported as absence, and the
+recorded claim carries no trace of the scope that produced it, so a later reader cannot see what was left
+out. It stood for two passes.
+
+**Compared against the fifth pattern, "tracing is not running"** — the pattern this document already has for
+reachability verification, and the obvious place to file it. It does not fit. The fifth is about reading a
+call graph and treating the result as though the suite had been run; its corrective is to run something.
+Here a command *was* run, and grep executed correctly and returned precisely what it was asked for. Running
+the full suite would not have answered this question either — a suite tells you what breaks, not who
+references a symbol that nothing calls. Nothing was traced-instead-of-run, so the fifth's rule cannot reach
+it.
+
+**Compared against the twentieth, "a comparison between two counts is only informative once both sides are
+named as counting the same thing"** — and this one fits, which is why the candidate is rejected rather than
+promoted. The twentieth's rule is to name the quantity a figure counts. Applied faithfully it catches this
+outright and without extension: the search counted *references outside tests and outside the defining file*,
+and the finding reported it as *references*. One quantity, honestly named, and the false claim cannot form.
+The candidate is the twentieth's own mechanism appearing in a new domain — a reachability query rather than
+a figure comparison — which makes it a new instance of a recorded pattern, not a new pattern. Instances
+belong in items, and it is item 118.
+
+Weighed and not treated as decisive: this is the second instance in this arc of a check whose scope silently
+determined its answer, the first being a regex that dropped a flag-suffixed entry from a pattern array and
+undercounted it by one. Both are from one author within one arc, which is not a criterion.
+
+**The condition under which it reopens.** If an instance appears where the filter is one the author did not
+write and cannot see — a search tool's own default exclusion, an index that silently omits a path class, a
+matcher that honours an ignore file nobody consulted — then the twentieth's rule stops being sufficient,
+because naming the quantity a search counts requires knowing that a filter is being applied at all. That is
+a genuinely different mechanism: not a malformed question, but a correct question answered against a corpus
+the asker believed was complete. It would deserve its own pattern, argued on that basis rather than by
+resemblance to this one.
