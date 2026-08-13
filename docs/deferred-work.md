@@ -9560,9 +9560,17 @@ of three or fewer. At complex tier the quota is 4 but the estimate can still wit
 codebase already instruments the resulting contradiction with its own marker, describing it in place as
 the third point at which these two axes disagree.
 
-**Registered predictions, unmeasured, Anthropic credit at zero.** Classifier agreement with a hand label,
-70 to 85 percent, bounded below by the low-confidence fallback to medium and by the parser's default to
-complex_multi_file — both pull toward the middle of the range. Promotion rate on default settings,
+**Registered predictions. The agreement one has now been measured and refuted; the other two stand.**
+Classifier agreement with a hand label, 70 to 85 percent. **The prediction is left exactly as registered —
+the clause that followed it is not.** As first written it said the range was "bounded below by the
+low-confidence fallback to medium and by the parser's default to complex_multi_file — both pull toward the
+middle of the range." Neither half survives the measurement, and the two fail differently. The parser's
+default to complex_multi_file sets the **archetype**, in the branch that validates the archetype field; it
+never touches the tier, so it cannot bound tier agreement at all — a category error between two different
+quantities, not an estimate that came out wrong. The low-confidence fallback does act on tier, but it fired
+once in forty calls, and seventeen of the eighteen disagreements are among confident results scoring 0.7 to
+0.9; a mechanism that fires once cannot produce a fifteen-point floor. What actually holds the figure down
+is recorded below, and it is neither of these. Promotion rate on default settings,
 exactly zero — recorded as a consequence of item 109's reachability finding rather than as an estimate, so
 a single non-zero observation refutes the reading of the trigger rather than adjusting a number. Outcome
 invariance across forced-tier arms for the five non-null-pipeline archetypes, at least 80 percent
@@ -9571,16 +9579,62 @@ different success rate or iteration distribution between the simple and complex 
 archetypes; a difference confined to debug and complex_multi_file confirms rather than refutes, since
 those are the two where tier still binds.
 
+**The agreement measurement, run at `49aa3615` against labels frozen at `6b7c966d`.** Forty tasks, one
+classifier call each, on gpt-4o-mini. This is the OpenAI arm only, so nothing in it speaks to Anthropic
+behaviour and it does not enable the arm comparison item 90 is holding. **Per source first, because the
+overall figure is a weighted average of three different distributions and those weights were a choice
+rather than a property of anything:** the archetype corpus agrees 65.0 percent (13 of 20), verbatim task
+spans from this arc's plan files and briefs 50.0 percent (5 of 10), and commit subjects 40.0 percent (4 of
+10). Restricted to the twenty-eight labels not marked ambiguous the three separate further rather than
+converging — 73.3 percent (11 of 15), 57.1 percent (4 of 7), 16.7 percent (1 of 6). **Overall 55.0 percent,
+22 of 40**, which inherits those arbitrary weights and is the least informative number in the set.
+
+**The finding that matters more than the percentage: the confusion matrix's lower triangle is empty.** All
+eighteen disagreements run one way — the classifier rates the task higher than the frozen label, fifteen by one
+tier and three by two, and not once below it. That is a directional bias, not a noise figure, and it is
+what holds the agreement figure down where the two mechanisms the prediction named do not.
+
+**What the bias tracks.** Agreement is 28.6 percent (2 of 7) on tasks whose text carries the vocabulary the
+prompt's own COMPLEX trigger list keys on — "all", "every", "everywhere" and their relatives — against 60.6
+percent (20 of 33) on tasks carrying none; each figure counts tasks whose text matches or fails to match
+that alternation, nothing else. Attributing every disagreement individually: eight trace to a heuristic the
+labelling deliberately excluded, seven of those to the COMPLEX trigger list and one to the test-fix default;
+one to a fifth fallback mechanism recorded as item 122; and nine to nothing more specific than the prompt's
+blanket instruction to classify up when uncertain. That last count is kept apart from the other two because
+a rule able to explain any upward move explains none of them in particular — unexplained is zero or nine
+depending on whether the blanket instruction is admitted as an explanation, and both readings are reported
+rather than one chosen.
+
+**What the figure is agreement *with*, which is a constraint on reading it rather than a caveat beneath it.**
+The labels were frozen by a reader who had already read the classifier's own system prompt, and were
+anchored to its tier definition block alone — the file and iteration thresholds plus the larger-of-two-scopes
+rule — with its heuristic table, its classify-up instruction, its signal words and its COMPLEX trigger list
+all deliberately excluded from labelling. So this is agreement between the classifier and a scope judgement
+made by a reader of its own prompt. It is not agreement with a naive human label and must not be read as
+one. Labelling against the full prompt instead would have measured something much closer to whether the
+model obeys its own instructions, which is a different and largely tautological question.
+
+**What it does not establish.** Nothing about whether tier changes outcomes. This entry's own finding is
+that tier reaches only `tokenBudgetCap` for five of seven archetypes, so a low agreement rate does not make
+the tier harmful and a high one would not have made it load-bearing. That question is the behavioural
+measurement, still unrun.
+
 **What the two measurements would cost.** Agreement against hand labels needs one classifier call per
 task and nothing else — 40 calls is about eight cents on the default Anthropic model and about one cent on
 the OpenAI one, effectively free. The behavioural question needs three forced-tier arms over the same
-tasks; 20 tasks is 60 full runs, at roughly thirty cents to a dollar each, so 18 to 60 dollars. Neither
-has been run.
+tasks; 20 tasks is 60 full runs, at roughly thirty cents to a dollar each, so 18 to 60 dollars. **The first
+has now been run and its estimate held.** Forty calls billed $0.006797 against the one cent predicted here,
+the undershoot coming from OpenAI's automatic prefix cache engaging from the second call onward — $0.000265
+for the first call, $0.000165 median across the rest. The Anthropic figure in this paragraph stays an
+estimate, since that arm was not run. The behavioural measurement has not been run.
 
 **Where the code lives:** `TIER_LIMITS` and `resolveTierLimits` in `tierLimits.ts`; the overwrite, the
 restore guard and the filter precedence chain all in `agentLoop.ts`; `buildDispatcherCapabilityFilter` in
-`archetypeDispatcher.ts`. See item 90, which carries its own registered prediction and is blocked on the
-same zero-credit constraint — the two are the pending measurements this arc is holding. See item 109 for
+`archetypeDispatcher.ts`. See item 90, which carries its own registered prediction and remains unmeasured.
+With this entry's agreement half now run, what this arc still holds is item 90 and this entry's behavioural
+measurement — and the zero-credit framing this sentence used to carry describes neither of them, since the
+agreement measurement ran on OpenAI for well under a cent and the behavioural one is held up by its dollar
+cost rather than by any credit balance. See item 109 for
 why a wrong tier cannot be recovered from, and item 116 for the CLAUDE.md sentence this item falsifies.
 
 ## 111. Closed — the orphaned scope-audit remainder is removed at `ad7818b8`; two of this entry's own three claims were false, manufactured by an exclusion-scoped grep
@@ -9777,7 +9831,7 @@ together.
 archetype dispatcher paragraph respectively; the third is item 113. Nothing is applied here — this entry
 exists so the next docs pass has a target it does not have to rediscover.
 
-## 117. Two instances of the twenty-fourth pattern on one surface — one closed by removal, one still standing in thirteen files
+## 117. Closed — two instances of the twenty-fourth pattern on one surface, the second removed at `41081a0d`
 
 **What it is.** The scope-audit surface carried two tests that could not fail for reasons unrelated to what
 they appeared to check. They are worth recording together because they are the same mechanism at different
@@ -9800,8 +9854,18 @@ does. The count of thirteen was re-verified for this entry rather than carried. 
 removing them touches thirteen files on a subject unrelated to the audit removal, and the negative assertion
 needs a decision about what, if anything, replaces it.
 
-**Where it stands:** the thirteen mocks in `src/cli/dispatch.*.test.ts`. See the twenty-fourth pattern for
+**Where it stood:** the thirteen mocks in `src/cli/dispatch.*.test.ts`. See the twenty-fourth pattern for
 the mechanism, and item 111 for the removal that closed the first instance.
+
+**Closed at `41081a0d`, with every figure recounted from that commit's own diff rather than carried from
+this entry.** Thirteen `vi.hoisted` declarations, thirteen `vi.mock("../llm/auditPipeline.js", …)` calls and
+twelve `mockResolvedValue` setup lines went, across thirteen files; the gap between thirteen and twelve is
+real rather than a miscount, one file having declared the mock and never set a return value on it. The
+single vacuous assertion went with them, and nothing replaced it — the decision this entry said was needed
+turned out not to be needed, because a negative assertion against a module the code under test cannot import
+proves nothing that deleting it takes away. The load-bearing question was settled before anything was
+removed: an unfiltered repo-wide grep found zero non-test files under `src/` naming the module at all, so
+no import in `dispatch.ts`'s transitive graph could ever have reached it.
 
 ## 118. A reachability search scoped with exclusions reports absence as evidence, and the exclusion is invisible in the result
 
@@ -9854,7 +9918,7 @@ makes it the cold branch. Retargeted, the same mutation killed exactly that test
 and the intuitive test to reach for is the one named after the feature rather than the one that covers the
 branch.
 
-## 120. CLAUDE.md's FINAL SUMMARY bullet describes a prompt pointer that no longer exists
+## 120. Closed — CLAUDE.md's FINAL SUMMARY bullet described a prompt pointer that no longer exists, and four further claims that had also stopped being true
 
 **What is not the defect, established before the defect itself.** The bullet references
 `.zone/audits/final-summary-recovery-examples.md`, and this document previously called the file's absence a
@@ -9876,6 +9940,26 @@ reference for a human or an agent to follow by hand.
 at `cf15224` and their pointer removed at `27c5a8eb`, rather than "moved to" a path. Nothing further needs
 establishing — both commits and the current absence are confirmed above. Not applied here: this pass's scope
 is this document, and CLAUDE.md was corrected at `ad7818b8` on a different surface.
+
+**Closed at `5f3ee09c`, and the fix was larger than this entry specified — the pointer clause was one of
+five false claims in that bullet, not the whole of it.** This entry scoped the repair to a single clause
+because it had traced the pointer and stopped. Reading `buildPatchSummary` while writing the replacement
+showed `27c5a8eb` had not merely removed a pointer: it deleted both summary templates outright and replaced
+them with one function parameterised by a token range and a character cap. Enumerated rather than counted,
+since how many drifts the bullet held depends entirely on where the claims are cut: `cf15224` "moved"
+Examples 2+3 to a path, when they were dropped and their pointer removed; only natural_completion survived
+inline, when the survivor is the APPLY_ROLLED_BACK-derived example and natural_completion is one of the two
+dropped; `COMPACT_SUMMARY` and `DETAILED_SUMMARY` were named as live identifiers, when neither exists;
+`## What changed` and `## Why` were named as the section headers, when the function's own text says there is
+no fixed section list; and what-changed was described as grouped by directory or area, when the live wording
+groups by intent. One clause survived intact — why in one sentence, omitted when the task states the goal —
+and one drifted only in wording, max six bullets becoming max roughly six groups.
+
+**Which of those was found when, recorded because a claim appearing between passes without a stated source
+is what a recount is for.** The pointer was this entry's own. The other four were found by the fix pass
+itself, reading the live function rather than the entry, and the natural_completion one is named in
+`5f3ee09c`'s own commit message. None arrived later or from anywhere unstated; all five were re-verified
+against source while writing this closure.
 
 ## 121. `tierLimits.test.ts` and `tierSettings.test.ts` fail three of four runs when executed together, and it pre-dates the removal
 
@@ -9906,30 +9990,102 @@ settings file per test file fixes the race without weakening anything, at the co
 two files. These are different repairs with different consequences and choosing between them is not this
 entry's call.
 
+## 122. An archetype value in the tier slot degrades the tier and keeps the archetype, and nothing in this document recorded that path
+
+**What it is.** The classifier's response parser validates tier and archetype independently — deliberate, and
+recorded in its own comment as the repair for a run the classifier had correctly called `investigation`
+reaching the agent loop as a `refactor` patch run. One consequence went unobserved until the agreement
+measurement at `49aa3615`: on one call of forty the model put `question`, an archetype value, in the tier
+field. The tier-validity branch rejected it, substituted medium and zeroed the confidence, which routes the
+result through the same gate an under-threshold score would hit; the archetype field was independently
+usable, cleared its own confidence check, and survived to select the pipeline.
+
+**Why it is worth a record rather than a footnote.** What comes back is a medium-tier classification with
+confidence zero and a fallback flag set — indistinguishable, from the returned object alone, from a model
+that considered the tier and was genuinely unsure. Those are different failures. One is a model with no
+usable tier opinion; the other is a model whose tier opinion went into the wrong field while its archetype
+opinion was fine and was kept. Only the emitted marker separates them, by naming the rejected value.
+
+**Recorded as a mechanism, not as an ordinal.** Counting tier-replacement paths in this classifier gives four
+causes — an invalid tier, low confidence, an error or timeout, and the large-file bump — across five
+application sites, since the bump runs both after a response and again on a cache hit. Whether this one is
+"the fifth" depends entirely on which of those you count, so the mechanism is recorded and the number is not.
+
+**Where the code lives:** the tier-validity branch and the adopted-archetype fallback in
+`parseClassifierResponse`, and the confidence gate they funnel into, both in `taskClassifier.ts`. One
+observation in forty calls; see item 110 for the measurement that produced it.
+
+## 123. COMPLEX-trigger vocabulary in a task string halves classifier agreement
+
+**What it is.** On the forty-task measurement at `49aa3615`, tasks whose text carries the vocabulary the
+classifier's own COMPLEX trigger list keys on — "all", "every", "everywhere", "across the codebase" and their
+relatives — agree with the frozen label 28.6 percent of the time, 2 of 7. Tasks carrying none agree 60.6
+percent, 20 of 33. Both sides count the same quantity: tasks whose text matches that alternation against
+tasks whose text does not, over the same forty calls, against the same labels.
+
+**Why it matters more than the headline percentage.** Every disagreement in that measurement runs upward, and
+this is the largest single named driver of it. Of the eighteen disagreements, eight trace to a heuristic the
+labelling deliberately excluded, and seven of those eight are the trigger list.
+
+**What it does not show.** That the trigger list is wrong. The label anchor excluded it on purpose, so a
+disagreement here means the classifier followed an instruction the label ignored — true by construction, not
+a defect. What the figure establishes is the magnitude of that instruction's effect on tier output, which
+nothing had measured.
+
+## 124. `rankerBaseline.snapshot.json` embeds frozen copies of sixty-two test files, and the test consuming it never compares them against the live tree
+
+**What it is.** The ranker's frozen measurement ground carries a content map of 136 path-to-content entries,
+62 of them `.test.ts` files, each holding a byte copy of that file as it stood when the snapshot was
+captured. The consuming test reads the snapshot and nothing else: its content lookup returns the embedded
+string, and the only check mentioning the live tree asserts that every content key is a path the snapshot
+itself scanned, which is internal consistency rather than a comparison.
+
+**So it is inert, and that is why it is recorded.** Editing any of those 62 files does not fail the test,
+does not make the snapshot stale in a way the suite can detect, and needs no companion update. A pass that
+finds a frozen twin of a file it is editing — which is how this surfaced, during the removal at `5f3ee09c` —
+needs to know that before reasoning about it, because the natural assumption runs the other way.
+
+**No fix proposed.** The decoupling is deliberate and stated in the test's own header: running against the
+live tree would inject exactly the instability a frozen ground exists to avoid.
+
+## 125. A removed setter had no mocks anywhere while its removed getter had thirteen
+
+**What it is.** `ad7818b8` deleted `readAuditModeSetting` and `writeAuditModeSetting` from the same file in
+the same commit. At the tree immediately before their residual stubs were removed, the getter carried
+thirteen hoisted mock declarations across the dispatch test files and the setter had zero occurrences of any
+kind anywhere under `src/`.
+
+**What it is evidence about.** How mocks accumulate, not about either removal. A test stubs a getter because
+the code under test calls it and needs a value back — unmocked, it returns undefined and the run diverges. A
+setter is usually inert in a test, its write going somewhere the test never reads, so nothing forces a stub
+into existence. The asymmetry is not an oversight repeated in thirteen files; it is the shape stubbing
+pressure has, and it predicts where orphaned mocks collect after any removal: on the read side, in proportion
+to how many test files touch the calling path.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 121 to find out which ones still need something. No index of
+reader the trouble of reading all 125 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (48): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 111
+**Closed** (50): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 111, 117, 120
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (4): 108, 113, 116, 120
+first (3): 108, 113, 116
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (9): 1, 4, 18, 23, 57, 63, 75, 90, 110
 
-**Neither — a structural fact recorded, with no fix proposed** (60): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (63): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
-81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 117, 118,
-119, 121
+81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
+119, 121, 122, 123, 124, 125
 
-Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, and 93 are partially closed or corrected; the
-classification above covers only the portion still open, not the whole entry.
+Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
+this partition covers only the portion still open in each, not the whole entry.
 
 ---
 
@@ -11531,3 +11687,46 @@ because naming the quantity a search counts requires knowing that a filter is be
 a genuinely different mechanism: not a malformed question, but a correct question answered against a corpus
 the asker believed was complete. It would deserve its own pattern, argued on that basis rather than by
 resemblance to this one.
+
+## A second candidate considered and not promoted: a registered prediction's stated floor naming mechanisms that cannot produce the floor
+
+Item 110 registered classifier agreement at 70 to 85 percent, "bounded below by the low-confidence fallback
+to medium and by the parser's default to complex_multi_file." The measurement at `49aa3615` returned 55.0
+percent, and neither named mechanism can have been holding the figure anywhere. The prediction itself was
+registered in the right form and refuted cleanly; what was wrong was the causal clause under it, and nothing
+had ever checked that clause because checking a number's reasoning is not what a registered prediction
+invites you to do.
+
+**The two halves fail differently, which is what makes the candidate arguable at all.** The
+complex_multi_file half is a category error: that default sets the archetype, never the tier, so it acts on
+a different quantity than the one being predicted. The low-confidence half names the right quantity and
+fails on size — it fired once in forty calls, where a floor fifteen points below the range needs a mechanism
+that fires constantly.
+
+**Compared against the twentieth pattern, which is the closest relative and which covers one half but not
+the other.** The twentieth's rule — name what each side counts and confirm both describe the same instrument
+reading the same scope — applied faithfully to the category half would have caught it before the measurement
+existed: naming what the archetype default acts on against what the prediction measures shows immediately
+that they are not the same quantity. That half is an instance of the twentieth rather than anything new. The
+magnitude half it does not reach. Both sides there are the same quantity, correctly named; what is wrong is
+an unstated assumption about how often the mechanism fires, and no amount of naming catches that.
+
+**Compared against the eighth pattern, the only other one about predictions, and found unrelated.** The
+eighth governs a mutation's named target coinciding with its substituted constant — a kill-set prediction
+whose subject is a test battery, not a registered claim about future measurement. Different subject,
+different mechanism. Swept for others: only two entries in this document carry registered predictions, and
+item 90's are framed as confirming and refuting signals with a named confounder rather than as a range with
+a mechanistic floor, so no existing pattern governs this shape.
+
+**Not promoted, on population.** That sweep is also what declines it. The population in which this failure
+could occur is the set of predictions stating a mechanistic bound, and that set has exactly one member, which
+failed. One of one is not a rate. The founding anaphor instance rested on a single case too, but a
+seventeen-item sweep established that the mechanism was rare rather than merely unobserved; here there is
+nothing to be rare among, and a pattern resting on the only instance of its own population would be
+describing an event rather than a mechanism.
+
+**Reopen condition, scoped to the magnitude half only.** A second registered prediction whose stated bound
+names the right quantity and still cannot produce the stated magnitude promotes this, because that is the
+half the twentieth demonstrably does not cover. A second category-error instance reopens nothing — it
+belongs to the twentieth, and the correct response would be to apply that rule to prediction clauses rather
+than to write a new pattern beside it.
