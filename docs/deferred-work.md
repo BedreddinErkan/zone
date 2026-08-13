@@ -9900,8 +9900,15 @@ real rather than a miscount, one file having declared the mock and never set a r
 single vacuous assertion went with them, and nothing replaced it — the decision this entry said was needed
 turned out not to be needed, because a negative assertion against a module the code under test cannot import
 proves nothing that deleting it takes away. The load-bearing question was settled before anything was
-removed: an unfiltered repo-wide grep found zero non-test files under `src/` naming the module at all, so
-no import in `dispatch.ts`'s transitive graph could ever have reached it.
+removed: a repo-wide grep found zero non-test files under `src/` naming the module at all, so no import in
+`dispatch.ts`'s transitive graph could ever have reached it.
+
+**That scan was described as unfiltered and was not, which changes its characterisation and not its
+conclusion.** The shell's `grep` is shimmed to honour ignore files, and it excluded `CLAUDE.md` from every
+recursive scan in this arc — see item 130 for the mechanism. Re-run with `command grep`, the answer here is
+identical: that file contained zero occurrences of the module name at the parent of the closing commit, so
+nothing the scan could not see would have changed what it found. The word "unfiltered" is dropped rather
+than defended.
 
 ## 118. A reachability search scoped with exclusions reports absence as evidence, and the exclusion is invisible in the result
 
@@ -9914,7 +9921,12 @@ empty result looks identical whether nothing matched or everything that matched 
 **Why it survived.** The finding was written from the empty output, recorded in the ledger, and read back by
 two later passes as established fact. Nothing about the recorded claim carried the scope that produced it,
 so no reader could see that "no consumer" meant "no consumer among the things I did not exclude". The
-correction came only when a removal pass re-ran the search unfiltered and classified what came back.
+correction came only when a removal pass re-ran the search without those two filters and classified what came
+back. **"Unfiltered" is the wrong word for that re-run and is corrected here rather than left standing.** It
+dropped the two `grep -v` clauses this entry is about, which is what mattered, but it still ran under a
+shimmed `grep` that honours ignore files and excluded `CLAUDE.md` — see item 130. The re-run's conclusion is
+unaffected, and the point survives with more force than before: a search can be filtered in a way its author
+did not write and cannot see, which is the distinction item 130 and the twenty-fifth pattern now carry.
 
 **The corrective is naming, not searching harder.** The search was not broken — grep returned exactly what
 it was asked for. What was wrong was the question, and the fix is to state what a search counts before
@@ -10258,11 +10270,66 @@ establishing — item 127 carries the measurement and the arms carry the data. N
 scope is this document, and the correction belongs to a pass that can also re-read the rest of
 `determinism.md` for the same class of claim.
 
+## 130. The shell's `grep` honours ignore files and excludes `CLAUDE.md` from every recursive scan, and the file git reports as not ignored is the one the search tool drops
+
+**What it is, and the first framing of it was incomplete.** `grep` in this environment is a shell function
+execing the tool's own binary with `--ignore-files`. It excludes `CLAUDE.md` from recursive searches. The
+obvious reading — a tool inventing an exclusion — is wrong, and the correction is the substance.
+`.gitignore` lists that file outright. Git declines to ignore it **only because gitignore patterns have no
+effect on files already tracked**, and it is tracked. The search tool applies the pattern with no knowledge
+of git's index. Both tools are correct by their own rules, and the file falls in the gap between them.
+
+**The diagnostic is a pair of commands that disagree about the same path.** `git check-ignore -v <path>`
+reports no match and exits non-zero; `git check-ignore --no-index -v <path>` reports the matching ignore line.
+Opposite answers mean the path is in the gap: tracked, pattern-matched, visible to git, invisible to any
+search tool honouring ignore files. Reading `.gitignore` alone does not predict it, because predicting it
+also requires knowing the tracked-file rule — which is why the check is the pair rather than the file.
+
+**Four properties worth having recorded, each established by running rather than by reading the shim.** The
+exclusion is **recursive-mode only**: naming the file explicitly returns identical results under both greps.
+It is **silent** — no flag announces the skip and `--stats` emits nothing about it. `find` is shimmed the
+same way, to a different tool. And the shims **travel with the tool**, not with the repo or the shell: they
+appear in no rc file and in no repo file, and resolve through the tool's own exec path, so any repository
+entered in such a session inherits them.
+
+**The excluded set is small, and its size is what makes an audit possible.** Two paths are both tracked and
+pattern-matched — command: `git ls-files | git check-ignore --no-index --stdin` — and one of them is deleted
+on disk, so it is invisible to every tool regardless. **One effective exclusion.** Because that set has a
+single member, re-running any scan with `command grep` can only add hits from that one file, so a past
+scan's answer changed if and only if the file contained the searched string at that commit. That reduces an
+open-ended worry to a finite check.
+
+**Six conclusions in this arc were checked that way, and five are provably safe.** Item 117's mock-stub
+enumeration, the residual-stub inventory, the tier establish pass's reachability claims, item 118's own
+correction, and the pass that repaired `CLAUDE.md` — the first three because the file held zero occurrences
+of every symbol they searched at the relevant commit, the fourth because it was scoped to `src/` and its
+filters were author-written, the fifth because it targeted the file by name and naming is identical under
+both greps. Marking those safe is the same work as finding the sixth, and is recorded as such rather than
+omitted for being unexciting.
+
+**The sixth is item 111's removal boundary, whose conclusion is unaffected and whose self-description was
+not.** It called itself an unfiltered whole-tree scan and was neither; `CLAUDE.md` held six of the symbols it
+searched. The conclusion survives on grounds the exclusion cannot touch: the claim was about production
+callers, a markdown file cannot call anything, and the same commit edited that file by name — introducing
+the bullet recording the removal — so its stale references were repaired deliberately rather than left to a
+scan that could not see them. The two ledger sentences carrying the word are corrected in place.
+
+**The standing exposure, which this arc's clean result does not retire.** The single file the shim hides is
+the one injected into every prompt, and therefore the file a staleness or consistency sweep most wants to
+read. A future sweep that does not account for this will miss it in exactly the way that produced no damage
+here only by luck of what the searched strings happened to be.
+
+**The fix, specified.** Use `command grep` for any repo-wide scan whose result will be reported as an
+absence, and when a file seems missing from results, run the check-ignore pair before concluding it holds
+nothing. Nothing further needs establishing: the mechanism, the excluded set and the blast radius were all
+measured before this entry was written. See the twenty-fifth pattern for the general mechanism, and item 118
+for the author-written form of the same failure.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 129 to find out which ones still need something. No index of
+reader the trouble of reading all 130 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -10271,7 +10338,7 @@ first.
 **Closed** (51): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 111, 117, 120, 126
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (4): 108, 113, 116, 129
+first (5): 108, 113, 116, 129, 130
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (9): 1, 4, 18, 23, 57, 63, 75, 90, 110
 
@@ -11794,6 +11861,54 @@ item 107 counts in this file, because it reads `reason` off the union without na
 to its subject and unchecked by the compiler at once, and neither condition surfaces the other. Recorded, not
 fixed — the pass that found it was scoped to message text and class routing.
 
+## A twenty-fifth pattern, promoted from the third candidate: a search can be filtered by something the author did not write and cannot see, and an absence claim cannot detect it
+
+The third candidate below was declined with a condition attached, and the condition has now been met. It read:
+if an instance appears where the filter is one the author did not write and cannot see — "a search tool's own
+default exclusion, an index that silently omits a path class, a matcher that honours an ignore file nobody
+consulted" — then the twentieth's rule stops being sufficient. The third of those three shapes is what
+occurred, close to verbatim.
+
+**The instance.** A repo-wide search for repeats of a claim returned nothing, and the file that carried the
+repeat was the one file the shell's `grep` excludes. It excludes it because the shim honours ignore files and
+`.gitignore` lists it; git does not ignore it because gitignore patterns do not apply to tracked files.
+Nothing in the command text, the tool's name, or its output says any of that. Item 130 records the mechanism
+and the blast radius.
+
+**Why the twentieth is not enough here, which is the whole argument for a separate pattern.** The twentieth's
+rule is to name what a figure counts before setting it against another. Applying it requires knowing that a
+filter is in play, and here nothing reveals one — the author would have to write "files matching my pattern,
+excluding those matched by ignore patterns the canonical tool declines to apply", which is not a sentence
+anyone composes without already having the finding. The twentieth governs a malformed question. This governs
+a well-formed question answered against a corpus the asker believed was complete.
+
+**Why it is distinct from item 118's form of the same failure**, which is the third candidate's own subject.
+There the filter was two `grep -v` clauses the author typed. The empty result was equally misleading, but the
+cause was recoverable by re-reading the command. Here re-reading the command reveals nothing, because the
+command is not where the filter lives. Same symptom, opposite diagnosis, and the corrective differs
+accordingly: item 118's is to name what a search counts; this one's is to establish what the search *could
+see* before believing what it did not find.
+
+**The refinement this instance forces on the condition's own wording, recorded because it makes the
+phenomenon likelier to recur rather than rarer.** The condition imagined a filter originating in the tool.
+What occurred is subtler: the pattern text is the repository's own and is perfectly readable, and the
+invisible part is the tool's silent decision to honour it combined with the canonical tool declining to.
+Consulting the ignore file would not have predicted the exclusion either — the tracked-file rule has to be
+known as well. A filter can therefore be fully documented, in a file the author has read, and still be
+invisible at the moment it applies.
+
+**The diagnostic, which is what makes this a check rather than a caution.** For any path suspected of being
+dropped, run `git check-ignore -v` and `git check-ignore --no-index -v` against it. Agreement means the path
+is ordinary. Disagreement — no match from the first, a matching line from the second — means the path is
+tracked and pattern-matched, visible to git and invisible to ignore-honouring search tools, and any absence
+claim covering it is unproven.
+
+The rule: an absence found by a search is evidence only about the corpus the search actually reached, and the
+corpus a search reaches is not always the corpus its command describes. Before reporting "no occurrences",
+establish that the tool could have seen the places the claim covers — by naming the tool used, not merely the
+pattern searched. Where that cannot be established cheaply, report the absence as bounded to what was
+searched rather than as absence.
+
 ## A candidate pattern considered this pass and not promoted: a prose restatement of a computed figure diverging from the computation
 
 Two instances arose in one session, both inside plan text for the item 93 fix. A script parsed all forty
@@ -11906,7 +12021,15 @@ a genuinely different mechanism: not a malformed question, but a correct questio
 the asker believed was complete. It would deserve its own pattern, argued on that basis rather than by
 resemblance to this one.
 
-## A second candidate considered and not promoted: a registered prediction's stated floor naming mechanisms that cannot produce the floor
+**The condition was met and the pattern is promoted; this section stays as the record of the deliberation
+rather than being rewritten.** The instance is the third of the three shapes named above — a matcher
+honouring an ignore file nobody consulted — and it arrived through the shell's own `grep` shim excluding one
+tracked file from every recursive scan. It is the twenty-fifth pattern now, argued on the basis this
+condition set rather than by resemblance, with item 130 carrying the mechanism and the blast radius. What
+the decline got right is worth keeping visible: the mechanism really is distinct from the author-written
+form, and saying so in advance is what made the later instance recognisable instead of arguable.
+
+## A fourth candidate considered and not promoted: a registered prediction's stated floor naming mechanisms that cannot produce the floor
 
 Item 110 registered classifier agreement at 70 to 85 percent, "bounded below by the low-confidence fallback
 to medium and by the parser's default to complex_multi_file." The measurement at `49aa3615` returned 55.0
