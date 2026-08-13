@@ -5060,8 +5060,9 @@ gate does not consult — the seventeenth pattern's precedent applies, and the h
 the distribution is now observable and still unmeasured.
 
 **The total file count came back 954, the same value the earlier sample holds, and that confirms a
-prediction this entry already made.** The fixture from the direct call holds exactly 954 and the prose
-above rounds it to the high nine hundreds. Two different trees and two unrelated tasks returning an
+prediction this entry already made.** The fixture from the direct call holds exactly 954, and this entry's
+own account of where the fixture values came from rounds that same figure to the high nine hundreds. Two
+different trees and two unrelated tasks returning an
 identical count is what this entry predicted when it declined to buy data — that a deliberate set drawn
 from one repository "would still leave the file-count signal a near-constant, which is the thing it
 would most need to vary." It is a near-constant. This is agreement between two readings of the same
@@ -10062,17 +10063,72 @@ into existence. The asymmetry is not an oversight repeated in thirteen files; it
 pressure has, and it predicts where orphaned mocks collect after any removal: on the read side, in proportion
 to how many test files touch the calling path.
 
+## 126. Closed — the locked anaphor sweep is line-based and could not see a referent split across a wrap; both hidden instances are now removed and the convention reports two figures
+
+**Mechanism: the instrument reads lines, and the defect it hunts does not respect them.** The sweep that
+guards this document against positional referents runs a fixed pattern through `grep`, which matches within
+one physical line. A referent whose words fall either side of a soft wrap — `the prose` ending one line,
+`above` beginning the next — cannot match, no matter what the pattern contains. The blind spot is in how the
+text is fed to the matcher, not in what the matcher looks for, which is why no amount of tuning the verb set
+would have found it.
+
+**What it had been hiding, both genuine.** A bucket paragraph pointing by position at `the classification`,
+which became visible only when an unrelated edit rewrapped its line, and item 79 pointing the same way at
+`the prose`, whose antecedent is that entry's own account of where its fixture values came from. Neither was
+a false positive; both are exactly the shape the convention exists to catch. Both are written here with the
+trailing position word dropped, on the same reasoning as the placeholder in the convention section: a
+referent quoted as an example is a mention rather than a use, and the sweep cannot tell the two apart, so
+naming one in full would raise the count this entry exists to explain. Two referents stood unreported for as
+long as the sweep has
+been run under this name.
+
+**The gap arc, carried as history rather than as a completeness claim.** Measured at three points, the same
+pattern under both instruments: at `49aa3615`, 52 line-based against 54 wrap-normalized, a gap of two; at
+`8e806902`, 52 against 53 after the first instance was removed; in this pass, 52 against 52 after the second.
+That arc is evidence the second instrument finds real instances — it produced two, and both were repaired. It
+is **not** evidence the sweep is now complete, and nothing here claims that. A pattern with six verbs still
+sees only what six verbs describe, and a referent phrased outside them remains outside them.
+
+**Why zero is the useful state, stated so a later pass does not read the clean figure as decoration.** The
+wrap-normalized count earns its place by making a future non-zero gap a fresh signal — a referent hidden by
+wrapping, appearing now, in this pass. That only works if the current state is clean. A standing divergence
+would have to be re-adjudicated every sweep to decide whether the one was old or new, which is the cost that
+made clearing the last instance worth doing here rather than recording it and moving on.
+
+**A second limitation, found by this entry's own verification gate rather than reasoned about in advance.**
+The sweep cannot distinguish a positional referent being used from one being quoted as an example. Writing
+this record the obvious way — naming both instances in full — raised the line-based count from 52 to 55, and
+the gate caught it as a finding about the edit rather than letting it pass as a new absolute. The document
+had already solved this once, in the sentence this entry amends, by writing its pattern with a placeholder
+instead of a literal; the same reasoning now applies to any entry that quotes a referent. The rule that falls
+out: prose about the pattern is written so the pattern does not match it, because a matcher counting mentions
+alongside uses reports the document's own commentary as defects.
+
+**The amendment is the fix, and it landed with this entry** — see the convention section for its wording: two
+figures reported, each naming its instrument, the normalization joining lines within a paragraph only, and
+the pattern itself untouched. Every historical delta stays valid, because deltas were compared under the
+line-based instrument throughout and that instrument's absolute has not moved.
+
+**Bucket, decided rather than defaulted.** Closed on arrival, on items 101 and 102's precedent — both
+introduced and given a `Closed —` heading in one commit, `565c6a98`. What makes that precedent apply is
+shape rather than citation: item 101 opens "Mechanism: one new field, threaded from where the offered set was
+already computed," an entry written to document work that had already landed rather than to propose work
+still pending. This entry has that shape. Actionable now was checked and does not fit: it means a fix is
+specified and nothing new needs learning first, which presupposes the fix is outstanding, and here the fix is
+the convention amendment in this same commit. Checked the other way too — nothing sitting in Actionable now
+lacks a still-pending fix.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 125 to find out which ones still need something. No index of
+reader the trouble of reading all 126 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (50): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 111, 117, 120
+**Closed** (51): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 111, 117, 120, 126
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (3): 108, 113, 116
@@ -10180,6 +10236,28 @@ means "somewhere earlier in this entry" and was never adjacent to what it names,
 but only because a single paragraph in the entry fits the description. So the mechanism is real and
 rare, and it is recorded here rather than generalized: an insertion-heavy pass is when it happens, and
 this document has just had several in a row.
+
+**Completed rather than corrected, because everything the sweep sentence says is true and what it omits is
+how the check reads its input.** The sweep is run with `grep`, which matches within one physical line, so a
+referent whose words fall either side of a soft wrap cannot match however many verbs the pattern carries.
+Two such referents existed while the sweep reported none: a bucket paragraph pointing by position at
+`the classification`, surfaced when an edit rewrapped its line and removed at `8e806902`, and item 79
+pointing the same way at `the prose`, removed in the pass recording this. Both are named here without their
+trailing position word, for the same reason this section already writes its pattern with a placeholder — a
+quoted referent is a mention, not a use, and the matcher cannot distinguish them. **The amendment: an anaphor
+sweep now reports two figures rather than one.** The locked line-based count against its absolute, and a wrap-normalized count beside it, each naming
+its instrument; the normalization joins lines within a paragraph only and preserves blank-line boundaries, so
+that collapsing cannot manufacture a match across two paragraphs. A divergence between the two figures is
+itself the finding — it says a referent is hidden by wrapping, not that the absolute moved.
+
+**The pattern itself is not widened, and the distinction is the whole point.** Its six verbs stay exactly as
+they are and the absolute stays anchored to the line-based count, so every delta recorded under this name
+before or after remains comparable. The verb set is a scoping decision about which referents are worth
+finding; wrapping is input preparation, and how text is fed to a matcher is not a question about that scope.
+Conflating the two would make the lock meaningless — any miss could be answered by adding a verb, which is
+exactly what the lock exists to prevent. A reconstruction that widened the set to thirteen verbs returned 53
+against the recorded pattern's 52 and was rejected on that ground; the correct response to a miss is to ask
+whether the instrument could see the text at all.
 
 **The densest instance so far, and it is in the file injected into every prompt.** A sweep of the
 contributor-guidance file in `e8c5a96b` enumerated every one of its file-and-line citations: of the
