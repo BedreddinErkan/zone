@@ -90,7 +90,9 @@ export interface SubagentResultInput {
 }
 
 export interface SubagentResultOutput {
-  /** Amount to add to outer subagentTokenTotal. Update the outer variable BEFORE calling emitTokenBudgetStatus. */
+  /** Token delta from this subagent call. The caller passes it straight into
+   *  TokenBudgetMeter.recordSubagentResult, which applies it before reading
+   *  the cumulative total. */
   subagentTokenDelta: number;
   /** Amount to add to outer subagentCostTotal. */
   subagentCostDelta: number;
@@ -100,9 +102,10 @@ export interface SubagentResultOutput {
  * Parses a successful Task tool result: aggregates filesModified, propagates
  * token and cost accumulators, and emits the corresponding zone log markers.
  *
- * Does NOT handle the token-budget check or early return — the caller must
- * update subagentTokenTotal with the returned delta BEFORE calling
- * emitTokenBudgetStatus so the closure reads the correct cumulative value.
+ * Does NOT handle the token-budget check or early return — the caller
+ * (handleToolResult.ts) passes the returned delta into
+ * TokenBudgetMeter.recordSubagentResult, which applies it and reads the
+ * cumulative total from within the same method call.
  */
 export function handleSubagentResult(opts: SubagentResultInput): SubagentResultOutput {
   let subagentTokenDelta = 0;
