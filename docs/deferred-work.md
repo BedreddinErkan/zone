@@ -8452,6 +8452,9 @@ to be read as either confirmation or refutation of the anti-narrowing choice ite
 prefix-suppression rule is inside it. The splice fix is in `assembleAgentSystemPrompt`, `llm/agentLoop.ts`.
 See item 88 for the notice this regression came from, and item 89 for a different, unrelated way the same
 notice can go stale, and item 93 for the second surface this item's own mechanism was applied to in advance.
+See item 110 for the other pending measurement in this arc: it carries its own registered predictions,
+follows this item's precedent for recording them, and is blocked on the identical constraint — Anthropic
+credit at zero. A pass that acquires credit should read both together rather than either alone.
 
 ## 91. Closed — `run_command_readonly`'s description named no discovery binary, at either of the two sites that state its capability
 
@@ -9488,11 +9491,243 @@ consequence — it alters only the text of a refusal that already happens — an
 deliberately not applied at 6f9c9a69, whose scope held variant B byte-identical. See item 93 for the refusal
 family and item 91 for the description fix that made the same omission on a different surface.
 
+## 109. `forced_tier_blocking` cannot fire on the default path — it gates on a condition only an explicit flag sets, so it cannot recover from the only way a wrong tier actually arises
+
+**What it is.** A promotion exists inside the main loop to recover from a tier that blocked the tools a
+task needed. Its eligibility flag, `tierArchetypeMismatch`, requires `input.forceTier` to equal `"simple"`.
+That field is written from exactly two places, both routed through `config.ts`: the `--force-tier` CLI
+option and the `ZONE_FORCE_TIER` environment variable. With neither supplied the field is undefined, the
+flag is permanently false, and the promotion can never fire. A tier the classifier produced on its own —
+the only kind a normal run has — is therefore unrecoverable by the mechanism built to recover from it.
+
+**The seven conditions, by shape.** All must hold in the same iteration: the loop is not a subagent loop;
+`forceTier` equals simple; the classified archetype is one of the four in the exploration-needing set
+(targeted_fix, refactor, complex_multi_file, debug); the shared one-shot promotion guard is still unset;
+a failure has been detected; the iteration index is at least 2; and some path in the per-run read counter
+has been read at least twice.
+
+**What it relaxes and what it does not.** It recomputes the capability filter, the tool list and the
+allowed-tool set, so the model sees the full toolset from the next iteration. It deliberately leaves the
+iteration budget and the coaching-attempt allowance alone — the source calls it a tool-only promotion in
+its own comment. So even when it does fire, it buys tools and not time.
+
+**Recovery cost before it can fire.** At least three iterations (the index test is `iter >= 2`,
+zero-based), at least one detected failure, and at least two reads of the same path — so at minimum two
+read calls that produced nothing new, plus whatever else those three iterations spent, before any
+loosening happens.
+
+**A comment/code divergence sits inside the trigger.** The leading comment describes the condition as
+having re-read the same file three or more times; the code tests for two or more. The code is what runs.
+Neither reading changes the reachability finding, since the enclosing flag is false on the default path
+regardless, but the two should not disagree.
+
+**Where the code lives:** the flag is built near the top of the main loop in `agentLoop.ts` alongside the
+exploration-needing archetype set; the promotion body sits inside the per-iteration block, marked as
+branch B of the forced-tier work. `forceTier` is resolved in `cli/config.ts`. See item 110 for what the
+tier gates when it is right, and item 84 for unreachable mechanisms of a different shape — those have no
+callers at all, whereas this code is entered on every iteration and it is the condition that is never true.
+
+## 110. Tier reaches only `tokenBudgetCap` for five of seven archetypes; its iteration cap and tool subset bind only when the archetype pipeline is null
+
+**What it is.** `TIER_LIMITS` carries four fields. Two of them — the iteration budget and the tool subset —
+are superseded by the archetype pipeline whenever one exists, by two independent precedence rules that
+happen to agree. Tier decides those two only for the archetypes whose pipeline config is null.
+
+**The iteration path.** Inside the tier branch, which runs for every main loop because `resolveTierLimits`
+never returns null and `tierLimits` is null only for subagent loops, `maxIterationsForRun` is overwritten
+unconditionally with `softIterWarn × 3`. Counting iterations per run, that is 45, 75 and 120 for simple,
+medium and complex, against `softIterWarn` values of 15, 25 and 40. The overwrite discards
+`BASE_MAX_ITERATIONS`, which is 15, and discards any caller-supplied `maxIterations` — the discard is
+logged rather than silent. A later guard restores the pipeline's `maxIterationsOverride` only when that
+value is smaller than the current budget. Counting iterations per pipeline, every pipeline cap is smaller:
+3 for question, 5 for simple_add, 10 for targeted_fix, 12 for refactor. So the tier's number binds only
+where there is no override.
+
+**The tool path reaches the same place by a different rule.** Filter precedence puts an explicit
+`capabilityFilter` ahead of the tier-derived subset. `buildDispatcherCapabilityFilter` returns undefined
+for a null pipeline config, and only then does the tier subset apply — counting tools per subset, 5 for
+simple, 9 for medium, and no filter at all for complex. The source records this happening in practice: an
+approved answer-only plan reclassified as debug yields no capability filter, leaving the medium-tier
+subset in force.
+
+**Which archetypes have a null pipeline.** Counting archetypes per union, two of the seven — debug and
+complex_multi_file. For the other five the tier decides neither tools nor iterations, leaving
+`tokenBudgetCap` as the only field it still reaches.
+
+**The subagent quota frequently cancels itself.** `Task` is withheld when the quota is zero or when the
+task is judged small, where small means an estimated iteration count below 15 or an estimated file count
+of three or fewer. At complex tier the quota is 4 but the estimate can still withdraw the tool, and the
+codebase already instruments the resulting contradiction with its own marker, describing it in place as
+the third point at which these two axes disagree.
+
+**Registered predictions, unmeasured, Anthropic credit at zero.** Classifier agreement with a hand label,
+70 to 85 percent, bounded below by the low-confidence fallback to medium and by the parser's default to
+complex_multi_file — both pull toward the middle of the range. Promotion rate on default settings,
+exactly zero — recorded as a consequence of item 109's reachability finding rather than as an estimate, so
+a single non-zero observation refutes the reading of the trigger rather than adjusting a number. Outcome
+invariance across forced-tier arms for the five non-null-pipeline archetypes, at least 80 percent
+identical verdicts with final iteration counts within one. **The refuting signal** is a materially
+different success rate or iteration distribution between the simple and complex arms on those five
+archetypes; a difference confined to debug and complex_multi_file confirms rather than refutes, since
+those are the two where tier still binds.
+
+**What the two measurements would cost.** Agreement against hand labels needs one classifier call per
+task and nothing else — 40 calls is about eight cents on the default Anthropic model and about one cent on
+the OpenAI one, effectively free. The behavioural question needs three forced-tier arms over the same
+tasks; 20 tasks is 60 full runs, at roughly thirty cents to a dollar each, so 18 to 60 dollars. Neither
+has been run.
+
+**Where the code lives:** `TIER_LIMITS` and `resolveTierLimits` in `tierLimits.ts`; the overwrite, the
+restore guard and the filter precedence chain all in `agentLoop.ts`; `buildDispatcherCapabilityFilter` in
+`archetypeDispatcher.ts`. See item 90, which carries its own registered prediction and is blocked on the
+same zero-credit constraint — the two are the pending measurements this arc is holding. See item 109 for
+why a wrong tier cannot be recovered from, and item 116 for the CLAUDE.md sentence this item falsifies.
+
+## 111. `auditIterCap` has no reader, and the audit gate it belongs to has no production caller — the sixth accumulated constraint measured to do less than expected
+
+**What it is.** Of the four fields in `TIER_LIMITS`, one is read by nothing. `auditIterCap` — 0, 6 and 8
+by tier, counting iterations allowed to the audit investigation — has no consumer anywhere outside its own
+definition. Cross-checked in both directions before recording: a search for the identifier across the
+source tree returns its declaration and no use.
+
+**The gate it serves is itself unreachable.** `shouldRunAudit` and `isLowRiskPlan` are referenced only by
+`auditMode.test.ts`. No production module calls either. So the `auditMode=auto` branch, the tier-equals-
+simple audit skip inside it, and the low-risk-plan skip beside that are all dead in the shipped product.
+This is consistent with the project's own description of its default plan path as executing once with no
+audit — the machinery survives, the path to it does not.
+
+**The sixth in an accumulated series, cross-referenced by recorded shape.** Five constraints in this
+codebase have already been measured and found to do less than their surface suggests: item 81, every
+scanned file labelled category unknown with that label reaching prompts well outside the ranker; item 82,
+the role flows and the nineteen modules behind them removed outright; item 83, a confirmed-dead field in
+the risk-score modifier table beside two live entries that diverge for unmeasured reasons; item 84, nine
+unreachable mechanisms sharing one shape across three subsystems, invisible to a naive import graph; and
+item 92, a value plumbed through seven files' type signatures with no dispatch path reaching it. This is
+the sixth, and it is the first where the dead field sits inside a table whose other three fields are live.
+
+**Where the code lives:** the field in `tierLimits.ts`; the two functions in `auditMode.ts`; the test that
+is their only caller alongside them. No fix is proposed — whether to delete the machinery or restore a
+path to it is a scoping decision this entry does not make.
+
+## 112. The classification call is never cached — the prompt misses the per-model minimum by 2,199 characters, so every dispatch re-bills it in full
+
+**What it is.** Every dispatch classifies its task with a separate request, and that request carries no
+cache marker. The system prompt is 6,001 characters. `getCacheMinChars` for the default Anthropic
+classifier model returns 8,200. The request carries no tools, so there is nothing to add to the system
+text to clear the minimum, and `isCacheEligible` returns false.
+
+**Established by running the conversion, not by comparing two numbers.** The classifier's exact request
+shape — same model, same temperature, same output cap, the real system prompt, a representative user
+message — was passed through the production `convertParams` and the result inspected: the system field is
+emitted as a plain string rather than the cache-marked array form, and the serialized request contains no
+`cache_control` anywhere. The threshold arithmetic predicts that; the run confirms it.
+
+**What it costs.** Counting characters in the prompt, 6,001 plus 27 fixed characters of user-message
+scaffolding plus the task text. Counting tokens by this repo's own four-characters-per-token proxy — the
+same proxy the conversion code uses for this decision — a 200-character task gives about 1,557 input
+tokens. At the registered rates for the default Anthropic classifier model, one dollar per million input
+and five per million output, and the roughly 110 output tokens the classifier's own documentation states,
+that is about $0.0021 per dispatch. On the default OpenAI model, at fifteen cents and sixty cents per
+million, about $0.0003. The figure is billed separately from the run it classifies and surfaces under its
+own field on the classification and on the archetype telemetry marker.
+
+**No fix is proposed, and that is the reason this sits where it does.** Closing a 2,199-character gap is a
+design decision with at least three answers — pad the prompt to clear the minimum, lower the per-model
+minimum, or accept the cost as the price of a 6,001-character prompt — and choosing between them needs an
+argument this entry does not have. See item 113 for the one specified fix this finding did produce, and
+item 114 for the cache that does exist and what it is keyed on.
+
+## 113. `pickClassifierModel`'s own cost comment understates the real per-call cost by about 4.2× — correct the comment
+
+**What it is.** The comment above the classifier's model selection asserts the call stays "well below
+$0.0005/classification for prompts under ~500 tokens." Neither half holds. The prompt is about 1,557
+tokens by the same four-characters-per-token proxy the codebase uses elsewhere, not under 500, and the
+call costs about $0.0021 on the default Anthropic model — roughly 4.2 times the stated ceiling.
+
+**The fix, specified.** Replace the claim with the measured figure and name the basis, so the number
+cannot drift the way an unlabelled approximation does. The correct value is already computed in item 112;
+nothing further needs to be established first. The same entry records why the call is uncached, which is
+the reason the real cost is what it is.
+
+**Where the code lives:** the comment sits directly above the model-selection function in
+`taskClassifier.ts`. This entry is the fix; item 112 is the finding that produced it.
+
+## 114. The classification cache is in-process only and keyed on the task string alone — provider and model are absent from the key
+
+**What it is.** Classifications are memoised in a module-level map. Nothing writes it to disk and nothing
+shares it between processes, so its lifetime is the lifetime of the process — which for the interactive
+REPL means it survives every dispatch in a session and is never invalidated during one.
+
+**The key is a djb2 hash of the trimmed task description and nothing else.** Two consequences follow from
+what the key omits rather than from what it contains. Only byte-identical task strings, modulo leading and
+trailing whitespace, can ever hit — two differently worded requests for the same work never do. And
+because neither provider nor model is part of the key, an entry produced under one provider is served
+unchanged after a mid-session provider switch, with the model that produced it no longer the model in use.
+
+**Nothing clears it in production.** The exported cache-clearing function is referenced only by five test
+files. The per-call `skipCache` option is declared and read but never passed as true by any production
+caller.
+
+**A hit is not a pure replay.** The hit path re-runs the large-file tier bump against the current file
+sizes, and can upgrade the cached tier and write the upgraded entry back, emitting its own marker with the
+source recorded as a cache re-run. So a cached classification can change on a later hit without a model
+call.
+
+**The hit rate is unmeasured and is not estimated here.** It depends entirely on how often a user submits a
+byte-identical task string, which is a property of usage rather than of the code, and the dispatch logs
+that would answer it do not exist — see item 115.
+
+**Where the code lives:** the map, the hash function and the hit path are all in `taskClassifier.ts`.
+
+## 115. Neither tier telemetry marker reaches disk — the fields exist, the emissions do not survive
+
+**What it is.** The two markers that would answer how often the tier is wrong are emitted through the
+shared logging helper, which is a direct console write with no file sink. In the interactive TUI the
+stdout shield swallows anything matching its telemetry prefix pattern, which both markers match. Nothing
+under the per-repo state directory contains either marker: the log directory holds only command-cache
+files. The occurrences of both marker names elsewhere in that directory are prose mentions inside audit
+and plan documents, not captured emissions.
+
+**What the fields would have carried.** The archetype marker carries the run id, archetype, archetype
+confidence, classifier cost, tier, whether a fallback was used, a user-override slot, the final iteration,
+the final cost, success, whether a pipeline was applied, the archetype promoted from, the promotion
+trigger, the iteration promotion happened at, and a count of questions asked. The mismatch marker carries
+the run id, the forced tier, the classified archetype, its confidence, and the list of blocked tools.
+
+**Why this is the binding constraint on every future tier measurement.** The instrumentation needed to
+answer the question already exists and is already emitted on every run; it is simply not retained. Any
+measurement of classification accuracy or promotion rate must either capture standard output at run time
+or add a sink first — no historical answer can be recovered, and none should be reconstructed from
+recollection of past sessions.
+
+**Where the code lives:** the emit functions in `loopTelemetry.ts`; the logging helper in `utils/logger.ts`;
+the stdout shield in the TUI entry point.
+
+## 116. Three CLAUDE.md claims about the classifier are wrong, found after the repair pass that did not cover this surface
+
+**What it is.** CLAUDE.md was repaired at `3ed5bc33`, which corrected one live falsehood, one wrong clause
+and six drifted figures. These three were found afterwards, by an establish pass reading the classifier
+rather than the surfaces that repair covered, and none of them was in its scope. A reader should not infer
+the repair pass missed them through carelessness.
+
+**The three, each with the correct value already established.** The claim that only the classifier sends a
+300-token completion cap is stale — the ceiling constant is 1,024, raised from 300 at `2af1ee76` because
+the smaller value was truncating classifications. The claim that the debug and complex_multi_file
+archetypes run at a base maximum of 15 iterations is wrong — the tier branch overwrites that value for
+every main loop, so those two archetypes run at 45, 75 or 120 by tier, per item 110. And the classifier's
+own model-selection cost comment understates the per-call cost by about 4.2×, per item 113 — that one is a
+source comment rather than a CLAUDE.md sentence, and is listed here only so a docs pass sees the whole set
+together.
+
+**Where the fix goes:** the first two are sentences in CLAUDE.md, in the adapters section and the
+archetype dispatcher paragraph respectively; the third is item 113. Nothing is applied here — this entry
+exists so the next docs pass has a target it does not have to rediscover.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 108 to find out which ones still need something. No index of
+reader the trouble of reading all 116 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -9501,13 +9736,13 @@ first.
 **Closed** (47): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (1): 108
+first (3): 108, 113, 116
 
-**Blocked on data** — closing requires an observation that doesn't exist yet (8): 1, 4, 18, 23, 57, 63, 75, 90
+**Blocked on data** — closing requires an observation that doesn't exist yet (9): 1, 4, 18, 23, 57, 63, 75, 90, 110
 
-**Neither — a structural fact recorded, with no fix proposed** (52): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (57): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
-81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107
+81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 111, 112, 114, 115
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, and 93 are partially closed or corrected; the
 classification above covers only the portion still open, not the whole entry.
@@ -11037,3 +11272,41 @@ drafting error with a working review and belongs on record. At that point it mus
 first pattern in this document as well as the twentieth, because a wrong figure that ships and is later
 trusted is the same failure as a reference that was stale from the moment it was written, and the difference
 would have to be argued rather than assumed.
+
+## A second candidate considered and not promoted: a live constraint whose recovery gates on a condition normal operation never sets
+
+The mechanism, from item 109. A constraint is added. A recovery is added for the case where the constraint
+is wrong. The recovery's trigger reads a field that only an explicit operator action ever writes, so on the
+default path the recovery is unreachable — and the constraint's failure mode becomes invisible rather than
+recovered. The constraint is live throughout; it is the remedy that is dead.
+
+**Compared against the fifth pattern, "tracing is not running"** — the closest existing essay in subject,
+since both turn on whether a code path actually executes. It does not fit. The fifth is a verification
+discipline: confirm reachability by running rather than by reading a call graph, written because a reader
+concluded something was live when it was not. Nothing of that kind happened here. The establish pass read
+the gate condition, found both writers of the field, and reached the correct conclusion on its first pass;
+no investigation was misled. What the candidate describes is a property of the system's design, not a way
+a reader goes wrong.
+
+**Compared against the twenty-fourth, which is closer in mechanism** — a guard that looks live, is inert,
+and whose inertness is invisible to the ordinary green-test signal. The resemblance is real and it still
+fails, for a reason that is checkable rather than rhetorical. The twenty-fourth's guard is a test
+assertion, and its diagnostic is mutation: break the region the assertion claims to guard and see whether
+it notices. That diagnostic cannot reach this case, and not by accident. The only test exercising the
+promotion path sets the forcing field itself — it must, because setting it is the sole way to enter the
+code at all. Mutating the gate would be killed by that test, since the test supplies the very condition
+production never supplies. The guard is inert in production and live under test, so "only a mutation can
+tell the two apart" names precisely the tool that cannot tell them apart here. Different mechanism, not a
+milder instance of the same one.
+
+**Why it stays an item.** Every one of the twenty-four recorded patterns is a mechanism by which an
+investigation, a test or a measurement produces a wrong or an empty answer. This is a mechanism by which
+the software fails to recover from its own misjudgement. That is item-shaped, and it is recorded as item
+109 rather than promoted here.
+
+**The condition under which it reopens.** If a second instance appears where a recovery path's trigger is
+unreachable *and* the investigation initially concluded the recovery was live — where the dead trigger
+actually misled a reader — the failure has become a verification failure and belongs beside the fifth
+pattern, argued on that basis. Reopen also if the shape recurs a third time whether or not anyone was
+misled, since three independent instances would make it something this codebase reliably produces rather
+than one item that happened once.
