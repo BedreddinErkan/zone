@@ -17,7 +17,6 @@ const mockClearTrustedCommandsForRun = vi.hoisted(() => vi.fn().mockReturnValue(
 const mockSetTrustAllForRun = vi.hoisted(() => vi.fn());
 const mockBuildCliSink = vi.hoisted(() => vi.fn(() => ({ onProgress: vi.fn() })));
 const mockCreateSpinner = vi.hoisted(() => vi.fn(() => ({ stop: vi.fn() })));
-const mockRunAuditPipeline = vi.hoisted(() => vi.fn());
 const mockPreparePlanContext = vi.hoisted(() => vi.fn());
 const mockGenerateExecutionPlan = vi.hoisted(() => vi.fn());
 const mockRequestPlanApproval = vi.hoisted(() => vi.fn());
@@ -43,7 +42,6 @@ vi.mock("../llm/planApprovals.js", () => ({
   rejectPendingPlansForRun: mockRejectPendingPlansForRun,
 }));
 vi.mock("./sink.js", () => ({ buildCliSink: mockBuildCliSink, createSpinner: mockCreateSpinner }));
-vi.mock("../llm/auditPipeline.js", () => ({ runAuditPipeline: mockRunAuditPipeline }));
 vi.mock("../core/preparePlanContext.js", () => ({ preparePlanContext: mockPreparePlanContext }));
 vi.mock("../llm/executionPlan.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../llm/executionPlan.js")>();
@@ -85,7 +83,6 @@ beforeEach(() => {
   mockRunLlmPatchFlow.mockReset();
   mockRunLlmPatchFlow.mockResolvedValue({ ok: true, decisionMode: "safe_to_apply" });
   mockPreparePlanContext.mockResolvedValue({ projectSummary: "TS project", relevantFilePaths: [] });
-  mockRunAuditPipeline.mockResolvedValue({ auditFindings: undefined, revisionDecision: undefined, earlyExit: null });
   mockBuildCliSink.mockReturnValue({ onProgress: vi.fn() });
   mockCreateSpinner.mockReturnValue({ stop: vi.fn() });
   mockReadAuditModeSetting.mockReturnValue("auto");

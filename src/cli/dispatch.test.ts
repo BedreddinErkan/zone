@@ -10,7 +10,6 @@ const mockClearTrustedCommandsForRun = vi.hoisted(() => vi.fn().mockReturnValue(
 const mockSetTrustAllForRun = vi.hoisted(() => vi.fn());
 const mockBuildCliSink = vi.hoisted(() => vi.fn(() => ({ onProgress: vi.fn() })));
 const mockCreateSpinner = vi.hoisted(() => vi.fn(() => ({ stop: vi.fn() })));
-const mockRunAuditPipeline = vi.hoisted(() => vi.fn());
 const mockPreparePlanContext = vi.hoisted(() => vi.fn());
 const mockGenerateExecutionPlan = vi.hoisted(() => vi.fn());
 const mockReadAuditModeSetting = vi.hoisted(() => vi.fn(() => "auto"));
@@ -41,7 +40,6 @@ vi.mock("./sink.js", () => ({
   buildCliSink: mockBuildCliSink,
   createSpinner: mockCreateSpinner,
 }));
-vi.mock("../llm/auditPipeline.js", () => ({ runAuditPipeline: mockRunAuditPipeline }));
 vi.mock("../core/preparePlanContext.js", () => ({ preparePlanContext: mockPreparePlanContext }));
 vi.mock("../llm/executionPlan.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../llm/executionPlan.js")>();
@@ -123,7 +121,6 @@ beforeEach(() => {
   delete process.env["ZONE_PLAN_APPROVAL_CYCLE"];
   mockBuildCliSink.mockReturnValue({ onProgress: vi.fn() });
   mockCreateSpinner.mockReturnValue({ stop: vi.fn() });
-  mockRunAuditPipeline.mockResolvedValue({ auditFindings: undefined, revisionDecision: undefined, earlyExit: null });
   mockPreparePlanContext.mockResolvedValue({
     projectSummary: "A TS project",
     relevantFilePaths: [],
@@ -339,7 +336,6 @@ describe("runOneShotInner — mode wiring", () => {
       mode: "plan",
       externalAc: new AbortController(),
     });
-    expect(mockRunAuditPipeline).not.toHaveBeenCalled();
     expect(mockRequestPlanApproval).toHaveBeenCalledOnce();
     expect(mockRunLlmPatchFlow).toHaveBeenCalledOnce();
   });
