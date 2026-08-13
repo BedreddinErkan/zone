@@ -1,11 +1,19 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   readTierSettings,
   writeTierSettings,
   getTierSettingsPath,
+  _setTierSettingsPathForTest,
 } from "./tierSettings.js";
 
+// Item 121: this file and tierLimits.test.ts both read and write the same
+// settings file by default, racing when vitest schedules them close together.
+// Each gets its own path so the two can never collide.
+const TEST_DIR = fs.mkdtempSync(join(tmpdir(), "zone-tierSettings-test-"));
+_setTierSettingsPathForTest(join(TEST_DIR, "tier-limits.json"));
 const SETTINGS_PATH = getTierSettingsPath();
 
 let backup: string | null = null;
@@ -24,6 +32,11 @@ afterEach(() => {
   } else if (fs.existsSync(SETTINGS_PATH)) {
     fs.unlinkSync(SETTINGS_PATH);
   }
+});
+
+afterAll(() => {
+  _setTierSettingsPathForTest(null);
+  fs.rmSync(TEST_DIR, { recursive: true, force: true });
 });
 
 describe("Phase L.3 tierSettings persistence", () => {

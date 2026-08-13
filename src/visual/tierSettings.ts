@@ -9,7 +9,7 @@
 // evaluation and never sees that assignment.
 import fs from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import type { TaskTier } from "../llm/taskClassifier.js";
 
 export interface PerTierSettings {
@@ -26,15 +26,22 @@ export interface TierSettingsFile {
 
 export type TierSettings = Partial<Record<TaskTier, PerTierSettings>>;
 
+let _settingsPathOverride: string | null = null;
+
+/** For test isolation only — redirect where tier settings are stored. */
+export function _setTierSettingsPathForTest(p: string | null): void {
+  _settingsPathOverride = p;
+}
+
 // Resolved per call, never captured into a module-level const: a path captured
 // at module load ignores any later redirection of the home directory, which is
 // how test runs end up writing into the real ~/.zone.
 function settingsDir(): string {
-  return join(homedir(), ".zone");
+  return _settingsPathOverride ? dirname(_settingsPathOverride) : join(homedir(), ".zone");
 }
 
 function settingsPath(): string {
-  return join(settingsDir(), "tier-limits.json");
+  return _settingsPathOverride ?? join(settingsDir(), "tier-limits.json");
 }
 
 const VALIDATION = {

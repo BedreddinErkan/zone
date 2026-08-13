@@ -1,8 +1,14 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { TIER_LIMITS, resolveTierLimits } from "./tierLimits.js";
 import type { TaskClassification } from "./taskClassifier.js";
-import { writeTierSettings, getTierSettingsPath } from "../visual/tierSettings.js";
+import {
+  writeTierSettings,
+  getTierSettingsPath,
+  _setTierSettingsPathForTest,
+} from "../visual/tierSettings.js";
 
 function makeClassification(tier: "simple" | "medium" | "complex"): TaskClassification {
   return {
@@ -123,6 +129,11 @@ describe("resolveTierLimits", () => {
 });
 
 describe("L.3: resolveTierLimits with user overrides", () => {
+  // Item 121: this describe and tierSettings.test.ts both read and write the
+  // same settings file by default, racing when vitest schedules them close
+  // together. A distinct path here means the two can never collide.
+  const TEST_DIR = fs.mkdtempSync(join(tmpdir(), "zone-tierLimits-test-"));
+  _setTierSettingsPathForTest(join(TEST_DIR, "tier-limits.json"));
   const SETTINGS_PATH = getTierSettingsPath();
   let backup: string | null = null;
 
@@ -139,6 +150,11 @@ describe("L.3: resolveTierLimits with user overrides", () => {
     } else if (fs.existsSync(SETTINGS_PATH)) {
       fs.unlinkSync(SETTINGS_PATH);
     }
+  });
+
+  afterAll(() => {
+    _setTierSettingsPathForTest(null);
+    fs.rmSync(TEST_DIR, { recursive: true, force: true });
   });
 
   it("applies user tokenBudgetCap override for simple tier", () => {
