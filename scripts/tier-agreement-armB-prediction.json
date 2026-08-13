@@ -1,0 +1,65 @@
+{
+  "purpose": "Prediction for arm B of the tier-agreement measurement, registered and committed BEFORE the first billed call so the result cannot be reconciled to it after the fact.",
+  "arm": "B",
+  "armAResultsFile": "scripts/tier-agreement-results.json",
+  "armACommit": "49aa3615",
+  "frozenLabelsCommit": "6b7c966d",
+  "frozenLabelsSha256": "1a7cc72ce17a0add2f7de0f1d1fbb26ae7c3cc23a130c75753d972b76bfd883b",
+
+  "theSingleVariable": {
+    "file": "src/llm/taskClassifier.ts",
+    "locatedBy": "the CLASSIFIER_SYSTEM_PROMPT block headed with the COMPLEX tier trigger list",
+    "occurrencesInSrc": 1,
+    "occurrenceCommand": "grep -rc 'any one is sufficient' src/llm/taskClassifier.ts",
+    "before": "COMPLEX tier triggers (any one is sufficient):",
+    "after": "COMPLEX tier triggers (each raises consideration; the file and iteration scope rule decides):",
+    "whatChanged": "Sufficiency becomes consideration, and the scope rule is named as the decider.",
+    "whatDidNotChange": [
+      "the five trigger bullets themselves",
+      "the Classification-heuristics bullet reading '\"all instances\" / \"every X\" / \"across the codebase\" -> COMPLEX', which is unconditional and carries no count requirement",
+      "the 'When uncertain between medium and complex, prefer complex' block",
+      "the classify-up instruction",
+      "the signal-words list",
+      "the test-fix default",
+      "the tier definitions and the scope rule itself",
+      "the frozen labels, the 40 tasks, the harness and its options"
+    ]
+  },
+
+  "prediction": {
+    "statement": "Approximately zero of the 40 tasks change tier between arm A and arm B.",
+    "basis": [
+      "0 of 40 tasks match the prompt's literal trigger-#2 phrases ('across all N files' / 'every reference' / 'throughout the codebase' / 'in each file'), which the list further requires be combined with a count >= 3.",
+      "1 of 40 tasks matches the looser Classification-heuristics bullet's phrases ('all instances' / 'every X' / 'across the codebase').",
+      "7 of 7 arm A reasoning strings on the trigger-carrying tasks cite multi-file scope ('across multiple files', 'multiple call sites', 'coordinated updates') and none cites a trigger condition, a count threshold, or sufficiency language."
+    ],
+    "howArmAsSplitWasActuallyComputed": "By a regex written for the arm A analysis, /\\ball\\b|\\bevery\\b|everywhere|across the codebase|throughout|in each file|no occurrence/i, which matched 7 of 40 almost entirely on a bare 'all'. That regex is looser than the prompt's stated conditions and is NOT the trigger list. The 28.6/60.6 figures are a correct vocabulary effect; attributing them to the COMPLEX trigger list is not supported and is corrected in this pass."
+  },
+
+  "whatANullDoesAndDoesNotEstablish": {
+    "aNullIsConsistentWithTwoDistinctStates": [
+      "The COMPLEX trigger list genuinely does not fire on this frozen set, so softening its header changes nothing because nothing was engaged.",
+      "The softened header IS engaged but is overridden by the two untouched forms of the same instruction: the unconditional heuristics bullet (no count requirement, strictly looser than trigger #2) and the prefer-complex block."
+    ],
+    "thisPassCannotDistinguishThem": "Distinguishing the two requires a further arm that softens those forms as well. Registered here, before the run, so a null is not read as stronger evidence than it is.",
+    "boundaryOnAnyNull": "That the list does not fire on these 40 tasks is not that it never fires. The frozen set is 40 tasks from three sources with labels anchored to the scope rule; a corpus carrying genuine multi-file counts, explicit 3-or-more file lists, or signature-change wording could engage the list where this set does not.",
+    "notValidation": "Arm B is not validated for production by this pass regardless of outcome. The prompt change is reverted in a separate commit after the results land."
+  },
+
+  "armABaseline": {
+    "overallAgreement": "55.0% (22/40)",
+    "perSource": { "A_corpus": "65.0% (13/20)", "B_briefs": "50.0% (5/10)", "C_commits": "40.0% (4/10)" },
+    "triggerCarrying": "28.6% (2/7)",
+    "nonTrigger": "60.6% (20/33)",
+    "directional": "18 disagreements, 15 one tier up, 3 two tiers up, 0 downward",
+    "fallbacks": "1 of 40, low_confidence kind",
+    "billedCost": "$0.006797"
+  },
+
+  "quantitiesToReportRegardlessOfOutcome": [
+    "agreement on trigger-carrying tasks, arm B, against arm A's 28.6%",
+    "agreement on non-trigger tasks, arm B, against arm A's 60.6% -- the guard; a fall means one bias traded for another",
+    "directional split, arm B, against arm A's 18 upward and 0 downward -- downward disagreements appearing is a distinct finding from upward ones disappearing",
+    "reasoning text compared arm A against arm B across all 40 tasks, not only the movers, reporting whether trigger-style justification (sufficiency language, 'any one', a named trigger condition, a count threshold) appears in either arm at all"
+  ]
+}

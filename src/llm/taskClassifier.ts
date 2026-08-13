@@ -96,7 +96,7 @@ Classification heuristics:
   suggesting "implementation is correct, tests are stale" should NOT be trusted
   — verify by reading the implementation first.
 
-COMPLEX tier triggers (any one is sufficient):
+COMPLEX tier triggers (each raises consideration; the file and iteration scope rule decides):
 - Rename / refactor of a symbol across ≥3 files where its definition +
   imports + call sites all need coordinated updates
 - Task wording includes "across all N files" / "every reference" /
