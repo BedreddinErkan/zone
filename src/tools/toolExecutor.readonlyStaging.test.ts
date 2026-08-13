@@ -7,8 +7,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { executeTool, CATCH_ALL_TEXT } from "./toolExecutor.js";
-import { checkCommandSafe, type CatchAllClass } from "../llm/runCommandSafe.js";
+import { executeTool, CATCH_ALL_TEXT, WHITELIST_MISS_SAMPLE } from "./toolExecutor.js";
+import { checkCommandSafe, WHITELIST_PREFIXES, type CatchAllClass } from "../llm/runCommandSafe.js";
 
 let repoPath: string;
 
@@ -239,6 +239,35 @@ describe("run_command_readonly: catch-all end-to-end, tag + content per class (i
       const result = await executeTool("run_command_readonly", { command: cmd }, repoPath);
       expect(result.success).toBe(false);
       expect(result.output).toContain(expectContent);
+    });
+  }
+});
+
+describe("run_command_readonly: whitelist-miss curated sample (item 108 fix)", () => {
+  // Item 108 fix: the whitelist-miss render used to print WHITELIST_PREFIXES.slice(0, 8),
+  // which put every test runner first and pushed the five discovery binaries an agent
+  // holding only run_command_readonly actually needs (ls/find/grep/rg/fd) past the slice.
+  // The render now builds its own discovery-first curated sample instead of reading
+  // `reason` — these tests check that sample directly, not the old identity-by-prose proxy.
+
+  it("every curated sample entry is a member of the real WHITELIST_PREFIXES array, not a second hardcoded list", () => {
+    for (const p of WHITELIST_MISS_SAMPLE) {
+      expect(WHITELIST_PREFIXES, `curated entry ${JSON.stringify(p)}`).toContain(p);
+    }
+  });
+
+  it("message states the sample is partial, with the count read from the live array", async () => {
+    const result = await executeTool("run_command_readonly", { command: "whoami" }, repoPath);
+    expect(result.output).toContain("Examples of");
+    expect(result.output).toContain(`(${WHITELIST_PREFIXES.length} total)`);
+  });
+
+  const DISCOVERY_BINARIES = ["ls", "find", "grep", "rg", "fd"];
+  for (const bin of DISCOVERY_BINARIES) {
+    it(`discovery binary '${bin}' appears inside the 100-char TUI title slice`, async () => {
+      const result = await executeTool("run_command_readonly", { command: "whoami" }, repoPath);
+      const title = String(result.output).slice(0, 100);
+      expect(title).toMatch(new RegExp(`\\b${bin}\\b`));
     });
   }
 });

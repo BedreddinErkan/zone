@@ -25,7 +25,7 @@ import { generateFileOutline } from "./fileOutline.js";
 import { findCheckerForFile, trackCheckerUnavailableWarning } from "./syntaxCheckers.js";
 import { classifyShellExit } from "./classifyShellExit.js";
 import { validateRunEnvironment } from "./runEnvironment.js";
-import { checkCommandSafe, type CatchAllClass } from "../llm/runCommandSafe.js";
+import { checkCommandSafe, WHITELIST_PREFIXES, type CatchAllClass } from "../llm/runCommandSafe.js";
 import { hashStagingState } from "../llm/loopDetector.js";
 import { MEMORY_WARN_THRESHOLD_BYTES } from "../memory/constants.js";
 import { segmentPatchBlocks } from "../utils/patchBlocks.js";
@@ -65,6 +65,20 @@ export const CATCH_ALL_TEXT: Record<CatchAllClass, string> = {
   "pipe-to-non-utility": "this pipes into a program that isn't a read-only text utility. For example, pipe into head, tail, grep, rg, wc, sort, uniq, cut, column, jq, less, more, or cat instead.",
   "empty-command": "no command was supplied.",
 };
+
+/**
+ * Item 108 fix: the whitelist-miss render used to interpolate `checkCommandSafe`'s own
+ * `WHITELIST_PREFIXES.slice(0, 8)` sample, which puts every test runner first — the five
+ * discovery binaries an agent holding only run_command_readonly actually needs (ls, find,
+ * grep, rg, fd) sit at indices 34-42 of 45, past that slice. This curated, discovery-first
+ * sample is built here instead, at render time, decoupled from `reason` — checkCommandSafe
+ * and the `reason` string it returns are untouched by this pass. Every entry is asserted a
+ * member of WHITELIST_PREFIXES by toolExecutor.readonlyStaging.test.ts against the real
+ * array, not a second hardcoded list trusted on its own.
+ */
+export const WHITELIST_MISS_SAMPLE: readonly string[] = [
+  "ls", "find", "grep", "rg", "fd", "npm test", "npx vitest", "tsc",
+];
 
 // Ledger item 18: shared by the match-time normalization below and the detection-only
 // telemetry pre-pass, so both read the same transformation instead of two hand-maintained
@@ -1197,17 +1211,19 @@ export async function executeTool(
           reason: safety.reason,
         }));
         // Item 93 fix: routed by the structured tag checkCommandSafe now returns, not by
-        // substring-sniffing `reason`. Chain and catch-all no longer interpolate `reason`
-        // into the rendered message at all — for the catch-all it was the raw regex source
-        // (`blocked pattern: ...`); for chain it was the same. Whitelist-miss is the
-        // deliberate exception: its own reason carries the allowed-prefix list, real content,
-        // not a pattern, so it stays interpolated.
+        // substring-sniffing `reason`. Chain and catch-all don't interpolate `reason` into
+        // the rendered message — for the catch-all it was the raw regex source
+        // (`blocked pattern: ...`); for chain it was the same. Item 108 fix: whitelist-miss
+        // no longer interpolates it either — its reason's own 8-entry sample put every test
+        // runner first (WHITELIST_PREFIXES.slice(0, 8)), so the render now builds its own
+        // discovery-first sample from WHITELIST_MISS_SAMPLE instead. `reason` itself is
+        // unchanged on every path and still reaches telemetry, just above.
         return {
           success: false,
           output: safety.tag === "chain"
             ? `Command blocked: Chained commands aren't supported on the read-only shell — run each command (e.g. \`git status -s\` and \`git diff --stat\`) as a separate call. For file contents or line ranges, use the read_file tool (lineRange:[start,end]) or head/tail/cat.`
             : safety.tag === "whitelist-miss"
-              ? `Command blocked: ${safety.reason}. This command isn't on the no-approval read-only allowlist — if it's a safe read, run it via the approval-gated shell (run_command) instead.`
+              ? `Command blocked: not in whitelist. Examples of allowed prefixes: ${WHITELIST_MISS_SAMPLE.join(", ")}, and more (${WHITELIST_PREFIXES.length} total). This command isn't on the no-approval read-only allowlist — if it's a safe read, run it via the approval-gated shell (run_command) instead.`
               : `Command blocked: ${CATCH_ALL_TEXT[safety.tag]}`,
         };
       }

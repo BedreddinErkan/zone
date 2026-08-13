@@ -1,5 +1,5 @@
 /** Command-prefix whitelist. Matched against the command after trimming. */
-const WHITELIST_PREFIXES = [
+export const WHITELIST_PREFIXES = [
   // Test runners
   "npx vitest",
   "vitest",
