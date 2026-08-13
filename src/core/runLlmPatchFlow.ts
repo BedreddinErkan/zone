@@ -4376,14 +4376,6 @@ export async function runLlmPatchFlow(input: {
    *  path, durable resume). */
   gateLeadVerb?: string | null;
   gateMode?: string;
-  /** Phase X.0.1: distilled findings from the pre-execution scope audit.
-   *  Forwarded to agentLoopBaseInput so the execute agent sees the AUDIT CONTEXT block. */
-  auditFindings?: {
-    summary: string;
-    citationCount: number;
-    toolCallCount: number;
-    costUsd: number;
-  };
   summaryFormat?: "compact" | "detailed";
   /** Phase 1 session memory: prior task's FINAL SUMMARY loaded by TUI before dispatch. */
   priorSessionSummary?: string;
@@ -5846,8 +5838,6 @@ const initializeTodosFromPlan = (): void => {
         resumeAnswer: input.resume.answer,
         resumePendingQuestion: input.resume.pendingQuestion,
       } : {}),
-      // Phase X.0.1: forward audit findings so execute agent skips re-investigation.
-      auditFindings: input.auditFindings,
       summaryFormat: input.summaryFormat,
       priorSessionSummary: input.priorSessionSummary,
       webSearchEnabled: input.webSearchEnabled,

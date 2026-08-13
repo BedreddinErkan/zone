@@ -9,8 +9,6 @@ export interface TierLimits {
   /** Soft iteration warning threshold. Agent receives a wrap-up prompt at this iteration;
    *  the cost ceiling (tokenBudgetCap) is the actual hard stop. */
   softIterWarn: number;
-  /** Phase AS: iteration cap for the scope audit investigation. System-level, not user-overridable. */
-  auditIterCap: number;
 }
 
 export const TIER_LIMITS: Record<TaskTier, TierLimits> = {
@@ -18,19 +16,16 @@ export const TIER_LIMITS: Record<TaskTier, TierLimits> = {
     maxSubagentCalls: 0,
     tokenBudgetCap: 400_000,
     softIterWarn: 15,
-    auditIterCap: 0,
   },
   medium: {
     maxSubagentCalls: 0,
     tokenBudgetCap: 600_000,
     softIterWarn: 25,
-    auditIterCap: 6,
   },
   complex: {
     maxSubagentCalls: 4,
     tokenBudgetCap: 800_000,
     softIterWarn: 40,
-    auditIterCap: 8,
   },
 };
 
@@ -76,6 +71,5 @@ export function resolveTierLimits(
     maxSubagentCalls: userOverride.maxSubagentCalls ?? base.maxSubagentCalls,
     tokenBudgetCap: userOverride.tokenBudgetCap ?? base.tokenBudgetCap,
     softIterWarn: userOverride.softIterWarn ?? base.softIterWarn,
-    auditIterCap: base.auditIterCap, // system-level — never overridden
   };
 }

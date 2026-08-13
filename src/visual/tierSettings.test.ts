@@ -4,8 +4,6 @@ import {
   readTierSettings,
   writeTierSettings,
   getTierSettingsPath,
-  readAutoAuditSetting,
-  writeAutoAuditSetting,
 } from "./tierSettings.js";
 
 const SETTINGS_PATH = getTierSettingsPath();
@@ -127,36 +125,5 @@ describe("Phase L.3 tierSettings persistence", () => {
     it("returns empty object for non-object input (string)", () => {
       expect(writeTierSettings("bad" as unknown as Record<string, never>)).toEqual({});
     });
-  });
-});
-
-describe("Phase AS: autoAuditComplexTasks persistence", () => {
-  it("readAutoAuditSetting returns true when file does not exist (default on)", () => {
-    expect(readAutoAuditSetting()).toBe(true);
-  });
-
-  it("writeAutoAuditSetting(false) persists and readAutoAuditSetting returns false", () => {
-    writeAutoAuditSetting(false);
-    expect(readAutoAuditSetting()).toBe(false);
-  });
-
-  it("writeAutoAuditSetting(true) persists and readAutoAuditSetting returns true", () => {
-    writeAutoAuditSetting(false);
-    writeAutoAuditSetting(true);
-    expect(readAutoAuditSetting()).toBe(true);
-  });
-
-  it("auto-audit write does not clobber existing tierSettings on disk", () => {
-    writeTierSettings({ medium: { tokenBudgetCap: 100_000 } });
-    writeAutoAuditSetting(false);
-    const tiers = readTierSettings();
-    expect(tiers.medium?.tokenBudgetCap).toBe(100_000);
-    expect(readAutoAuditSetting()).toBe(false);
-  });
-
-  it("autoAuditComplexTasks absent from file treated as default true", () => {
-    writeTierSettings({ complex: { maxSubagentCalls: 2 } });
-    // File exists but has no autoAuditComplexTasks key → default true
-    expect(readAutoAuditSetting()).toBe(true);
   });
 });

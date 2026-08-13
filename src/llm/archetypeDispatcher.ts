@@ -2,10 +2,8 @@ import type { TaskArchetype } from "./taskClassifier.js";
 import { READ_ONLY_CAPABILITIES, type CapabilityFilter } from "../tools/capabilities.js";
 
 export interface PipelineConfig {
-  skipPhase1: boolean;
   skipPlan: boolean;
   skipPlanSSE: boolean;
-  skipAudit: boolean;
   iterCap: number;
   coachingBudget: number;
   allowSubagentDispatch: boolean;
@@ -37,10 +35,8 @@ export interface ArchetypeFlags {
 }
 
 export const SIMPLE_ADD_PIPELINE: Readonly<PipelineConfig> = Object.freeze({
-  skipPhase1: true,
   skipPlan: true,
   skipPlanSSE: true,
-  skipAudit: true,
   iterCap: 5,
   coachingBudget: 2,
   allowSubagentDispatch: false,
@@ -51,10 +47,8 @@ export const SIMPLE_ADD_PIPELINE: Readonly<PipelineConfig> = Object.freeze({
 });
 
 export const QUESTION_PIPELINE: Readonly<PipelineConfig> = Object.freeze({
-  skipPhase1: true,
   skipPlan: true,
   skipPlanSSE: true,
-  skipAudit: true,
   iterCap: 3,
   coachingBudget: 0,
   allowSubagentDispatch: false,
@@ -93,10 +87,8 @@ export const QUESTION_PIPELINE: Readonly<PipelineConfig> = Object.freeze({
  * `read_file_nonexistent` is a read-only-relevant trigger.
  */
 export const INVESTIGATION_PIPELINE: Readonly<PipelineConfig> = Object.freeze({
-  skipPhase1: true,
   skipPlan: true,
   skipPlanSSE: true,
-  skipAudit: true,
   iterCap: 12,
   coachingBudget: 2,
   allowSubagentDispatch: false,
@@ -113,10 +105,8 @@ export const INVESTIGATION_PIPELINE: Readonly<PipelineConfig> = Object.freeze({
 // CE.4.1.f: per-archetype coachingBudget — targeted_fix:3, refactor:4 (complex_multi_file/debug→5 via null fallback)
 // Lower budget fires coaching_exhausted soft promotion earlier; L5.1b-2 absorbs via relaxation.
 export const TARGETED_FIX_PIPELINE: Readonly<PipelineConfig> = Object.freeze({
-  skipPhase1: false,
   skipPlan: false,
   skipPlanSSE: false,
-  skipAudit: false,
   iterCap: 10,
   coachingBudget: 3,
   allowSubagentDispatch: true,
@@ -127,10 +117,8 @@ export const TARGETED_FIX_PIPELINE: Readonly<PipelineConfig> = Object.freeze({
 });
 
 export const REFACTOR_PIPELINE: Readonly<PipelineConfig> = Object.freeze({
-  skipPhase1: false,
   skipPlan: false,
   skipPlanSSE: false,
-  skipAudit: false,
   iterCap: 12,
   coachingBudget: 4,
   allowSubagentDispatch: true,

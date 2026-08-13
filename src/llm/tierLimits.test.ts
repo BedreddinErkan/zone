@@ -17,25 +17,22 @@ function makeClassification(tier: "simple" | "medium" | "complex"): TaskClassifi
 }
 
 describe("TIER_LIMITS", () => {
-  it("simple tier: 0 subagent calls, 400k tokens, softIterWarn=15, auditIterCap=0", () => {
+  it("simple tier: 0 subagent calls, 400k tokens, softIterWarn=15", () => {
     expect(TIER_LIMITS.simple.maxSubagentCalls).toBe(0);
     expect(TIER_LIMITS.simple.tokenBudgetCap).toBe(400_000);
     expect(TIER_LIMITS.simple.softIterWarn).toBe(15);
-    expect(TIER_LIMITS.simple.auditIterCap).toBe(0);
   });
 
-  it("medium tier: 0 subagent calls, 600k tokens, softIterWarn=25, auditIterCap=6", () => {
+  it("medium tier: 0 subagent calls, 600k tokens, softIterWarn=25", () => {
     expect(TIER_LIMITS.medium.maxSubagentCalls).toBe(0);
     expect(TIER_LIMITS.medium.tokenBudgetCap).toBe(600_000);
     expect(TIER_LIMITS.medium.softIterWarn).toBe(25);
-    expect(TIER_LIMITS.medium.auditIterCap).toBe(6);
   });
 
-  it("complex tier: 4 subagent calls, 800k tokens, softIterWarn=40, auditIterCap=8", () => {
+  it("complex tier: 4 subagent calls, 800k tokens, softIterWarn=40", () => {
     expect(TIER_LIMITS.complex.maxSubagentCalls).toBe(4);
     expect(TIER_LIMITS.complex.tokenBudgetCap).toBe(800_000);
     expect(TIER_LIMITS.complex.softIterWarn).toBe(40);
-    expect(TIER_LIMITS.complex.auditIterCap).toBe(8);
   });
 });
 
@@ -182,11 +179,5 @@ describe("L.3: resolveTierLimits with user overrides", () => {
     expect(limits.softIterWarn).toBe(30);
     expect(limits.tokenBudgetCap).toBe(TIER_LIMITS.medium.tokenBudgetCap);
     expect(limits.maxSubagentCalls).toBe(TIER_LIMITS.medium.maxSubagentCalls);
-  });
-
-  it("auditIterCap is system-level and not user-overridable", () => {
-    writeTierSettings({ medium: { softIterWarn: 18 } });
-    const limits = resolveTierLimits(makeClassification("medium"));
-    expect(limits.auditIterCap).toBe(TIER_LIMITS.medium.auditIterCap);
   });
 });

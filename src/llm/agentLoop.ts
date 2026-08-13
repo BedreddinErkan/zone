@@ -290,28 +290,6 @@ export interface AgentLoopInput {
    *  "audit" = scope audit lane; "main" or absent = primary agent loop.
    */
   lane?: "main" | "audit";
-  /**
-   * Phase X.0.1: distilled findings from the pre-execution scope audit.
-   * When present, injected as an AUDIT CONTEXT block in the user message
-   * so the execute agent skips re-investigating ground the audit covered.
-   * Feature-gated: undefined when no audit ran (simple tasks, audit disabled).
-   */
-  auditFindings?: {
-    summary: string;
-    citationCount: number;
-    toolCallCount: number;
-    costUsd: number;
-    // Step B: structured fields for richer AUDIT CONTEXT render
-    scopeVerdict?: "under_scope" | "over_scope" | "mixed" | "none";
-    severity?: "none" | "minor" | "major";
-    citations?: Array<{ file: string; line?: number }>;
-    filesAlreadyRead?: string[];
-    // Step C: structured Phase 1 output fields
-    rootCause?: string;
-    fixInstruction?: string;
-    filesToEdit?: string[];
-    evidence?: string;
-  };
   /** Gap 1: per-run hook registrations. Hooks are synchronous and scoped to this run only. */
   hooks?: {
     preIteration?: import("../hooks/postToolUseHook.js").PreIterationHook[];
@@ -521,15 +499,6 @@ export function buildOpenAIPromptCacheKey(
 // Edit in ONE commit only — every wording change is a global cold-cache reset.
 const SESSION_MEMORY_HEADER = "SESSION MEMORY — context from earlier turns in this session:";
 
-/** Step B: stable module-level directive for Phase 2 when AUDIT CONTEXT is present.
- *  No ${...} interpolation — per-run data lives in the user-message AUDIT CONTEXT block. */
-const TRUST_PHASE1_DIRECTIVE =
-  `=== AUDIT CONTEXT IS AUTHORITATIVE ===\n` +
-  `A prior investigation phase analyzed this task and produced the AUDIT CONTEXT block in the user message. Its findings — verdict, severity, cited files, files-already-investigated, and summary — are authoritative.\n\n` +
-  `Execute the implied fix. Do not re-read files listed under "Files already investigated" unless your direct observations contradict the audit's evidence. One targeted read_file for verification is allowed; broad search_in_files or find_references over the same surface is wasted work and counts against your iteration budget.\n\n` +
-  `If the AUDIT CONTEXT block is empty or internally contradictory, fall back to standard investigation. Otherwise trust it.\n` +
-  `=== END AUDIT CONTEXT GUIDANCE ===`;
-
 // Shared constant — edit in ONE commit only (wording change = cold-cache reset).
 // Unconditional: present in both Q&A and patch branches regardless of webSearchEnabled,
 // so toggling the feature never changes the cached system-prompt prefix.
@@ -661,8 +630,6 @@ export function assembleAgentSystemPrompt(input: {
    *  doesn't catch it, since tsconfig excludes *.test.ts). See the concatenation
    *  site's `?? ""` below, and this file's own prompts test for the pin. */
   toolAbsenceBlock?: string;
-  /** Step B: when set, appends TRUST_PHASE1_DIRECTIVE before the repo path line. */
-  auditFindings?: unknown;
   /** When "question" or "investigation", prepends a Q&A/Listing mode preamble —
    *  unless planApproved is true, which overrides archetype entirely (see
    *  effectiveArchetype below): a user-approved plan's steps mean no read-only
@@ -959,7 +926,6 @@ export function assembleAgentSystemPrompt(input: {
       : "") +
     input.backgroundCommandBlock +
     (input.toolAbsenceBlock ?? "") +
-    (input.auditFindings ? `${TRUST_PHASE1_DIRECTIVE}\n\n` : "") +
     `Repository path: ${input.repoPath}`
   );
 }
@@ -3094,7 +3060,6 @@ Example:
         planProgressBlock,
         planAnnotationsBlock: buildPlanAnnotationsBlock(input.executionPlan),
         toolAbsenceBlock,
-        auditFindings: input.auditFindings,
         archetype: input.taskClassification?.archetype,
         planApproved: input.planApproved,
         // Derived here rather than threaded as a new AgentLoopInput field: executionPlan
@@ -3158,54 +3123,6 @@ Example:
   // documents the PRIOR RUN CONTEXT convention, so the agent reads
   // APPLY_ROLLED_BACK markers from previous attempts before investigating.
   const priorRun = String(input.priorRunSummary ?? "").trim();
-  // X.0.1: when audit findings are present, inject them after PRIOR RUN CONTEXT
-  // and before the task so the execute agent trusts the audit and does not
-  // re-investigate ground it already covered.
-  const af = input.auditFindings;
-  let auditContextBlock = "";
-  if (af) {
-    const lines: string[] = [
-      "--- AUDIT CONTEXT ---",
-      "An audit phase has already investigated this task. The structured findings below are authoritative.",
-      "",
-      `Metadata: cost=$${af.costUsd.toFixed(4)}, tool_calls=${af.toolCallCount}, citations=${af.citationCount}`,
-    ];
-    if (af.scopeVerdict) {
-      lines.push(`Verdict: ${af.scopeVerdict} | Severity: ${af.severity ?? "none"}`);
-    }
-    if (af.filesAlreadyRead && af.filesAlreadyRead.length > 0) {
-      lines.push("");
-      lines.push("Files already investigated (do not re-read unless directly contradicted by other evidence):");
-      for (const f of af.filesAlreadyRead) lines.push(`- ${f}`);
-    }
-    if (af.citations && af.citations.length > 0) {
-      lines.push("");
-      lines.push("Cited evidence:");
-      for (const c of af.citations) lines.push(`- ${c.file}${c.line !== undefined ? `:${c.line}` : ""}`);
-    }
-    if (af.rootCause) {
-      lines.push("");
-      lines.push(`Root cause: ${af.rootCause}`);
-    }
-    if (af.fixInstruction) {
-      lines.push("");
-      lines.push(`Fix instruction: ${af.fixInstruction}`);
-    }
-    if (af.filesToEdit && af.filesToEdit.length > 0) {
-      lines.push("");
-      lines.push("Files to edit:");
-      for (const f of af.filesToEdit) lines.push(`- ${f}`);
-    }
-    if (af.evidence) {
-      lines.push("");
-      lines.push(`Evidence: ${af.evidence}`);
-    }
-    lines.push("");
-    lines.push("Findings:");
-    lines.push(af.summary);
-    lines.push("--- END AUDIT CONTEXT ---");
-    auditContextBlock = lines.join("\n") + "\n\n";
-  }
   const modeTag = hasExplicitMode ? `\n\n--- mode: ${mode} ---` : "";
   const sessionMem = String(input.priorSessionSummary ?? "").trim();
   const sessionMemBlock = sessionMem
@@ -3259,15 +3176,14 @@ Example:
         "PRIOR RUN CONTEXT — your last attempt in this thread produced this result:\n" +
         priorRun +
         "\nEND PRIOR RUN CONTEXT.\n\n" +
-        auditContextBlock +
         restageSeedBlock +
         resumeBlock +
         planContextBlock +
         input.task
       )
-    : resumeBlock + sessionMemBlock + auditContextBlock + restageSeedBlock + planContextBlock + input.task) + modeTag;
+    : resumeBlock + sessionMemBlock + restageSeedBlock + planContextBlock + input.task) + modeTag;
 
-  const afterHeader = (auditContextBlock + restageSeedBlock + planContextBlock + String(input.task ?? "")).trim();
+  const afterHeader = (restageSeedBlock + planContextBlock + String(input.task ?? "")).trim();
   if (sessionMemBlock && !afterHeader) {
     userContent +=
       "\n\nNo explicit task text was included for this turn. " +
