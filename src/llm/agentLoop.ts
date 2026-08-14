@@ -522,8 +522,10 @@ const MISSING_REFERENCED_CONTENT_DIRECTIVE =
   `- Work with whatever IS present (e.g. a carried summary), then state plainly ` +
   `that you do not have the referenced content itself, name exactly what is missing, ` +
   `and ask the user to paste it.\n` +
-  `- Only read or search the repository if the user explicitly names or confirms ` +
-  `a concrete file path; in that one case treat it as a normal file.\n\n`;
+  `- That restriction is about the referenced content itself, not repository ` +
+  `search in general. Only read or search the repository for it if the user ` +
+  `explicitly names or confirms a concrete file path; in that one case treat ` +
+  `it as a normal file.\n\n`;
 
 // Patch-branch only — the Q&A/investigation branches must not receive patch-mode
 // directives, and a read-only agent answering a question should not be asking one.

@@ -212,6 +212,39 @@ describe("session memory — assembleAgentSystemPrompt static prefix invariant",
     const p2 = assembleAgentSystemPrompt({ ...AGENT_OPTS, repoPath: "/repo/b" });
     expect(extract(p1)).toBe(extract(p2));
   });
+
+  // The third bullet used to read as an unrestricted gate on repository search —
+  // no back-reference to the missing content, unlike bullets 1 and 2, which both
+  // tie back via "for it" / "the referenced content itself". Fixed by scoping it
+  // to the same referent. Two assertions below check the two distinguishable
+  // parts of that fix separately, not one property counted twice — see the
+  // partial-revert mutation in the fix's own commit for why they must be separate.
+
+  it("still prohibits searching the filesystem for the missing referenced content (bullet 1, unchanged)", () => {
+    const p = assembleAgentSystemPrompt(AGENT_OPTS);
+    expect(p).toContain(
+      "do NOT search the filesystem (find/ls/grep) or git for it"
+    );
+  });
+
+  it("bullet 3 states the restriction is about the referenced content, not search in general", () => {
+    const p = assembleAgentSystemPrompt(AGENT_OPTS);
+    expect(p).toContain(
+      "That restriction is about the referenced content itself, not repository search in general."
+    );
+  });
+
+  it("bullet 3 ties its search permission back to the referenced content, not repository search generally", () => {
+    const p = assembleAgentSystemPrompt(AGENT_OPTS);
+    expect(p).toContain("Only read or search the repository for it if the user");
+  });
+
+  it("the concrete-file-path carve-out itself still grants permission to read the file directly", () => {
+    const p = assembleAgentSystemPrompt(AGENT_OPTS);
+    expect(p).toContain(
+      "explicitly names or confirms a concrete file path; in that one case treat it as a normal file"
+    );
+  });
 });
 
 // ── Audit→Execute shared prefix (Phase X.0.1 fix) ────────────────────────────
