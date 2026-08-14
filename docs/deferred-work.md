@@ -11580,6 +11580,19 @@ real run's own call site passes for this configuration. The pre-fix inflation wa
 prior commit's own committed source rather than cited from this entry, so the before state was demonstrated
 immediately before it was edited away.
 
+**A boundary that sentence needs, found free by a later pass before it spent anything: the reconstruction
+it was checked against carries the same empty project-memory block the audit does, so what it establishes
+is audit-equals-reconstruction rather than audit-equals-executed-prompt.** The agent loop reads the
+per-repo memory file unconditionally — wrapped in a try and a catch, with no enabling flag at that site —
+and here it returns a non-empty block of roughly thirty-eight hundred characters. The audit passes an empty
+one. Assembling this configuration both ways puts the audit form near sixty-eight hundred characters and
+the run form near ten thousand six hundred, a difference of the block plus its separator, and the two are
+not byte-identical. **The two fixes this entry closed on are unaffected and stay closed** — the offered set
+does reach the assembly and the filenames do carry the stamp, both verified by running — but a third
+divergence of the same kind survives them, and a reader should not take the byte-identity sentence as
+covering it. **It is not a confound for the measurement that found it:** the memory-writing tool is withheld
+for this archetype, checked against the real notice, so the block cannot change between cells of one arm.
+
 **The finding that changed the fix's shape, recorded because it is the substantive one.** The obvious
 mutation — pass an empty set instead of the real pair — was run before any assertion was written, and it
 renders **byte-identical text** to the real pair, on the with-notice and without-notice forms both. The
@@ -11731,11 +11744,75 @@ the dumps are written by the audit step in `scripts/notice-regression-probe.mjs`
 pass this occurred during and the assertion whose failure printed it, and item 148 for the file where a
 working-discipline rule would live if one were ever filed.
 
+## 153. Blocked on data — whether T7's zero reproduces, with the prediction and the decision rule registered before the first billed call
+
+**The question, and what it is deliberately not.** Item 149 judged one task's zero-tool-call answer
+residual suppression rather than a correct tool-free answer. Item 151 forecloses every prompt-variable
+explanation of it for that arm, because all seven cells read identical text. What remains is task-level
+against sampling-level, and only repetition separates those two: a zero that recurs under an unchanged
+configuration is a property of the task, and a zero that does not is a draw. **This is not the route
+question** — nothing here explains why a zero happens, only whether it recurs — **and it is not item 90's
+criterion**, which needs all seven tasks and is untouched by a single-task result. It also does not revisit
+item 149's mechanism reading; it tests that reading's stability, which is a different claim.
+
+**The design.** Four cells of that one task, arm B, the shipped configuration, on the pinned model, run as
+four sequential single-task invocations because a single-task selection returns exactly one task. Each
+invocation writes its own capture and its own prompt-dump pair, which is only true since the naming fix
+item 150 records; before it, later arms overwrote earlier ones.
+
+**The prediction, registered in the strong form so it can be wrong.** Every one of the four cells shows a
+shell-call count of zero. Item 149 ruled the original zero suppression on three controls inside the same
+arm, and suppression so judged is a property rather than a coin flip. A weaker prediction — mostly zero,
+or a majority — would absorb almost any outcome and could not be refuted, which is why it is not the one
+registered.
+
+**The decision rule, keyed on how many of the four cells show a non-zero shell-call count.** **None of
+four: reproducible** — the zero is a property of the task in this configuration rather than sampling
+variance, and item 149's judgment is corroborated behaviourally. **All four: sampling variance** — the
+original zero was a draw, and item 149's judgment would rest on a single sample of a stochastic behaviour
+and need revisiting, which is explicitly not this measurement's to do. **One, two or three: stochastic, and
+this design cannot tell the rate** — both outcomes occur, so the behaviour is neither fixed nor a one-off;
+the result is reported as a fraction with its own n and never as a rate.
+
+**The bound on the strongest outcome, registered rather than discovered afterwards.** Four zeros out of
+four does not establish determinism. A true zero-rate as low as roughly forty-seven percent still produces
+four zeros in four about one time in twenty, so a clean sweep bounds the rate from below and never means
+always. What a rate would take: bounding it to within about fifteen points at ninety-five percent needs
+roughly forty-three cells, near sixty-six cents at this task's own measured per-cell figure and more if the
+cells search.
+
+**A spend bound that can shorten the run, registered because it changes what the rule may read.** Cost is
+checked against each capture as it lands, and the pass stops if the running total plus the next cell's
+worst-case estimate would cross the pre-registered ceiling. If that stop fires, the rule reads on whatever
+number of cells completed, with its bound loosened accordingly and stated; below three cells no branch
+fires and the outcome is recorded as inconclusive by design rather than as a mixed result.
+
+**The instrument-is-wrong branch, on the signals item 90's own rule uses plus one this design adds.** The
+offered set is not exactly the two tools the probe asserts at startup; or the prompt audit reports the two
+arms differing by anything other than the notice; or a cell's scored shell count disagrees with the raw
+call list the same record carries. **Added here and free:** each invocation now writes its own stamped
+prompt dump, so the four can be compared against each other directly — if they are not byte-identical, the
+configuration was not held constant and no branch of the rule applies.
+
+**What varies between cells, established before any spend.** Sampling, and by design: neither the probe nor
+the agent loop sets a temperature under either instrument, and the adapter leaves it undefined and sends
+none, so the provider default governs. Nothing else that reaches the prompt varies — the task string is
+fixed, the run stamp and run identifier reach filenames and telemetry rather than the prompt, no
+conversation directory exists, and the probe passes no session identifier and no prior-session summary, so
+there is no cross-run feedback channel. The project-memory block the run injects is constant across cells
+because the memory-writing tool is withheld for this archetype.
+
+**Where the code lives:** the instrument and its single-task selection are in
+`scripts/notice-regression-probe.mjs`; the machine-readable predictions sit beside it in `scripts`, and
+this entry is the registration of record where the two could be read as differing. See item 149 for the
+judgment this tests the stability of, item 151 for the foreclosure that leaves only this question, item 150
+for the naming fix that makes four cells separable, and item 90 for the criterion this does not answer.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 152 to find out which ones still need something. No index of
+reader the trouble of reading all 153 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -11746,7 +11823,7 @@ first.
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (8): 108, 113, 116, 129, 130, 138, 142, 148
 
-**Blocked on data** — closing requires an observation that doesn't exist yet (10): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143
+**Blocked on data** — closing requires an observation that doesn't exist yet (11): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143, 153
 
 **Neither — a structural fact recorded, with no fix proposed** (75): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
