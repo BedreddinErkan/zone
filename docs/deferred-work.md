@@ -9876,10 +9876,17 @@ the run id, the forced tier, the classified archetype, its confidence, and the l
 no historical answer could be recovered and that any future measurement must capture standard output or add
 a sink first. Both halves are wrong: a sink exists, it has been retaining these records for the fortnight
 before this entry was written, and the historical answer for the archetype marker is sitting in it. What
-survives of the paragraph is narrower and worth keeping — the emissions reach disk **only through the TUI**,
-because the shield is what appends them. A script that imports the agent loop directly and runs outside the
-TUI emits to a console nothing is intercepting, and nothing is retained for that run. That is the real
-constraint, and it is why item 135 exists.
+survives of the paragraph is narrower and worth keeping — the emissions reach disk **only where the shield is
+installed**, because the shield is what appends them. A script that imports the agent loop directly, or the
+probe importing the classifier directly, emits to a console nothing is intercepting, and nothing is retained
+for that run. That is the real constraint, and it is why item 135 exists.
+
+**A correction to the sentence that first replaced this paragraph, made one pass later by the same author.**
+It read that emissions reach disk only through the TUI. That is false: the headless dispatch entry point
+installs the same stdout shield, in every output mode except JSON, which suppresses it because that mode
+emits a single envelope instead. So a non-interactive run retains markers exactly as an interactive one does,
+and item 134's measurement needs no TUI. The half of the sentence about a directly-importing script stands
+unchanged — that is a different path with no shield on it at all.
 
 **Where the code lives:** the emit functions in `loopTelemetry.ts`; the logging helper in `utils/logger.ts`;
 the stdout shield in the TUI entry point; the appender and its path resolution in the marker-sink module
@@ -10526,9 +10533,38 @@ of the two explanations — likely is not measured, and the marker travels the s
 as the archetype marker, so there is no mechanism on the persistence side that would treat it differently.
 Naming the likelier answer is not the same as having it.
 
-**What would settle it.** One run under the TUI, tier forced to simple, on a task the classifier puts into
-one of those four archetypes, followed by a look at the sink. Nothing else is needed and no code changes.
-Blocked only on the run.
+**What would settle it.** One run with the tier forced to simple, on a task whose classification carries one
+of those four archetypes, followed by a look at the sink. **Not under the TUI specifically** — the entry said
+so and the correction to item 115 above withdraws it: the headless entry point installs the same shield in
+every output mode but JSON, so a non-interactive run retains markers identically and is the cheaper vehicle.
+No code changes. Blocked only on the run.
+
+**The prediction, registered before running so it can be wrong.** The marker fires and a record appears.
+The reasoning is the firing condition's own shape: it requires an explicitly forced tier, which is a
+deliberate act, and nothing in this repository's history has performed it — so the historical zero is
+expected to be an absence of occasions rather than an absence of persistence. This is a prediction and not
+a finding; the prior pass leaned the same way and leaning is not measuring.
+
+**The decision rule, with the null-result discriminator fixed in advance, because a bare zero after the run
+would be as ambiguous as the zero that opened this entry.** Two positive controls run alongside the subject.
+The tier-constraints marker is emitted from the same region of the same function and proves both that the
+shield was installed and that the region was reached. The archetype marker carries the archetype itself and
+proves which half of the firing condition held. Four outcomes, decided now:
+
+- Mismatch record present. Persistence works, so the historical zero means the condition never held. **Closes.**
+- Mismatch absent, tier-constraints present, archetype marker showing an exploration archetype under a forced
+  simple tier. The condition held and the record did not survive. **The instrument is wrong, not the
+  hypothesis** — and that is a finding about the marker's own path, not about usage.
+- Mismatch absent, archetype marker showing an archetype outside the exploration set. The run never put the
+  code in the condition. **Stays open**, reported as a miss rather than as evidence either way.
+- Mismatch absent and tier-constraints absent too. The shield was not installed or the region was never
+  reached. **Instrument wrong**, and nothing is learned about the marker at all.
+
+**One methodological note recorded with the rule.** The run reaches the firing condition through a classifier
+fallback rather than a successful classification, so the archetype is the configured fallback value rather
+than a model judgement. The condition reads that field without regard to its provenance, so persistence is
+tested faithfully; what such a run cannot speak to is how often the condition arises in ordinary use, which
+the condition's own shape answers instead.
 
 ## 135. Whether the probe's own capture sees a real emission has never been exercised, and only a paid run can exercise it
 
@@ -10544,10 +10580,45 @@ TUI where no shield is installed. Item 115's correction is therefore evidence ab
 about this one. What remains unexercised is the install timing, the interleaving with anything else that
 writes to the same console during a live classifier call, and the read-back at the end of an iteration.
 
-**What would settle it, and its cost.** One classifier call against a live provider with the capture in
-place — the probe's own gate mode does exactly this for a single task at roughly a third of a cent. The
-degradation path itself cannot be forced from a test without either exporting the parser or mocking the
+**What would settle it, and its cost.** One classifier call with the capture in place. **The cost is nothing
+rather than the third of a cent this entry first estimated**, because the reason that can be induced is the
+error reason and it is induced by an invalid key, which a provider rejects at authentication before metering
+any tokens. The degradation path cannot be forced from a test without exporting the parser or mocking the
 module, so a run is the cheap route rather than the only conceivable one.
+
+**Which reasons can be induced at all, established before running.** Of the four, only **error** can be
+commanded. The output cap is computed from the model alone and reads no environment, so truncation cannot be
+induced; the confidence threshold is a plain constant with no seam, so a low-confidence fallback cannot be
+forced; an invalid tier value is the model's own output and cannot be requested. That bounds what any run of
+this kind can establish, and the bound is stated here rather than discovered afterwards.
+
+**The prediction, registered before running.** The capture observes the emission: a row whose reasons array
+holds exactly the error reason, whose derived kind is error, whose task-hash flag is false and whose
+unattributed flag is false. The reasoning is that emission is unguarded and synchronous, the probe patches
+the console object in the same process, and nothing between the two is conditional.
+
+**The decision rule, and the trap it exists to avoid.** The item closes if the reasons array is non-empty
+**and** the task-hash flag is false — that pair, not the derived field, is what proves capture together with
+attribution. **The derived field cannot close this on its own**, because the derivation maps a captured error
+marker and a zero-marker fallback onto the same value; a row reading error is consistent with the capture
+having seen nothing at all.
+
+**The false negative this seam can produce, and the control that detects it.** An empty array with the
+fallback flag set is ambiguous between "the capture failed" and "nothing was emitted" — and an authentication
+rejection is the earliest possible exit, so the second is a live risk rather than a hypothetical one. The
+control is free and already recorded on the row. The fallback constructor is called on the statement
+immediately before the emit, inside the same handler, with no branch between them, and its output supplies
+the row's own reasoning text. So a reasoning field carrying the authentication failure's message, with the
+fallback flag set, proves execution reached the line before the emit; an empty array beside it is a capture
+failure. A reasoning field showing anything else means the handler was never reached, and the run is a seam
+failure rather than evidence about the capture.
+
+**What a green run does not prove, stated with the rule rather than after it.** Nothing about truncation, an
+invalid tier, or a low-confidence fallback — none of which can be induced here. And nothing about the longer
+error paths: an authentication rejection is the shortest route from call to emit, with the least code in
+between. A timeout or a parse failure travels further before emitting and is not covered by this measurement.
+On the evidence a run of this shape can produce, **this item closes for the authentication-error reason
+specifically, never for the general claim that the capture works.**
 
 ## 136. The probe hand-copies a module-private hash and its normalisation, and nothing detects drift
 
@@ -10616,11 +10687,77 @@ introduced after the main function settles, makes it live with no other change.
 entry declines to prescribe it only because there is no present defect to motivate it and the pair's shared
 discipline is itself the more useful thing on record. A pass that wraps one should wrap both.
 
+## 140. The daily spend cap is implemented twice — once inline in the agent loop where it runs, once in a module nothing calls
+
+**What it is.** The rule that a run stops when today's spend has reached the daily cap exists in two places.
+The live one is written inline in the agent loop: it resolves the cap from the shared resolver, reads the
+day's usage, and returns early when the cap is positive and spend has reached it. The other is a dedicated
+module exporting a check function and a route-level gate wrapping it. **The module has no production
+caller** — the gate is referenced nowhere outside its own file by either instrument, and the check function
+only by that gate. The agent loop imports the resolver directly and never the module built around it.
+
+**Why this is worth an entry rather than a shrug.** The dead copy is not merely unused, it is a second
+statement of a policy rule that a reader will find first: it carries the file name the architecture
+documentation points at, and its own comment instructs the reader to call it at the start of every
+dispatching route. Someone maintaining the cap will reasonably edit the copy that documents itself as the
+entry point, and the edit will do nothing. Two implementations of one rule, one unreachable and better
+signposted than the reachable one, is the failure mode worth recording.
+
+**How it was found, and a correction to the finding's own first form.** A pass looking for a cost control
+saw the check function had no call site in the loop and recorded that the cap was unwired. That was wrong,
+and re-deriving it produced this entry's own account: the cap is enforced, just not by the module named
+after it.
+The first reading came from grepping for the function name; the second from grepping for the resolver it
+delegates to.
+
+**No fix proposed.** Deleting the dead module and wiring it in are both defensible and they are different
+decisions — one says the inline copy is the design, the other says the module was the design and the inline
+copy is the drift. Nothing here establishes which, and the entry declines to guess.
+
+## 141. Two cost-and-length flags are declared on the command line and threaded nowhere
+
+**What it is.** The command-line options type declares a maximum-budget flag and a maximum-turns flag. Both
+parse. Neither reaches anything: the budget flag's name appears exactly once in the whole source tree, in
+its own declaration, by both instruments; the turns flag appears in its declaration and then only as an
+unrelated same-named parameter inside the thinking-block replay helper, which has its own default and never
+sees the flag's value.
+
+**Why the budget one is the worse of the pair.** A flag named for a spend ceiling is a safety promise. A
+user who passes it has been told the run is bounded, and the run is not bounded — the failure is silent, and
+it is silent in the direction that costs money. The turns flag fails the same way with a cheaper
+consequence.
+
+**Where this sits relative to item 140.** The daily cap is a real, enforced bound; these two are not bounds
+at all. A reader who finds the cap working should not conclude the flags work, and a reader who finds the
+flags dead should not conclude spending is unbounded.
+
+**No fix proposed.** Wiring them and removing them are again different decisions, and the entry has no basis
+for choosing.
+
+## 142. The architecture documentation names the dead copy of the spend cap as the live one
+
+**What it is.** The spend-caps section of the repository's own architecture file states that the daily cap is
+checked before each iteration and cites the module described in item 140 — the copy with no caller. The
+precedence chain it gives is correct and the resolver it names is the right one. The pointer to the enforcer
+is wrong.
+
+**The three-state decision on that sentence, recorded rather than applied.** It is **false**, so it is a
+rewrite rather than a completion or a boundary note: the cap is enforced inline in the agent loop against the
+resolver, and the cited module is the unreachable copy. The correct sentence keeps the precedence chain and
+the resolver reference and replaces the enforcer reference. **The edit is not made in this pass** — the pass
+that found it was measuring something else, and the file is out of its scope — but the decision is fixed
+here so the next documentation pass applies it rather than re-deriving it.
+
+**Why this is separate from item 140.** Documentation describing an unwired gate as live is a different
+defect from the gate being unwired. The code defect survives whatever the documentation says; the
+documentation defect is what routes a maintainer to the wrong file, and it would remain a defect even if the
+dead module were deleted tomorrow.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 139 to find out which ones still need something. No index of
+reader the trouble of reading all 142 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -10629,14 +10766,14 @@ first.
 **Closed** (54): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 111, 117, 120, 121, 126, 128, 137
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (6): 108, 113, 116, 129, 130, 138
+first (7): 108, 113, 116, 129, 130, 138, 142
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (11): 1, 4, 18, 23, 57, 63, 75, 90, 110, 134, 135
 
-**Neither — a structural fact recorded, with no fix proposed** (68): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (70): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
-119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139
+119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
