@@ -12,11 +12,29 @@ import {
   isRefusal,
   scoreTaskDiscovery,
   compareDiscovery,
+  validatePredictions,
 } from "./notice-regression-probe.mjs";
 import { resolveToolList, listRegisteredTools, registerTool } from "../src/tools/toolRegistry.js";
 
 const SNAPSHOT = new URL("../src/repo/rankerBaseline.snapshot.json", import.meta.url).pathname;
 const SCRATCH = new URL("./.notice-regression-probe.scratch.json", import.meta.url).pathname;
+
+// The real, unedited historical predictions file the T2/T4 openai arm-B run actually
+// used — embedded verbatim rather than read live, for the same reason the discovery
+// fixtures below are: .zone/ is gitignored, so a live read behaves differently
+// depending on the machine running the test. Its T2 entry carries discoveryCount: 1.5
+// — established as NOT a typo: the file's own rationale explains it as a deliberate
+// range encoding ("Predicted T2 discoveryCount is a range (1-2, written as 1.5)"),
+// which is exactly why validation warns rather than throws on it.
+const REAL_T2T4_PREDICTIONS = {
+  "_readme": "Predictions for the OpenAI cross-provider establish pass (gpt-5.6-luna, arm B / shipped configuration, T2 and T4 only). Registered before the first model call, transcribed from the plan approved for this pass -- not written after seeing any result.",
+  "perTask": {
+    "T2": { "discoveryCount": 1.5, "falseNegativeResolves": true },
+    "T4": { "discoveryCount": 1, "falseNegativeResolves": true }
+  },
+  "anyRefusal": false,
+  "rationale": "Both shipped fixes (the collision-suppression rule in toolAbsenceNotice.ts, and the discovery-binary disclosure in the tool's own description) are provider-blind -- static text and a suppression rule computed once, reading nothing about which model is calling. Step 1 of this pass's plan confirmed the notice, the description, and the tool schema all reach an OpenAI run unchanged: description text survives the Responses-API tool conversion byte for byte (responsesConvertParams.ts's unnest is structural only), and toolAbsenceNotice.ts itself has zero provider references. If the fixes are sound in general rather than incidentally Anthropic-shaped, a model with the same tool set and the same corrected notice should also discover T2's symbol (item 90: arms A and C both found it in ten places across four files with one grep) and locate T4's file (item 90: arms A and C both located it with one find). Predicted T2 discoveryCount is a range (1-2, written as 1.5) because arm A used one grep and arm C used one grep for T2 specifically, but a different model's own querying style is the one genuinely untested variable here -- not the fix, which is reasoned above to be provider-blind, but this specific OpenAI model's own tool-calling tendency, which no prior arm (all Anthropic-only) ever measured. anyRefusal is predicted false because checkCommandSafe is a pure function of the command string with no model-identity input, and it produced zero refusals across the seventeen commands recovered in the establish pass behind item 91. A miss on discoveryCount or falseNegativeResolves is informative about this model's own behaviour, not about the fix regressing on this provider -- item 90's own pending verification requires the same model as arms A, B, and C, which this pass does not use and cannot substitute for.",
+};
 
 describe("loadGroundTasks", () => {
   it("loads all seven frozen ground tasks with no filter", () => {
@@ -220,6 +238,32 @@ describe("isDiscoveryCommand", () => {
   });
 });
 
+// The exact prefix of a whitelist-miss refusal, verified by reading toolExecutor.ts's
+// current render branch (`safety.tag === "whitelist-miss"`) and runCommandSafe.ts's
+// WHITELIST_MISS_SAMPLE/WHITELIST_PREFIXES, not read from a capture — no on-disk
+// capture in this arc's data contains a whitelist-miss refusal, established by
+// sweeping all seven arm-B files before writing this. Structurally different from the
+// chain text below: a different template entirely (allowed prefixes, not a blocked
+// pattern), reached via a different branch than either the chain or catch-all texts.
+// Established, not assumed: item 93's own ledger entry describes an OLDER render of
+// this same branch (WHITELIST_PREFIXES.slice(0,8), test-runner-heavy, no discovery
+// binary) — that description is now stale. Item 108 decoupled the rendered text from
+// that raw slice into the curated, discovery-first WHITELIST_MISS_SAMPLE below; this
+// fixture reflects the code as it reads today, confirmed by reading toolExecutor.ts
+// fresh rather than trusting the ledger's own prose about it.
+const REAL_WHITELIST_MISS_TEXT =
+  "Command blocked: not in whitelist. Examples of allowed prefixes: ls, find, grep, rg, fd, npm test, npx vitest, tsc, and more (45 total). This command isn't on the no-approval read-only allowlist — if it's a safe read, run it via the approval-gated shell (run_command) instead.";
+
+// The exact resultHead the real T3 capture holds — copied verbatim, truncated at 200
+// chars exactly as buildCaptureRecord truncates it in production, not reproduced from
+// the current source template. (The current chain-text template no longer contains the
+// raw-regex fragment this real capture does — item 93's own "chain branch rendered a
+// raw regex too" finding, fixed after this capture was taken. Using the real bytes
+// rather than today's template is deliberate: this is what a real run actually
+// produced, which is what isRefusal has to work against.)
+const REAL_T3_CHAIN_REFUSAL_TEXT =
+  "Command blocked: blocked pattern: &&\\s*\\S. Chained commands aren't supported on the read-only shell — run each command (e.g. `git status -s` and `git diff --stat`) as a separate call. For file content";
+
 describe("isRefusal", () => {
   it("REAL T1: an executed-and-failed call (exit_code=2) is not a refusal", () => {
     expect(isRefusal("[exit_code=2 — command failed]\nsrc/remote/toWireFrame.ts-21- * ...")).toBe(false);
@@ -232,20 +276,37 @@ describe("isRefusal", () => {
   it('SYNTHETIC, exact prefix from toolExecutor.ts\'s own catch-all text: a refusal is detected', () => {
     expect(isRefusal("Command blocked: this find flag writes or runs a program. List without it.")).toBe(true);
   });
+
+  it("REAL T3, verbatim from the actual capture (not a synthetic invention): a refusal is detected", () => {
+    expect(isRefusal(REAL_T3_CHAIN_REFUSAL_TEXT)).toBe(true);
+  });
+
+  it("REAL TEMPLATE (whitelist-miss, verified from current source, structurally different from the chain text): a refusal is detected", () => {
+    expect(isRefusal(REAL_WHITELIST_MISS_TEXT)).toBe(true);
+  });
 });
 
 describe("scoreTaskDiscovery", () => {
-  it("REAL T3: three calls, none discovery-shaped (npm test, two git commands off the list) — the zero fixture", () => {
+  it("REAL T3: three calls, none discovery-shaped (npm test, two git commands off the list) — the zero fixture, with its genuine mid-call refusal", () => {
+    // Call #2's resultHead corrected to the real captured text (was a generic
+    // exit-code placeholder in the prior pass — the real call was refused, not
+    // executed-and-failed, and `refused` below was wrongly asserted false against it).
     const toolCallLog = [
       { tool: "run_command_readonly", args: { command: "npm test" }, success: true, resultHead: "[exit_code=0 — command succeeded; output below is informational]\n..." },
-      { tool: "run_command_readonly", args: { command: "git diff --stat && git status --short" }, success: false, resultHead: "[exit_code=1 — command failed]\n..." },
+      { tool: "run_command_readonly", args: { command: "git diff --stat && git status --short" }, success: false, resultHead: REAL_T3_CHAIN_REFUSAL_TEXT },
       { tool: "run_command_readonly", args: { command: "git diff --stat" }, success: true, resultHead: "[exit_code=0 — command succeeded; output below is informational]\n..." },
     ];
     const scored = scoreTaskDiscovery(toolCallLog);
     expect(scored.discoveryCount).toBe(0);
     expect(scored.discoveryCalls).toEqual([]);
     expect(scored.allShellCalls.length).toBe(3);
-    expect(scored.refused).toBe(false);
+    expect(scored.refused).toBe(true);
+    expect(scored.refusedCalls).toEqual(["git diff --stat && git status --short"]);
+    // The refusal is real, but the refused command isn't discovery-shaped — so the
+    // ruling has nothing to exclude here. This is the case the establish pass named:
+    // a task with only a refused, non-discovery call cannot tell "excluded" from
+    // "never there" — the boundary test below is what actually exercises the ruling.
+    expect(scored.refusedDiscoveryShapedCalls).toEqual([]);
   });
 
   it("REAL T5: two rg calls both count — the multi-discovery real fixture", () => {
@@ -281,13 +342,110 @@ describe("scoreTaskDiscovery", () => {
     expect(scoreTaskDiscovery(toolCallLog).discoveryCount).toBe(1);
   });
 
-  it("SYNTHETIC: a refused call is flagged separately from discovery scoring", () => {
+  it("THE RULING, center case: a refused discovery-shaped call does not count, but remains visible in both raw fields", () => {
     const toolCallLog = [
       { tool: "run_command_readonly", args: { command: "find / -exec rm {} \\;" }, success: false, resultHead: "Command blocked: this find flag writes or runs a program." },
     ];
     const scored = scoreTaskDiscovery(toolCallLog);
+    expect(scored.discoveryCount).toBe(0);
+    expect(scored.discoveryCalls).toEqual([]);
     expect(scored.refused).toBe(true);
-    expect(scored.refusedCalls.length).toBe(1);
+    expect(scored.refusedCalls).toEqual(["find / -exec rm {} \\;"]);
+    expect(scored.refusedDiscoveryShapedCalls).toEqual(["find / -exec rm {} \\;"]);
+  });
+
+  it("THE RULING under a second, structurally different refusal text (whitelist-miss, verified from source): still excluded", () => {
+    // The pairing (this specific command with a whitelist-miss refusal) is constructed
+    // to exercise the scorer's classification, not a claim that the real gate would
+    // route this exact command to whitelist-miss — ls/find/fd/grep/rg and git
+    // grep/ls-files are themselves whitelisted prefixes, per item 93/CLAUDE.md, so a
+    // real whitelist-miss-and-discovery-shaped pairing may not be reachable through the
+    // live gate at all. What's real here is the refusal TEXT, verified from current
+    // source; the test proves isRefusal and the ruling both hold under it regardless.
+    const toolCallLog = [
+      { tool: "run_command_readonly", args: { command: "rg --unusual-flag-combo pattern src/" }, success: false, resultHead: REAL_WHITELIST_MISS_TEXT },
+    ];
+    const scored = scoreTaskDiscovery(toolCallLog);
+    expect(scored.discoveryCount).toBe(0);
+    expect(scored.refused).toBe(true);
+    expect(scored.refusedDiscoveryShapedCalls).toEqual(["rg --unusual-flag-combo pattern src/"]);
+  });
+
+  it("THE RULING'S BOUNDARY: a task with both a refused discovery-shaped call and an executed one — the count is exactly one, and both stay visible", () => {
+    // This is the case a single-call fixture cannot exercise: with only a refused call
+    // present, "excluded from the count" and "never there" produce the same zero. Two
+    // calls make the exclusion observable, not just assertable.
+    const toolCallLog = [
+      { tool: "run_command_readonly", args: { command: "find / -exec rm {} \\;" }, success: false, resultHead: "Command blocked: this find flag writes or runs a program." },
+      { tool: "run_command_readonly", args: { command: "rg pattern src/" }, success: true, resultHead: "[exit_code=0 — command succeeded; output below is informational]\n..." },
+    ];
+    const scored = scoreTaskDiscovery(toolCallLog);
+    expect(scored.discoveryCount).toBe(1);
+    expect(scored.discoveryCalls).toEqual(["rg pattern src/"]);
+    expect(scored.refusedDiscoveryShapedCalls).toEqual(["find / -exec rm {} \\;"]);
+    expect(scored.allShellCalls).toEqual(["find / -exec rm {} \\;", "rg pattern src/"]);
+    expect(scored.refused).toBe(true);
+  });
+});
+
+describe("validatePredictions", () => {
+  it("a valid integer discoveryCount produces no warning", () => {
+    const raw = { perTask: { T5: { discoveryCount: 3, falseNegativeResolves: null } }, anyRefusal: false, rationale: "because" };
+    expect(validatePredictions(raw)).toEqual([]);
+  });
+
+  it("the shipped example file itself produces zero warnings via loadPredictions — the fully-valid case, through the real path", () => {
+    const example = new URL("./notice-regression-predictions.example.json", import.meta.url).pathname;
+    const p = loadPredictions(example);
+    expect(p.validationWarnings).toEqual([]);
+  });
+
+  it("the REAL historical T2/T4 file's discoveryCount: 1.5 produces exactly one warning naming the field and value", () => {
+    const warnings = validatePredictions(REAL_T2T4_PREDICTIONS);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("perTask.T2.discoveryCount");
+    expect(warnings[0]).toContain("1.5");
+  });
+
+  it("loadPredictions integration: the real T2/T4 file does not throw and its warning survives into validationWarnings, untouched on disk", () => {
+    // Written to SCRATCH rather than pointed at the real .zone/ path — same portability
+    // reasoning as every other embedded fixture here — but this is still the real
+    // recorded content, round-tripped through the actual loadPredictions file-read path
+    // rather than called as a pure function on an in-memory object.
+    writeFileSync(SCRATCH, JSON.stringify(REAL_T2T4_PREDICTIONS));
+    try {
+      const p = loadPredictions(SCRATCH);
+      expect(p.perTask.T2.discoveryCount).toBe(1.5); // unmodified — the artifact is not edited to pass
+      expect(p.validationWarnings.some((w) => w.includes("perTask.T2.discoveryCount"))).toBe(true);
+    } finally {
+      unlinkSync(SCRATCH);
+    }
+  });
+
+  it("an invalid falseNegativeResolves (not true/false/null) is warned", () => {
+    const raw = { perTask: { T2: { discoveryCount: 1, falseNegativeResolves: "yes" } }, anyRefusal: false, rationale: "x" };
+    const warnings = validatePredictions(raw);
+    expect(warnings.some((w) => w.includes("falseNegativeResolves"))).toBe(true);
+  });
+
+  it("an invalid anyRefusal (not a boolean) is warned", () => {
+    const raw = { perTask: {}, anyRefusal: "maybe", rationale: "x" };
+    const warnings = validatePredictions(raw);
+    expect(warnings.some((w) => w.includes("anyRefusal"))).toBe(true);
+  });
+
+  it("a missing rationale is warned, since the readme states it is required", () => {
+    const raw = { perTask: {}, anyRefusal: false };
+    const warnings = validatePredictions(raw);
+    expect(warnings.some((w) => w.includes("rationale"))).toBe(true);
+  });
+
+  it("a negative or non-integer discoveryCount is warned, an in-range integer is not, across a small sweep", () => {
+    // rationale included in each so the sweep isolates discoveryCount specifically —
+    // its own absence is a separate, already-covered warning.
+    expect(validatePredictions({ perTask: { X: { discoveryCount: 0 } }, rationale: "x" }).length).toBe(0);
+    expect(validatePredictions({ perTask: { X: { discoveryCount: -1 } }, rationale: "x" }).length).toBe(1);
+    expect(validatePredictions({ perTask: { X: { discoveryCount: 2.5 } }, rationale: "x" }).length).toBe(1);
   });
 });
 

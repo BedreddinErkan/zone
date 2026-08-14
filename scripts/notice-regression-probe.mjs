@@ -36,8 +36,12 @@
  * notice-regression-predictions.example.json, attributed to a classify.mjs not in
  * this repo. isDiscoveryCommand/scoreTaskDiscovery/compareDiscovery below are that
  * definition now, with every reading the prose left open resolved and commented at
- * the point of decision. main() scores every run's own results and writes the
- * comparison into the same JSON it already writes, under a "scored" key.
+ * the point of decision — including the ruling that a refused call, even a
+ * discovery-shaped one, never executed and does not count. main() scores every run's
+ * own results and writes the comparison into the same JSON it already writes, under a
+ * "scored" key. validatePredictions checks predictions against the readme's own four
+ * field rules and warns rather than throws, so a malformed historical prediction stays
+ * loadable rather than becoming an unrecoverable record.
  *
  * MODEL PINNING MATTERS: arms A, B, and C were all measured on claude-sonnet-4-6.
  * --provider/--model default to anthropic/claude-sonnet-4-6 for exactly that reason
@@ -110,7 +114,55 @@ export function loadPredictions(path) {
       `See scripts/notice-regression-predictions.example.json for the required shape.`
     );
   }
-  return raw;
+  const validationWarnings = validatePredictions(raw);
+  for (const w of validationWarnings) {
+    console.warn(`[notice-arm] predictions validation: ${w}`);
+  }
+  return { ...raw, validationWarnings };
+}
+
+/**
+ * Item 144: validates predictions against the readme's own stated field rules —
+ * discoveryCount an integer >= 0, falseNegativeResolves true/false/null, anyRefusal
+ * (top-level) true/false, rationale (top-level) a non-empty string. Returns one
+ * human-readable warning string per violation; never throws, never mutates its input.
+ * A field that is absent is not flagged here — that is a different, already-handled
+ * gap (compareDiscovery reports discoveryMatch: null for an absent per-task entry).
+ *
+ * WARN, never throw — deliberately different from loadPredictions' own two structural
+ * checks (file missing, perTask missing), which stay hard failures because nothing
+ * downstream can run at all without them. A field-level violation is different in
+ * kind: the real historical T2/T4 predictions file this instrument was scored against
+ * already contains one (a recorded discoveryCount of 1.5), and that file is a record of
+ * what was actually predicted before that run happened. Throwing here would make the
+ * file unloadable and destroy the record rather than flag it. Every violation is still
+ * surfaced loudly — via this return value and loadPredictions' own console.warn per
+ * entry — never silently coerced or dropped.
+ */
+export function validatePredictions(raw) {
+  const warnings = [];
+  const perTask = raw?.perTask ?? {};
+  for (const [taskId, pred] of Object.entries(perTask)) {
+    if (pred?.discoveryCount !== undefined) {
+      const v = pred.discoveryCount;
+      if (!Number.isInteger(v) || v < 0) {
+        warnings.push(`perTask.${taskId}.discoveryCount: expected an integer >= 0, got ${JSON.stringify(v)}`);
+      }
+    }
+    if (pred?.falseNegativeResolves !== undefined) {
+      const v = pred.falseNegativeResolves;
+      if (v !== true && v !== false && v !== null) {
+        warnings.push(`perTask.${taskId}.falseNegativeResolves: expected true, false, or null, got ${JSON.stringify(v)}`);
+      }
+    }
+  }
+  if (raw?.anyRefusal !== undefined && raw.anyRefusal !== true && raw.anyRefusal !== false) {
+    warnings.push(`anyRefusal: expected true or false, got ${JSON.stringify(raw.anyRefusal)}`);
+  }
+  if (raw?.rationale === undefined || typeof raw.rationale !== "string" || raw.rationale.trim() === "") {
+    warnings.push(`rationale: required, expected a non-empty string, got ${JSON.stringify(raw?.rationale)}`);
+  }
+  return warnings;
 }
 
 /** Builds one task's capture record. Pure — no I/O, no model call; `loop` may be a fake. */
@@ -237,7 +289,7 @@ export function isRefusal(resultHead) {
 }
 
 /**
- * Item 144: scores one task's discovery behaviour from its captured toolCallLog. Two
+ * Item 144: scores one task's discovery behaviour from its captured toolCallLog. Three
  * readings the prose left open, resolved here rather than left implicit:
  *   - UNIT: one per qualifying CALL, not one per qualifying segment within a call. A
  *     call piping two discovery binaries together (`find . | grep foo`) counts once.
@@ -247,20 +299,35 @@ export function isRefusal(resultHead) {
  *     that basis.
  *   - SUCCESS: counted regardless of the call's own `success` flag. A failed-but-
  *     genuine rg invocation is discovery-shaped by what was invoked, not by whether it
- *     succeeded — a different question, which isRefusal answers on its own terms.
+ *     succeeded — a different question from refusal, answered next.
+ *   - REFUSAL (the ruling): a refused call does NOT count toward discoveryCount, even
+ *     when its command is discovery-shaped. A blocked command never executed, produced
+ *     no output, and showed the agent nothing — item 90 asks whether the notice leads
+ *     the agent to discover, and an attempt the shell refused is not a discovery. The
+ *     rejected alternative: counting attempts (discovery-shaped commands regardless of
+ *     refusal) would measure intent, a different metric from the one the prose defines
+ *     ("count of ... calls", read here as calls that ran). A refused discovery-shaped
+ *     call is never silently dropped — it survives in `refusedCalls` and, singled out,
+ *     in `refusedDiscoveryShapedCalls`, so the ruling's effect stays auditable.
  * Returns the derived count alongside the raw calls it came from — the derived field
  * must never be the only record of what happened (item 128's lesson, applied here).
  */
 export function scoreTaskDiscovery(toolCallLog) {
   const allShellCalls = (toolCallLog ?? []).filter((c) => c.tool === "run_command_readonly");
-  const discoveryCalls = allShellCalls.filter((c) => isDiscoveryCommand(c.args?.command));
   const refusedCalls = allShellCalls.filter((c) => isRefusal(c.resultHead));
+  const discoveryCalls = allShellCalls.filter(
+    (c) => isDiscoveryCommand(c.args?.command) && !isRefusal(c.resultHead)
+  );
+  const refusedDiscoveryShapedCalls = allShellCalls.filter(
+    (c) => isDiscoveryCommand(c.args?.command) && isRefusal(c.resultHead)
+  );
   return {
     discoveryCount: discoveryCalls.length,
     discoveryCalls: discoveryCalls.map((c) => c.args?.command ?? ""),
     allShellCalls: allShellCalls.map((c) => c.args?.command ?? ""),
     refused: refusedCalls.length > 0,
     refusedCalls: refusedCalls.map((c) => c.args?.command ?? ""),
+    refusedDiscoveryShapedCalls: refusedDiscoveryShapedCalls.map((c) => c.args?.command ?? ""),
   };
 }
 
