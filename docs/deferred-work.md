@@ -8700,7 +8700,17 @@ this item's fix removed has come back.
 **One route candidate has been withdrawn, and this item should not be read as having lost a finding.** A
 paragraph in item 100 proposed the patch-rules contradiction as the nearest candidate route; that block was
 never in the prompt, and item 100 retracts it. What remains open here is unchanged in kind and smaller by
-one in count. **The prompt-audit delta this entry relies on elsewhere is untouched by that correction** —
+one in count.
+
+**The remaining zero is now known to be stable, which bears directly on whether this item can close under
+its own criterion.** Item 153 re-ran that task four times under the same configuration and got a zero
+shell-call count every time. This entry's criterion requires every one of the seven tasks to show a
+non-zero shell-call count, so a re-run of the full arm on this configuration should be expected to fail on
+that task again rather than to pass by chance — the stays-open branch is not a coin flip this item can wait
+out. **What follows is stated and deliberately not acted on:** closing this item now needs either a
+configuration in which that task behaves differently, or a revised criterion, and a revision must be
+registered in its own pass before it is applied, exactly as this item's current criterion was. Neither is
+this pass's to do, and the criterion stands unamended. **The prompt-audit delta this entry relies on elsewhere is untouched by that correction** —
 the with-notice and without-notice reconstructions differ by exactly the notice's own length, and so do the
 two executed prompts, because the audit's omission is carried identically by both sides of the subtraction.
 
@@ -11400,7 +11410,12 @@ reader to paste a prior report if one exists. Three independent counting methods
 reason for non-action: that the archetype is answer-only, that no file-editing tools are available in the
 run, and that it therefore cannot apply a patch regardless. That is the same shape as the original arm
 B's own false negatives — a true statement about withheld tools offered as the reason for not doing
-something the withheld tools were not needed for. And the environment pointed the other way: the question
+something the withheld tools were not needed for. **That sentence is true of the cell it describes and is
+now known to describe one sample rather than the behaviour:** item 153 re-ran this same task four times
+under the same configuration, and the word "tool" appears in none of the four answers. All four decline in
+the same way, citing missing context instead. **The verdict is unaffected and the strand is narrowed** —
+this entry's judgment rested on three arm-mates that searched under identical conditions, not on the
+citation, and those controls are untouched; what the citation evidences is one occurrence in five. And the environment pointed the other way: the question
 archetype's own preamble, per item 97, prescribes one shell command and frames the deliverable as that
 command's output. T7 issued none. A run that abandons the shell in an environment instructing it to use
 the shell is the exact behaviour item 90 measured.
@@ -11657,6 +11672,14 @@ the task string was the only input that varied, and the tasks differ in length, 
 Sampling-level variables: nothing in the probe or the loop pins a temperature, so two runs of the same cell
 are not required to agree.
 
+**Two classes were named and one has since been eliminated, so this entry's own list is completed rather
+than corrected.** Item 153 ran the task that differed four more times under an unchanged configuration and
+got the same zero every time, with the four prompts hashing identically and sampling left unpinned
+throughout. A sampling-level explanation predicts disagreement between runs and did not get it. **What
+survives is the task-level class alone** — something about that task string, under this archetype,
+reliably produces an answer with no tool call. The bound item 153 registered travels with this: four of
+four bounds the rate from below rather than establishing determinism.
+
 **A separate question that must not be folded into that one.** Whether the zero reproduces at all is
 unmeasured, and it is a different question from why it happened. Repeating the one task under an unchanged
 configuration is what answers it. Under perfect separation the exact one-tailed figure only reaches a
@@ -11744,7 +11767,7 @@ the dumps are written by the audit step in `scripts/notice-regression-probe.mjs`
 pass this occurred during and the assertion whose failure printed it, and item 148 for the file where a
 working-discipline rule would live if one were ever filed.
 
-## 153. Blocked on data — whether T7's zero reproduces, with the prediction and the decision rule registered before the first billed call
+## 153. Closed — T7's zero reproduces four times out of four; it is a property of the task in this configuration, not sampling variance
 
 **The question, and what it is deliberately not.** Item 149 judged one task's zero-tool-call answer
 residual suppression rather than a correct tool-free answer. Item 151 forecloses every prompt-variable
@@ -11802,11 +11825,59 @@ conversation directory exists, and the probe passes no session identifier and no
 there is no cross-run feedback channel. The project-memory block the run injects is constant across cells
 because the memory-writing tool is withheld for this archetype.
 
+**The result, read against the rule exactly as registered.** Four cells ran, none was cut short by the
+spend bound, and **none of the four issued a single shell call**. Every cell finished on natural completion
+at one iteration of an allowed three, with an empty tool-call list. The count the rule keys on is therefore
+zero of four, which fires the first branch: **the zero is a property of the task in this configuration
+rather than sampling variance**. The registered prediction — all four at zero — held in its strong form.
+
+**The bound the registration attached to that branch, applied rather than quietly dropped.** Four of four
+does not establish determinism. A true zero-rate near forty-seven percent produces this outcome about one
+time in twenty, so what is established is that the zero is not a one-off, and its rate is bounded from
+below rather than known. Nothing here says "always". A rate would take roughly forty-three cells.
+
+**Every instrument-is-wrong signal was checked and none fired.** The offered set was exactly the two tools
+on all four cells, or the probe would have aborted. Each cell's audit reported the two arms differing by
+precisely the notice's own length. Each cell's scored shell count was compared against the raw tool-call
+list its own record carries and agreed. And the check this design added, now affordable because the dumps
+carry a run stamp: the four cells' prompt dumps hash to **one** distinct value per form, so the
+configuration was demonstrably held constant across the run rather than assumed to be.
+
+**Cost, against the estimate registered before spending.** The four cells came to just over six cents,
+against a derived estimate of just under six point two — inside it, and well inside the pre-registered
+ceiling. Every cell cost within a fifth of a cent of every other, which is itself consistent with four
+runs of the same short shape.
+
+**One thing did not reproduce, and it is the strand item 149 leaned on rhetorically.** The original cell
+justified its inaction by citing withheld editing tools. **In none of these four cells does the word
+"tool" appear at all.** All four instead cite missing context — no prior run context, no session memory,
+no referenced document — and ask three or four numbered clarifying questions. So the *behaviour* item 149
+judged is robust and the *stated reason* for it was a feature of that one sample. This does not overturn
+that entry, whose verdict rested on three arm-mates that searched rather than on the citation; it narrows
+what the citation is evidence of, from one occurrence in five.
+
+**An independent confirmation of item 150's memory boundary, from the run's own telemetry rather than a
+reconstruction.** Each cell reported its assembled system prompt at a size that the audit's own dumps do
+not account for: the audit form plus the notice leaves a shortfall of exactly the difference between the
+introduction line the audit hardcodes and the one the loop builds, once the project-memory block is added
+back. The run's own instrumentation therefore reproduces, arithmetically and without any reconstruction,
+the divergence recorded as a boundary on item 150 — and adds a second component to it, the agent
+introduction, alongside the memory block.
+
+**Bucket: Blocked on data becomes Closed.** For: this entry's own question was whether the zero recurs, and
+four cells answered it under a rule fixed before the first call, with every instrument branch checked
+clear — items 144 and 91 both closed on a settled central question with residual limits named as limits,
+which is the shape here. Against: Blocked on data requires an observation that does not exist, and the
+observation is now made; Neither is for a structural fact with no fix proposed, and this entry is a
+measurement rather than a structural note. The rate bound and the route question stay open and are named
+as limits, not as unfinished business of this entry.
+
 **Where the code lives:** the instrument and its single-task selection are in
 `scripts/notice-regression-probe.mjs`; the machine-readable predictions sit beside it in `scripts`, and
 this entry is the registration of record where the two could be read as differing. See item 149 for the
 judgment this tests the stability of, item 151 for the foreclosure that leaves only this question, item 150
-for the naming fix that makes four cells separable, and item 90 for the criterion this does not answer.
+for the naming fix that makes four cells separable and for the memory boundary this confirms, and item 90
+for the criterion this does not answer.
 
 ## Status snapshot — a partition, not a priority ordering
 
@@ -11818,12 +11889,12 @@ priority ordering" cautions against ranking by importance, which this section do
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (59): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 111, 117, 120, 121, 126, 128, 134, 135, 137, 144, 149, 150
+**Closed** (60): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 111, 117, 120, 121, 126, 128, 134, 135, 137, 144, 149, 150, 153
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (8): 108, 113, 116, 129, 130, 138, 142, 148
 
-**Blocked on data** — closing requires an observation that doesn't exist yet (11): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143, 153
+**Blocked on data** — closing requires an observation that doesn't exist yet (10): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143
 
 **Neither — a structural fact recorded, with no fix proposed** (75): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
