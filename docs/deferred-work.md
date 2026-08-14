@@ -8707,7 +8707,17 @@ its own criterion.** Item 153 re-ran that task four times under the same configu
 shell-call count every time. This entry's criterion requires every one of the seven tasks to show a
 non-zero shell-call count, so a re-run of the full arm on this configuration should be expected to fail on
 that task again rather than to pass by chance — the stays-open branch is not a coin flip this item can wait
-out. **What follows is stated and deliberately not acted on:** closing this item now needs either a
+out.
+
+**That expectation was measured against a prompt that has since changed, and the change moved the task off
+its zero at least sometimes.** Item 156 fixed a directive that gated the search this task's own archetype
+preamble prescribes; item 157 then observed one of three cells searching and answering correctly where five
+of five had declined. **What this changes for this entry is the expectation, not the criterion**: a full arm
+re-run on the current build is no longer expected to fail on that task with certainty, only with unknown
+probability, because the one measurement that exists is three in eight against its own control and cannot
+be read as a rate. **The criterion stands unamended and no revision is proposed here** — a revision needs
+its own registration, and the case for one is weaker now rather than stronger, since the task may simply
+pass on its own terms. **What follows is stated and deliberately not acted on:** closing this item now needs either a
 configuration in which that task behaves differently, or a revised criterion, and a revision must be
 registered in its own pass before it is applied, exactly as this item's current criterion was. Neither is
 this pass's to do, and the criterion stands unamended. **The prompt-audit delta this entry relies on elsewhere is untouched by that correction** —
@@ -11505,6 +11515,18 @@ substantive one now agree, so no pressure falls on the rule at all. Had it lande
 consequence would have been grounds for a further revision of that criterion, registered in its own pass
 before being applied — never a carve-out applied at scoring time to a rule that does not contain one.
 
+**This entry's verdict is now contradicted by a cell that searched, and the contradiction is partial rather
+than total.** Item 156 found a prompt contradiction that forbade the search this entry called declined, and
+item 157 measured the fix: one of three cells then issued two recursive searches, read two files, and
+answered the task correctly with a file, a line range and a covering test. **No control cell ever did that**,
+so this entry's "the task was answerable and the agent declined" is right about answerable and wrong about
+why — the agent was, for that cell, obeying an unscoped instruction rather than exhibiting a residual of the
+notice regression. **The verdict does not fall outright**, because two of the three cells still declined and
+three in eight does not separate that from variance; what falls is the attribution. Residual suppression
+named a model tendency; the established cause is a prompt defect that was in every one of this entry's own
+cells. A pass that resolves item 157's power problem should revisit this entry's verdict directly rather
+than adding another boundary to it.
+
 **Three counting errors in a fresh entry, found by the next pass, which is the seventeenth pattern's own
 claim rather than a new one.** This entry was written one pass before the judgment, cited by nothing in
 between, and carried a wrong word count, a wrong question count and a cost ratio wrong by a factor of two
@@ -11872,6 +11894,13 @@ at one iteration of an allowed three, with an empty tool-call list. The count th
 zero of four, which fires the first branch: **the zero is a property of the task in this configuration
 rather than sampling variance**. The registered prediction — all four at zero — held in its strong form.
 
+**That stability held the prompt fixed, and it does not survive the prompt changing.** Item 156 altered the
+directive this task's answers were complying with, and item 157's cells on the new prompt broke the run of
+zeros: one of three issued shell calls and answered correctly. **This entry's finding is unaffected and its
+scope is now explicit** — it established that the zero was a property of the task under *that* prompt rather
+than sampling noise, which is exactly what a prompt-caused behaviour looks like. It never claimed the zero
+would survive a prompt change, and it did not.
+
 **The bound the registration attached to that branch, applied rather than quietly dropped.** Four of four
 does not establish determinism. A true zero-rate near forty-seven percent produces this outcome about one
 time in twenty, so what is established is that the zero is not a one-off, and its rate is bounded from
@@ -12056,7 +12085,7 @@ reading.
 function's archetype ternary. See item 149 for the judgment this displaces, item 151 for the foreclosure
 that pointed at the task-prompt interaction, and item 157 for the measurement.
 
-## 157. Whether scoping that bullet restores searching, with the prediction and rule registered before the first billed call
+## 157. Whether scoping that bullet restores searching — one cell of three searched and answered correctly, which the registered rule reads as mixed and not separable from variance
 
 **The question.** One task in item 90's arm issued no shell calls, five times out of five on the pinned
 model — the original cell plus item 153's four reproductions. Item 156 identifies a prompt contradiction as
@@ -12107,6 +12136,54 @@ factor in either direction: all four control cells report zero cached tokens, so
 run's first cell will be.
 
 **Bucket: Blocked on data.** The observation does not exist yet and this entry is the registration for it.
+
+**The run happened, the spend bound cut it to three cells, and the rule reads it as mixed.** One of the
+three issued shell calls; two did not. Against a zero-of-five control that is three in eight, which does not
+separate a real effect from sampling variance. **The prediction — all cells searching — is refuted in its
+registered strong form**, and the weakness registered alongside it is what the result exhibits: the
+directive's surviving bullets still steer toward asking rather than looking, and two cells took that path.
+
+**The fourth cell could not have changed the verdict, which is why the stop cost nothing.** With one of
+three already searching, the best reachable outcome at four cells was two of four, which is six in
+thirty-six — still not separable. Only three or four of four would have been, and both were already out of
+reach once the second and third cells declined. The bound bit on cost and not on information, and that is
+worth recording because a spend rule that truncates a design usually does cost something.
+
+**What the one searching cell did, because the binary the rule keys on understates it.** It issued two
+recursive searches for masking vocabulary, read two files, ran to its iteration ceiling, and produced a
+correct sourced answer: it located the masking helper, gave its file and line range, described the
+behaviour for long and short inputs, and named the test that covers it. That is not a marginal difference
+from the control's zero — it is the task being answered rather than declined, and no control cell ever did
+it. **The metric records one bit of that and the entry records the rest**, because a rule keyed on whether
+a shell call happened cannot distinguish a token search from a complete answer.
+
+**The directive's own vocabulary persists in the cells that declined.** Two of the three cite absent prior
+content — a report, an earlier session, content not carried forward — and both ask the user to paste it,
+which is the block's own prescribed behaviour. The control was five of five on that vocabulary. Two of
+three is not a measured drop at this n, and it is recorded as an observation rather than as a rate. **A
+counting correction belongs with it:** a first pass over these answers scored that vocabulary at one of
+three, because the pattern used missed a cell that phrased the same idea as prior findings from an earlier
+session rather than in the terms the pattern anticipated. Re-read with a wider pattern it is two of three.
+The narrow figure never left this pass, but the same error would have understated the persistence had it.
+
+**Every instrument-is-wrong signal was checked and none fired, including the one this entry added.** The
+offered set was exactly the two tools on all three cells. Each cell's audit reported the two arms differing
+by precisely the notice's own length. Each cell's scored shell count agreed with the raw call list its own
+record carries. The three prompt dumps hash to one distinct value. And the added check passed: every dump
+carries the scoped bullet and none carries the unscoped form, so the rebuild took and the run measured the
+fixed prompt rather than the old one.
+
+**Cost, against the estimate registered before spending.** Just under nine cents over three cells, against
+a six-cent estimate for four. The searching cell cost nearly four times a declining one — three iterations
+against one — which is why the bound bit after three. The estimate's error was in the per-cell figure for a
+searching cell, not in the direction: the interesting outcome was correctly predicted to be the dearer one.
+
+**Bucket, decided rather than inherited: Blocked on data.** The registration's own question — does the fix
+restore searching — has an answer that is not separable from variance at this n, so the observation that
+would settle it still does not exist. Closing needs both arms near ten, per this entry's own power
+paragraph, and the further control cells must run on the pre-fix prompt. Against: Closed would require the
+question answered, and three in eight is not an answer; Neither would require no fix proposed, and the
+design that would settle it is specified here.
 
 **Where the code lives:** the instrument is `scripts/notice-regression-probe.mjs` with its single-task
 selection; the directive is item 156's. See item 156 for the defect and the fix, item 153 for the control
