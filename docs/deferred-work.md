@@ -11997,22 +11997,137 @@ byte-identity case of the prompt-audit block; the file it depends on is the per-
 assembler embeds. See item 150 for what the test pins and item 147 for the adjacent but distinct shape of a
 figure whose validity depended on an environment nobody recorded.
 
+## 156. Closed — a prompt directive's third bullet gated all repository search instead of only the search for missing referenced content, contradicting the archetype preamble that prescribes one shell command
+
+**What it is.** A static directive added to the assembled system prompt tells the agent what to do when a
+user refers to prior content — a report, a document, an earlier output — that is not present in the
+conversation. Its own introducing commit names the failure it was written to stop: the agent had been
+confabulating that such content was a file on disk and hunting the filesystem for it, and neither reactive
+safety net caught that because the searches exited zero. Three bullets follow. **The first two are scoped
+back to the missing content and the third was not**, and the third is the one that gates behaviour.
+
+**The scoping asymmetry, read bullet by bullet from the committed text rather than inferred.** The first
+bullet forbids searching the filesystem "for it" — tied to the referenced content by that pronoun. The
+second tells the agent to state plainly that it does not have "the referenced content itself" — tied by an
+explicit noun phrase. The third said only to read or search the repository if the user names a concrete
+file path, with **no back-reference of any kind**. Read on its own terms it gated every repository search,
+whatever the subject.
+
+**Why that mattered: the same prompt prescribes the search the bullet forbade.** The question archetype's
+own preamble instructs the agent to use one shell command to answer the query, and offers three worked
+examples — a find, a directory listing, and a recursive grep. The third bullet's prohibition names those
+same three verbs. Both blocks are in the same assembled prompt, both apply to a task whose object is
+underdetermined, and nothing in the prompt says which wins. Deciding which applies requires knowing whether
+the referent is in the repository, which requires the search the bullet gates — a circularity in the text.
+
+**The author's own commit message shows the phrasing inverted the intent.** It describes the third bullet
+as a carve-out preventing false refusals on legitimate file lookups — a permission. Written as "Only … if",
+a permission becomes a restriction. That is the whole defect: not a wrong idea, a sentence that says the
+opposite of what it was for.
+
+**Fixed at `e0509485`, minimally and without weakening the first two bullets.** The third bullet gains a
+sentence stating the restriction is about the referenced content itself rather than repository search in
+general — reusing the second bullet's own noun phrase rather than a new synonym — and the operative
+sentence gains the same "for it" tie-back the first bullet already uses. The unlock condition and the
+permission to treat a named path as a normal file are unchanged. Bullets one and two and the header are
+byte-identical before and after. Four tests were added beside the three the introducing commit shipped,
+which pin presence across archetypes, ordering, and byte-stability across repository paths but no bullet
+wording; the new ones pin the first bullet's prohibition, the third bullet's disclaiming sentence and its
+tie-back as two separate assertions, and the survival of the unlock condition. Three mutations were
+predicted by name and each killed exactly its predicted set.
+
+**What the fix does not settle, and it is why item 157 exists.** Whether removing the contradiction changes
+behaviour is a measurement, not a reading. The first two bullets survive and still steer toward naming what
+is missing and asking the user to paste it, so a task could decline for those reasons alone.
+
+**How this was found, recorded because the path matters more than the finding.** Five answers to one task
+were compared: none mentioned a tool or any search verb, and all five cited missing prior context in the
+directive's own vocabulary — its terms for the artefacts it names, and its instruction to ask the user to
+paste. The block was then located in the assembled prompt by running the assembler, and its bullets read
+individually. Nothing about this needed a paid call.
+
+**Bucket: Closed.** The defect is identified, the fix has landed with tests and mutation coverage, and what
+remains open is a behavioural question that is item 157's, not this entry's. Against: Actionable now needs
+an unmade fix; Blocked on data needs a missing observation, and the defect itself was established by
+reading.
+
+**Where the code lives:** the directive is a module-level constant in `llm/agentLoop.ts`, spliced once into
+`assembleAgentSystemPrompt`'s unconditional shared tail; the preamble it contradicted is in the same
+function's archetype ternary. See item 149 for the judgment this displaces, item 151 for the foreclosure
+that pointed at the task-prompt interaction, and item 157 for the measurement.
+
+## 157. Whether scoping that bullet restores searching, with the prediction and rule registered before the first billed call
+
+**The question.** One task in item 90's arm issued no shell calls, five times out of five on the pinned
+model — the original cell plus item 153's four reproductions. Item 156 identifies a prompt contradiction as
+the cause and fixes it. This measures whether the fix changes the behaviour. **It is one task**: item 90's
+criterion needs all seven, and nothing here speaks to the other six. It also does not establish that the
+directive's surviving bullets are harmless — only what changing the third one did.
+
+**The design.** Four cells of that task, arm B, the shipped configuration, on the pinned model, as four
+sequential single-task invocations. The control is the five historical cells and **cannot be re-run**: the
+prompt has changed, so measuring the old one again would require checking out the pre-fix commit and
+rebuilding. The control is fixed at five.
+
+**The prediction, registered in the strong form.** All four cells issue at least one shell call. If the
+contradiction is what forbade the search the preamble prescribes, removing it lets the preamble stand.
+**Registered with its own known weakness:** the first two bullets survive and still steer toward asking
+rather than looking, so a cell could decline on those alone. A weaker prediction would absorb that outcome
+and could not be refuted, which is why the strong form is the one registered.
+
+**The decision rule, on how many of the four cells issue at least one shell call.** **Four of four:** the
+fix restored searching and the diagnosis holds — against a zero-of-five control the one-tailed exact figure
+is one in a hundred and twenty-six. **None of four:** the diagnosis was wrong or incomplete; the third
+bullet was not the operative constraint, and either the surviving bullets suppress independently or the
+cause lies outside the directory altogether. **One, two or three:** mixed, and the design's power is not
+uniform across that range — computed in advance, three of four gives four in eighty-four and is
+distinguishable from the control, while two of four gives six in thirty-six and one of four gives four in
+nine, neither of which separates a real partial effect from sampling variance.
+
+**What a mixed result would need, and the part that is a finding rather than a number.** More cells of the
+same arm do not fix it. A control of five caps the achievable significance: at a true half-rate effect,
+extending only the measured arm gives roughly one in ten at eight cells, one in thirteen at twelve, one in
+sixteen at sixteen — approaching but never crossing the conventional threshold, because the control's own
+count bounds the evidence. Resolving a half-rate effect needs **both arms near ten**, where ten against ten
+gives about one in sixty. That is five further control cells — which must run on the pre-fix prompt, so a
+checkout and rebuild — plus six further measured cells.
+
+**The instrument-is-wrong branch, on the signals item 153 used plus one this measurement must add.** The
+offered set is not exactly the two tools the probe asserts at startup; or the prompt audit reports the two
+arms differing by anything other than the notice; or a cell's scored shell count disagrees with the raw
+call list its own record carries; or the four cells' prompt dumps are not byte-identical to each other.
+**Added and mandatory here:** those dumps must contain the **scoped** bullet. The instrument compiles from
+a build directory, and that build was nearly a day older than the fix when this pass began — if the dumps
+carry the unscoped form, the rebuild did not take and the run measured the old prompt.
+
+**What varies between cells, established before any spend.** Sampling only, as in item 153: no temperature
+is set anywhere on this path. The prompt grows by ninety-eight characters and by nothing else — every other
+compiled change since the previous build is a test file the build excludes. And the prompt cache is not a
+factor in either direction: all four control cells report zero cached tokens, so they were as cold as this
+run's first cell will be.
+
+**Bucket: Blocked on data.** The observation does not exist yet and this entry is the registration for it.
+
+**Where the code lives:** the instrument is `scripts/notice-regression-probe.mjs` with its single-task
+selection; the directive is item 156's. See item 156 for the defect and the fix, item 153 for the control
+and the rule shape this follows, and item 90 for the criterion this does not answer.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 155 to find out which ones still need something. No index of
+reader the trouble of reading all 157 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (60): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 111, 117, 120, 121, 126, 128, 134, 135, 137, 144, 149, 150, 153
+**Closed** (61): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 111, 117, 120, 121, 126, 128, 134, 135, 137, 144, 149, 150, 153, 156
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (8): 108, 113, 116, 129, 130, 138, 142, 148
 
-**Blocked on data** — closing requires an observation that doesn't exist yet (10): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143
+**Blocked on data** — closing requires an observation that doesn't exist yet (11): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143, 157
 
 **Neither — a structural fact recorded, with no fix proposed** (77): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
