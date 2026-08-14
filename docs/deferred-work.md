@@ -9818,19 +9818,53 @@ source recorded as a cache re-run. So a cached classification can change on a la
 call.
 
 **The hit rate is unmeasured and is not estimated here.** It depends entirely on how often a user submits a
-byte-identical task string, which is a property of usage rather than of the code, and the dispatch logs
-that would answer it do not exist — see item 115.
+byte-identical task string, which is a property of usage rather than of the code.
+
+**The ground this entry first gave for that is false, and is corrected rather than left standing.** It read
+that the dispatch logs which would answer the question do not exist, citing item 115. Marker records do
+reach disk, at the user-level sink item 115 now describes, and classification markers are among them. What
+they cannot answer is this particular question, for a reason established by reading the cache branch rather
+than by counting what the sink happens to hold: **a hit returns the cached classification before any
+emission at all.** The classified marker fires only on the paths that build a fresh one, so a hit leaves no
+record to count — the gap is a silent return, not an absent log, and no field added to that marker's payload
+would close it. The one marker that does separate the two is the large-file bump, which records its source
+as a cache re-run; it fires only when a bump upgrades a cached tier, and the sink holds none. The conclusion
+stands unchanged; only its basis moves.
 
 **Where the code lives:** the map, the hash function and the hit path are all in `taskClassifier.ts`.
 
-## 115. Neither tier telemetry marker reaches disk — the fields exist, the emissions do not survive
+## 115. Corrected — the archetype marker does reach disk, at a user-level sink this entry's own search never covered
 
 **What it is.** The two markers that would answer how often the tier is wrong are emitted through the
-shared logging helper, which is a direct console write with no file sink. In the interactive TUI the
-stdout shield swallows anything matching its telemetry prefix pattern, which both markers match. Nothing
-under the per-repo state directory contains either marker: the log directory holds only command-cache
-files. The occurrences of both marker names elsewhere in that directory are prose mentions inside audit
-and plan documents, not captured emissions.
+shared logging helper, which is a direct console write with no file sink — that much is unchanged and
+still true of the helper. Nothing under the per-repo state directory contains either marker: the log
+directory holds only command-cache files, and the occurrences of both marker names elsewhere in that
+directory are prose mentions inside audit and plan documents, not captured emissions. **That sentence was
+true when written and is true now, and it is left standing deliberately — it is a statement about one
+directory, and this entry's error was reading it as a statement about disk.**
+
+**The sentence that was incomplete, completed.** The entry said the stdout shield swallows anything
+matching its telemetry prefix pattern, which both markers match. It does — but not before doing something
+else the entry did not carry. Inside the same branch, on the same path, and *before* the swallow, the
+shield calls the marker-sink appender. That function writes one JSON record per marker to a file under the
+**user-level** home directory, not the per-repo one. The shield is a tee, not a drain, and the entry
+described only the half of it that discards.
+
+**Why a correct search still reached a wrong conclusion, which is the part worth keeping.** The two roots
+share a basename. The per-repo state directory and the user-level one are both called `.zone`, both are
+written by this codebase — thirteen files under `src` join the home directory with that name, by two
+instruments agreeing on the same thirteen — and each holds a directory called `sessions`. A search of the
+per-repo root is a correctly scoped, correctly executed, correctly reported search; what made its result
+read as complete rather than partial is that the directory it covered carries the same name as the one it
+did not.
+
+**Wrong on arrival, not superseded — and the chronology is recorded because a later reader will otherwise
+re-litigate it.** The sink landed at `362042db`; this entry was written at `83e433e8`, two weeks later. The
+earliest archetype record in the sink is timestamped minutes after that first commit and the latest four
+days before the second. There was never a window in which this entry was true.
+
+**The figures.** The sink holds 50 archetype records against a total of 3792. The mismatch marker holds
+none, which is a different question and is item 134's, not this one's.
 
 **What the fields would have carried.** The archetype marker carries the run id, archetype, archetype
 confidence, classifier cost, tier, whether a fallback was used, a user-override slot, the final iteration,
@@ -9838,14 +9872,18 @@ the final cost, success, whether a pipeline was applied, the archetype promoted 
 trigger, the iteration promotion happened at, and a count of questions asked. The mismatch marker carries
 the run id, the forced tier, the classified archetype, its confidence, and the list of blocked tools.
 
-**Why this is the binding constraint on every future tier measurement.** The instrumentation needed to
-answer the question already exists and is already emitted on every run; it is simply not retained. Any
-measurement of classification accuracy or promotion rate must either capture standard output at run time
-or add a sink first — no historical answer can be recovered, and none should be reconstructed from
-recollection of past sessions.
+**What replaces the binding-constraint claim, which was the false generalisation.** The entry concluded that
+no historical answer could be recovered and that any future measurement must capture standard output or add
+a sink first. Both halves are wrong: a sink exists, it has been retaining these records for the fortnight
+before this entry was written, and the historical answer for the archetype marker is sitting in it. What
+survives of the paragraph is narrower and worth keeping — the emissions reach disk **only through the TUI**,
+because the shield is what appends them. A script that imports the agent loop directly and runs outside the
+TUI emits to a console nothing is intercepting, and nothing is retained for that run. That is the real
+constraint, and it is why item 135 exists.
 
 **Where the code lives:** the emit functions in `loopTelemetry.ts`; the logging helper in `utils/logger.ts`;
-the stdout shield in the TUI entry point.
+the stdout shield in the TUI entry point; the appender and its path resolution in the marker-sink module
+under `utils`.
 
 ## 116. Three CLAUDE.md claims about the classifier are wrong, found after the repair pass that did not cover this surface
 
@@ -10274,7 +10312,7 @@ is non-trivial, never as a variance estimate to compute against.
 **Where it can be checked:** the three arms' committed results files under `scripts/`, whose per-task rows
 carry the returned tier, the confidence, the fallback flag and the model's own reasoning for each run.
 
-## 128. The invalid-tier degradation fired once in one run and twice in a repeat of that same run, and the results files cannot tell you so
+## 128. Closed — the invalid-tier degradation fired once in one run and twice in a repeat of that same run, and the results files could not tell you so until `8f4144bf`
 
 **What it is.** Item 122 records the mechanism: the model puts an archetype value in the tier slot, the
 parser rejects it, substitutes medium and zeroes the confidence, and the archetype survives. Across the three
@@ -10282,17 +10320,44 @@ arms on the same frozen forty, that path fired **once in arm A, once in arm B, a
 the null arm being a repeat of arm A on byte-identical input. So the mechanism's rate is not stable across
 repeats of the same measurement, which is the same finding as item 127 arriving on a different surface.
 
-**The count's provenance, stated because the artefact cannot support it.** Those figures come from the
-`[zone-classifier-fallback]` markers emitted during each run, not from the committed results files. The files
-record a derived `fallbackKind`, and that field collapses this path into `low_confidence` — correctly, since
-the parser zeroes the confidence and the result really does travel through the low-confidence gate. The
-consequence is that **a reader with only the results files cannot distinguish a model that had no usable tier
-opinion from one whose tier opinion went into the wrong field.** The distinguishing evidence exists only in
-the run's own log output, which no artefact here retains.
+**The count's provenance, corrected — the entry conceded too much.** It said the figures came from the
+run's markers and not from the committed results files. Half of that is wrong. **The counts are readable
+straight off the artefacts:** one fallback row in arm A, one in arm B, two in the null arm, each identifiable
+by its own `fallbackUsed` flag with no marker needed. What the artefacts cannot supply is the **attribution**
+of those rows to the invalid-tier path, which is a different claim and the only one that ever needed the
+markers.
 
-**No fix proposed.** Recording the rejected value on the returned classification would separate them, but
-that is a production shape change on a diagnostic path, and whether the distinction is worth a field is not
-this entry's call.
+**And the attribution is unrecoverable on stronger grounds than the entry gave.** It rested the collapse on
+the derived `fallbackKind` alone. The four rows are indistinguishable in every persisted field: identical
+derived kind, identical reasoning string, and confidence zero on all four — and that last one is not the
+signature it looks like, because the fallback constructor sets confidence to zero on **every** fallback path,
+invalid-tier and genuine-low-confidence alike. There is no field in those files, derived or raw, that
+separates them. The consequence the entry drew stands: **a reader with only the results files cannot
+distinguish a model that had no usable tier opinion from one whose tier opinion went into the wrong field.**
+
+**The premise behind "no fix proposed" was wrong, which is why one was found.** The entry declined a fix on
+the grounds that separating the two would be a production shape change on a diagnostic path. It would not:
+`fallbackKind` is not a production shape. It exists only in the probe script — zero occurrences under `src`
+by two instruments — so widening it touches no production surface at all, and the entry's own reasoning had
+ruled out a change it never needed to consider.
+
+**Closed at `8f4144bf`, in the probe alone.** Five exported pure functions replace the inline derivation; the
+domain widens from three values to five, with precedence running invalid_tier, then truncated, then
+low_tier_confidence, then error, then null; three fields join each row, the verbatim reasons array among them,
+so the derived value is no longer the only record of what happened. The suite moved from 445 files and 5542
+tests to 446 and 5561, skips unchanged at 17. Five mutations were predicted by name before running and killed
+exactly the predicted sets, zero delta.
+
+**Why the precedence ordering is not decorative, established by reading the control flow rather than by
+observing outputs.** The invalid-tier branch does not return: it falls through into the confidence gate
+directly below it, and the parser has already zeroed the confidence that gate reads, so a low_tier_confidence
+emission is **forced** alongside every invalid_tier one. Separately, the unsurvived-truncation path is always
+followed by a throw that nothing catches before the outer error handler, making a truncated-plus-error pair
+**unconditional** too. Both generic reasons therefore co-fire with the specific ones rather than competing
+with them, which is what makes ordering by specificity the correct rule and not an arbitrary one.
+
+**What is not closed here** is whether the probe's own capture observes a real emission end to end; that
+needs a paid run and is item 135.
 
 ## 129. `docs/determinism.md` states that randomness from the model is controlled by temperature zero, without the scoping its own header carries
 
@@ -10446,27 +10511,132 @@ the assertions together, not the assertions alone.
 and it would break the fifteen assertions that currently document the behaviour. Whether the consistency is
 worth that is not this entry's call.
 
+## 134. The tier-archetype mismatch marker has zero records, and zero is consistent with two incompatible explanations
+
+**What it is.** Item 115's correction establishes that the archetype marker reaches the sink and holds fifty
+records. Its sibling, the tier-archetype mismatch marker, holds none. That is consistent with "it has never
+fired" and equally consistent with "it fires and cannot persist," and this entry exists to stop either being
+recorded as the answer — which is the error item 115 made one level up.
+
+**Why the question is answerable but not answered.** The firing condition is narrow and fully readable: the
+loop must not be a subagent loop, the tier must be explicitly forced to simple, a classification archetype
+must be present, and that archetype must be one of the four the dispatcher treats as needing exploration.
+Every one of those is a deliberate act rather than an ambient condition, so "never fired" is the more likely
+of the two explanations — likely is not measured, and the marker travels the same helper and the same shield
+as the archetype marker, so there is no mechanism on the persistence side that would treat it differently.
+Naming the likelier answer is not the same as having it.
+
+**What would settle it.** One run under the TUI, tier forced to simple, on a task the classifier puts into
+one of those four archetypes, followed by a look at the sink. Nothing else is needed and no code changes.
+Blocked only on the run.
+
+## 135. Whether the probe's own capture sees a real emission has never been exercised, and only a paid run can exercise it
+
+**What it is.** Item 128's fix reads classifier fallback markers by patching the console inside the probe.
+Every test behind it is synthetic — the wire shape is real, taken from the emitting function's own two
+argument call, and the derivation over it is pinned by five mutations, but no real emission has ever passed
+through that capture.
+
+**Why the gap is real rather than pedantic, and why item 115 does not close it.** The historical evidence
+that these markers can be captured at all comes from the TUI's shield, which is a different mechanism
+entirely: the shield patches the stream, the probe patches the console object, and the probe runs outside the
+TUI where no shield is installed. Item 115's correction is therefore evidence about the shield's path, not
+about this one. What remains unexercised is the install timing, the interleaving with anything else that
+writes to the same console during a live classifier call, and the read-back at the end of an iteration.
+
+**What would settle it, and its cost.** One classifier call against a live provider with the capture in
+place — the probe's own gate mode does exactly this for a single task at roughly a third of a cent. The
+degradation path itself cannot be forced from a test without either exporting the parser or mocking the
+module, so a run is the cheap route rather than the only conceivable one.
+
+## 136. The probe hand-copies a module-private hash and its normalisation, and nothing detects drift
+
+**What it is.** Item 128's fix asserts that each captured marker belongs to the task the probe is holding, by
+comparing the marker's task hash against a hash the probe computes itself. The source function is
+module-private, so the probe carries a copy of the algorithm and, separately, a copy of the normalisation
+applied to the input before hashing.
+
+**The failure mode is quiet and total rather than partial.** If either copy drifts from the source — a
+changed hash constant, a changed normalisation — every marker on every row mismatches at once, and the row
+field that exists to flag an anomaly reports one on every row instead of none. A signal that fires
+everywhere is indistinguishable from a signal that is broken, and nothing in the probe or the suite would
+say which had happened.
+
+**No guard exists and none is specified here.** One would require either exporting the source function, which
+is a production change made for a script's benefit, or a contract test pinning both implementations against a
+fixed corpus of inputs, which couples a script's test to a production internal. Both are real options with
+real costs and neither is this entry's call — naming what a guard would have to do is not specifying one.
+
+## 137. Closed — the probe's side effects ran at module scope, so importing it for any export would have made paid calls
+
+**What it is.** Before `8f4144bf` the tier-agreement probe read the API key file, read the label set, patched
+the console and ran the whole classify loop at module scope. Any import of that file for any reason would
+have executed all of it.
+
+**This is not hypothetical.** It fired during the fix pass itself: the first run of the new test file, which
+imports the probe only for its pure derivation functions, threw on a missing key file before a single
+assertion ran. Under a machine with a key present it would have made forty real provider calls instead.
+
+**Closed by the guard the sibling scripts already used.** Every side effect moved inside a main function
+invoked only when the module is the process entry point, matching the shape two other scripts in the same
+directory already carried. The pure functions sit above that guard and importing them now runs nothing.
+
+## 138. Four scripts are one export away from item 137's defect, held back by nothing but the absence of an export
+
+**What it is.** Three of the seven scripts in the scripts directory carry the entry-point guard; four do not,
+by two instruments agreeing on the same split. Of those four, three invoke their main function unconditionally
+at module scope and the fourth runs its work as top-level statements. Three of the four read the API key file.
+
+**What makes them safe today is not a guard.** None of the four exports anything, so nothing can import them,
+so the side effects are unreachable. That is exactly the state the tier-agreement probe was in — and the
+moment that file gained its first export, the defect became live and fired on the first test run. The
+protection is an absence, and absences end quietly: the person who adds the first export to any of these four
+is not obviously doing anything dangerous.
+
+**The fix, fully specified.** Wrap each of the four in the same entry-point guard the other three already use,
+before any of them acquires an export rather than after. Nothing needs to be measured or decided first, and
+the shape to copy is already in the same directory three times over.
+
+## 139. Both of the probe's console captures restore without a finally, and the consequence is bounded by something incidental
+
+**What it is.** The tier-agreement probe patches the console log channel and the console warn channel, and
+restores both by plain assignment after its loop. Neither is wrapped in a construct that runs on the way out
+of a throw. The stderr capture added by item 128's fix inherits this from the stdout capture that preceded it
+— deliberately, since silently improving one half of a pair while describing the other as matched would have
+made the report false.
+
+**The consequence is smaller than the description suggests, and the reason is worth recording.** A throw
+inside the loop leaves both channels patched, but what runs next is the entry-point guard's own failure
+handler, which writes through the error channel — the one channel the probe never patches — and then exits
+the process. So the swallow currently costs nothing observable, and the record exists because the property
+holding it harmless is incidental rather than designed: one added log line in that handler, or any code
+introduced after the main function settles, makes it live with no other change.
+
+**No fix proposed, on those grounds.** Wrapping both restores would be a small and obvious change, and the
+entry declines to prescribe it only because there is no present defect to motivate it and the pair's shared
+discipline is itself the more useful thing on record. A pass that wraps one should wrap both.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 133 to find out which ones still need something. No index of
+reader the trouble of reading all 139 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (52): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 111, 117, 120, 121, 126
+**Closed** (54): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 111, 117, 120, 121, 126, 128, 137
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (5): 108, 113, 116, 129, 130
+first (6): 108, 113, 116, 129, 130, 138
 
-**Blocked on data** — closing requires an observation that doesn't exist yet (9): 1, 4, 18, 23, 57, 63, 75, 90, 110
+**Blocked on data** — closing requires an observation that doesn't exist yet (11): 1, 4, 18, 23, 57, 63, 75, 90, 110, 134, 135
 
-**Neither — a structural fact recorded, with no fix proposed** (67): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (68): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
-119, 122, 123, 124, 125, 127, 128, 131, 132, 133
+119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
@@ -12192,3 +12362,49 @@ names the right quantity and still cannot produce the stated magnitude promotes 
 half the twentieth demonstrably does not cover. A second category-error instance reopens nothing — it
 belongs to the twentieth, and the correct response would be to apply that rule to prediction clauses rather
 than to write a new pattern beside it.
+
+## A fifth candidate considered and not promoted: two roots sharing a basename make a correctly scoped search read as an exhaustive one
+
+The instance is item 115. A search established that neither tier telemetry marker appeared under the
+per-repo state directory, which was true, and the entry concluded that neither marker reached disk, which
+was false — the shield persists them to a sink under the user-level home directory. The search was correctly
+scoped, correctly executed and correctly described. What failed sits between the search and the claim.
+
+**Compared against the twenty-fifth, which is the neighbour this looked like and is not.** That pattern's
+own distinguishing test is that re-reading the command reveals nothing, because the command is not where
+the filter lives; it defines itself against the recoverable form where the scope is visible in what the
+author typed. Here the scope is entirely visible — the entry names the directory it searched, in its own
+sentence — so by the twenty-fifth's own criterion this is the form it excludes rather than the form it
+covers. Its rule still supplies the corrective, that an absence is evidence only about the corpus the search
+reached, but a shared corrective is not a shared mechanism.
+
+**Compared against the fifth and the twenty-first, which cover the cause between them.** The entry reasoned
+from source — the logging helper is a console write, the shield swallows what matches — and concluded a file
+did not exist, when opening the file was cheaper than the reasoning was. That is the fifth's corollary
+exactly, that reading's role is to know what to run rather than to substitute for running. The twenty-first
+adds the aggravating half: the artefact was already on disk, already written, unread the entire time. Two
+existing patterns, applied faithfully, would each have caught this.
+
+**What is genuinely left over, stated rather than buried, because it is the reason this was arguable.** The
+two roots share a basename. Both are called `.zone`, both are written by this codebase, and each contains a
+directory called `sessions`. Without that collision, "I searched one directory, therefore it is not on disk"
+is an obvious leap that no reader would grant; with it, the searched directory carries the name of the thing
+being claimed about, and the leap reads as a complete account. That is not the fifth, and not the
+twenty-first, and not the twenty-fifth. It is a distinct mechanism by which an under-scoped search stops
+looking under-scoped.
+
+**Not promoted, on population, which is the same ground the fourth candidate was declined on.** The
+namespace-collision element has exactly one instance. The twenty-fifth was promoted from one instance too,
+but only because an earlier decline had registered the condition it met in advance; there is no such
+registration here, and a mechanism resting on its own only instance describes an event. The three criteria
+the first rejected candidate set out are also split rather than met: the wrong artefact did survive into a
+committed entry and was depended on by another, which favours promotion, and the twenty-fifth's corrective
+did not yet exist when item 115 was written — it landed later the same day — so this cannot be declined as a
+corrective merely declined. Population is what declines it, and population alone.
+
+**The condition under which it reopens.** A second instance in which two same-named namespaces make a
+partial search read as exhaustive — the two `.zone` roots again, or any other pair where the searched name
+matches the claimed scope — promotes this on the residue named above, not on resemblance to the twenty-fifth.
+A second instance of the plain form, where a search is simply narrower than the claim it supports and nothing
+disguises that, reopens nothing: it belongs to the fifth and the twenty-first, and the right response is to
+apply those rather than write a pattern beside them.
