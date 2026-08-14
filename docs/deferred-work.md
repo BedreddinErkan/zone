@@ -12007,10 +12007,42 @@ separately, so it holds whatever the memory file says. If equality passes and on
 memory file changed and **the correct action is to update the pinned number to the new value**. It is not a
 regression, and investigating it as one is wasted work.
 
+**That prescription is right and its diagnosis is incomplete, completed here rather than rewritten.** The
+first time this pin actually went red, the memory file had not changed at all — its block was unchanged and
+deterministic, and substituting item 156's directive fix back to its pre-fix wording reproduced the old
+pinned number exactly, so the whole move was that fix. **A change to shared prompt-assembly source is a
+second trigger**, and the paragraph named only the first. Everything else in it held: the equality check was
+confirmed to pass on its own before the number was touched, and updating the number was the correct action.
+Both triggers produce the same symptom and take the same response, so what needed widening is the causal
+clause, not the instruction.
+
+**Why naming both matters more than it looks.** A reader who believes only the first trigger will look at
+the memory file, find it untouched, and conclude something is genuinely broken — which is the wasted work
+this paragraph exists to prevent, arrived at from the opposite direction.
+
 **Why the length pin is there at all, given that equality is the real assertion.** Equality alone can be
 satisfied by both sides drifting together, which is precisely the flaw that made the previous proof
 vacuous — see item 150. The length is a second, independent anchor to today's real content: it cannot move
 without someone noticing. The fragility is the price of that, and it is deliberate rather than overlooked.
+
+**That claim was reasoning when written and is now a measured fact.** A parser-recognised entry added to
+the live memory file moved the block from roughly thirty-eight hundred characters to roughly four thousand,
+and with that change in place the audit and an independently built reference **still matched each other
+exactly** while the length moved off its baseline. Equality is blind to that class and the pin is what
+catches it, demonstrated rather than argued. The file was restored immediately and confirmed byte-identical.
+
+**The first attempt at that demonstration proved nothing, and the reason is a recorded pattern rather than
+a new one.** It appended plain text to the memory file, which the reader's own parser ignores — only
+marker-delimited content and dated entry lines are parsed — so no drift was injected and the unchanged
+result described a perturbation that never happened. That is the twenty-third pattern exactly: a stand-in
+silently substituted for the part a measurement means to move, with nothing about a clean result
+distinguishing the two. **The corrective it implies is what the second attempt did** — name a fact only a
+real change could produce, the block length moving, and confirm that first, before reading the equality
+result as evidence of anything.
+
+**What the pin actually did the one time it fired, which is this entry's own justification under test.** It
+fired correctly, for a cause this entry had not named, and it did not fire falsely. A pin that only ever
+caught its anticipated trigger would be worth less than one that catches an unanticipated one.
 
 **No fix proposed.** Deriving the expected length at test time from the same file would remove the
 fragility and remove the anchor with it, which is the trade this entry exists to make visible rather than
@@ -12068,6 +12100,14 @@ predicted by name and each killed exactly its predicted set.
 **What the fix does not settle, and it is why item 157 exists.** Whether removing the contradiction changes
 behaviour is a measurement, not a reading. The first two bullets survive and still steer toward naming what
 is missing and asking the user to paste it, so a task could decline for those reasons alone.
+
+**A boundary rather than a defect: this fix broke a test its own pass could not see.** The directive's text
+is embedded in an assembled prompt that one test elsewhere reconstructs and pins by length, and that test
+reads the compiled build rather than source. The build had not been refreshed since before this fix, so the
+full suite ran green and the break surfaced a day later during unrelated work. **Nothing here was done
+wrong** — the fix was correct, its own tests were correct and covered the file it changed, and the consumer
+sits outside the scope this entry declared. What the episode establishes is structural and belongs to item
+158: a local suite result is authoritative about source only for the tests that read source.
 
 **How this was found, recorded because the path matters more than the finding.** Five answers to one task
 were compared: none mentioned a tool or any search verb, and all five cited missing prior context in the
@@ -12189,11 +12229,60 @@ design that would settle it is specified here.
 selection; the directive is item 156's. See item 156 for the defect and the fix, item 153 for the control
 and the rule shape this follows, and item 90 for the criterion this does not answer.
 
+## 158. A local suite can pass because the compiled build it partly reads is stale, so a source change breaks a test the changing pass cannot see
+
+**What happened, and nothing in it was done carelessly.** A pass changed prompt-assembly source, ran the
+full suite, got green, and committed. One test elsewhere reconstructs that same assembled prompt and pins
+its length — and it reads the **compiled build**, not source. The build was a day older than the change, so
+the test compared an old compilation against an old pin and passed. The break surfaced a day later, in the
+middle of unrelated work, when a rebuild for a different purpose brought the change into the build. **The
+pass had no way to see it**, and that is the point of the entry.
+
+**The exposure, bounded in both directions, because both bounds change what this is worth.** Asked
+precisely, only **one** test file in the tree imports from the build directory — a pattern for the bare
+string matches eight files under both instruments, but checked file by file, seven only mention it in a
+comment or a path literal and import nothing. That one file imports three times, and it is also the only
+test reaching prompt text that way. **So this is not a class-wide hole.** In the other direction:
+**continuous integration builds before it tests**, running a typecheck, then a build, then the suite, so the
+guard exists — it is simply not on the local machine.
+
+**What is missing is any local coupling, and that was proven rather than read.** The test script is a bare
+runner invocation with no build step, and the only lifecycle hook in the manifest is attached to build
+rather than to test. Running the relevant test file leaves the build artefact's modification time
+byte-identical, so the runner demonstrably does not rebuild.
+
+**The consequence, stated narrowly enough to be actionable.** A local suite result is authoritative about
+source only for the tests that read source. Every pass in this arc has treated a green local suite as
+authoritative about everything, and for one file that has been wrong since the file was written.
+
+**What a guard would require, named and deliberately not chosen.** A build step before the local test run
+would be correct and would make every local run pay a compile. A freshness assertion inside the one test
+that reads the build would be cheap and would cover only the file that already knows it has the problem.
+Importing from source in that test would defeat its own purpose, since it mirrors an instrument that reads
+the build deliberately. Each trades something real, the shape is not determined by the finding, and this
+entry does not decide it.
+
+**One sub-question is open and is named rather than bucketed separately.** Whether the workflow actually ran
+red on the offending commit could not be read here — the command-line client is unauthenticated on this
+machine — so it is undetermined rather than assumed either way. It bears only on whether the existing
+off-machine guard fired in this instance, not on whether it exists.
+
+**Bucket: Neither**, decided with the two-way check. For: a structural fact recorded with no fix proposed,
+the shape items 87 and 107 sit under — the three candidate guards are named as alternatives, not chosen.
+Against: Actionable now requires a fix specified in the entry, and this deliberately specifies none;
+Blocked on data requires an observation that does not exist, and this entry is the observation.
+
+**Where the code lives:** the one build-importing test is the prompt-audit block of
+`scripts/notice-regression-probe.test.ts`; the build step that exists only in continuous integration is in
+the tests workflow. See item 156 for the change that exposed this, item 155 for the pin that caught it, and
+item 157 for the measurement pass whose own first phase checked the build's freshness explicitly and found
+it stale — the same precondition, verified rather than violated.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 157 to find out which ones still need something. No index of
+reader the trouble of reading all 158 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -12206,10 +12295,10 @@ first (8): 108, 113, 116, 129, 130, 138, 142, 148
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (11): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143, 157
 
-**Neither — a structural fact recorded, with no fix proposed** (77): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (78): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
-119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152, 154, 155
+119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152, 154, 155, 158
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
@@ -14244,3 +14333,36 @@ beside the instance rather than into the pattern, deliberately: the pattern's te
 **The condition under which it reopens.** A second case of the authorial coupling — a reconstruction
 checked against its original while inheriting a construction choice from it. A second *mechanical* case
 reopens nothing; it is the second pattern as already written, and belongs there.
+
+## A sixth candidate considered and not promoted: a check whose authority rests on an artefact it does not itself refresh
+
+**The instance.** A pass changed prompt-assembly source, ran the full suite, read green, and committed. One
+test reconstructs that prompt and reads the compiled build rather than source; the build predated the
+change, so the test compared an old compilation against an old pin and passed. The green was not a weak
+signal — it was no signal at all about the thing that had changed. Item 158 records the mechanics.
+
+**Compared against the twenty-seventh, which is nearest by theme and is genuinely a different thing.** That
+pattern governs a figure whose context went unrecorded — a failure rate that moved with suite scope, a
+suite result that moved with a shell variable. In both of its instances **both readings were true** under
+their own conditions, and the fault was in not naming the condition beside the figure. Here the green was
+**false**: the subject had changed and the check examined an earlier compilation of it. A context that
+changes a true answer is not the same as a precondition whose failure makes the answer meaningless.
+
+**Compared against the twenty-third, which is closer in mechanism and still not it.** That one is a
+stand-in silently measured in place of the real artefact, and its corrective is to name what stood in for
+each part. The difference here is visibility: its placeholder was constructed by the measuring pass, which
+could have named it; this stand-in is a file carrying the same name and path as the real thing,
+distinguishable only by a timestamp, reached through an import statement that looks correct.
+
+**Not promoted, on population, established by looking rather than assumed.** A sweep for stale-build
+language returns eight hits under both instruments; four are unrelated senses of the word, and the other
+four are all one entry's own text from this same arc. **No prior instance exists.** The measurement pass
+whose first phase found a stale build is not a second instance — it *checked* the precondition and found it
+unmet before running, which is the discipline working rather than failing. One instance describes an event,
+which is the twenty-fifth's own decline reasoning applied unchanged.
+
+**The condition under which it reopens.** A second case where a check passes because an artefact it depends
+on, and does not refresh, was stale — here or in another instrument. The visibility distinction above is the
+residue to compare a second sighting against: a stand-in that announces itself belongs to the twenty-third,
+and one that is indistinguishable from the real artefact without checking a timestamp is what this candidate
+would be about.
