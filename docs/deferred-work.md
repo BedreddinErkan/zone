@@ -8688,10 +8688,21 @@ landed the other way, so the mechanical verdict and the substantive one agree an
 pressure at all. It stands unamended.
 
 **The judgment carries a qualification this entry must hold rather than delegate.** The behaviour matches
-the shape of the regression recorded here and does **not** match its mechanism, which is provably absent
-from the prompt that arm ran: computed directly against the rendered artefact, no withheld name is a strict
-prefix of any offered name. Nothing in the judgment says the collision this item's fix removed has come
-back. Item 100 carries the nearest candidate route and the arm that would separate it.
+the shape of the regression recorded here and does **not** match its mechanism, which is absent from the
+configuration that arm ran: no withheld name is a strict prefix of any offered name, recomputed over the
+seventeen withheld names and the two offered ones. **The clause that used to call the source of that
+computation a rendered artefact is corrected** — the audit files are a reconstruction, not the executed
+prompt, per item 150. **The conclusion is unaffected and was re-derived rather than assumed so**: the
+notice text those two inputs come from appears verbatim in the executed prompt as well, and the offered set
+was re-derived from the registry rather than read from either. Nothing in the judgment says the collision
+this item's fix removed has come back.
+
+**One route candidate has been withdrawn, and this item should not be read as having lost a finding.** A
+paragraph in item 100 proposed the patch-rules contradiction as the nearest candidate route; that block was
+never in the prompt, and item 100 retracts it. What remains open here is unchanged in kind and smaller by
+one in count. **The prompt-audit delta this entry relies on elsewhere is untouched by that correction** —
+the with-notice and without-notice reconstructions differ by exactly the notice's own length, and so do the
+two executed prompts, because the audit's omission is carried identically by both sides of the subtraction.
 
 **Bucket, re-decided rather than inherited a second time: it stays Blocked on data.** The competing reading
 was checked and rejected. Against the move: closing this item under its own current criterion requires a run in which
@@ -9493,31 +9504,34 @@ The strict-prefix suppression that made `run_command` a silent instruction under
 has no remaining instance here: what's left is an instruction standing next to its own contradiction in the
 same prompt, not an instruction with nothing to correct it.
 
-**That finding was established against the assemblers and has since been confirmed independently, at run
-time, from a prompt a paid run actually rendered.** The system-prompt dump kept beside item 90's second arm
-is the `question` configuration, one of the nine. It carries the full patch-rules block instructing three
-editing tools by name, and it carries a withheld list naming all three, a short distance earlier in the
-same text. Nothing about the sweep changes; what changes is that its result no longer rests on the
-assemblers alone.
+**A paragraph added here claiming a run-time confirmation and a behavioural instance is retracted in full,
+and the retraction is recorded rather than the text quietly removed.** It asserted three things, each false,
+and each is stated and corrected separately because they fail for different reasons.
 
-**And that configuration now has a candidate behavioural instance, which this item has never had before.**
-Item 149 judges a cell of that same run to have declined to search a task it could have answered with one
-command, opening its answer by stating that editing tools were unavailable and it could not patch
-regardless. The prompt it read instructs patching at length and declares patching withheld. That is the
-nearest artefact-supported route to the behaviour once item 90's own collision mechanism is excluded, and it
-is **explicitly a candidate rather than a demonstrated cause** — nothing here isolates it, and a prompt
-containing a contradiction is not evidence that the contradiction is what the model acted on.
+**First: that the finding had been "confirmed independently, at run time, from a prompt a paid run actually
+rendered" — false.** The system-prompt files kept beside item 90's second arm are not what any run executed.
+They are a separate reconstruction, assembled by the probe's own audit step, and that step omits the offered
+tool set. The assembler's own offered-set predicate treats an unset set as offered, deliberately, so every
+block conditioned on a write tool renders in the reconstruction and in none of the runs. Item 150 records
+the mechanism, the figures, and what does and does not survive it.
 
-**What would separate it.** An arm holding everything else constant while removing the patch-rules block
-from an answer-only configuration, two cells, at roughly a cent and a half each on that run's measured
-per-cell figure, plus the code to render a variant that does not exist today. Naming the arm is not
-proposing it.
+**Second: that the question configuration carries the patch-rules block — false.** That block has been
+gated on at least one of the three write tools being offered since `a8b40589`, which is the first of the six
+commits this entry's own closure paragraph already names. The built output the probe imports carries that
+gate and was built before the arm ran. Assembling the same configuration with the offered set supplied
+produces no patch-rules block at all.
 
-**This item stays closed, and the boundary is worth stating rather than left to inference.** Its closure
-covers its sweep and its count — nineteen configurations tested, nine defective, counted by tool — not a
-fix; the entry already records the conditional fix as feasible and deliberately not designed. A candidate
-instance does not reopen a completed count, and a demonstrated cause would belong to whichever entry runs
-the arm, not to this one.
+**Third: that this configuration is one of this item's nine live instances — false, and it contradicted
+this entry's own conclusion inside the entry.** The closure paragraph records every catalogued
+configuration and tool as resolved, with no bound left standing. The retracted paragraph asserted the
+opposite a few paragraphs earlier, and the check that would have caught it was reading to the end of the
+entry being edited.
+
+**What the retraction takes with it.** The candidate behavioural instance is withdrawn entirely, and so is
+the two-cell arm proposed to separate it: there is nothing to separate, because the block was never in the
+prompt. Item 149's verdict is untouched — it never rested on this — and item 151 records what the same
+artefacts do establish about that run. This item's own sentences stand exactly as they did before the
+retracted paragraph was written, and its bucket does not move.
 
 **A conditional fix is feasible for all of it, not designed here.** The full offered set is already in scope
 at the single production call site — already read there to derive two existing booleans — and all three
@@ -11430,11 +11444,16 @@ cell, and arm A ran a configuration this arm does not.
 knows.** This is the same behavioural shape as the original regression — non-action justified by a
 tool-absence citation — arriving by a different route. Item 90's own mechanism, a withheld bare tool name
 reading as covering the offered name it prefixes, is **provably absent** from the prompt this task ran
-under: computing that rule directly against the rendered artefact, over every withheld name and every
-offered name, returns zero withheld-root-covers-offered-extension pairs, and the bare name is not in the
-withheld list at all. The archetype preamble's own command instruction names the offered tool correctly
-too, so item 98's fix is live in the same text. T7's zero is therefore **not** evidence that the fixed
-collision persists. It is evidence that the behaviour is reachable without it.
+under: computing that rule over every withheld name and every offered name returns zero
+withheld-root-covers-offered-extension pairs, and the bare name is not in the withheld list at all. The
+archetype preamble's own command instruction names the offered tool correctly too, so item 98's fix is live
+in the same text. T7's zero is therefore **not** evidence that the fixed collision persists. It is evidence
+that the behaviour is reachable without it. **The phrase that used to call the computation's source a
+rendered artefact is corrected** — the audit files are a reconstruction that omits the offered tool set, per
+item 150 — **and the conclusion survives the correction on independent grounds, checked rather than
+asserted**: the notice carrying the withheld names appears verbatim in the executed prompt, the offered set
+was re-derived from the registry, and every line of the preamble this entry quotes is present in the
+executed prompt too.
 
 **What would settle what remains, in increasing order of what it costs.** The free judgment is made, and
 is recorded here. What is not settled is the route: which feature of this prompt produced the behaviour
@@ -11483,11 +11502,116 @@ item 90 for the arm and its criterion, item 97 for the preamble T7 ran under, it
 clarification path and for what this arm establishes about asking without a tool, item 100 for the
 candidate route, and item 94 for arm A's own figure on this task.
 
+## 150. Actionable now — the notice probe's prompt audit omits the offered tool set, so its own diagnostic files describe a prompt no run executed
+
+**What it is.** The probe writes two system-prompt files beside every capture, and they are the artefact
+every later pass reached for when it wanted to know what a run's prompt contained. They do not contain it.
+The audit assembles the prompt from a fixed input object that omits the offered tool set, while the real
+run computes that set from its own tool list and passes it. The assembler's offered-set predicate treats an
+unset set as **offered**, deliberately and with a comment saying so, which is the safe default for a
+production caller and the wrong one for a diagnostic. Every prompt block conditioned on a write tool
+therefore renders in the file and in none of the runs.
+
+**The figures, from assembling four ways against the same built output the probe imports.** In the audit's
+own form the two files come to roughly eleven thousand and eleven and a third thousand characters; in the
+run's form the same configuration produces roughly sixty-eight hundred and seventy-two hundred. The
+inflation is **4,095 characters**, identical on both sides. Both files on disk are byte-identical to the
+audit form, which is what proves the omission rather than inferring it from the difference.
+
+**Eight blocks, not three, and the count is a set difference rather than a sample.** Present in the
+diagnostic and absent from the executed prompt: the patch rules, the pre-existing-broken-file recovery, the
+apply-rolled-back recovery, the verification-warnings recovery, the user-edit-rejection block, the
+test-failures directive, the task-subagents block, and the search-first directive. A ninth block, prior run
+context, appears in both, the diagnostic carrying one extra bullet gated on a subagent tool. The arithmetic
+closes: audit-only paragraphs less the one differing paragraph, plus paragraph-separator accounting, equals
+the total inflation exactly. A first count of three came from probing six section names and reporting the
+sample as the total; the set difference is the instrument that answers this, and a needle test is not.
+
+**What survives this, and it matters more than the defect.** Item 90's prompt-audit delta is **untouched**:
+the with-notice and without-notice files differ by exactly the notice's own length, and so do the two
+executed prompts, because the omission is carried identically by both sides of the subtraction. That
+entry's instrument-is-wrong condition keyed on the delta remains a valid check. Item 144's sentences about
+this step concern whether it runs on request or unconditionally and how its header describes it, not what
+it contains — unaffected. The notice itself is built from the real offered set and appears verbatim in the
+executed prompt, so every conclusion drawn from the withheld list is sound. And every line of the question
+preamble that items 97 and the twenty-first pattern quote is in the executed prompt too. **The diagnostic
+was faithful about everything anyone checked and wrong about the rest**, which is why it misled without
+invalidating.
+
+**A second defect in the same step, independent of the first.** The two files are written to fixed names in
+the captures directory, so each arm overwrites the previous arm's. The files now on disk are the second
+arm's; seven of the nine captures beside them belong to the first arm, which ran before the gate that
+suppresses those blocks landed. What the first arm's prompt contained is therefore not recoverable from
+this directory, and nothing in the file names says so.
+
+**What it cost.** One fabricated finding — a behavioural candidate recorded in item 100 for a prompt block
+that was never in the prompt, retracted there — and a description error in three other entries and one
+pattern, each corrected in place with its conclusion checked separately.
+
+**The fix, specified.** Pass the offered tool set into the audit assembly. The probe already computes it,
+already asserts it equals an expected pair before proceeding, and already hands it to the notice builder a
+few statements later; the audit call is the one place it is dropped. Nothing needs to be measured or
+decided first. A second, smaller change is named rather than specified: give the two files the run stamp
+the capture files already carry, so an arm cannot overwrite another's.
+
+**Bucket: Actionable now**, decided with the two-way check. For: the fix is stated in this entry and needs
+nothing new learned first, which is this bucket's own bar — items 113, 129, 130 and 142 all sit here on
+exactly that shape, each naming a concrete correction to make. Against: Neither is for a structural fact
+with no fix proposed, and one is proposed; Blocked on data requires an observation that does not exist, and
+the observation is this entry.
+
+**Where the code lives:** the audit step and its input object are in `scripts/notice-regression-probe.mjs`,
+immediately before the arm loop; the offered-set predicate and every block gated on it are inside
+`assembleAgentSystemPrompt`, `llm/agentLoop.ts`. See item 100 for the retraction, item 90 for the delta
+that survives, item 144 for the other defect in this same step, and item 151 for what the same artefacts do
+establish.
+
+## 151. The system prompt in item 90's arm is identical for every task, which forecloses every prompt-variable explanation of the one task that differed
+
+**What it is.** Seven tasks ran in that arm; one made no tool calls and six searched. Every one of them
+read the same system prompt, character for character. Enumerated at the assembler's own call site, the
+inputs are repository-derived, capability-derived, plan-derived, or literal: the intro, framework lines,
+project memory and repository path are properties of the tree; the iteration ceiling, shell-availability
+flag, offered tool set, background block and tool-absence notice all derive from the one capability filter
+the probe builds once; the plan-progress, plan-annotation and answer-only fields derive from an execution
+plan the probe never passes; and the import summary, approval flag and summary format are not passed
+either. The only task-adjacent input is the archetype, which the probe hardcodes for all seven. **No field
+reaching the assembler is derived from the task string.**
+
+**What that forecloses, and it was free to establish.** No difference in prompt text can explain why one of
+seven behaved differently, because there was no difference in prompt text. Every hypothesis of the form
+"this block, or that instruction, produced the zero" is ruled out for this arm by construction rather than
+by measurement — including the one item 100 briefly carried. Ruling out a class of explanations at no cost
+is worth recording precisely because the alternative is spending an arm to rule out one member of it.
+
+**What remains, stated as the two surviving classes rather than as a hypothesis.** Task-level variables:
+the task string was the only input that varied, and the tasks differ in length, specificity and mood.
+Sampling-level variables: nothing in the probe or the loop pins a temperature, so two runs of the same cell
+are not required to agree.
+
+**A separate question that must not be folded into that one.** Whether the zero reproduces at all is
+unmeasured, and it is a different question from why it happened. Repeating the one task under an unchanged
+configuration is what answers it. Under perfect separation the exact one-tailed figure only reaches a
+conventional threshold at four cells per arm — three gives exactly a twentieth — so a design that could say
+anything needs at least four, at roughly six cents on the arm's own measured per-cell figure. A two-cell
+design answers nothing at any price, which is the finding worth more than the run.
+
+**Bucket: Neither**, decided with the two-way check. For: a structural fact recorded with no fix proposed,
+which is this bucket's own definition — items 87 and 107 sit here on that shape, each recording how
+something is built without prescribing a change. Against: Actionable now requires a fix specified in the
+entry, and nothing here is broken to fix; Blocked on data requires an observation that does not exist yet,
+and this one is already in hand.
+
+**Where the code lives:** the assembler call site is in `assembleAgentSystemPrompt`'s caller, `llm/agentLoop.ts`;
+the arm's own invocation, which varies only the task string and the run identifier, is in
+`scripts/notice-regression-probe.mjs`. See item 149 for the judgment on the task that differed, item 90 for
+the arm, and item 150 for the diagnostic defect found alongside this.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 149 to find out which ones still need something. No index of
+reader the trouble of reading all 151 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -11496,14 +11620,14 @@ first.
 **Closed** (58): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 111, 117, 120, 121, 126, 128, 134, 135, 137, 144, 149
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (8): 108, 113, 116, 129, 130, 138, 142, 148
+first (9): 108, 113, 116, 129, 130, 138, 142, 148, 150
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (10): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143
 
-**Neither — a structural fact recorded, with no fix proposed** (73): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (74): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
-119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147
+119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
@@ -12907,6 +13031,19 @@ investigator's own harness assembled and already has on disk. An observation and
 claim, and the cause is the one a later pass, reading the same artefact for a different reason, can still
 overturn.
 
+**A boundary this pattern's own instance needs, and it does not disturb the rule.** The artefact described
+here as the prompt those cells ran under is not that — it is a reconstruction the harness writes beside the
+captures, and it omits the offered tool set, so it renders blocks no run executed. Item 150 records the
+mechanism. **This pattern's conclusion is unaffected, checked line by line rather than assumed:** every
+sentence of the preamble it draws on — the mode header, the preferred listing form, the instruction against
+reading source, the iteration-budget line, and both worked examples — is present in the executed prompt as
+well. What the reconstruction added was elsewhere, in blocks about write tools these cells never held.
+**And one thing this pattern can no longer establish for itself:** the cells it concerns ran before the gate
+that suppresses those blocks, and the reconstruction is written to a fixed name that each later arm
+overwrites, so the file that pass read no longer exists. Whether it read a faithful artefact is undetermined
+and now unrecoverable — which strengthens rather than weakens the rule, since the artefact it prescribes
+reading turns out to need checking too.
+
 ## A twenty-second pattern: a text-matching assertion needs to be scoped to the specific region a fix touches, not the whole document that region sits inside
 
 Pinning a fix to one line inside a large, static system prompt, the first draft of the new test scanned the
@@ -13419,10 +13556,13 @@ being hard, not a check being skipped.
 ## A third candidate considered and not promoted: a fix verified live in the artefact does not retire the behaviour it was written for
 
 **The instance.** Item 90 recorded a regression, identified its mechanism, shipped a fix for that
-mechanism, and the fix is verifiably present in the prompt a later arm rendered — computing the rule
-directly against that artefact returns no remaining instance of the collision. A cell of that arm then
-produced the same behavioural shape anyway, judged in item 149. A verified fix, a verified absence of its
-target, and the behaviour regardless.
+mechanism, and the fix is verifiably present in the configuration a later arm ran — computing the rule over
+that configuration's withheld and offered sets returns no remaining instance of the collision. A cell of
+that arm then produced the same behavioural shape anyway, judged in item 149. A verified fix, a verified
+absence of its target, and the behaviour regardless. **The phrase that used to locate that computation in
+"the prompt a later arm rendered" is corrected**, per item 150: the probe's audit files are a
+reconstruction, not the executed prompt. The mechanism argument is unaffected — it reads only the notice and
+the offered set, both of which the executed prompt carries identically.
 
 **Compared against the thirteenth, which is the nearest by surface and is not the mechanism.** That pattern
 governs a string search standing in for a call-graph check — a lazy instrument, where presence or absence
@@ -13446,7 +13586,43 @@ conduct rather than correct anything. Population is one, and the one is not an e
 
 **The condition under which it reopens, split by which side the second instance lands on.** On the
 investigative side: a pass that does infer a behaviour retired from its mechanism being verified absent,
-and is wrong. That is the error this candidate would name, and it has not happened. On the subject side: if
-the arm item 100 describes demonstrates a second sufficient cause, then one behaviour with several
-sufficient causes is an established fact about the prompt, and it belongs to whichever entry runs that arm
-rather than beside the patterns.
+and is wrong. That is the error this candidate would name, and it has not happened. On the subject side: a
+demonstration that one behaviour has several sufficient causes would be an established fact about the
+prompt, and would belong to whichever entry demonstrated it rather than beside the patterns. **The arm this
+condition originally named as the demonstration has since been withdrawn** — item 100 retracts it, because
+the block it would have varied was never in the prompt — so the subject-side condition now waits on a
+demonstration nobody has designed, which is a weaker standing than it had when written.
+
+## A fourth candidate considered and not promoted: an instrument's own diagnostic artefact diverging from what the instrument measured, faithfully where checked
+
+**The instance.** The notice probe writes a reconstruction of its own prompt beside every capture. That
+reconstruction omits one argument, and the assembler treats the omission as permission, so the file carries
+eight blocks no run executed and four thousand-odd characters that were never sent. Every later pass that
+wanted to know what a run's prompt contained opened that file. One of them recorded a defect in the system
+that was only ever in the file. Item 150 has the mechanism and the figures.
+
+**The half that makes it interesting rather than merely embarrassing.** The reconstruction was correct
+about everything any conclusion actually rested on — the withheld-tool list, the offered set, every line of
+the archetype preamble two entries quote — and wrong only about blocks conditioned on tools the runs did
+not hold. An artefact wrong throughout gets caught the first time anyone checks it against anything. One
+that is right wherever it is checked and wrong where it is not survives every check it is given.
+
+**Compared against the twenty-first, and the relation is not resemblance.** That pattern's corrective is to
+read the instrument the subject was measured under before attributing an outcome to the subject, and it
+names the harness's own on-disk artefact as the thing to read. Following that corrective faithfully is what
+produced this error. That is the same relation the twenty-sixth has to the seventeenth — a corrective whose
+faithful execution causes the next failure — and it is precisely what would make this promotable rather
+than absorbable. **The twenty-first is not widened to cover it**, because widening would turn "read the
+artefact" into "read the artefact and verify the artefact", which is a different rule with a different cost
+and would make that pattern's own instance read as a failure when it was a success.
+
+**Not promoted, on population.** One artefact, one instrument, one moment. The twenty-sixth carried two
+independent instances on two surfaces when it was promoted; the twenty-fifth's own decline reasoning — a
+mechanism resting on its only instance describes an event — applies here unchanged. That five entries cite
+the artefact is evidence of how far it travelled, not of independent confirmation, and the twenty-sixth
+itself says so.
+
+**The condition under which it reopens.** A second instrument whose own diagnostic output diverges from
+what it measured while staying faithful on the fields some conclusion rested on. The selective fidelity is
+the part to match, not the divergence: a diagnostic that is simply wrong throughout reopens nothing, since
+ordinary checking catches it and the twenty-first already governs what to do about it.
