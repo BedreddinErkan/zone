@@ -8377,7 +8377,7 @@ recomputation of the offered tool set are all in the same file, inside the itera
 for the notice this leaves stale, and item 87 for the mode-revisability finding this residue sits
 beside.
 
-## 90. The tool-absence notice item 88 shipped suppressed shell use in a measured regression; the fix has now been re-run, and two of seven tasks fall short of the registered bar
+## 90. The tool-absence notice item 88 shipped suppressed shell use in a measured regression; the fix has now been re-run and re-scored against a revised bar, and one of seven tasks falls short — the one that made no tool calls at all
 
 **What was measured, and by what design.** Three arms, seven frozen ground tasks, `claude-sonnet-4-6`, one
 run per cell, question archetype (eighteen absent tools). Arm A: the notice's own registry-suppression seam
@@ -8632,12 +8632,72 @@ the criterion is wrong should say so, register the revised criterion, and only t
 are already on disk and re-scoring costs nothing, which is what makes the discipline worth keeping rather
 than convenient to skip.
 
+**The re-score under the revised criterion, run through the committed scorer rather than counted by hand,
+and in its own commit after the criterion was pushed.** Per-task shell-call counts, in task order: one,
+one, **two**, one, three, one, **zero**. Nine shell calls across the seven tasks; six of the seven used the
+shell. The task that scored zero on the discovery bar while running a test and a typecheck scores **two**
+here, which is the correction working. The task that made no tool calls at all scores zero on both bars,
+which is the residue.
+
+**The verdict against the three registered branches, read as written.** The closing branch requires every
+task non-zero and one task is zero, so **this item stays open** — on one task rather than two, and on the
+one task where the shell genuinely was not used. The instrument-is-wrong branch is clear on all three
+conditions: the offered set and the prompt-audit delta were checked at the original reading, and the
+re-pointed third condition was checked here — every task's scored shell count was compared against the raw
+call list in the same record and agreed on all seven, zero disagreements.
+
+**The comparison the criterion exists to make, made against recorded prose because the artefacts for the
+other side are gone.** The original arm B is recorded as zero shell calls on every task: seven tasks at
+zero. This run is one task at zero. Applying the revised criterion to both, arm B fails on seven and this
+run fails on one — which is the shape of the regression's absence, not its return. That comparison cannot
+be re-derived from captures: the arm A, B and C files were never tracked and are confirmed destroyed, so
+what is compared is this run's computed figures against the earlier arm's written ones, and it is worth
+exactly what that asymmetry allows.
+
+**The refusal ruling was exercised by real data for the first time, and changed no verdict.** The revised
+criterion counts attempted shell calls including refused ones. Only one refusal exists anywhere in the
+captures, on the OpenAI arm's third task, and that task holds two other shell calls; counting it or
+excluding it leaves the task non-zero either way. The ruling is therefore recorded as untested by
+consequence rather than as validated — it has been applied once and has never yet been the difference
+between two answers.
+
+**The surviving OpenAI captures re-scored through the same function, which is free and answers two things
+at once.** Per-task shell counts, in task order: one, one, three, one, two, one, one — ten shell calls,
+seven of seven tasks using the shell, one refusal. **Under the same revised criterion that arm would
+close**, where the pinned model's does not, on exactly one task. That is a difference between two models
+on the same seven tasks under the same shipped configuration, with every bound item 94 attaches to its own
+figures applying unchanged: one run per cell, and no OpenAI run has ever seen the pre-fix notice, so
+nothing here speaks to the fix's behavioural safety on that provider. **And separately: item 94's per-task
+discovery figures, hand-read when that entry was written, agree with the committed scorer on all seven
+tasks.** That is the first mechanical check those figures have had, it cost nothing, and it corroborates
+them rather than correcting them.
+
+**Bucket, re-decided rather than inherited: it stays Blocked on data.** The competing reading was checked
+and rejected. Against the move: closing this item under its own current criterion requires a run in which
+every task uses the shell, and no such observation exists — the same shape items 110 and 143 sit in the
+bucket for. For the move: the observation now exists and what remains is item 149's judgment, which is a
+decision rather than data, the shape item 38 and item 46 sit in Neither for. What decides it is that item
+149's judgment is explicitly not an exception to this item's criterion, so it cannot close this item; it
+can only motivate a further registered revision. Reading the bucket as satisfied by any conceivable
+revision would empty it, since every entry in it could be closed by rewriting its own bar.
+
 **Where the run's own artefacts are, and their durability.** The two capture files, carrying every tool call
 and the scored comparison, sit under the per-repo audits directory alongside the earlier OpenAI ones. That
 directory is gitignored, and this entry's own earlier passes record captures in exactly that place having
-been destroyed twice by temporary-directory clears. The figures above are therefore recorded here rather than
+been destroyed twice by temporary-directory clears. Checked directly this pass rather than assumed: nothing
+under that directory is in the index, no commit in any ref has ever touched it, and both `check-ignore`
+instruments agree it is ignored. The figures above are therefore recorded here rather than
 left as a pointer to files that may not survive; the predictions they were judged against are tracked, in
 `scripts`, and will.
+
+**A fix shape for that durability, proposed and deliberately not implemented.** What a later pass needs
+from a capture is the per-task counts and the comparison, not the transcripts — the transcripts are what
+makes the directory too large and too sensitive to track, and they are also the part no re-score consumes.
+So: have the probe write a second, small, tracked artefact beside each capture, carrying the scored
+per-task figures, the predictions they were compared against, the model, and the commit the run was made
+at, with no command output and no answer text. That is a change to the instrument and it is not made here,
+because this pass registered and applied a criterion and adding an unrelated output path to the same
+instrument in the same arc is how a measurement pass turns into a feature pass.
 
 **A second prediction was registered against this item's mechanism, from a different surface — and it has
 moved to item 143.** That sentence is true and is kept rather than deleted, because the prediction's
@@ -9065,6 +9125,12 @@ before the comparison was written. This sits squarely in this document's own inv
 category, matching the boundary item 95 drew for the nineteenth: both instances are facts about how this arc
 wrote its own comparisons, not facts about the subject being measured. Accepted as the twentieth pattern,
 below. Essay count becomes twenty.
+
+**Every per-task discovery figure in this item was hand-read, and all seven have since been checked
+mechanically.** Item 144's scorer did not exist when these cells were written; run over the same seven
+captures afterwards, it returns the identical count for every task. The figures were right, and they are no
+longer only as good as one reading of a capture. The captures themselves remain untracked, so what is
+durable is this record rather than the artefact behind it.
 
 **Where this leaves items 90 and 91.** Both remain exactly as they were before this pass — item 90 Blocked
 on data, item 91 Closed with its own unmeasured-behaviour caveat intact. A same-tasks run on a different
@@ -11219,9 +11285,10 @@ invoked; the other zero is a task that made two shell calls, neither discovery-s
 because item 90 reports one number for two different states and this is the state that number cannot
 describe.
 
-**Why it is not a footnote.** Item 90's revised criterion counts shell calls per task, and T7 is the only
-task in the arm at zero. Whatever this zero means is therefore the whole of what stands between that item
-and its closure — which makes it too load-bearing to leave inside a parenthesis in another entry.
+**Why it is not a footnote.** Item 90's revised criterion counts shell calls per task, and the re-score
+through the committed scorer confirms T7 is the only task in that arm at zero — the other six run between
+one and three shell calls each. Whatever this zero means is therefore the whole of what stands between that
+item and its closure, which makes it too load-bearing to leave inside a parenthesis in another entry.
 
 **The evidence toward a correct tool-free answer.** The task is genuinely underspecified: two words, one
 of them ambiguous between an API key, a displayed key, and a stored key. The answer names that ambiguity
