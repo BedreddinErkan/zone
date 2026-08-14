@@ -25,9 +25,19 @@
  * shipped default behaviour of buildToolAbsenceBlock itself, so plain arm B already
  * exercises it. Recovered verbatim from the session transcript that built it
  * (notice.mjs, classify.mjs, promptdiff.mjs — the analysis and prompt-audit logic
- * live in this file too, see buildCaptureRecord and the --audit-prompt step) after
+ * live in this file too, see buildCaptureRecord and the prompt-audit step in main() —
+ * it runs unconditionally on every invocation (zero model calls, two file writes)
+ * rather than behind a flag; an earlier version of this comment described one, and
+ * that was wrong rather than merely stale — nothing in main() ever parsed it) after
  * the original captures were destroyed twice by /tmp clears; this file exists so a
  * third reconstruction is never needed.
+ *
+ * SCORING (item 144): the discovery metric used to exist only as prose in
+ * notice-regression-predictions.example.json, attributed to a classify.mjs not in
+ * this repo. isDiscoveryCommand/scoreTaskDiscovery/compareDiscovery below are that
+ * definition now, with every reading the prose left open resolved and commented at
+ * the point of decision. main() scores every run's own results and writes the
+ * comparison into the same JSON it already writes, under a "scored" key.
  *
  * MODEL PINNING MATTERS: arms A, B, and C were all measured on claude-sonnet-4-6.
  * --provider/--model default to anthropic/claude-sonnet-4-6 for exactly that reason
@@ -173,6 +183,121 @@ const OPENAI_MIN_OUTPUT_TOKENS = 16;
 export function buildCreditProbeParams(model, provider) {
   const maxTokens = provider === "openai" ? OPENAI_MIN_OUTPUT_TOKENS : 1;
   return { model, messages: [{ role: "user", content: "hi" }], max_tokens: maxTokens };
+}
+
+/**
+ * Item 144: the discovery-command definition, formerly prose only ("ls, find, fd, grep,
+ * rg, git grep, git ls-files — the DISCOVERY regex in the recovered classify.mjs logic")
+ * attributed to a file this repo does not have. This IS that definition now — a single
+ * place to change what counts, and the mutation target for whether the set is complete.
+ */
+export const DISCOVERY_BINARIES = ["ls", "find", "fd", "grep", "rg", "git grep", "git ls-files"];
+
+// Derived once, off DISCOVERY_BINARIES itself — never hardcoded separately — so the
+// array is the one source of truth for both halves of the check below. An entry added
+// here (in either direction) changes what isDiscoveryCommand recognizes without any
+// change to its body.
+const DISCOVERY_SINGLE = new Set(DISCOVERY_BINARIES.filter((b) => !b.includes(" ")));
+const DISCOVERY_COMPOUND = new Set(DISCOVERY_BINARIES.filter((b) => b.includes(" ")));
+
+/**
+ * Item 144: whether a run_command_readonly command string is discovery-shaped. Splits on
+ * shell chain/pipe operators and checks only the LEADING token(s) of each segment —
+ * never a whole-string scan. The prose gave no matching rule at all; a whole-string
+ * regex was considered and rejected because it is wrong in two different ways, each
+ * absent from every real capture this was built against but both real risks: a
+ * discovery word inside a quoted search argument (`npm test -- "please find the failing
+ * test"` — npm test is invoked, "find" sits inside a quoted string) and a discovery word
+ * as a word-boundary-delimited substring of a path or flag unrelated to the invoked
+ * command (`cat logs/find-output.log` — cat is invoked, "find" is delimited by / and -
+ * inside a filename). A bareword regex reads both as discovery=true; both are false.
+ */
+export function isDiscoveryCommand(command) {
+  const segments = String(command ?? "").split(/\|\||&&|\||;/);
+  for (const seg of segments) {
+    const tokens = seg.trim().split(/\s+/).filter(Boolean);
+    if (tokens.length === 0) continue;
+    if (DISCOVERY_COMPOUND.has(tokens.slice(0, 2).join(" "))) return true;
+    if (DISCOVERY_SINGLE.has(tokens[0])) return true;
+  }
+  return false;
+}
+
+/**
+ * Item 144: whether a run_command_readonly call was refused by checkCommandSafe before
+ * ever executing, as opposed to executing and failing. Matches the literal prefix
+ * toolExecutor.ts writes for a block ("Command blocked: ...") — a positive signal,
+ * confirmed by reading both exit-header sites there, rather than the absence of the
+ * "[exit_code=" prefix an executed call (success OR failure) always carries. A real
+ * captured call fails with exit_code=2 and is still a genuine, executed rg search —
+ * conflating "failed" with "refused" would misclassify it.
+ */
+export function isRefusal(resultHead) {
+  return String(resultHead ?? "").startsWith("Command blocked:");
+}
+
+/**
+ * Item 144: scores one task's discovery behaviour from its captured toolCallLog. Two
+ * readings the prose left open, resolved here rather than left implicit:
+ *   - UNIT: one per qualifying CALL, not one per qualifying segment within a call. A
+ *     call piping two discovery binaries together (`find . | grep foo`) counts once.
+ *     The prose's own word is "calls"; nothing in it or in the historical figures
+ *     ("fifteen shell calls ... ten of them discovery") counts one pipeline twice. The
+ *     alternative — counting per matching segment — was considered and rejected on
+ *     that basis.
+ *   - SUCCESS: counted regardless of the call's own `success` flag. A failed-but-
+ *     genuine rg invocation is discovery-shaped by what was invoked, not by whether it
+ *     succeeded — a different question, which isRefusal answers on its own terms.
+ * Returns the derived count alongside the raw calls it came from — the derived field
+ * must never be the only record of what happened (item 128's lesson, applied here).
+ */
+export function scoreTaskDiscovery(toolCallLog) {
+  const allShellCalls = (toolCallLog ?? []).filter((c) => c.tool === "run_command_readonly");
+  const discoveryCalls = allShellCalls.filter((c) => isDiscoveryCommand(c.args?.command));
+  const refusedCalls = allShellCalls.filter((c) => isRefusal(c.resultHead));
+  return {
+    discoveryCount: discoveryCalls.length,
+    discoveryCalls: discoveryCalls.map((c) => c.args?.command ?? ""),
+    allShellCalls: allShellCalls.map((c) => c.args?.command ?? ""),
+    refused: refusedCalls.length > 0,
+    refusedCalls: refusedCalls.map((c) => c.args?.command ?? ""),
+  };
+}
+
+/**
+ * Item 144: mechanical comparison of scored results against the predictions file
+ * loadPredictions returns. `discoveryCount` and `anyRefusal` are compared directly —
+ * both are derivable purely from toolCallLog. `falseNegativeResolves` is NOT
+ * auto-judged: the two real T2/T4 summaries this was built against resolve their false
+ * negatives in free prose ("I found problemWordsPresent in: ..." / "the relevant
+ * implementation is under src/tools") that a regex cannot safely interpret without
+ * risking a wrong answer presented as a measurement. Surfaced for a human to read
+ * instead, explicitly marked as such rather than silently skipped.
+ */
+export function compareDiscovery(predictions, scoredResults) {
+  const perTask = {};
+  let anyRefusalActual = false;
+  for (const r of scoredResults) {
+    const pred = predictions.perTask?.[r.taskId];
+    const predictedCount = pred?.discoveryCount;
+    if (r.refused) anyRefusalActual = true;
+    perTask[r.taskId] = {
+      predictedDiscoveryCount: predictedCount ?? null,
+      actualDiscoveryCount: r.discoveryCount,
+      discoveryMatch: predictedCount === undefined ? null : predictedCount === r.discoveryCount,
+      predictedFalseNegativeResolves: pred?.falseNegativeResolves ?? null,
+      actualSummary: r.summary ?? null,
+      requiresHumanJudgment: pred?.falseNegativeResolves !== undefined && pred?.falseNegativeResolves !== null,
+    };
+  }
+  return {
+    perTask,
+    anyRefusal: {
+      predicted: predictions.anyRefusal ?? null,
+      actual: anyRefusalActual,
+      match: predictions.anyRefusal === undefined ? null : predictions.anyRefusal === anyRefusalActual,
+    },
+  };
 }
 
 // ---------- Not pure: makes a real, billed call ----------
@@ -356,7 +481,26 @@ async function main() {
 
   const totCost = results.reduce((s, r) => s + (r.costUsd ?? 0), 0);
   console.error(`\n[notice-arm] TOTAL cost=$${totCost.toFixed(4)} over ${results.length} task(s)${stoppedOnCostGate ? " (stopped on cost gate)" : ""}`);
+
+  // Item 144: score every task's own results and compare against the predictions this
+  // run was required to load before it started. Final write, after the per-task
+  // incremental ones above, so a crash mid-run still leaves the unscored raw data.
+  const scoredResults = results.map((r) => ({
+    taskId: r.id,
+    summary: r.summary,
+    ...scoreTaskDiscovery(r.toolCallLog),
+  }));
+  const scored = compareDiscovery(predictions, scoredResults);
+  writeFileSync(outFile, JSON.stringify({ arm: ARM, model, provider, offered, predictions, results, scored }, null, 2));
   console.error(`[notice-arm] captures written to ${outFile}`);
+  for (const [taskId, s] of Object.entries(scored.perTask)) {
+    const matchStr = s.discoveryMatch === null ? "no prediction" : s.discoveryMatch ? "MATCH" : "MISMATCH";
+    console.error(`[notice-arm] scored ${taskId}: discovery=${s.actualDiscoveryCount} (predicted ${s.predictedDiscoveryCount ?? "?"}, ${matchStr})`);
+  }
+  console.error(
+    `[notice-arm] anyRefusal: actual=${scored.anyRefusal.actual} ` +
+    `predicted=${scored.anyRefusal.predicted ?? "?"} match=${scored.anyRefusal.match}`
+  );
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
