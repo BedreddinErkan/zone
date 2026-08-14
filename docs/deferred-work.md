@@ -10518,20 +10518,19 @@ the assertions together, not the assertions alone.
 and it would break the fifteen assertions that currently document the behaviour. Whether the consistency is
 worth that is not this entry's call.
 
-## 134. The tier-archetype mismatch marker has zero records, and zero is consistent with two incompatible explanations
+## 134. Closed — the mismatch marker fires and persists; the zero was an absence of occasions, not of persistence
 
 **What it is.** Item 115's correction establishes that the archetype marker reaches the sink and holds fifty
 records. Its sibling, the tier-archetype mismatch marker, holds none. That is consistent with "it has never
 fired" and equally consistent with "it fires and cannot persist," and this entry exists to stop either being
 recorded as the answer — which is the error item 115 made one level up.
 
-**Why the question is answerable but not answered.** The firing condition is narrow and fully readable: the
+**Why the question was answerable, and now answered.** The firing condition is narrow and fully readable: the
 loop must not be a subagent loop, the tier must be explicitly forced to simple, a classification archetype
 must be present, and that archetype must be one of the four the dispatcher treats as needing exploration.
-Every one of those is a deliberate act rather than an ambient condition, so "never fired" is the more likely
-of the two explanations — likely is not measured, and the marker travels the same helper and the same shield
-as the archetype marker, so there is no mechanism on the persistence side that would treat it differently.
-Naming the likelier answer is not the same as having it.
+Every one of those is a deliberate act rather than an ambient condition, so "never fired" was the more likely
+of the two explanations — and the sentence that followed, that likely is not measured, was true when written
+and has now been discharged by a run rather than by more reasoning.
 
 **What would settle it.** One run with the tier forced to simple, on a task whose classification carries one
 of those four archetypes, followed by a look at the sink. **Not under the TUI specifically** — the entry said
@@ -10566,12 +10565,37 @@ than a model judgement. The condition reads that field without regard to its pro
 tested faithfully; what such a run cannot speak to is how often the condition arises in ordinary use, which
 the condition's own shape answers instead.
 
-## 135. Whether the probe's own capture sees a real emission has never been exercised, and only a paid run can exercise it
+**The result, read against the rule as committed and not against a fresh interpretation.** One run, headless,
+tier forced to simple, fallback archetype configured, key deliberately invalid so nothing could be billed.
+The sink written by that run — a temp one, so the real sink's count was unchanged before and after — holds
+**one mismatch record**, carrying a forced tier of simple, a classified archetype of refactor, and a list of
+thirteen blocked tools. That is the rule's first branch verbatim: the record is present, so persistence works,
+so the historical zero was an absence of occasions. **Closes.** The prediction registered before the run was
+that the marker fires and persists, and it was right.
+
+**The positive controls, including the one that did not fire.** The tier-constraints marker is present in the
+same run, which is what proves the shield was installed on a non-interactive run and that the region was
+reached — the load-bearing control, since the whole discrimination rests on it. The archetype marker is
+**absent**, and that is not a failure of the rule: it is emitted when the loop closes, and this loop died at
+its first call because the key was invalid, so it never reached its own close. The rule only needed that
+control on the branches where the mismatch record was missing, and that branch did not occur.
+
+**Two things the run surfaced that were not the question.** The daily-cap status marker appears in the same
+run with a resolved cap and a spend reading, which is independent corroboration that the cap is resolved and
+checked inside the loop — the live half of item 140. And the tier-constraints payload reports its tier as
+medium while the limits it reports alongside are the simple tier's: it is naming the classification's tier,
+not the forced tier that actually produced the limits, and it carries no field for the latter. A reader of
+that record alone cannot tell a forced run from an unforced one. Recorded as observed; no fix proposed and
+none attempted here.
+
+## 135. Closed — the capture sees a real emission on the authentication-error path, and the run cost nothing
 
 **What it is.** Item 128's fix reads classifier fallback markers by patching the console inside the probe.
-Every test behind it is synthetic — the wire shape is real, taken from the emitting function's own two
-argument call, and the derivation over it is pinned by five mutations, but no real emission has ever passed
-through that capture.
+Every test behind it was synthetic — the wire shape real, taken from the emitting function's own two argument
+call, and the derivation over it pinned by five mutations, but no real emission had passed through that
+capture. **The entry's own title was wrong on its second half**, and the correction is worth stating because
+it decided the whole shape of the measurement: a paid run was not required. An invalid key induces the error
+reason for nothing, because a provider rejects it at authentication before metering any tokens.
 
 **Why the gap is real rather than pedantic, and why item 115 does not close it.** The historical evidence
 that these markers can be captured at all comes from the TUI's shield, which is a different mechanism
@@ -10619,6 +10643,28 @@ error paths: an authentication rejection is the shortest route from call to emit
 between. A timeout or a parse failure travels further before emitting and is not covered by this measurement.
 On the evidence a run of this shape can produce, **this item closes for the authentication-error reason
 specifically, never for the general claim that the capture works.**
+
+**The result, read against the rule as committed.** One probe run over a single task against an invalid key.
+The row carries a reasons array holding exactly the error reason, a task-hash flag of false, an unattributed
+flag of false, and a derived kind of error — the prediction registered beforehand, matched in every field
+including the one that could not have closed the item on its own. Both halves of the closing condition hold:
+the array is non-empty and the attribution check passed. **Closes**, on the terms set in advance.
+
+**The control did its job, and is recorded because it is what makes the result readable.** The row's reasoning
+text carries the authentication failure's own message, which proves execution reached the statement before the
+emit. Had the array been empty beside it, that would have been a capture failure rather than an absent
+emission — the false negative this seam could have produced, and the reason the control was fixed in advance
+rather than improvised afterwards. The run also retried once, the transport-fallback path doing what it does,
+so the recorded row reflects the second call and the per-iteration capture reset was exercised incidentally.
+
+**The boundary, unchanged from the pre-committed version and restated so a later reader does not overreach.**
+This measures the shortest error path only. Truncation, an invalid tier value and a low-confidence fallback
+remain unexercised and cannot be induced without a source change; a timeout or a parse failure travels further
+between emission and read-back and is not covered. What is now established is that a real emission crosses
+this capture and lands attributed on the row — not that every emission does.
+
+**Cost, since the entry originally guessed one.** Nothing. The probe's own accounting reported zero for the
+call and no usage row was written, both checked after the run rather than assumed from the mechanism.
 
 ## 136. The probe hand-copies a module-private hash and its normalisation, and nothing detects drift
 
@@ -10763,12 +10809,12 @@ priority ordering" cautions against ranking by importance, which this section do
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (54): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 111, 117, 120, 121, 126, 128, 137
+**Closed** (56): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 111, 117, 120, 121, 126, 128, 134, 135, 137
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (7): 108, 113, 116, 129, 130, 138, 142
 
-**Blocked on data** — closing requires an observation that doesn't exist yet (11): 1, 4, 18, 23, 57, 63, 75, 90, 110, 134, 135
+**Blocked on data** — closing requires an observation that doesn't exist yet (9): 1, 4, 18, 23, 57, 63, 75, 90, 110
 
 **Neither — a structural fact recorded, with no fix proposed** (70): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
