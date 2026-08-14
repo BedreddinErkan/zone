@@ -8377,7 +8377,7 @@ recomputation of the offered tool set are all in the same file, inside the itera
 for the notice this leaves stale, and item 87 for the mode-revisability finding this residue sits
 beside.
 
-## 90. The tool-absence notice item 88 shipped suppressed shell use in a measured regression, fixed by a rule this pass never re-ran behaviourally
+## 90. The tool-absence notice item 88 shipped suppressed shell use in a measured regression; the fix has now been re-run, and two of seven tasks fall short of the registered bar
 
 **What was measured, and by what design.** Three arms, seven frozen ground tasks, `claude-sonnet-4-6`, one
 run per cell, question archetype (eighteen absent tools). Arm A: the notice's own registry-suppression seam
@@ -8467,6 +8467,10 @@ survives all of that and bounds what the result can be attributed to.
 
 **Two of those three repairs are done, and the prediction is re-registered here.** The scorer landed at
 `a430b3da` and `4d6be02a`, item 144. The re-registration and its rule are this paragraph and the next.
+**All three are now done and the run has happened** — this entry's own closure paragraph listed them as
+prerequisites, which was true when written; what remains is no longer a repair or a run but the question the
+result raised, stated in the outcome paragraphs below. The cost figure that paragraph estimates is superseded by the measured one:
+the arm billed twenty-nine cents, against the twenty-nine to thirty-six predicted.
 
 **The primary prediction, restated against a target that exists.** Every one of the seven tasks issues at
 least one discovery-shaped shell call, and both named false negatives resolve — the symbol reported absent is
@@ -8497,6 +8501,51 @@ oversight.
 preamble's own tool-mention fixes landed together, so a single arm cannot attribute any result to either one.
 A non-zero discovery count on every task is consistent with the notice fix working, with the preamble fixes
 working, and with both — and this design cannot separate them.
+
+**The run happened, and the rule as written says this item stays open.** Seven frozen tasks, arm B against
+the current build, on the pinned model, predictions committed at `7756e936` before the first billed call.
+Per-task discovery counts: one, one, **zero**, one, three, one, **zero**. Two tasks show zero, so the rule's
+second branch fires and this item does not close. That branch says such an outcome is a real result about the
+shipped configuration rather than a failed measurement, and it is recorded as one.
+
+**The instrument-is-wrong branch did not fire, checked before reading the result as behavioural.** The
+offered set was exactly the two tools the probe asserts, or it would have aborted; the prompt audit reported
+the two arms differing by precisely the notice's own length; and every task's scored count was re-derived
+from the raw call list the same record carries and agreed with it. No refusals occurred.
+
+**Both false negatives resolved, judged by a reader against item 144's recorded ruling rather than by the
+scorer.** The task whose symbol the original arm B reported absent from the repository returned it found in
+four files — the definition, two call sites and their two test files. The task whose file the original arm B
+said it could not locate returned the correct path, its function, and an accurate account of what that
+function already does. That half of the prediction holds.
+
+**What the two zeros actually are, because the metric reports one number for two different states, and
+neither is the state this item recorded.** The regression this entry measured was shell abandonment: the
+original arm B issued zero shell calls on every task. This run issued nine shell calls across the seven, and
+six of the seven tasks used the shell at all. The first zero is a task that made two shell calls — a test
+run and a typecheck — neither of them discovery-shaped, so it scores zero on a discovery metric while
+plainly not having abandoned the shell. The second is a task that made no tool calls at all and answered in
+one iteration. Against the historical figures this entry already records — arm A at fifteen shell calls with
+ten discovery, arm B at zero and zero — this run's nine and seven sit far closer to arm A than to the arm B
+it reproduces the configuration of.
+
+**That is a finding about this item's own decision rule, and it is recorded as a finding rather than acted
+on.** The rule's criterion is a non-zero discovery count per task; the regression it was written to detect is
+whether the agent uses the shell at all. For five of seven tasks the two coincide. For the test-and-typecheck
+task they diverge, and the rule returns "stays open" for a task that did not exhibit the regression. **This
+is deliberately not treated as licence to re-score the existing captures under a widened criterion.** The bar
+was registered before the run precisely so it could not be adjusted after seeing the numbers, and adjusting
+it now — even with a good argument — would forfeit exactly what registering it bought. A pass that believes
+the criterion is wrong should say so, register the revised criterion, and only then re-score; the captures
+are already on disk and re-scoring costs nothing, which is what makes the discipline worth keeping rather
+than convenient to skip.
+
+**Where the run's own artefacts are, and their durability.** The two capture files, carrying every tool call
+and the scored comparison, sit under the per-repo audits directory alongside the earlier OpenAI ones. That
+directory is gitignored, and this entry's own earlier passes record captures in exactly that place having
+been destroyed twice by temporary-directory clears. The figures above are therefore recorded here rather than
+left as a pointer to files that may not survive; the predictions they were judged against are tracked, in
+`scripts`, and will.
 
 **A second prediction was registered against this item's mechanism, from a different surface — and it has
 moved to item 143.** That sentence is true and is kept rather than deleted, because the prediction's
