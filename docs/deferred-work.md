@@ -8424,38 +8424,65 @@ here generalises past the seven frozen tasks and the one archetype they were run
 **Unverified, and this matters more than any figure in this item: the fix landed on master and its
 behavioural effect has never been measured.** The re-run this arm's own design calls for — the same seven
 tasks, `claude-sonnet-4-6`, the same arm-B configuration, against the shipped fix — was never executed;
-Anthropic credit was exhausted before it started, confirmed persistent by retry. A same-tasks run on a
-different model does not close this — see item 94. A prediction was registered before the fix landed:
-per-task discovery-command counts matching arm C's own measured counts, and both false negatives resolving.
-That prediction stands unchecked. A reader should not infer the regression is closed because the fix is on
-master — closing this item requires the observation this paragraph names, and that observation does not yet
-exist.
+Anthropic credit was exhausted before it started, confirmed persistent by retry. **That sentence was true
+when written and is left standing as history; it is no longer why this item is open** — see the blockers
+paragraph below. A same-tasks run on a different model does not close this — see item 94. A prediction was
+registered before the fix landed: per-task discovery-command counts matching arm C's own measured counts,
+and both false negatives resolving. That prediction stands unchecked. A reader should not infer the
+regression is closed because the fix is on master — closing this item requires the observation this
+paragraph names, and that observation does not yet exist.
 
-**A second prediction registered against this item's mechanism, from a different surface, and equally
-unmeasured.** The regression this item records is a naming effect: a name that appears in the prompt is read
-as covering more than it says, and the agent narrows its behaviour to match. Item 93's fix at 6f9c9a69 puts
-a named example into twelve of the seventeen catch-all refusal texts — "for example `ls -la`", "such as
-`find . -type f`" — deliberately phrased as an example rather than as the remedy, precisely because of what
-this item measured. The prediction registered before any observation exists: naming one rephrasing may still
-read as the exhaustive permitted set, and reduce the count of distinct whitelisted binaries an agent reaches
-for after a refusal, relative to a text naming none. **Confirming signal:** post-refusal commands concentrate
-on the exact binary the text named, distinct-binary count at or near one, on tasks where more than one binary
-would serve. **Refuting signal:** distinct-binary count after a refusal holds or rises against the pre-fix
-text, and the named binary is not over-represented among what follows. **The confounder that would make
-either reading unsafe:** the new texts are also shorter and plainer than the raw-pattern texts they replaced,
-so any measured difference could belong to length or readability rather than to the naming, and separating
-them needs an arm that varies only whether the example is present while holding length roughly constant.
-None of this has been run. Anthropic credit is zero, the same exhaustion that left this item's own primary
-re-run unexecuted, and this prediction stands in exactly the same state — registered, not evidence, and not
-to be read as either confirmation or refutation of the anti-narrowing choice item 93 made.
+**The prediction was registered, and it cannot be checked as registered — the referent it names was never
+recorded.** The sentence above is true: a prediction exists, and it precedes the fix. What it compares
+against does not. Arm C's per-task discovery counts appear in no artefact; which three of the seven tasks
+arm C covered is stated nowhere; and the raw captures were never tracked at all — nothing under the per-repo
+state directory is in the index, no commit in any ref has touched the capture directory, and both
+`check-ignore` instruments agree that directory is ignored, which is the twenty-fifth pattern's negative
+case rather than an instance of it. What survives is prose: an arm-A aggregate of fifteen shell calls with
+ten discovery, arm-A per-task totals in item 94, and one arm-C data point. A prediction whose comparison
+side was never captured reads as checkable and is not, and nothing in the sentence registering it signals
+that.
+
+**The blockers, corrected — credit is not among them.** Three things stand between this item and its
+observation, and none is a balance. The referent is missing, per this entry's own referent paragraph. The
+prompt moved:
+eight tool-mention commits changed the question archetype's own preamble after the prediction was
+registered, and the change sits on this item's own mechanism — the preamble's instruction moved from the
+withheld tool name to the offered one. And the instrument has no scorer, per item 144. Item 110 made this
+same correction to its own credit framing first; this entry follows it.
+
+**The confound, recorded before any spend so it is not rediscovered afterwards.** A re-run today varies the
+notice and the preamble together, because both were fixed between the arms and now. A single arm cannot
+separate them: a count matching arm C and a count exceeding it are both consistent with either fix having
+done the work. The design that would separate them is a two-arm run holding the preamble at its current
+text while varying only the notice's suppression rule — which requires re-introducing the pre-fix notice
+condition by construction, since it no longer exists in the code. That design is named here, not proposed.
+
+**What would close this item.** The observation, plus three repairs first: re-register the prediction
+against something that exists — non-zero discovery calls on every task and the two named false negatives
+resolving is checkable where a match against arm C's counts is not; give the primary prediction a decision
+rule in the shape items 134 and 135 now carry; and give the instrument a scorer. Then one arm, seven tasks,
+on the pinned model, at roughly the measured per-arm figure this entry already records. The confound above
+survives all of that and bounds what the result can be attributed to.
+
+**A second prediction was registered against this item's mechanism, from a different surface — and it has
+moved to item 143.** That sentence is true and is kept rather than deleted, because the prediction's
+provenance is this item: the regression recorded here is a naming effect, and item 93's refusal-example
+choice was made in advance because of what this item measured. What moved is the prediction itself, with its
+confirming signal, its refuting signal and its confounder intact. It moved because its blocking condition is
+not this item's: it has a real decision rule and no instrument whatever, where this item has an instrument
+and a broken referent, and one bucket line cannot describe both.
 
 **Where the code lives:** the notice is `llm/toolAbsenceNotice.ts`, `buildToolAbsenceBlock`; the
 prefix-suppression rule is inside it. The splice fix is in `assembleAgentSystemPrompt`, `llm/agentLoop.ts`.
 See item 88 for the notice this regression came from, and item 89 for a different, unrelated way the same
 notice can go stale, and item 93 for the second surface this item's own mechanism was applied to in advance.
-See item 110 for the other pending measurement in this arc: it carries its own registered predictions,
-follows this item's precedent for recording them, and is blocked on the identical constraint — Anthropic
-credit at zero. A pass that acquires credit should read both together rather than either alone.
+See item 110 for the other pending measurement in this arc: it carries its own registered predictions and
+follows this item's precedent for recording them. **The clause that used to end this sentence — that both
+are blocked on the identical constraint, Anthropic credit at zero — is false in both halves and is
+rewritten.** Item 110's own blocker is dollar cost, which that entry corrected for itself; this item's are
+the three named above. The two are still worth reading together, and a pass with budget should — but budget
+is not what either is waiting on.
 
 ## 91. Closed — `run_command_readonly`'s description named no discovery binary, at either of the two sites that state its capability
 
@@ -8519,7 +8546,9 @@ independent statement of this same capability, untouched by this item; its white
 redirects the agent to `run_command`, which several archetypes — including the one item 90 measured — do
 not offer. Its own behavioural effect is unmeasured on `claude-sonnet-4-6`, as is the scope guard's; neither
 this fix nor item 90's has been re-run against that model, for the same reason — Anthropic credit exhausted
-at the time of both. See item 94: a different provider does not supply this.
+at the time of both. **That was true at the time and stays; it is no longer the reason either is unmeasured**
+— item 90's blockers are now a missing referent, a moved prompt and an unscored instrument, and this fix's
+own re-run inherits the second of those. See item 94: a different provider does not supply this.
 
 **Where the code lives:** `toolDefinitions.ts`, the `run_command_readonly` tool entry; `commandToolLine`
 inside `assembleInvestigationSystemPrompt`, `agentLoop.ts`; pinning tests in
@@ -8916,9 +8945,12 @@ each provider's own expected value. Verified working on the one provider this fi
 in isolation — item 94's own T2 and T4 both completed on the first attempt after this fix landed. That is
 not the same claim as the instrument having served its original purpose: every run since `08ceb75e` has been
 against OpenAI, item 90's own pending observation needs `claude-sonnet-4-6`, and this fix did not touch the
-Anthropic branch at all — that path was never blocked by this bug, only by the same credit exhaustion that
-has blocked it since before the instrument existed. The bug is resolved; the instrument has still never once
-produced the observation it exists to produce.
+Anthropic branch at all — that path was never blocked by this bug. **The clause that followed, that credit
+exhaustion has blocked it since before the instrument existed, is written in the present and is false in the
+present; it is rewritten.** Credit did block it, at the time this entry was written. What blocks it now is
+item 90's own set: a prediction whose referent was never recorded, a prompt that moved after registration,
+and this instrument's missing scorer, item 144. The bug is resolved; the instrument has still never once
+produced the observation it exists to produce, and the reason has changed since this entry said why.
 
 **Essay decision — accepted, not declined: checked directly against all eighteen, by mechanism rather than
 by title, and none of them state this one.** The closest by surface vocabulary is the fourteenth, itself
@@ -9016,7 +9048,14 @@ count, git-clean status — no answer text, no correctness verdict, for any task
 only for T2 and T4, the two tasks with a recorded false negative; it never recorded a T6 or T7 verdict for
 either arm. Whether this is a shared prompt defect or a model-specific tendency under an identical prompt
 cannot be settled from what survives. Settling it needs a re-run of arm A itself, through the committed
-instrument, on `claude-sonnet-4-6` — Anthropic credit, item 90's own standing blocker.
+instrument, on `claude-sonnet-4-6`. **The blocker this sentence used to name — Anthropic credit, called item
+90's standing blocker — is false, and the replacement is written to carry its own boundary rather than to
+swap one name for another.** Credit was the blocker when this sentence was written, and stopped being it
+without the sentence changing. What holds item 90 now, as of its own correction, is a prediction referent
+that was never recorded, a question preamble that moved after the prediction was registered, and an
+instrument with no scorer. Those are stated as of that correction and are themselves capable of going
+stale: a reader should check item 90's own blockers paragraph rather than trusting this restatement of it,
+which is exactly the failure the first version of this sentence demonstrates.
 
 **Where the code lives:** the preamble is inside `assembleAgentSystemPrompt`, `agentLoop.ts`, in the same
 conditional that selects the investigation archetype's own block. See item 94 for the two cells this explains,
@@ -9666,7 +9705,10 @@ estimate, since that arm was not run. The behavioural measurement has not been r
 
 **Where the code lives:** `TIER_LIMITS` and `resolveTierLimits` in `tierLimits.ts`; the overwrite, the
 restore guard and the filter precedence chain all in `agentLoop.ts`; `buildDispatcherCapabilityFilter` in
-`archetypeDispatcher.ts`. See item 90, which carries its own registered prediction and remains unmeasured.
+`archetypeDispatcher.ts`. See item 90, which carries its own registered prediction and remains unmeasured —
+**and, completing this sentence rather than correcting it, whose prediction cannot be checked as registered
+at all**, since the arm it compares against was never captured. Registered and unmeasured is true of it;
+checkable is not, and this sentence read as implying the third.
 With this entry's agreement half now run, what this arc still holds is item 90 and this entry's behavioural
 measurement — and the zero-credit framing this sentence used to carry describes neither of them, since the
 agreement measurement ran on OpenAI for well under a cent and the behavioural one is held up by its dollar
@@ -10799,11 +10841,71 @@ defect from the gate being unwired. The code defect survives whatever the docume
 documentation defect is what routes a maintainer to the wrong file, and it would remain a defect even if the
 dead module were deleted tomorrow.
 
+## 143. Whether a named refusal example narrows the binaries an agent reaches for, registered against item 90's mechanism and carrying no instrument
+
+**What it is, and why it is here rather than inside item 90.** The regression item 90 records is a naming
+effect: a name in the prompt is read as covering more than it says, and the agent narrows to match. Item
+93's fix put a named example into twelve of the seventeen catch-all refusal texts — phrased as an example
+rather than as the remedy, deliberately, because of what item 90 measured. This entry carries the prediction
+that choice was made against. It was registered inside item 90 and moved here because its blocking condition
+is different: item 90 has an instrument and a broken referent, this has a real decision rule and no
+instrument at all, and one bucket line cannot honestly describe both.
+
+**The prediction, unchanged from its registration.** Naming one rephrasing may still read as the exhaustive
+permitted set, and reduce the count of distinct whitelisted binaries an agent reaches for after a refusal,
+relative to a text naming none.
+
+**The decision rule, also unchanged, and better formed than item 90's own.** **Confirming signal:**
+post-refusal commands concentrate on the exact binary the text named, distinct-binary count at or near one,
+on tasks where more than one binary would serve. **Refuting signal:** distinct-binary count after a refusal
+holds or rises against the pre-fix text, and the named binary is not over-represented among what follows.
+**The confounder that would make either reading unsafe:** the new texts are also shorter and plainer than
+the raw-pattern texts they replaced, so any measured difference could belong to length or readability rather
+than to the naming. Separating them needs an arm that varies only whether the example is present while
+holding length roughly constant.
+
+**What blocks it.** No instrument exists. The notice probe measures discovery calls under a tool-absence
+notice; it does not induce refusals, does not classify what follows one, and has no arm structure for
+varying refusal text. Building one is a prerequisite, and the measurement then needs at least two arms
+rather than one. Naming what would have to be built is not the same as this entry specifying a fix, which is
+why it sits where it does rather than in Actionable now.
+
+**Where it came from:** item 90, which retains the sentence recording that this prediction was registered
+against its mechanism; item 93 for the refusal texts themselves.
+
+## 144. The notice-regression instrument captures but does not score, and its metric lives only in prose
+
+**What it is.** `scripts/notice-regression-probe.mjs` runs the arms, records every tool call, and writes the
+predictions verbatim into its own output — and then stops. It computes no discovery-command count and
+compares nothing against the predictions it refused to run without. The count those predictions are stated
+in is defined only in the predictions readme's own prose, as a list of binaries, and attributed there to a
+classifier file that is not in this repository — a repo-wide search for that classifier finds nothing under
+either instrument, and the one other script that mentions the file refers to it in the past tense.
+
+**The defect is not the missing code, it is that the metric has no single definition.** An instrument whose
+scoring rule lives in prose can be applied two ways by two analysts against the same capture, and neither
+can be shown wrong, because there is nothing to disagree with. That is what makes this worth an entry rather
+than a footnote: it would silently affect any future measurement using this instrument, including item 90's
+own, and the disagreement would surface as a dispute about results rather than as a defect in the tool.
+
+**A second, smaller instance of the same shape.** The file's header advertises a prompt-audit step as though
+it were a flag; the argument loop parses two flags and that is not one of them. The step does run, but
+unconditionally rather than on request, so the header describes an interface the file does not have.
+
+**The fix, fully specified.** Implement the readme's own binary list as a function in the instrument,
+compute the per-task count from the captured tool calls, and compare it against the loaded predictions in
+the same place the run already writes them. Correct the header to describe the prompt audit as
+unconditional. Nothing needs to be measured or decided first — the readme already names the binaries, and
+the capture already holds the calls.
+
+**Where the code lives:** the probe and its predictions example, both under `scripts`, alongside the probe's
+own unit tests which pin its pure parts and would be the natural home for the scorer's.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 142 to find out which ones still need something. No index of
+reader the trouble of reading all 144 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -10812,9 +10914,9 @@ first.
 **Closed** (56): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 111, 117, 120, 121, 126, 128, 134, 135, 137
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (7): 108, 113, 116, 129, 130, 138, 142
+first (8): 108, 113, 116, 129, 130, 138, 142, 144
 
-**Blocked on data** — closing requires an observation that doesn't exist yet (9): 1, 4, 18, 23, 57, 63, 75, 90, 110
+**Blocked on data** — closing requires an observation that doesn't exist yet (10): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143
 
 **Neither — a structural fact recorded, with no fix proposed** (70): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
@@ -11976,6 +12078,12 @@ sentence to be caught; some were. A one-commit-old entry has had none of them. R
 about when text was written, not about how much scrutiny it has survived, and this document keeps
 treating the first as evidence of the second.
 
+**Completing that second sentence, which is true and not the whole of it.** A citing reading is an
+*opportunity* to catch a false sentence and is not reliably a check: the twenty-sixth pattern records
+two cases where the citing entries copied the false sentence instead, so the count of citations rose
+while the scrutiny did not. Both halves hold. The claim to retire is not that old entries get read —
+they do — but the inference from having been cited often to having been checked at all.
+
 Item 76 is the clearest instance. It was written in the same commit that closed item 69, by the pass
 that discovered it, and it entered permanent record carrying three false claims: that the note it is
 about has one consumer, when three subscribe to that event and one of them copies the whole
@@ -12591,3 +12699,47 @@ matches the claimed scope — promotes this on the residue named above, not on r
 A second instance of the plain form, where a search is simply narrower than the claim it supports and nothing
 disguises that, reopens nothing: it belongs to the fifth and the twenty-first, and the right response is to
 apply those rather than write a pattern beside them.
+
+## A twenty-sixth pattern, contradicting the seventeenth rather than resembling it: citation copies a claim more reliably than it checks one
+
+The seventeenth pattern rests on a stated mechanism — an old entry has been read by every pass that cited
+it, and each reading was an opportunity to catch a false sentence. That is the half this pattern refutes.
+Citation is at least as good a channel for propagating a false sentence as for catching one, and when it
+propagates, the number of citations reads afterwards as corroboration.
+
+**The first instance.** Item 90 was carried for months as blocked on Anthropic credit. It is cited across
+ten other entries. The credit framing did not get caught by any of those readings; it got copied into them.
+One entry restated it as item 90's standing blocker, in the present tense, on its own authority. Another
+recorded the same exhaustion as the reason a different fix was unmeasured. A third said the path had been
+blocked by credit since before the instrument existed. None of the three re-derived it. By the time a pass
+finally checked, the claim was supported by more text than when it was written, and every additional support
+was a copy of the original rather than an independent reading of the artefact.
+
+**The second instance, a different pass and a different surface.** Item 115 asserted that neither tier
+telemetry marker reaches disk. Item 114 cited it for exactly that, and rested its own conclusion about an
+unmeasurable cache hit rate on it. The claim was wrong on arrival. The citing entry did not test it — citing
+it was the whole of the interaction — and the false sentence acquired a dependent.
+
+**Why this is not the seventeenth.** That pattern's subject is a *fresh* entry, unchecked because no pass
+has cited it yet, and its corrective is a re-derivation by the next pass. Both instances here are the
+opposite case: old entries, heavily cited, and the citations are what carried the error forward. Applying
+the seventeenth faithfully would have marked these as the *well-checked* end of its own spectrum.
+
+**Why this is not the eighteenth.** That one governs a reading whose validity expired — true when taken,
+false later, with a window the measurer failed to name. It fits item 90's half-shape and not item 115's,
+whose claim was false on arrival and never had a valid window to expire. A pattern that covers one instance
+and not the other is not the mechanism behind both.
+
+**The corrective, which is a sweep discipline rather than a caution.** When a claim is refuted, the entries
+depending on it are found by two sweeps, not one: by item reference, which finds every entry naming it, and
+by claim shape, which finds every entry carrying the assertion whether or not it names the source. The
+second is the one that matters, because inheritance without citation is invisible to the first. Report both
+counts. And the count of citations an entry has accumulated is evidence about how widely it travelled, never
+about whether it was checked — a claim is checked when someone re-derives it from the artefact, and citing
+is not that.
+
+**Recorded against this pass's own conduct, because the mechanism caught it in the act.** The blast-radius
+list for item 90 was first assembled by hand from a reference sweep's output and came to four entries. The
+claim-shape sweep returned a fifth the hand list had missed — and that fifth was present in the reference
+sweep's own output, so the miss was in the reading rather than in the instrument. The pattern was drafted
+before the sweep that demonstrated it.
