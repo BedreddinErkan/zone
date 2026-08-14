@@ -8465,6 +8465,39 @@ rule in the shape items 134 and 135 now carry; and give the instrument a scorer.
 on the pinned model, at roughly the measured per-arm figure this entry already records. The confound above
 survives all of that and bounds what the result can be attributed to.
 
+**Two of those three repairs are done, and the prediction is re-registered here.** The scorer landed at
+`a430b3da` and `4d6be02a`, item 144. The re-registration and its rule are this paragraph and the next.
+
+**The primary prediction, restated against a target that exists.** Every one of the seven tasks issues at
+least one discovery-shaped shell call, and both named false negatives resolve — the symbol reported absent is
+found, and the file at an unconfirmed path is located. This replaces the per-task match against arm C's own
+counts, which no artefact holds and which therefore could never have been checked. It is weaker than the
+original and it is checkable, which the original was not; a prediction that cannot be compared to anything is
+not a stronger claim, only an unfalsifiable one.
+
+**The decision rule, split by who decides what.** The scorer settles the discovery half mechanically: a
+per-task count from the captured calls, compared against the registered figures without a human in the loop.
+The false-negative half is not mechanical and must not be made to look it — item 144 records why, and the
+scorer surfaces the prediction beside the actual summary text with an explicit marker rather than deriving a
+verdict. So: **closes** if every task shows a non-zero discovery count and a reader, applying that recorded
+ruling, judges both false negatives resolved. **Stays open** if any task shows zero, or if either false
+negative survives — either outcome is a real result about the shipped configuration, not a failed
+measurement. **The instrument is wrong rather than the hypothesis** if the offered set is not exactly the two
+tools the probe asserts at startup, if the prompt audit shows the two arms differing by anything other than
+the notice, or if a task's calls are captured but its scored count disagrees with the raw call list the same
+record carries — the scorer preserves both precisely so that disagreement is visible rather than assumed
+away.
+
+**`anyRefusal` is removed from what this run must measure, and removed rather than quietly dropped.** It was
+part of the registered set; item 145 answers it from artefacts already on disk, at no cost and with no run.
+A pass executing this measurement should not re-register it, and should not read its absence here as an
+oversight.
+
+**The confound stands, restated so the re-registration carries it.** The notice fix and the question
+preamble's own tool-mention fixes landed together, so a single arm cannot attribute any result to either one.
+A non-zero discovery count on every task is consistent with the notice fix working, with the preamble fixes
+working, and with both — and this design cannot separate them.
+
 **A second prediction was registered against this item's mechanism, from a different surface — and it has
 moved to item 143.** That sentence is true and is kept rather than deleted, because the prediction's
 provenance is this item: the regression recorded here is a naming effect, and item 93's refusal-example
@@ -8980,6 +9013,19 @@ becomes nineteen.
 variant — the chain-operator block, naming the offending operator (`&&\s*\S`) and pointing at splitting the
 call into separate commands. This is the first refusal of any kind recorded across this entire arc: arms A,
 B, and C, item 94's own T2 and T4, and this same pass's own T1 all had zero.
+
+**That description is accurate about the captured artefact and stale about the code, the same way item 93's
+own whitelist-miss description went stale.** The text this entry quotes is what the capture holds, and the
+capture still holds it — but `6f9c9a69` landed hours after that run and removed the raw-regex interpolation
+from the chain branch, which is the change item 93 records as costing that variant the ability to name which
+operator tripped it. A reader should not infer from this entry that the current code names the operator; it
+does not. The boundary is given rather than the sentence rewritten, because what this entry describes is an
+event that happened, and it did happen this way.
+
+**What this refusal decides, established only later and recorded here because nothing connected the two at
+the time.** It refutes a prediction registered before that same run — see item 145. Knowing the event and
+knowing what it settles turned out to be different things, and this entry had the first without the second
+for as long as no instrument computed the comparison.
 
 **What the agent did next answers, for this one variant, a question item 93 itself named as unmeasured.** Its
 very next call was the exact rephrasing the refusal text prescribed — the same two pieces of information as
@@ -10873,7 +10919,7 @@ why it sits where it does rather than in Actionable now.
 **Where it came from:** item 90, which retains the sentence recording that this prediction was registered
 against its mechanism; item 93 for the refusal texts themselves.
 
-## 144. The notice-regression instrument captures but does not score, and its metric lives only in prose
+## 144. Closed — the notice-regression instrument scores now, at `a430b3da` and `4d6be02a`, with its remaining limits named as limits
 
 **What it is.** `scripts/notice-regression-probe.mjs` runs the arms, records every tool call, and writes the
 predictions verbatim into its own output — and then stops. It computes no discovery-command count and
@@ -10898,30 +10944,151 @@ the same place the run already writes them. Correct the header to describe the p
 unconditional. Nothing needs to be measured or decided first — the readme already names the binaries, and
 the capture already holds the calls.
 
+**Closed in two commits.** `a430b3da` made the metric code: the binary list as a named export, a
+leading-token-per-segment match rule chosen over a whole-string regex because that form misreads a discovery
+word inside a quoted argument or inside an unrelated path, one count per qualifying call rather than per
+matching segment, and a mechanical comparison against the loaded predictions wired into the one real
+invocation path — leaving the scorer unreachable from a real run would have reproduced this entry's own
+defect. `4d6be02a` added the ruling the first commit left implicit and the validation it left absent: a
+refused call does not count toward the discovery count even when its command is discovery-shaped, because a
+blocked command never executed and showed the agent nothing, with the rejected alternative recorded beside
+it — counting attempts would measure intent, a different quantity from the one the prose defines. The
+excluded subset survives in its own field so the ruling stays auditable rather than silently subtracting.
+Predictions are now checked against the readme's four stated field rules, warning rather than throwing,
+because the one historical predictions file already violates one and throwing would make that record
+unloadable rather than flag it.
+
+**The three limits, recorded as limits rather than as defects, because each is a human ruling the metric
+cannot make for itself.** The false-negative field is resolved in free prose that no regex should be trusted
+to adjudicate — it is surfaced with the actual summary text and an explicit marker, never auto-derived.
+Command substitution and `xargs`-style piping, where a discovery binary is not the leading token of its
+segment, are outside the match rule; no captured command in the frozen set needs it, and the boundary is
+named rather than silently unhandled. And whether a range-encoded prediction — the historical file records
+one task's count as a non-integer, deliberately, its own rationale explaining it as a range the schema has no
+way to express — warrants its own field is a schema question the validator flags and cannot decide.
+
 **Where the code lives:** the probe and its predictions example, both under `scripts`, alongside the probe's
-own unit tests which pin its pure parts and would be the natural home for the scorer's.
+own unit tests, which now pin the scorer's pure parts as well as the ones they already covered.
+
+## 145. A registered prediction and the artefact refuting it sat on the same disk, unlinked, because nothing computed the comparison
+
+**What it is.** The OpenAI arm's predictions file registered, before its run, that no shell call across the
+tasks it covered would be refused. One was. T3's second call was blocked by the chain-operator variant, and
+the capture recording that has been on disk ever since. The prediction is refuted, the refutation cost
+nothing, and it is the first mechanically-scored refutation this arc has produced.
+
+**Two facts that belong together and must not be collapsed into one.** The refusal itself was not missed:
+item 96 documents it at length — which variant fired, what the agent did next, what it cost the run, and the
+bound on generalising from it. What was missing is its bearing on the prediction. No entry anywhere connected
+the event to the registered claim it settles; the field's own name appears nowhere in this document, by both
+instruments. So this is not a case of an observation going unnoticed. It is a case of an observation being
+noticed, analysed, written up — and its consequence for a standing prediction going uncomputed, because the
+instrument that captured it had no scorer until item 144.
+
+**Why that gap is the finding rather than a footnote.** Knowing that an event happened and knowing what it
+decides are different pieces of knowledge, and only the second closes a prediction. A discipline that
+registers predictions in advance — which this arc does, and enforces at the instrument level — gets no value
+from the registration unless something computes the comparison afterwards. Here the front half was
+mechanised and the back half was left to whoever happened to notice, and for as long as nobody did, the
+prediction and its refutation coexisted a few directories apart.
+
+**No fix proposed.** The scorer that makes this computable now exists; whether every historical prediction in
+the arc should be re-scored against its own captures is a separate decision with its own cost, and not this
+entry's to make.
+
+## 146. A pushed commit message asserts a discovery that item 96 had already made, and the ledger is the only place that can say so
+
+**What it is.** Commit `a430b3da`'s message states that its run "surfaced a real, previously undetected
+refusal". The refusal was not previously undetected. Item 96 had detected, recorded and analysed it before
+the pass that wrote those words existed, and a cross-reference naming that entry sat in that same pass's own
+search output.
+
+**What is false and what survives, kept apart.** "Previously undetected" is false. The clause that follows it
+— that nothing before could see it *mechanically* — is true and worth keeping: item 96 was a human reading a
+capture, not a computed result, and no instrument could have scored it before item 144. The message
+overstates a real finding rather than inventing one.
+
+**Why it is recorded here.** The message is pushed and immutable. A commit message cannot be corrected in
+place, and nothing else in the repository is going to contradict it. This entry is the only artefact a future
+reader will encounter that says which half of that sentence to trust — which is the whole reason for putting
+it in a document that can be edited.
+
+**No fix proposed**, because none exists. History is not rewritten for a wrong clause in a message.
+
+## 147. A full-suite figure was recorded as a property of the repository when it was a property of the repository and the shell
+
+**What it is.** Every "full suite stable" figure in this arc was recorded as a bare count of files and tests.
+Each was true when taken. None named the environment it held under, and one of them turned out to depend on
+it: a shell exporting a colour-forcing variable makes a TUI rendering assertion fail, and a shell without it
+does not. The test itself was defective and is fixed; the entry is not about the test. It is about a figure
+whose validity was conditional on something the figure never mentioned.
+
+**The sweep, and its limit stated rather than implied.** This shell exports the colour-forcing variable, a
+colour-capability variable, a terminal type and a locale; the continuous-integration flag, the timezone, the
+colour-suppressing variable, the Node environment variable and every project-specific variable are unset.
+The vitest configuration pins only three of them — the trust flag and the two home-directory redirects — so
+the colour and locale variables reach the suite unmediated. **The part that decides how much the sweep is
+worth:** the project's own source reads seventy-one distinct environment variables, cross-checked by two
+instruments, and the colour-forcing variable is not one of them. The exposure arrives entirely through a
+dependency's own capability detection. A sweep of the repository's own environment surface — the obvious
+sweep, and the one a reader would assume was done — could not have found this. What this sweep covers is the
+variables currently set in this shell, checked against what the configuration pins and what the source reads;
+what it does not cover is any variable read by any dependency, which is exactly where this one lived.
+
+**No fix proposed, and the rule that would follow is deliberately not filed yet.** The corrective is a
+workflow rule rather than repository knowledge: record the environment alongside a suite figure, or state
+that it was not recorded. Where such rules should live is item 148's subject, and creating a file for a
+single rule on an unverified premise is the failure this arc keeps finding rather than a repair of it.
+
+## 148. Actionable now — the CLAUDE.md behaviour-rule inventory is a belief carried across sessions and recorded nowhere
+
+**The claim, as it has been carried.** That an inventory pass ran over CLAUDE.md, found roughly two dozen
+cleanly extractable behaviour rules, sized the file, and recorded a decision to put workflow guidance in a
+separate file rather than in CLAUDE.md — with `docs/working-discipline.md` as the intended name.
+
+**What the repository actually holds.** No such file exists, and none was ever created in any ref. The name
+appears nowhere in the repository under either instrument. No ledger sentence records the decision: of the
+eight occurrences of the word "discipline" in this document, none is about extracting rules from CLAUDE.md,
+and the phrases that decision would have used return nothing.
+
+**The three-state ruling, and its careful half.** The claim is **false as a statement about the repository**
+and is recorded as false on that basis. It is not recorded as fabricated. Whether such an analysis happened
+in some session is not a question the repository can settle, and this entry does not pretend to settle it —
+what it establishes is that no artefact carries it, which is a different and smaller claim. **That the belief
+is unrecorded is the finding**, not that it is untrue in some wider sense. It survived across sessions
+precisely because nothing contradicted it, which is the twenty-seventh pattern one level up: a status that
+was a property of conversational context, read as a property of the repository.
+
+**What would close it.** An actual inventory pass over CLAUDE.md — run, and recorded here with its count and
+its decision. That is also the precondition for creating the file: a file created before the inventory would
+be asserting the same unrecorded premise in a new place.
+
+**Two rules are already waiting for that file**, so whoever runs the inventory does not rediscover them: item
+147's — record the environment alongside a suite figure, or say it was not recorded — and this entry's own,
+that a decision carried between sessions is not a decision the repository has made until something in the
+repository says so.
 
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 144 to find out which ones still need something. No index of
+reader the trouble of reading all 148 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (56): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 111, 117, 120, 121, 126, 128, 134, 135, 137
+**Closed** (57): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 111, 117, 120, 121, 126, 128, 134, 135, 137, 144
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (8): 108, 113, 116, 129, 130, 138, 142, 144
+first (8): 108, 113, 116, 129, 130, 138, 142, 148
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (10): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143
 
-**Neither — a structural fact recorded, with no fix proposed** (70): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (73): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
-119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141
+119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
@@ -12743,3 +12910,60 @@ list for item 90 was first assembled by hand from a reference sweep's output and
 claim-shape sweep returned a fifth the hand list had missed — and that fifth was present in the reference
 sweep's own output, so the miss was in the reading rather than in the instrument. The pattern was drafted
 before the sweep that demonstrated it.
+
+## A twenty-seventh pattern: a measured figure is a property of the run's context as much as the subject's, and unstated context reads as universal
+
+A suite count, a failure rate, a pass/fail — each is produced by running something somewhere, and the
+somewhere is part of the claim. Recorded without it, the figure reads as a property of the code, and the next
+reader compares it against their own run as though the two were measuring the same thing.
+
+**The first instance, and it is already in this document.** Item 131 records a failure class that is
+near-certain when two test files run as a pair and absent across four full-suite runs — the same code, the
+same machine, a rate that moves with how many other files are queued. The figure was a property of the run's
+scope, not of the defect.
+
+**The second, on a different axis and found by a different pass.** Every full-suite figure in this arc was
+recorded as a bare count. One of them depended on whether the invoking shell exported a colour-forcing
+variable: with it, a rendering assertion failed and the suite read red; without it, green. Both runs were
+honest. Neither named the condition, and item 147 records that the condition was not even in the
+repository's own environment surface — it reached the suite through a dependency.
+
+**Why this is not the eighteenth pattern**, which is the nearest relative and governs a reading whose
+validity *expires* — a measurement taken while a writer was still running, true when taken and false minutes
+later. Its corrective is to name the window. Neither instance here expires: the scheduling effect and the
+environment variable are both stable, and a measurement repeated an hour later reproduces the same figure
+exactly. Naming a time window would have caught neither. The precondition is not temporal, and the corrective
+is a different one: name the context the figure was measured in, or state that it was not recorded.
+
+The rule: a figure's context is part of the figure. Record the scope and the environment beside a count, or
+say explicitly that they were not captured — an unqualified number is a claim about the subject alone, and
+these two instances are cases where that claim was wrong while every individual measurement was right.
+
+## A candidate pattern considered this pass and not promoted: an instrument that enforces the front half of a discipline and leaves the back half to memory
+
+The instance is item 145. The notice-regression probe refuses to run without a predictions file — the
+discipline that predictions precede a run is mechanised, deliberately and with a comment saying so. Nothing
+mechanised the other end. No code compared the predictions against the results, so a registered claim and
+the artefact refuting it coexisted on one disk until a later pass wrote a scorer. The enforced half is
+visible in the code and reads as the whole discipline being handled.
+
+**Compared against the twenty-first, which is the closest relative.** That pattern governs an attribution
+made without reading the instrument the subject was measured under, and its own instance is a captured file
+left unread between the measurement and the pass that opened it. The resemblance is real — an available
+artefact, unconsulted — but the mechanism differs: there, someone drew a conclusion and skipped a check that
+would have qualified it; here, nobody drew a conclusion at all, and the gap is that no step existed to
+prompt one.
+
+**Compared against the twenty-sixth**, which is adjacent and genuinely distinct: that one is about citation
+propagating a claim instead of checking it. Nothing was cited here. The link was never attempted, which is
+the opposite failure — not a bad check, an absent one.
+
+**Not promoted, on population.** One instrument, one moment. The same file's second axis — existence
+enforced, field validity unvalidated until the same later pass — is the same author's design in the same
+file, and the first rejected candidate's own reasoning declines to count two instances from one drafting as
+independent.
+
+**The condition under which it reopens.** A second, unrelated instrument showing the same split: a
+precondition mechanically enforced, the corresponding post-condition left to whoever remembers. Two
+independent tools meeting that wall is a mechanism; one tool with two symptoms is a design choice, and the
+right response to it is to finish that tool rather than to write a pattern about it.
