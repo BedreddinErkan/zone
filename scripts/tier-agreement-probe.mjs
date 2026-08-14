@@ -33,8 +33,8 @@
  *   - an error/timeout fallback is a transport artifact, not a judgement. Retried once,
  *     with both attempts recorded. A low-confidence fallback is NEVER retried: it is part
  *     of the behaviour being measured.
- *   - BOUNDARY (item 128): rows written before <commit hash — filled in by the ledger
- *     pass that closes item 128> predate `fallbackReasons`/`fallbackTaskHashMismatch`/
+ *   - BOUNDARY (item 128): rows written before `8f4144bf` predate
+ *     `fallbackReasons`/`fallbackTaskHashMismatch`/
  *     `fallbackUnattributed` and cannot distinguish `invalid_tier` from `low_confidence` —
  *     both collapsed to `"low_confidence"` under the prior reasoning-regex derivation.
  *     Treat those three fields as absent, not false, on any row from before that commit.
