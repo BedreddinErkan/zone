@@ -169,8 +169,40 @@ describe("PlanBody — title reflects which of four shapes the plan carries", ()
 // whitespace makes the check invariant to wrap position while still failing
 // on any real content loss or a "…" (checked separately, unaffected by
 // whitespace collapsing since "…" is not whitespace).
+//
+// Whitespace alone stopped being sufficient once color entered the picture.
+// Under a color-emitting environment (FORCE_COLOR set — chalk's own
+// supports-color detection checks FORCE_COLOR unconditionally and never
+// reads the NO_COLOR env var at all, only a `--no-color` CLI flag, so
+// NO_COLOR alone does not suppress an already-set FORCE_COLOR), Ink re-emits
+// styling codes at a wrap point, not just a newline — a real character
+// dropped mid-word here would slip past a whitespace-only compare too, since
+// the fixture's own word boundary is what's supposed to catch it, and a
+// styling code landing in the middle of that boundary defeats it by
+// coincidence, not by design. normalizeFrame strips those codes first. Do
+// not remove stripAnsi as redundant with collapseWhitespace: they normalize
+// two different, unrelated things Ink inserts at the same wrap point, and
+// only one of them is whitespace.
 function collapseWhitespace(s: string): string {
   return s.replace(/\s+/g, "");
+}
+
+// Same construction as applyRollbackFeedback.ts's own stripAnsi (J.4.1): built
+// from String.fromCharCode(0x1b) rather than a literal control character so
+// this source file stays free of raw control bytes some editors/tooling
+// normalize away. Not imported from the `strip-ansi` package — that package
+// is not a direct dependency of this repo (absent from package.json); it is
+// pulled in only transitively, by ink-gradient and by ink's own
+// string-width/wrap-ansi, so importing it here would add an undeclared
+// dependency this repo has already, deliberately, avoided once.
+function stripAnsi(s: string): string {
+  const esc = String.fromCharCode(0x1b);
+  const ansiPattern = new RegExp(esc + "\\[[0-9;]*[A-Za-z]", "g");
+  return s.replace(ansiPattern, "");
+}
+
+function normalizeFrame(s: string): string {
+  return collapseWhitespace(stripAnsi(s));
 }
 
 describe("PlanBody — full-render regression guard (no caps)", () => {
@@ -182,7 +214,7 @@ describe("PlanBody — full-render regression guard (no caps)", () => {
       <PlanBody {...BASE_PROPS} steps={[{ title: "Step", description: longDescription, filesLikely: [] }]} />
     );
     const frame = lastFrame() ?? "";
-    expect(collapseWhitespace(frame)).toContain(collapseWhitespace(longDescription));
+    expect(normalizeFrame(frame)).toContain(normalizeFrame(longDescription));
     expect(frame).not.toContain("…");
   });
 
@@ -193,7 +225,7 @@ describe("PlanBody — full-render regression guard (no caps)", () => {
     expect(longHint.length).toBeGreaterThan(120);
     const { lastFrame } = render(<PlanBody {...BASE_PROPS} riskHints={[longHint]} />);
     const frame = lastFrame() ?? "";
-    expect(collapseWhitespace(frame)).toContain(collapseWhitespace(longHint));
+    expect(normalizeFrame(frame)).toContain(normalizeFrame(longHint));
     expect(frame).not.toContain("…");
   });
 
@@ -205,7 +237,7 @@ describe("PlanBody — full-render regression guard (no caps)", () => {
     expect(longSummary.length).toBeGreaterThan(200);
     const { lastFrame } = render(<PlanBody {...BASE_PROPS} scopeSummary={longSummary} />);
     const frame = lastFrame() ?? "";
-    expect(collapseWhitespace(frame)).toContain(collapseWhitespace(longSummary));
+    expect(normalizeFrame(frame)).toContain(normalizeFrame(longSummary));
     expect(frame).not.toContain("…");
   });
 });
