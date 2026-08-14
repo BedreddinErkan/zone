@@ -8672,14 +8672,37 @@ discovery figures, hand-read when that entry was written, agree with the committ
 tasks.** That is the first mechanical check those figures have had, it cost nothing, and it corroborates
 them rather than correcting them.
 
-**Bucket, re-decided rather than inherited: it stays Blocked on data.** The competing reading was checked
-and rejected. Against the move: closing this item under its own current criterion requires a run in which
+**The remaining zero has since been judged, and the judgment makes it a behavioural signal rather than a
+metric artefact.** Item 149 rules it residual suppression, on three controls inside this same arm that
+searched under identical conditions. That completes for T7 what the re-score completed for T3, in the
+opposite direction: T3's zero was the metric mis-describing a task that used the shell, and T7's zero is
+the metric describing exactly what happened. Both zeros are now understood, and only one of them is a
+result about the shipped configuration.
+
+**No criterion revision is triggered, and a later reader should not have to reconstruct why.** The
+revision path existed only on the other branch. Had the zero been judged a correct tool-free answer, a
+revision would have needed a mechanical predicate separating tasks that require the shell from tasks that
+do not, computable from the frozen ground rather than from a reading of an answer, and it would have had to
+survive the objection that any such predicate can be tuned once the failing task is known. The judgment
+landed the other way, so the mechanical verdict and the substantive one agree and the rule takes no
+pressure at all. It stands unamended.
+
+**The judgment carries a qualification this entry must hold rather than delegate.** The behaviour matches
+the shape of the regression recorded here and does **not** match its mechanism, which is provably absent
+from the prompt that arm ran: computed directly against the rendered artefact, no withheld name is a strict
+prefix of any offered name. Nothing in the judgment says the collision this item's fix removed has come
+back. Item 100 carries the nearest candidate route and the arm that would separate it.
+
+**Bucket, re-decided rather than inherited a second time: it stays Blocked on data.** The competing reading
+was checked and rejected. Against the move: closing this item under its own current criterion requires a run in which
 every task uses the shell, and no such observation exists — the same shape items 110 and 143 sit in the
-bucket for. For the move: the observation now exists and what remains is item 149's judgment, which is a
-decision rather than data, the shape item 38 and item 46 sit in Neither for. What decides it is that item
-149's judgment is explicitly not an exception to this item's criterion, so it cannot close this item; it
-can only motivate a further registered revision. Reading the bucket as satisfied by any conceivable
-revision would empty it, since every entry in it could be closed by rewriting its own bar.
+bucket for. For the move, in the form the argument first took: the observation exists and what remained was
+item 149's judgment, a decision rather than data, the shape item 38 and item 46 sit in Neither for. **That
+half is now settled and it did not change the decision.** The judgment has been made, and because it is
+explicitly not an exception to this item's criterion it cannot close this item — it can only have motivated
+a further registered revision, and on the branch it landed it does not even do that. Reading the bucket as
+satisfied by any conceivable revision would empty it, since every entry in it could be closed by rewriting
+its own bar. What this item waits on is unchanged and is a run.
 
 **Where the run's own artefacts are, and their durability.** The two capture files, carrying every tool call
 and the scored comparison, sit under the per-repo audits directory alongside the earlier OpenAI ones. That
@@ -9409,11 +9432,29 @@ neither carries any instruction about how to read what "the repository" means in
 cell in this arc ran with `ask_user` offered. Only that if a model recognises a task as ambiguous under this
 archetype, it has no tool to act on that recognition and no instruction to say so instead of guessing.
 
+**That paragraph is true and is now incomplete, and the neighbouring question it declined to answer has
+since been answered three times.** Whether a model asks *without* the tool is a different question from
+whether it would ask if it had one, and the second arm settles it: three of its seven cells asked
+clarifying questions in prose under this identical withholding — one closing by asking what a new symbol
+name should be, two producing three numbered questions each. Models route around the missing tool in prose
+rather than being stopped by it. That narrows what the absence costs in practice without touching the
+defect, which is unchanged: the tool is genuinely not offered, and the prompt genuinely never instructs
+flagging an ambiguity instead of resolving one, both re-verified against the rendered text.
+
+**What this entry does not explain, stated because a later pass proposed that it did.** The absence of a
+clarification path does not account for a cell issuing no shell commands. The two are independent, and one
+of the three prose-asking cells searched first and asked afterwards under exactly this configuration. Item
+149 records the reading that routed a suppressed-shell finding through this entry, and records its
+refutation. This entry is a real defect and, for that question, a permissive condition at most.
+
 **Where the code lives:** `ask_user`'s registration is in the tool registry; its absence from this archetype's
 offered set resolves through the same capability filter item 94's own measurement used,
 `buildDispatcherCapabilityFilter` against `QUESTION_PIPELINE`. The notice is `llm/toolAbsenceNotice.ts`. See
-item 97 for the two cells this absence left unable to ask, and item 98 for the other defects in the same
-preamble.
+item 97 for two cells that did not ask under this absence — **the clause that used to stand here called
+them cells the absence left unable to ask, and that is false**: neither asked, but three cells of a later
+arm asked in prose under the same withholding, so what the absence removes is asking through a tool, not
+asking. See also item 98 for the other defects in the same preamble, and item 149 for the cell that asked
+in prose and searched nothing.
 
 ## 100. Closed — Nine of nineteen configurations carry a prompt instruction naming a tool that configuration doesn't offer — Task in every one, TodoWrite and revert_patch tied second, search_in_files the case that found it and smaller than all but one of the others
 
@@ -9451,6 +9492,32 @@ second-largest; it is seventh of eight by this count.
 The strict-prefix suppression that made `run_command` a silent instruction under item 90's original regression
 has no remaining instance here: what's left is an instruction standing next to its own contradiction in the
 same prompt, not an instruction with nothing to correct it.
+
+**That finding was established against the assemblers and has since been confirmed independently, at run
+time, from a prompt a paid run actually rendered.** The system-prompt dump kept beside item 90's second arm
+is the `question` configuration, one of the nine. It carries the full patch-rules block instructing three
+editing tools by name, and it carries a withheld list naming all three, a short distance earlier in the
+same text. Nothing about the sweep changes; what changes is that its result no longer rests on the
+assemblers alone.
+
+**And that configuration now has a candidate behavioural instance, which this item has never had before.**
+Item 149 judges a cell of that same run to have declined to search a task it could have answered with one
+command, opening its answer by stating that editing tools were unavailable and it could not patch
+regardless. The prompt it read instructs patching at length and declares patching withheld. That is the
+nearest artefact-supported route to the behaviour once item 90's own collision mechanism is excluded, and it
+is **explicitly a candidate rather than a demonstrated cause** — nothing here isolates it, and a prompt
+containing a contradiction is not evidence that the contradiction is what the model acted on.
+
+**What would separate it.** An arm holding everything else constant while removing the patch-rules block
+from an answer-only configuration, two cells, at roughly a cent and a half each on that run's measured
+per-cell figure, plus the code to render a variant that does not exist today. Naming the arm is not
+proposing it.
+
+**This item stays closed, and the boundary is worth stating rather than left to inference.** Its closure
+covers its sweep and its count — nineteen configurations tested, nine defective, counted by tool — not a
+fix; the entry already records the conditional fix as feasible and deliberately not designed. A candidate
+instance does not reopen a completed count, and a demonstrated cause would belong to whichever entry runs
+the arm, not to this one.
 
 **A conditional fix is feasible for all of it, not designed here.** The full offered set is already in scope
 at the single production call site — already read there to derive two existing booleans — and all three
@@ -11275,7 +11342,7 @@ be asserting the same unrecorded premise in a new place.
 that a decision carried between sessions is not a decision the repository has made until something in the
 repository says so.
 
-## 149. One task in item 90's arm answered with no tool calls at all, and whether that is a correct tool-free answer or residual suppression is a judgment nobody has made
+## 149. Closed — one task in item 90's arm answered with no tool calls at all, and the judgment is residual suppression: three controls in the same arm searched under conditions identical to its own
 
 **What happened, from the capture.** T7 of item 90's seven-task arm — task text `mask the key`, with
 `src/cli/tui/components/ApiKeysView.tsx` recorded as its correct file — made **zero tool calls of any
@@ -11289,12 +11356,19 @@ describe.
 through the committed scorer confirms T7 is the only task in that arm at zero — the other six run between
 one and three shell calls each. Whatever this zero means is therefore the whole of what stands between that
 item and its closure, which makes it too load-bearing to leave inside a parenthesis in another entry.
+**That sentence was true when written and its second half no longer follows:** the zero's meaning is
+settled here, and item 90 stays open regardless, because its criterion is mechanical and a task at zero
+leaves it open whatever the zero means. What this entry decided was never item 90's bucket — it was
+whether the zero is a result about the shipped configuration or an artefact of the metric.
 
-**The evidence toward a correct tool-free answer.** The task is genuinely underspecified: two words, one
-of them ambiguous between an API key, a displayed key, and a stored key. The answer names that ambiguity
-and asks four specific questions — which key, where masking should happen, whether a prior report exists,
-and what the requester already has — then offers to investigate and give a sourced answer once told. It
-claims capability it is not exercising, which is the opposite of what a suppressed run reports.
+**The evidence toward a correct tool-free answer.** The task is terse: three words, one of them ambiguous
+between an API key, a displayed key, and a stored key. The answer names that ambiguity and asks three
+specific questions — which key, where masking should happen, and whether a prior report or diff exists —
+then offers to investigate and give a sourced answer once told. It claims capability it is not exercising,
+which is the opposite of what a suppressed run reports. **Two figures in this paragraph were wrong when it
+was written and are corrected in place: the task is three words rather than two, and the questions number
+three rather than four.** The fourth counted question was the second clause of the third, which asks the
+reader to paste a prior report if one exists. Three independent counting methods agree on three.
 
 **The evidence toward residual suppression, and it is not weak.** The answer cites tool absence as its
 reason for non-action: that the archetype is answer-only, that no file-editing tools are available in the
@@ -11305,10 +11379,45 @@ archetype's own preamble, per item 97, prescribes one shell command and frames t
 command's output. T7 issued none. A run that abandons the shell in an environment instructing it to use
 the shell is the exact behaviour item 90 measured.
 
-**The confound that keeps either reading from being forced.** Item 99 records that this archetype
-withholds `ask_user` and never instructs stating an ambiguity instead of resolving one. T7 improvised a
-clarification path the prompt gives it no tool for and no instruction to take — behaviour the
-configuration neither licenses nor forbids, which is why neither reading can claim it.
+**The paragraph that used to stand here called item 99 a confound keeping either reading from being
+forced, and it was false when written rather than superseded later.** It reasoned that because this
+archetype withholds `ask_user` and never instructs stating an ambiguity, T7's improvised prose
+clarification was behaviour the configuration neither licenses nor forbids, so neither reading could claim
+it. The material that refutes that was already on disk in the same capture file, unexamined: an arm-mate
+asked its clarifying question in prose under the identical withholding **and searched first**. A missing
+asking-tool does not prevent searching, and nothing about it made the readings symmetric. The correction is
+recorded rather than the sentence quietly dropped, because the error was reaching for a confound instead of
+opening the neighbouring records.
+
+**The three controls, and they are what make this a judgment rather than a preference.** All three sit in
+the same arm, the same model, the same archetype, the same withheld editing tools, and the same run.
+**The structural twin the frozen ground truth itself names.** T6's own `exposes` field ends with the words
+"same shape as T7" — same camelCase-hump obstacle, same terse common-word phrasing, no filename anchor. T6
+opened with a shell command and answered.
+**The authored no-answer control.** T3's `exposes` field calls it a control whose all-common-words phrasing
+has no correct answer to have, and its `correctFile` is null. Given a task with nothing to find, it ran two
+shell commands anyway before reporting — and then asked three numbered clarifying questions, the identical
+output form T7 produced. Same questions, two commands in front of them.
+**The imperative, genuinely underdetermined task.** T2 never says what to rename the symbol to, so it is
+underdetermined in exactly the way T7 claims to be, and it holds no editing tool with which to rename
+anything. It searched first, produced the complete map of every site the rename touches, and closed by
+asking what the new name should be. That is the behaviour available to T7 in full: look, report, then ask
+what genuinely remains open.
+
+**What the one prescribed command returns, which is what makes the task answerable.** The question
+archetype's own preamble instructs one shell command and offers a `grep -rn` form as an example. That
+command, run for the task's own word across the source tree, returns twenty-one hits, and the recorded
+correct file appears in three of them — its import of the masking helper and both of its render call sites.
+Two of the answer's three questions are settled by that output: there is exactly one key-masking path, and
+masking already happens at display time. The third asks the reader to supply what the search would have
+produced.
+
+**The verdict: residual suppression.** The task was answerable by the single command the environment
+instructed; the agent issued none; the non-action was framed by a tool-absence citation that is accurate
+and carries no weight — the withheld editing tools were never needed to locate and name a file — and the
+answer's own closing sentence concedes that investigating was available to it. Every escape the
+correct-tool-free-answer reading needs is closed by an arm-mate that took the other path under identical
+conditions.
 
 **The one hard comparison the surviving record allows, and it is like-for-like on purpose.** Item 94
 records arm A — the arm with the notice's suppression seam disabled — at six tool calls on this same
@@ -11317,33 +11426,62 @@ recorded nowhere, only its aggregate of fifteen, and substituting one for the ot
 twentieth pattern's own error. The comparison is also bounded by everything item 94 bounds: one run per
 cell, and arm A ran a configuration this arm does not.
 
-**What would settle it, in decreasing order of what it costs.** Free: a reader deciding, against the
-answer text and the correct file, whether a competent respondent given `mask the key` and a read-only
-shell should have searched before asking. Cheap: re-running this one task with the notice absent
-entirely, which separates "this model asks first on this task" from "this configuration suppresses" at
-roughly a fiftieth of the arm's own cost. Neither is done here.
+**The qualification, given its own paragraph because losing it would make this entry say more than it
+knows.** This is the same behavioural shape as the original regression — non-action justified by a
+tool-absence citation — arriving by a different route. Item 90's own mechanism, a withheld bare tool name
+reading as covering the offered name it prefixes, is **provably absent** from the prompt this task ran
+under: computing that rule directly against the rendered artefact, over every withheld name and every
+offered name, returns zero withheld-root-covers-offered-extension pairs, and the bare name is not in the
+withheld list at all. The archetype preamble's own command instruction names the offered tool correctly
+too, so item 98's fix is live in the same text. T7's zero is therefore **not** evidence that the fixed
+collision persists. It is evidence that the behaviour is reachable without it.
 
-**Why this pass does not make the free judgment.** The same pass registered item 90's revised criterion.
-A judgment made in that pass, on the one task that decides whether that criterion is met, is the
-after-the-fact reconciliation the registration exists to prevent — regardless of which way it landed.
+**What would settle what remains, in increasing order of what it costs.** The free judgment is made, and
+is recorded here. What is not settled is the route: which feature of this prompt produced the behaviour
+once the collision was excluded. Item 100 carries the nearest artefact-supported candidate and the arm that
+would separate it.
 
-**And its answer is not an exception to item 90's criterion.** That criterion is deliberately mechanical:
-a task at zero leaves the item open whatever the reason. If this entry resolves toward a legitimate
-tool-free answer, the consequence is grounds for a further revision of that criterion, registered in its
-own pass before being applied — not a carve-out applied at scoring time to a rule that does not contain
-one.
+**Why the pass that opened this entry did not make the free judgment, and why that separation was worth
+keeping.** That pass registered item 90's revised criterion. A judgment made there, on the one task
+deciding whether that criterion is met, would have been the after-the-fact reconciliation the registration
+exists to prevent — whichever way it landed. **A later pass made it, against the artefacts and with no
+criterion to protect**, which is why the separation was worth the delay and why which pass judged is worth
+recording rather than smoothing over.
 
-**Bucket: Neither.** Nothing is proposed to fix; a decision is recorded as unmade, with the facts needed
-to make it already in hand. The precedent runs both ways and both directions were checked: item 38 (a
-shipping decision still open with the flag already live), item 46 and item 51 ("decide between two
-approaches" and "measure, then decide") all sit in Neither on exactly this shape. Against the other
-direction, Blocked on data requires an observation that does not exist yet, and the observation here
-exists — the capture is on disk and the answer text is in it.
+**A cost figure in this entry was wrong and is corrected in place.** Re-running this one task was called
+roughly a fiftieth of the arm's own cost. It is roughly a nineteenth: the task billed a hair over a cent
+and a half against the arm's twenty-nine cents, a ratio just under nineteen, or a little over five percent.
+
+**And this answer is still not an exception to item 90's criterion, which the verdict happens to make
+easier rather than harder to hold.** That criterion is deliberately mechanical: a task at zero leaves the
+item open whatever the reason. The judgment landing on suppression means the mechanical answer and the
+substantive one now agree, so no pressure falls on the rule at all. Had it landed the other way, the
+consequence would have been grounds for a further revision of that criterion, registered in its own pass
+before being applied — never a carve-out applied at scoring time to a rule that does not contain one.
+
+**Three counting errors in a fresh entry, found by the next pass, which is the seventeenth pattern's own
+claim rather than a new one.** This entry was written one pass before the judgment, cited by nothing in
+between, and carried a wrong word count, a wrong question count and a cost ratio wrong by a factor of two
+and a half. All three fell to the first pass that re-derived them from the artefacts instead of reading the
+entry. The seventeenth pattern states that a freshly written entry is the least-checked text in this
+document; this is an instance of it, recorded where the errors were rather than promoted into a new
+pattern beside it.
+
+**Bucket, re-decided rather than inherited: Neither becomes Closed.** This entry's own question was which
+of two readings holds, and it is answered from artefacts, with three controls and a stated qualification.
+The precedent was checked both ways. For: item 144 closed on a settled central question with its remaining
+limits named as limits, and item 91 closed with its own unmeasured-behaviour caveat intact — the same
+shape, a resolved subject beside a named residue. Against: the residue here is the route question, and an
+entry closing while something it names stays open would be wrong if that residue were this entry's subject
+— it is not; it belongs to item 100's class and is recorded there, with the arm that would settle it. The
+n=1 bound applies to the judgment as it applies to every figure in this arc, and bounds what it
+generalises to rather than whether it was made.
 
 **Where the code lives:** the answer-only archetype's preamble is inside `assembleAgentSystemPrompt`,
 `llm/agentLoop.ts`; the capture is one of the two files item 90's own durability paragraph describes. See
 item 90 for the arm and its criterion, item 97 for the preamble T7 ran under, item 99 for the withheld
-clarification path, and item 94 for arm A's own figure on this task.
+clarification path and for what this arm establishes about asking without a tool, item 100 for the
+candidate route, and item 94 for arm A's own figure on this task.
 
 ## Status snapshot — a partition, not a priority ordering
 
@@ -11355,17 +11493,17 @@ priority ordering" cautions against ranking by importance, which this section do
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (57): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 111, 117, 120, 121, 126, 128, 134, 135, 137, 144
+**Closed** (58): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 111, 117, 120, 121, 126, 128, 134, 135, 137, 144, 149
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (8): 108, 113, 116, 129, 130, 138, 142, 148
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (10): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143
 
-**Neither — a structural fact recorded, with no fix proposed** (74): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (73): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
-119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 149
+119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
@@ -13277,3 +13415,38 @@ recent.
 control-arm behaviour was recorded before registration and not consulted. A bar that is simply wrong, with
 nothing available at registration time that would have shown it, reopens nothing — that is a measurement
 being hard, not a check being skipped.
+
+## A third candidate considered and not promoted: a fix verified live in the artefact does not retire the behaviour it was written for
+
+**The instance.** Item 90 recorded a regression, identified its mechanism, shipped a fix for that
+mechanism, and the fix is verifiably present in the prompt a later arm rendered — computing the rule
+directly against that artefact returns no remaining instance of the collision. A cell of that arm then
+produced the same behavioural shape anyway, judged in item 149. A verified fix, a verified absence of its
+target, and the behaviour regardless.
+
+**Compared against the thirteenth, which is the nearest by surface and is not the mechanism.** That pattern
+governs a string search standing in for a call-graph check — a lazy instrument, where presence or absence
+in text is read as evidence about behaviour. The opposite happened here. The rigorous check was the one
+run: the rule computed over the actual withheld and offered sets of the actual rendered prompt, which is
+the tracing the thirteenth prescribes rather than the grep it warns about. And the check was right — the
+mechanism genuinely is gone. Nothing was inferred from a keyword.
+
+**Compared against the sixteenth**, which runs the other direction: a claimed payoff traced forward and
+found already delivered by a downstream override. Here the payoff was delivered exactly where claimed and
+the behaviour outlived it. **And against the nineteenth**, whose subject is coverage — pinning what a
+change touches and missing the path nothing runs without. Nothing here is unpinned; the question is
+causation, not coverage.
+
+**What actually declines it, and it is not resemblance.** The patterns in this document are mistakes in how
+this arc investigates — the boundary item 95 drew when accepting one candidate and item 94 applied when
+declining another. This arc did not make this mistake. Item 90 says in its own text that a reader should
+not infer the regression is closed because the fix is on master, and it held that line across every pass
+that touched it. A pattern restating a discipline the document demonstrably kept would describe correct
+conduct rather than correct anything. Population is one, and the one is not an error instance.
+
+**The condition under which it reopens, split by which side the second instance lands on.** On the
+investigative side: a pass that does infer a behaviour retired from its mechanism being verified absent,
+and is wrong. That is the error this candidate would name, and it has not happened. On the subject side: if
+the arm item 100 describes demonstrates a second sufficient cause, then one behaviour with several
+sufficient causes is an established fact about the prompt, and it belongs to whichever entry runs that arm
+rather than beside the patterns.
