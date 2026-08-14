@@ -11529,7 +11529,7 @@ item 90 for the arm and its criterion, item 97 for the preamble T7 ran under, it
 clarification path and for what this arm establishes about asking without a tool, item 100 for the
 candidate route, and item 94 for arm A's own figure on this task.
 
-## 150. Closed — the notice probe's prompt audit omitted the offered tool set and its dumps overwrote each other; both fixed at `93a27f71`, with byte-identity to the run's own assembly proven
+## 150. Closed — the notice probe's prompt audit omitted the offered tool set and its dumps overwrote each other; both fixed at `93a27f71`, and the audit reproduces the executed prompt only as of `fc6f757d`
 
 **What it is.** The probe writes two system-prompt files beside every capture, and they are the artefact
 every later pass reached for when it wanted to know what a run's prompt contained. They do not contain it.
@@ -11589,11 +11589,25 @@ exported function, because the audit sits behind a real if minimal billed credit
 otherwise be exercised without spending; the extracted function is what the tests and the proof call, and
 the arm calls the same one in the same position.
 
-**What the closure was checked against.** The audit's no-notice output is byte-identical — full-string
-equality, not a length or substring check — to `assembleAgentSystemPrompt` called with the field set the
-real run's own call site passes for this configuration. The pre-fix inflation was reproduced fresh from the
-prior commit's own committed source rather than cited from this entry, so the before state was demonstrated
-immediately before it was edited away.
+**What the closure was checked against, and the claim that sentence made is false.** It said the audit's
+no-notice output was byte-identical — full-string equality, not a length or substring check — to the
+assembler called with the field set the real call site passes for this configuration. **It was not that
+field set.** The reference carried the audit's own empty project-memory block and the audit's own shorter
+introduction line, so the two sides shared the very omissions the comparison existed to detect and the
+check could not have failed. What the proof actually established is that the audit matched a
+reconstruction of itself. The pre-fix inflation figure is unaffected — it was reproduced fresh from the
+prior commit's own committed source rather than cited, so the before state was demonstrated immediately
+before it was edited away.
+
+**Why that flaw is worth naming precisely rather than filed as carelessness, and where the document's own
+guidance misclassifies it.** The second pattern governs exactly this shape: a check whose two sides share
+what the check is meant to detect cannot fail. Its own discriminator, though, asks whether the claim is
+about a value or about an agreement, and prescribes sharing for agreement claims — which, applied here,
+**licenses the flaw**. The claim looked like an agreement claim, and sharing was still fatal, because the
+two sides were not two independent producers that ought to agree but a thing and a reconstruction of it,
+where the reconstruction's fidelity is the whole question. The coupling was also authorial rather than
+mechanical: nothing in code linked the two sides, the same incomplete understanding simply wrote both.
+Recorded against the instance rather than promoted, for the reasons the essay decision states.
 
 **A boundary that sentence needs, found free by a later pass before it spent anything: the reconstruction
 it was checked against carries the same empty project-memory block the audit does, so what it establishes
@@ -11607,6 +11621,20 @@ does reach the assembly and the filenames do carry the stamp, both verified by r
 divergence of the same kind survives them, and a reader should not take the byte-identity sentence as
 covering it. **It is not a confound for the measurement that found it:** the memory-writing tool is withheld
 for this archetype, checked against the real notice, so the block cannot change between cells of one arm.
+
+**That paragraph was right about the divergence and is now superseded on the part that says it survives.**
+It is kept because it is what identified the flaw. The divergence it names is closed at `fc6f757d`, along
+with a second component it did not name — the introduction line, where the audit hardcoded a shorter string
+than the real call site's own ternary produces for this configuration, eighteen characters' worth.
+
+**What actually closed it, and how the new proof avoids the flaw the old one had.** The audit now reads
+project memory through the same function the loop calls, wrapped in the same try and catch so a missing or
+corrupt file degrades identically, and uses the introduction the real ternary yields here. The new reference
+is built by invoking that memory reader and the assembler **independently** — it shares the imported
+functions with the audit but no construction path, so either side is free to diverge if either is wrong,
+which is what the old reference could not do. Both lengths were predicted before the fix was written and
+matched exactly, and the assertion is full-string equality rather than a length or a substring. The
+remaining fields that still differ, and the one whose safety is conditional, are item 154.
 
 **The finding that changed the fix's shape, recorded because it is the substantive one.** The obvious
 mutation — pass an empty set instead of the real pair — was run before any assertion was written, and it
@@ -11666,6 +11694,19 @@ produces byte-identical output, because every gate that reads the offered set na
 tool and none names either tool this archetype holds. The set of inputs that produce the same prompt is
 therefore larger than task-independence alone, which strengthens the foreclosure rather than qualifying it:
 the prompt for this configuration is inert against more of its own inputs than this entry claimed.
+
+**The enumeration is short by two, and completing it does not touch the conclusion.** Counted against the
+assembler's own signature, which declares eighteen fields, the list names sixteen: the framework flag and
+the Q&A command tool go unnamed. Both fall inside categories this entry already names — the first beside
+the framework lines it accompanies, the second among the capability-derived fields — and **neither is
+derived from the task string**, which is the only property the conclusion rests on. Recorded because a
+reader checking the enumeration against the signature would otherwise find the gap and not know whether it
+mattered.
+
+**One thing did change, and it is verifiability rather than content.** This entry's claim was established
+by reading the call site, because at the time no artefact on disk reproduced the executed prompt — the
+audit's own dumps did not, per item 150. Since `fc6f757d` they do, so the claim can now be checked against
+a diagnostic rather than only against a reading. The claim itself is the same and was correct when made.
 
 **What remains, stated as the two surviving classes rather than as a hypothesis.** Task-level variables:
 the task string was the only input that varied, and the tasks differ in length, specificity and mood.
@@ -11879,11 +11920,88 @@ judgment this tests the stability of, item 151 for the foreclosure that leaves o
 for the naming fix that makes four cells separable and for the memory boundary this confirms, and item 90
 for the criterion this does not answer.
 
+## 154. Four fields the prompt audit still does not reproduce, three inert by construction and one inert only while a condition holds
+
+**What it is.** The fix at `fc6f757d` made the audit reproduce the executed prompt for this instrument's
+one configuration, and four fields still differ in value between what the audit passes and what the real
+call site passes. None of them changes the rendered output today. They are recorded together because a
+later reader auditing this instrument needs the whole residue in one place, and because one of the four is
+safe only conditionally.
+
+**The three that are inert by construction.** The Q&A command tool and the answer-only flag are omitted by
+the audit, and the assembler's own defaults for them equal the values the real call site derives here — the
+first has a documented default naming this archetype's own tool, the second is read through a falsy-or gate
+where an unset field and a false one are indistinguishable. Setting either explicitly would add an
+assignment with no observable effect and no test able to fail on it. The summary format is unreachable: the
+only branch that reads it is guarded on the archetype not being read-only, and this archetype is read-only.
+Each of the three was checked by assembling the prompt both ways and comparing, not by reasoning from the
+source.
+
+**The one to watch, and the condition rather than the state alone.** The plan-progress block genuinely
+differs — the real call site passes a substantial static template and the audit passes an empty string.
+It is inert only because that block renders when the todo-writing tool is offered, and this archetype
+withholds that tool. **If this archetype's offered set ever gains it, the audit silently diverges again**,
+and in exactly the way this entry's parent was opened for: a diagnostic describing a prompt no run
+executed. Closing it then needs one of two things, named now so the choice is not rediscovered under
+pressure — a new export of that template from the loop's own module, which is a change to the source tree
+rather than to the instrument, or a duplicated copy inside the probe, which creates a second source of
+truth for a string that already has one. Neither is worth doing while the block cannot render.
+
+**Why one entry rather than two.** Splitting the conditional field into its own heading was considered and
+declined: it would leave three inert fields under a heading that implies they need watching, which they do
+not, and the alternative failure — burying the conditional one inside a list — is avoided by giving it its
+own paragraph and its own trigger sentence instead.
+
+**Bucket: Neither**, decided with the two-way check. For: a structural fact recorded with no fix proposed,
+which is this bucket's own definition — items 87 and 107 sit here on that shape. Against: Actionable now
+requires a fix specified in the entry, and this entry deliberately specifies none while the condition
+holds, naming the two options only for when it fires; Blocked on data requires an observation that does not
+exist yet, and this entry is the observation.
+
+**Where the code lives:** the audit's own input object is in `scripts/notice-regression-probe.mjs`; the
+fields and the gates that read them are in `assembleAgentSystemPrompt`, `llm/agentLoop.ts`. See item 150
+for the divergences that were closed, and item 155 for the maintenance property of the test that pins the
+closure.
+
+## 155. The audit's byte-identity test pins a length derived from an untracked file, and a red result there is maintenance rather than a finding
+
+**What it is.** The test that pins item 150's closure asserts two things about the audit's assembled
+output: that it equals an independently built reference, and that its length equals one specific number.
+That number is derived from the current contents of the per-repo project-memory file, which the assembled
+prompt embeds. **That file is untracked and gitignored**, confirmed directly against the index and against
+both check-ignore forms, so it can change without any commit and the pinned number goes stale silently.
+
+**What a reader should do when it goes red, stated plainly because the wrong response is the tempting
+one.** Check the full-string equality assertion beside it first. That assertion is the real one and is
+content-independent — it compares the audit against a reference built by invoking the same memory reader
+separately, so it holds whatever the memory file says. If equality passes and only the length differs, the
+memory file changed and **the correct action is to update the pinned number to the new value**. It is not a
+regression, and investigating it as one is wasted work.
+
+**Why the length pin is there at all, given that equality is the real assertion.** Equality alone can be
+satisfied by both sides drifting together, which is precisely the flaw that made the previous proof
+vacuous — see item 150. The length is a second, independent anchor to today's real content: it cannot move
+without someone noticing. The fragility is the price of that, and it is deliberate rather than overlooked.
+
+**No fix proposed.** Deriving the expected length at test time from the same file would remove the
+fragility and remove the anchor with it, which is the trade this entry exists to make visible rather than
+to decide.
+
+**Bucket: Neither**, decided with the two-way check, on the same precedent as item 154 — a structural fact
+with no fix proposed, the shape items 87 and 107 sit under. Against: Actionable now needs a fix specified
+now, and this prescribes what to do only when a condition fires; Blocked on data needs a missing
+observation, and nothing here is waiting on one.
+
+**Where the code lives:** the assertion pair is in `scripts/notice-regression-probe.test.ts`, in the
+byte-identity case of the prompt-audit block; the file it depends on is the per-repo memory file the
+assembler embeds. See item 150 for what the test pins and item 147 for the adjacent but distinct shape of a
+figure whose validity depended on an environment nobody recorded.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 153 to find out which ones still need something. No index of
+reader the trouble of reading all 155 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -11896,10 +12014,10 @@ first (8): 108, 113, 116, 129, 130, 138, 142, 148
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (10): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143
 
-**Neither — a structural fact recorded, with no fix proposed** (75): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (77): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
-119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152
+119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152, 154, 155
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
@@ -13898,3 +14016,39 @@ itself says so.
 what it measured while staying faithful on the fields some conclusion rested on. The selective fidelity is
 the part to match, not the divergence: a diagnostic that is simply wrong throughout reopens nothing, since
 ordinary checking catches it and the twenty-first already governs what to do about it.
+
+## A fifth candidate considered and not promoted: a proof whose reference carries the flaw the proof exists to detect
+
+**The instance.** Item 150 closed on a byte-identity check between the prompt audit and a reference meant
+to stand for the executed prompt. The reference carried the audit's own empty project-memory block and its
+own shortened introduction line, so both sides of the comparison held the very omissions the comparison
+existed to find. The check passed and demonstrated nothing about the thing it named. A later pass built a
+reference independently and the divergence appeared immediately.
+
+**Distinguished from the candidate declined two passes ago**, which concerned an artefact that was faithful
+about every field anyone happened to check and unfaithful about the rest. That one is about where a
+reader's attention fell. This is narrower and worse: the check itself was constructed so that it could not
+fail, regardless of where attention fell.
+
+**First ground for declining: the mechanism is already the second pattern's own first case.** That pattern
+records a test deriving its expected value from the constant under test, so a mutation moved both sides
+together and the test survived the mutation it existed to catch. Item 150's proof is that shape — shared
+defect on both sides, comparison inert. Writing it again as a new pattern would restate a mechanism this
+document already holds, which is what the twenty-fifth's own decline reasoning warns against.
+
+**Second ground, for the part that genuinely is not that first case: population one.** The second pattern's
+coupling is mechanical and traceable in code — an import. This one was authorial: nothing linked the two
+sides, the same incomplete understanding of the real call site simply wrote both, independently, on
+different days. That distinction is real and this arc has exactly one instance of it. A mechanism resting
+on its only instance describes an event.
+
+**What is recorded instead, and where.** The second pattern's stated discriminator — value claim against
+agreement claim, with sharing prescribed for agreement claims — **misclassifies this instance**, because
+the claim looked like an agreement claim and sharing was nonetheless fatal. The missing distinction is
+between two independent producers that ought to agree and a thing checked against a reconstruction of
+itself, where the reconstruction's fidelity is the entire question. That gap is written into item 150
+beside the instance rather than into the pattern, deliberately: the pattern's text is left as it stands.
+
+**The condition under which it reopens.** A second case of the authorial coupling — a reconstruction
+checked against its original while inheriting a construction choice from it. A second *mechanical* case
+reopens nothing; it is the second pattern as already written, and belongs there.
