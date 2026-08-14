@@ -8492,6 +8492,88 @@ the notice, or if a task's calls are captured but its scored count disagrees wit
 record carries — the scorer preserves both precisely so that disagreement is visible rather than assumed
 away.
 
+**That rule is superseded for any future run, and is left standing rather than rewritten because this run
+was read under it.** Every sentence of it was true when written and the reading it produced is the record;
+rewriting it in place would erase what the result was judged against, which is the whole of what
+registering it in advance bought. A reader scoring any run after this correction applies the revised
+criterion this entry now carries; a reader auditing the run at `6e0defed` applies the superseded
+paragraph, which is why it stays.
+
+**The revised criterion, registered before the re-score that applies it and in its own commit, so the two
+cannot inform each other.** The rule it supersedes scores a task by how many of its shell calls were
+discovery-shaped. The regression this item exists to detect is whether the agent uses the shell at all —
+this entry's own opening records arm B at zero shell calls on every task, against arm A's fifteen. Those
+are different quantities, and a task that runs a test and a typecheck scores zero on the first while
+plainly not exhibiting the second.
+
+**Supplement, not replacement — both metrics are kept, with separate meanings that must not be
+collapsed.** Shell use is the regression test: it answers whether the notice still suppresses the shell.
+Discovery shape is a quality measure: it answers how much searching the agent did once it reached for the
+shell. Collapsing the second into the first is what produced the defect being corrected here, and each
+keeps its own field, its own ruling and its own scorer output.
+
+**The revised primary criterion, stated precisely enough to re-score against, and naming the field it
+reads.** For each of the seven frozen tasks, the shell-call count is the number of entries in that task's
+`toolCallLog` whose `tool` is `run_command_readonly` — exactly the length of the `allShellCalls` array
+`scoreTaskDiscovery` already returns, so applying this needs no change to the instrument. **Attempted
+calls count, refused ones included**, and that ruling deliberately diverges from the discovery metric's
+own: the regression is the agent not reaching for the shell, so an attempt the shell refused still proves
+it reached; the discovery metric asks what the agent learned, and a refused call teaches nothing. Two
+metrics, two rulings, each matched to the question it answers.
+
+**The three branches, and they are fully mechanical.** **Closes** if every one of the seven tasks shows a
+non-zero shell-call count. **Stays open** if any task shows zero, for any reason. **The instrument is
+wrong** rather than the hypothesis if the offered set is not exactly the two tools the probe asserts at
+startup, if the prompt audit shows the two arms differing by anything other than the notice, or if a
+task's scored shell count disagrees with the raw call list the same record carries — the third condition
+re-pointed from the discovery count to the shell count, the first two unchanged.
+
+**An exception for tasks correctly answerable without any shell was considered and declined, and the
+decline is recorded so a later reader does not read the strictness as an oversight.** Such an exception —
+setting aside a zero that a reader judges to be a correct tool-free answer — would make the criterion
+unreadable on its own: its outcome would depend on a judgment not yet made, and on a judgment that could
+be made after seeing which task fell short. That is the shape this arc's registration discipline exists
+to prevent, and admitting it into the criterion would cost exactly what registering the criterion buys.
+**Item 149's answer is therefore not an exception to this rule.** If that entry's judgment lands on the
+side of a legitimate tool-free answer, the consequence is grounds for a further registered revision in a
+later pass — recorded first, applied second — not a carve-out exercised at scoring time.
+
+**What this criterion cannot do, stated as part of it rather than discovered later.** It cannot
+distinguish a task answered correctly without the shell from a task suppressed into answering without the
+shell. It does not try to. That question is item 149's, and it is deliberately outside the rule.
+
+**Why the revision does not rest on the run it will be applied to.** Item 94 records, twice, that arm A —
+the control arm, the one without the regression — issued zero discovery-shaped calls on T3, committed at
+`a974d6ee` two days before the superseded criterion was committed at `c5bb75b7`, and an ancestor of it.
+The registered bar therefore demanded of the fixed arm something this document already recorded the
+control arm failing, on the same task. A bar the control does not clear cannot test for the treatment's
+regression, and that was checkable from committed text at the moment the bar was written.
+
+**Arm A's per-task discovery counts, recoverable from item 94's prose where arm C's are not, with the one
+soft step named.** T1, T2 and T4 at one each, from that entry's own record that the OpenAI run matched
+arm A exactly on those three and made one call on each; T3 at zero, stated directly; T5 at three, from
+"arm A and arm C both needed three calls on this task"; T6 at two, from "fewer than arm A's two"; and T7
+at two, which is what closes the arithmetic against this entry's own recorded total of ten. **The soft
+step:** T5's source sentence says "calls", not "discovery calls", and is read as the latter from its
+paragraph's subject and confirmed by the sum — recorded as derived rather than as a recorded figure,
+because item 94's own twentieth pattern is about comparing counts whose scope was never named. **Arm A's
+per-task shell counts are not recoverable** and are not asserted here: only its aggregate of fifteen is
+recorded anywhere.
+
+**This revision is not blind to its own outcome, and saying so is part of registering it.** The run's
+aggregate is already in this entry — nine shell calls across the seven tasks, six of the seven using the
+shell at all — so a reader can infer the revised criterion's verdict before reading the re-score that
+computes it. This registration therefore buys less than the pre-run one did, and it is not presented as
+an equivalent. What it does buy is that the rule is fixed in a pushed commit before any per-task shell
+figure is recorded anywhere, and that its shape is forced by facts predating the run rather than derived
+from it.
+
+**The machine-readable predictions file still states the superseded criterion, and is deliberately left
+unedited.** It is tracked, in `scripts`, and it is the artefact proving the predictions preceded the first
+billed call; rewriting it would destroy that proof to fix a staleness its own text already handles. That
+file states it is not an independent registration and that where the two could be read as differing, this
+item wins. A reader finding the old bar there should read this entry, not correct the file.
+
 **`anyRefusal` is removed from what this run must measure, and removed rather than quietly dropped.** It was
 part of the registered set; item 145 answers it from artefacts already on disk, at no cost and with no run.
 A pass executing this measurement should not re-register it, and should not read its absence here as an
@@ -8513,6 +8595,15 @@ offered set was exactly the two tools the probe asserts, or it would have aborte
 the two arms differing by precisely the notice's own length; and every task's scored count was re-derived
 from the raw call list the same record carries and agreed with it. No refusals occurred.
 
+**What the arm cost, summed from the captures' own per-task fields rather than estimated.** Twenty-nine
+point two six cents in total — `$0.292629` — against the twenty-nine to thirty-six predicted. Per task,
+in order: `$0.036766`, `$0.032645`, `$0.060681`, `$0.033947`, `$0.069448`, `$0.043697`, `$0.015444`. The
+cheapest is the task that made no tool calls at all, at roughly a fifth of the dearest. Predictions
+committed at `7756e936`; the reading of the result against them committed at `6e0defed`. **This is the
+arc's first paid measurement read against a rule registered before the spend**, and the thing worth
+recording about it is not the figure but that the rule was applied as written, including when applying it
+as written left the item open on a task that had not exhibited the regression.
+
 **Both false negatives resolved, judged by a reader against item 144's recorded ruling rather than by the
 scorer.** The task whose symbol the original arm B reported absent from the repository returned it found in
 four files — the definition, two call sites and their two test files. The task whose file the original arm B
@@ -8520,7 +8611,8 @@ said it could not locate returned the correct path, its function, and an accurat
 function already does. That half of the prediction holds.
 
 **What the two zeros actually are, because the metric reports one number for two different states, and
-neither is the state this item recorded.** The regression this entry measured was shell abandonment: the
+neither is the state this item recorded — the second of them now carried by item 149, which is what the
+revised criterion turns on.** The regression this entry measured was shell abandonment: the
 original arm B issued zero shell calls on every task. This run issued nine shell calls across the seven, and
 six of the seven tasks used the shell at all. The first zero is a task that made two shell calls — a test
 run and a typecheck — neither of them discovery-shaped, so it scores zero on a discovery metric while
@@ -11117,11 +11209,80 @@ be asserting the same unrecorded premise in a new place.
 that a decision carried between sessions is not a decision the repository has made until something in the
 repository says so.
 
+## 149. One task in item 90's arm answered with no tool calls at all, and whether that is a correct tool-free answer or residual suppression is a judgment nobody has made
+
+**What happened, from the capture.** T7 of item 90's seven-task arm — task text `mask the key`, with
+`src/cli/tui/components/ApiKeysView.tsx` recorded as its correct file — made **zero tool calls of any
+kind**, finished in one iteration of an allowed three, and terminated on natural completion rather than
+budget exhaustion. It is one of the two zeros item 90 records, and the only one where nothing at all was
+invoked; the other zero is a task that made two shell calls, neither discovery-shaped. This entry exists
+because item 90 reports one number for two different states and this is the state that number cannot
+describe.
+
+**Why it is not a footnote.** Item 90's revised criterion counts shell calls per task, and T7 is the only
+task in the arm at zero. Whatever this zero means is therefore the whole of what stands between that item
+and its closure — which makes it too load-bearing to leave inside a parenthesis in another entry.
+
+**The evidence toward a correct tool-free answer.** The task is genuinely underspecified: two words, one
+of them ambiguous between an API key, a displayed key, and a stored key. The answer names that ambiguity
+and asks four specific questions — which key, where masking should happen, whether a prior report exists,
+and what the requester already has — then offers to investigate and give a sourced answer once told. It
+claims capability it is not exercising, which is the opposite of what a suppressed run reports.
+
+**The evidence toward residual suppression, and it is not weak.** The answer cites tool absence as its
+reason for non-action: that the archetype is answer-only, that no file-editing tools are available in the
+run, and that it therefore cannot apply a patch regardless. That is the same shape as the original arm
+B's own false negatives — a true statement about withheld tools offered as the reason for not doing
+something the withheld tools were not needed for. And the environment pointed the other way: the question
+archetype's own preamble, per item 97, prescribes one shell command and frames the deliverable as that
+command's output. T7 issued none. A run that abandons the shell in an environment instructing it to use
+the shell is the exact behaviour item 90 measured.
+
+**The confound that keeps either reading from being forced.** Item 99 records that this archetype
+withholds `ask_user` and never instructs stating an ambiguity instead of resolving one. T7 improvised a
+clarification path the prompt gives it no tool for and no instruction to take — behaviour the
+configuration neither licenses nor forbids, which is why neither reading can claim it.
+
+**The one hard comparison the surviving record allows, and it is like-for-like on purpose.** Item 94
+records arm A — the arm with the notice's suppression seam disabled — at six tool calls on this same
+task, against this run's zero. Tool calls compared against tool calls: arm A's per-task **shell** count is
+recorded nowhere, only its aggregate of fifteen, and substituting one for the other is precisely the
+twentieth pattern's own error. The comparison is also bounded by everything item 94 bounds: one run per
+cell, and arm A ran a configuration this arm does not.
+
+**What would settle it, in decreasing order of what it costs.** Free: a reader deciding, against the
+answer text and the correct file, whether a competent respondent given `mask the key` and a read-only
+shell should have searched before asking. Cheap: re-running this one task with the notice absent
+entirely, which separates "this model asks first on this task" from "this configuration suppresses" at
+roughly a fiftieth of the arm's own cost. Neither is done here.
+
+**Why this pass does not make the free judgment.** The same pass registered item 90's revised criterion.
+A judgment made in that pass, on the one task that decides whether that criterion is met, is the
+after-the-fact reconciliation the registration exists to prevent — regardless of which way it landed.
+
+**And its answer is not an exception to item 90's criterion.** That criterion is deliberately mechanical:
+a task at zero leaves the item open whatever the reason. If this entry resolves toward a legitimate
+tool-free answer, the consequence is grounds for a further revision of that criterion, registered in its
+own pass before being applied — not a carve-out applied at scoring time to a rule that does not contain
+one.
+
+**Bucket: Neither.** Nothing is proposed to fix; a decision is recorded as unmade, with the facts needed
+to make it already in hand. The precedent runs both ways and both directions were checked: item 38 (a
+shipping decision still open with the flag already live), item 46 and item 51 ("decide between two
+approaches" and "measure, then decide") all sit in Neither on exactly this shape. Against the other
+direction, Blocked on data requires an observation that does not exist yet, and the observation here
+exists — the capture is on disk and the answer text is in it.
+
+**Where the code lives:** the answer-only archetype's preamble is inside `assembleAgentSystemPrompt`,
+`llm/agentLoop.ts`; the capture is one of the two files item 90's own durability paragraph describes. See
+item 90 for the arm and its criterion, item 97 for the preamble T7 ran under, item 99 for the withheld
+clarification path, and item 94 for arm A's own figure on this task.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 148 to find out which ones still need something. No index of
+reader the trouble of reading all 149 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -11134,10 +11295,10 @@ first (8): 108, 113, 116, 129, 130, 138, 142, 148
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (10): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143
 
-**Neither — a structural fact recorded, with no fix proposed** (73): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (74): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
-119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147
+119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 149
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
@@ -13016,3 +13177,36 @@ independent.
 precondition mechanically enforced, the corresponding post-condition left to whoever remembers. Two
 independent tools meeting that wall is a mechanism; one tool with two symptoms is a design choice, and the
 right response to it is to finish that tool rather than to write a pattern about it.
+
+## A second candidate considered and not promoted: a pre-registered bar never checked against the control arm's own recorded behaviour
+
+**The instance.** Item 90's registered criterion required every task in the fixed arm to issue at least
+one discovery-shaped shell call. Item 94 had recorded, two days earlier and in this same document, that
+the control arm — the one measured without the regression — issued zero discovery-shaped calls on one of
+those seven tasks. The bar was written without being checked against the behaviour of the run that
+defines what "no regression" looks like, and the check was a search away in text already committed.
+
+**Why it is worth stating even declined.** The failure is not that the bar was wrong; a pre-registered bar
+is allowed to be wrong, and this arc's discipline is precisely that a wrong one is applied as written
+rather than adjusted. The failure is that its wrongness was discoverable at registration time, so the
+discipline absorbed a cost it did not have to pay.
+
+**Compared against the twentieth**, the nearest relative, which governs two counts compared without their
+scopes being named. There is a family resemblance in that both are arithmetic done against a figure whose
+provenance went unchecked. But the twentieth's instances compare two numbers that measure different
+things; here one number is not compared to anything at all — the control's own figure was never brought
+into the comparison, which is an omission rather than a mismatch.
+
+**Compared against the fifth and the twenty-first**, both of which govern a check narrower than the claim
+it supports. Those concern a search that ran and did not reach far enough. Here no search ran; the
+relevant figure was in a neighbouring entry of the same document.
+
+**Not promoted, on population.** One instance. The twenty-fifth's own decline reasoning applies without
+strain — a mechanism resting on its only instance describes an event — and a candidate that would have
+been promoted on a second sighting should wait for one rather than be promoted on the strength of being
+recent.
+
+**The condition under which it reopens.** A second pre-registered bar, in this arc or another, whose
+control-arm behaviour was recorded before registration and not consulted. A bar that is simply wrong, with
+nothing available at registration time that would have shown it, reopens nothing — that is a measurement
+being hard, not a check being skipped.
