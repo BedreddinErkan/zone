@@ -81,6 +81,7 @@ import { resolveToolList, listRegisteredTools, registerTool } from "../dist/tool
 import { buildDispatcherCapabilityFilter, QUESTION_PIPELINE } from "../dist/llm/archetypeDispatcher.js";
 import { buildToolAbsenceBlock } from "../dist/llm/toolAbsenceNotice.js";
 import { createLLMClient } from "../dist/llm/factory.js";
+import { readProjectMemoryBlock } from "../dist/memory/projectMemory.js";
 
 const REPO = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 const DEFAULT_MODEL = { anthropic: "claude-sonnet-4-6", openai: "gpt-5.5" };
@@ -400,8 +401,27 @@ export async function probeCredit(client, model, provider) {
  * Extracted out of main() so it can run without the credit probe ahead of it — main()'s
  * own process.exit(4) becomes a throw here, since a unit a test imports must not be able
  * to kill the runner; main() catches it and preserves the original exit code and message.
+ *
+ * Two more fields closed here, established by comparing this function's own output against
+ * a reference built independently from the real `assembleAgentSystemPrompt` call site in
+ * agentLoop.ts, for this instrument's one configuration (question archetype, no framework,
+ * no executionPlan, no subagent): agentIntro was hardcoded to a shorter, unrelated string —
+ * the real call site's ternary always resolves to the literal below for this configuration,
+ * since the chat/investigation/subagent branches are all unreachable from this instrument
+ * and no framework is ever detected (the probe never passes one). projectMemoryBlock was
+ * omitted entirely — the real call site reads it unconditionally, wrapped in the identical
+ * try/catch below, so a missing or corrupt memory file degrades to "" exactly as it would in
+ * a real run rather than throwing somewhere a real run wouldn't. Every other field in this
+ * object was checked pairwise against its real-call-site value and found to already match —
+ * including two, qaCommandTool and answerOnly, whose value differs from "omitted" but whose
+ * RENDERED output does not, because the assembler's own default equals the real derived
+ * value for this configuration; left omitted rather than set to a value with no observable
+ * effect and no meaningful test. planProgressBlock also differs in value but never in
+ * output — gated on TodoWrite, withheld for this archetype — and closing it would need
+ * either a src/ change (exporting a new constant) or a duplicated string as a second source
+ * of truth, so it stays "" as a named, currently-inert gap rather than a silent one.
  */
-export function runPromptAudit({ capturesDir, ARM, only, runStamp }) {
+export async function runPromptAudit({ capturesDir, ARM, only, runStamp }) {
   const capabilityFilter = buildDispatcherCapabilityFilter({ ...QUESTION_PIPELINE });
   const offered = resolveToolList(capabilityFilter).map((t) => t.name).sort();
   if (JSON.stringify(offered) !== JSON.stringify(["read_file", "run_command_readonly"])) {
@@ -412,12 +432,18 @@ export function runPromptAudit({ capturesDir, ARM, only, runStamp }) {
     archetype: "question", tier: "medium", mode: "patch",
   });
   const offeredToolNames = new Set(offered);
+  let projectMemoryBlock = "";
+  try {
+    projectMemoryBlock = await readProjectMemoryBlock(REPO);
+  } catch {
+    projectMemoryBlock = "";
+  }
   const commonPromptInput = {
-    agentIntro: "You are Zone.", frameworkLines: [], hasFramework: false,
-    projectMemoryBlock: "", importContextSummary: undefined,
+    agentIntro: "You are Zone, an AI code agent.", frameworkLines: [], hasFramework: false,
+    projectMemoryBlock, importContextSummary: undefined,
     baseMaxIterations: QUESTION_PIPELINE.iterCap, canRunCommand: false,
     backgroundCommandBlock: "", repoPath: REPO,
-    planProgressBlock: "", planAnnotationsBlock: "", auditFindings: undefined,
+    planProgressBlock: "", planAnnotationsBlock: "",
     archetype: "question", planApproved: undefined, offeredToolNames,
   };
   const sysNoNotice = assembleAgentSystemPrompt({ ...commonPromptInput, toolAbsenceBlock: "" });
@@ -503,7 +529,7 @@ async function main() {
   // needing this transcript. Runs unconditionally, before any registry mutation.
   let audit;
   try {
-    audit = runPromptAudit({ capturesDir, ARM, only, runStamp });
+    audit = await runPromptAudit({ capturesDir, ARM, only, runStamp });
   } catch (e) {
     console.error(String(e && e.message ? e.message : e));
     process.exit(4);

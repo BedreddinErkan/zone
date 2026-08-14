@@ -19,6 +19,13 @@ import {
 } from "./notice-regression-probe.mjs";
 import { resolveToolList, listRegisteredTools, registerTool } from "../src/tools/toolRegistry.js";
 import { buildDispatcherCapabilityFilter, QUESTION_PIPELINE } from "../src/llm/archetypeDispatcher.js";
+// The byte-identity reference below must use the SAME built assembleAgentSystemPrompt and
+// readProjectMemoryBlock runPromptAudit itself calls (../dist/..., not ../src/...) — using
+// the vitest-transformed src versions here would make a src/dist build skew look like a
+// prompt-assembly regression, which is exactly the kind of false signal this proof exists
+// to rule out.
+import { assembleAgentSystemPrompt } from "../dist/llm/agentLoop.js";
+import { readProjectMemoryBlock } from "../dist/memory/projectMemory.js";
 // runPromptAudit (imported above from notice-regression-probe.mjs) reaches the registry
 // via ../dist/tools/toolRegistry.js, a SEPARATE module instance from the src import above
 // — established by running: suppressing through the src-imported functions left
@@ -536,10 +543,10 @@ describe("runPromptAudit", () => {
     return mkdtempSync(path.join(tmpdir(), "notice-regression-audit-test-"));
   }
 
-  it("PATCH RULES is absent from both dumps for the question archetype — half 1's payoff", () => {
+  it("PATCH RULES is absent from both dumps for the question archetype — half 1's payoff", async () => {
     const dir = scratchDir();
     try {
-      const audit = runPromptAudit({ capturesDir: dir, ARM: "B", only: null, runStamp: 1000 });
+      const audit = await runPromptAudit({ capturesDir: dir, ARM: "B", only: null, runStamp: 1000 });
       expect(audit.sysNoNotice).not.toContain("PATCH RULES:");
       expect(audit.sysWithNotice).not.toContain("PATCH RULES:");
       expect(audit.sysWithNotice).toContain("TOOLS NOT AVAILABLE THIS RUN");
@@ -548,10 +555,10 @@ describe("runPromptAudit", () => {
     }
   });
 
-  it("offeredToolNamesUsed is exactly the real registry-derived pair — pins the field's CONTENTS, not merely its presence", () => {
+  it("offeredToolNamesUsed is exactly the real registry-derived pair — pins the field's CONTENTS, not merely its presence", async () => {
     const dir = scratchDir();
     try {
-      const audit = runPromptAudit({ capturesDir: dir, ARM: "B", only: null, runStamp: 1001 });
+      const audit = await runPromptAudit({ capturesDir: dir, ARM: "B", only: null, runStamp: 1001 });
       const expected = resolveToolList(buildDispatcherCapabilityFilter({ ...QUESTION_PIPELINE }))
         .map((t) => t.name)
         .sort();
@@ -562,11 +569,11 @@ describe("runPromptAudit", () => {
     }
   });
 
-  it("filenames carry the run stamp — two different stamps produce two different, non-colliding paths", () => {
+  it("filenames carry the run stamp — two different stamps produce two different, non-colliding paths", async () => {
     const dir = scratchDir();
     try {
-      const a = runPromptAudit({ capturesDir: dir, ARM: "B", only: null, runStamp: 2000 });
-      const b = runPromptAudit({ capturesDir: dir, ARM: "B", only: null, runStamp: 2001 });
+      const a = await runPromptAudit({ capturesDir: dir, ARM: "B", only: null, runStamp: 2000 });
+      const b = await runPromptAudit({ capturesDir: dir, ARM: "B", only: null, runStamp: 2001 });
       expect(a.noNoticePath).not.toBe(b.noNoticePath);
       expect(a.withNoticePath).not.toBe(b.withNoticePath);
       expect(a.noNoticePath).toMatch(/system-prompt-no-notice-armB-all-2000\.txt$/);
@@ -578,17 +585,17 @@ describe("runPromptAudit", () => {
     }
   });
 
-  it("filenames also carry the task selection, matching the capture file's own arm+selection+stamp shape", () => {
+  it("filenames also carry the task selection, matching the capture file's own arm+selection+stamp shape", async () => {
     const dir = scratchDir();
     try {
-      const audit = runPromptAudit({ capturesDir: dir, ARM: "A", only: ["T2", "T4"], runStamp: 3000 });
+      const audit = await runPromptAudit({ capturesDir: dir, ARM: "A", only: ["T2", "T4"], runStamp: 3000 });
       expect(audit.noNoticePath).toMatch(/system-prompt-no-notice-armA-T2_T4-3000\.txt$/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  it("throws (not process.exit) when the registry no longer resolves to exactly [read_file, run_command_readonly] — a test importing this must survive the assertion failing", () => {
+  it("throws (not process.exit) when the registry no longer resolves to exactly [read_file, run_command_readonly] — a test importing this must survive the assertion failing", async () => {
     // Same registry seam the suppressNonOffered describe block above exercises, but
     // against the DIST-imported registry functions — runPromptAudit reads through
     // ../dist/tools/toolRegistry.js, a separate module instance from the src import used
@@ -599,11 +606,93 @@ describe("runPromptAudit", () => {
     const dir = scratchDir();
     const disabled = suppressNonOffered(["run_command_readonly"], registryFns);
     try {
-      expect(() => runPromptAudit({ capturesDir: dir, ARM: "B", only: null, runStamp: 4000 })).toThrow(
+      await expect(runPromptAudit({ capturesDir: dir, ARM: "B", only: null, runStamp: 4000 })).rejects.toThrow(
         /offered set is .*expected exactly \[read_file, run_command_readonly\]/
       );
     } finally {
       restoreSuppressed(disabled, { registerTool: registerToolDist });
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // The two divergences below were established by comparing the audit's output against a
+  // real-call-site reconstruction, traced field by field from agentLoop.ts's own
+  // assembleAgentSystemPrompt call site: agentIntro was a shorter, unrelated hardcoded
+  // string, and projectMemoryBlock was omitted, so both dumps carried an assembled prompt
+  // no real run of this instrument's own configuration would ever produce.
+
+  it("agentIntro matches the real call site's own literal for this configuration", async () => {
+    const dir = scratchDir();
+    try {
+      const audit = await runPromptAudit({ capturesDir: dir, ARM: "B", only: null, runStamp: 5000 });
+      expect(audit.sysNoNotice.startsWith("You are Zone, an AI code agent.")).toBe(true);
+      expect(audit.sysWithNotice.startsWith("You are Zone, an AI code agent.")).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("project memory reaches the audit exactly as the real call site reads it, and degrades the same way when absent", async () => {
+    const dir = scratchDir();
+    try {
+      const audit = await runPromptAudit({ capturesDir: dir, ARM: "B", only: null, runStamp: 5001 });
+      // A section header from the real .zone/memory.md, not the whole block — survives
+      // routine edits to that file's own prose.
+      expect(audit.sysNoNotice).toContain("## Project");
+
+      // The exact function runPromptAudit calls, pointed at a directory with no memory
+      // file: confirms the ENOENT path it wraps degrades to "" rather than throwing,
+      // matching agentLoop.ts's own try/catch around this same call.
+      const emptyRepoDir = mkdtempSync(path.join(tmpdir(), "notice-regression-no-memory-"));
+      try {
+        const block = await readProjectMemoryBlock(emptyRepoDir);
+        expect(block).toBe("");
+      } finally {
+        rmSync(emptyRepoDir, { recursive: true, force: true });
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("the audit's no-notice output is byte-identical to a reference built independently from the real call site's own field values", async () => {
+    const dir = scratchDir();
+    try {
+      const audit = await runPromptAudit({ capturesDir: dir, ARM: "B", only: null, runStamp: 5002 });
+
+      // Independently constructed: its own call to readProjectMemoryBlock and
+      // resolveToolList, not a reuse of anything runPromptAudit computed — the two
+      // invocations share only the imported functions, not a construction path, which is
+      // what makes this comparison non-tautological.
+      const off = resolveToolList(buildDispatcherCapabilityFilter({ ...QUESTION_PIPELINE }))
+        .map((t) => t.name)
+        .sort();
+      const mem = await readProjectMemoryBlock(process.cwd());
+      const reference = assembleAgentSystemPrompt({
+        agentIntro: "You are Zone, an AI code agent.",
+        frameworkLines: [],
+        hasFramework: false,
+        projectMemoryBlock: mem,
+        importContextSummary: undefined,
+        baseMaxIterations: QUESTION_PIPELINE.iterCap,
+        canRunCommand: false,
+        backgroundCommandBlock: "",
+        repoPath: process.cwd(),
+        planProgressBlock: "",
+        planAnnotationsBlock: "",
+        archetype: "question",
+        planApproved: undefined,
+        offeredToolNames: new Set(off),
+        toolAbsenceBlock: "",
+      });
+
+      // Predicted before running (established pass): 10,631 chars. Pinned as a length
+      // assertion alongside the full-string equality below, so a future change that
+      // preserves byte-identity by both sides drifting together still surfaces here —
+      // a known fragility of pinning live .zone/memory.md content, not hidden.
+      expect(audit.sysNoNotice.length).toBe(10631);
+      expect(audit.sysNoNotice).toBe(reference);
+    } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
