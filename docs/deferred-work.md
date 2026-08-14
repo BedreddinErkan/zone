@@ -10845,6 +10845,18 @@ gate, which multiplies suite time, or auditing test files for shared mutable res
 mechanical form today. Item 121's own repair — per-file resource isolation — is what removes an instance,
 and instances are what this document records.
 
+**A boundary on this entry's reach, added because a later observation ran the other way and is deliberately
+not filed here as an instance.** Every sentence in this entry is scoped to shared-resource races and stays
+as written; what needs saying is that the direction is not universal. A later pass met a single failure
+with the opposite profile: clean in isolation, clean on a full re-run, failing once under full parallelism,
+in a component test driving fake timers through an Ink render rather than sharing any mutable resource. Its
+scope-to-failure relation is inverted — contention *creates* it where distance *suppresses* the class this
+entry measures — so the reading this entry can invite, that the full suite is always the run least likely
+to surface a defect, is true for shared-resource races and false in general. That observation is one
+occurrence and is not recorded as an entry of its own: a single transient failure is thin for a heading,
+and filing an inverse mechanism as an instance of this one would blur the very distinction this entry
+exists to draw.
+
 ## 132. The call-time path-resolution rule is real, load-bearing and mechanically unenforced for this module
 
 **What it is.** CLAUDE.md requires that any writer under the user home resolve `homedir()` at call time
@@ -11502,7 +11514,7 @@ item 90 for the arm and its criterion, item 97 for the preamble T7 ran under, it
 clarification path and for what this arm establishes about asking without a tool, item 100 for the
 candidate route, and item 94 for arm A's own figure on this task.
 
-## 150. Actionable now — the notice probe's prompt audit omits the offered tool set, so its own diagnostic files describe a prompt no run executed
+## 150. Closed — the notice probe's prompt audit omitted the offered tool set and its dumps overwrote each other; both fixed at `93a27f71`, with byte-identity to the run's own assembly proven
 
 **What it is.** The probe writes two system-prompt files beside every capture, and they are the artefact
 every later pass reached for when it wanted to know what a run's prompt contained. They do not contain it.
@@ -11554,11 +11566,46 @@ few statements later; the audit call is the one place it is dropped. Nothing nee
 decided first. A second, smaller change is named rather than specified: give the two files the run stamp
 the capture files already carry, so an arm cannot overwrite another's.
 
-**Bucket: Actionable now**, decided with the two-way check. For: the fix is stated in this entry and needs
-nothing new learned first, which is this bucket's own bar — items 113, 129, 130 and 142 all sit here on
-exactly that shape, each naming a concrete correction to make. Against: Neither is for a structural fact
-with no fix proposed, and one is proposed; Blocked on data requires an observation that does not exist, and
-the observation is this entry.
+**Both halves landed at `93a27f71`, and the closure rests on running rather than on the diff reading
+correct.** The offered set now reaches the audit assembly; both dump filenames now carry a run stamp shared
+with the capture file, extending the arm-plus-selection-plus-timestamp expression the capture name already
+used rather than inventing a scheme. Applying both required extracting the inline audit block into an
+exported function, because the audit sits behind a real if minimal billed credit probe and could not
+otherwise be exercised without spending; the extracted function is what the tests and the proof call, and
+the arm calls the same one in the same position.
+
+**What the closure was checked against.** The audit's no-notice output is byte-identical — full-string
+equality, not a length or substring check — to `assembleAgentSystemPrompt` called with the field set the
+real run's own call site passes for this configuration. The pre-fix inflation was reproduced fresh from the
+prior commit's own committed source rather than cited from this entry, so the before state was demonstrated
+immediately before it was edited away.
+
+**The finding that changed the fix's shape, recorded because it is the substantive one.** The obvious
+mutation — pass an empty set instead of the real pair — was run before any assertion was written, and it
+renders **byte-identical text** to the real pair, on the with-notice and without-notice forms both. The
+reason is structural: every call of the offered-set predicate in the assembler names a write or dispatch
+tool — the subagent dispatcher five times, the patch applier three, the cross-file editor and the reverter
+twice each, the todo writer, the file writer and the search tool once each — and **none names either tool
+this archetype offers**, under both instruments. So no assertion on rendered text could distinguish the
+right set from an empty one, and the presence of the field pins nothing about its contents. What pins them
+is the constructed set being returned from the audit and asserted directly against a freshly derived one.
+**A count stated while establishing this needs its own correction:** twelve is the number of *lines*
+carrying that predicate, not the number of calls — there are sixteen occurrences, one of them the
+definition and fifteen of them calls, cross-checked by two independent methods. The conclusion is unchanged
+by the miscount, since the zero is what carries it.
+
+**The two dumps written before the filename fix are orphaned, and that is recorded rather than repaired.**
+Nothing will match their unstamped names again. They sit in a gitignored directory and were deliberately
+not deleted — they are not a fix pass's to remove, and their content is still readable by anyone who wants
+the pre-fix form.
+
+**Bucket, decided rather than inherited: Actionable now becomes Closed.** For: this bucket's own bar is a
+fix specified in the entry with nothing new to learn first, and that fix is now implemented, tested and
+verified by running — nothing here awaits an observation, a decision or a repair. Against: Blocked on data
+requires an observation that does not exist, and the observation is this entry; Neither is for a structural
+fact with no fix proposed, and one was proposed and taken. The prior reading, which placed it in Actionable
+now on the strength of the fix being specified but unwritten, was correct when written and is superseded by
+the fix landing.
 
 **Where the code lives:** the audit step and its input object are in `scripts/notice-regression-probe.mjs`,
 immediately before the arm loop; the offered-set predicate and every block gated on it are inside
@@ -11584,6 +11631,14 @@ seven behaved differently, because there was no difference in prompt text. Every
 by measurement — including the one item 100 briefly carried. Ruling out a class of explanations at no cost
 is worth recording precisely because the alternative is spending an arm to rule out one member of it.
 
+**That conclusion is unchanged and its evidence is wider than this entry first recorded.** Item 150's fix
+established, by running, that for this archetype the assembled text is identical not only across the seven
+task strings but across a *wrong offered tool set* — supplying an empty set in place of the real pair
+produces byte-identical output, because every gate that reads the offered set names a write or dispatch
+tool and none names either tool this archetype holds. The set of inputs that produce the same prompt is
+therefore larger than task-independence alone, which strengthens the foreclosure rather than qualifying it:
+the prompt for this configuration is inert against more of its own inputs than this entry claimed.
+
 **What remains, stated as the two surviving classes rather than as a hypothesis.** Task-level variables:
 the task string was the only input that varied, and the tasks differ in length, specificity and mood.
 Sampling-level variables: nothing in the probe or the loop pins a temperature, so two runs of the same cell
@@ -11607,27 +11662,96 @@ the arm's own invocation, which varies only the task string and the run identifi
 `scripts/notice-regression-probe.mjs`. See item 149 for the judgment on the task that differed, item 90 for
 the arm, and item 150 for the diagnostic defect found alongside this.
 
+## 152. Instruction-shaped text reached a pass through tool output, was declined correctly, and was not injected — it was this repository's own system prompt, printed by the test runner
+
+**What happened.** A fix pass running its own mutation testing saw a block of text arrive inside a shell
+command's captured output during a test run. The text read as an instruction addressed to an agent: it
+named a required final-answer format, forbade proposing edits on the grounds that the run was answer-only,
+and closed with a repository path. It contradicted the task that pass was mid-execution on. The pass
+identified it as not a user turn, declined to act on it, disclosed it in the response and in its commit
+message, and continued the real plan. **That handling is correct and is the behaviour to keep.** What
+follows corrects only where the text came from.
+
+**The source is located, and it is not external.** It is the system prompt this repository assembles. Nine
+distinctive phrases from the observed block are all present in the string the assembler returns for the
+configuration that pass's first mutation produced — the final-answer directive, the answer-only
+prohibition, the pipe-noise worked example, the truncation-marker instruction, the repository-path line.
+Both instruments locate each of them as a literal template constant in the agent loop's own prompt
+assembly. Nothing was injected, by anyone.
+
+**Three checks identify it rather than merely make it plausible.** Phrase presence alone would be weak.
+The observed phrases also appear in the assembled prompt in **exactly the observed order**, strictly
+ascending by position; and the observed block **ends where the prompt ends** — the repository-path line is
+the assembled prompt's own final line. A fragment that matches on content, on order, and on its terminal
+boundary is the thing itself.
+
+**The delivery mechanism, which is mundane.** That mutation made an assertion fail whose received value is
+the whole assembled prompt. The test runner prints the received side of a failed assertion. The
+plus-prefixes on every line of the observed block are the runner's own diff notation for the received side
+— the same notation visible on that pass's next mutation, where the received side was a two-element array
+and printed the same way.
+
+**The candidate this refutes, checked rather than assumed.** The natural hypothesis was a captured model
+transcript being echoed — this arc keeps captures containing model-written summaries, and reading one back
+is a real channel. It is not what happened. The only files under the per-repo audits directory carrying
+these phrases are the two prompt dumps, and those are themselves output of the same assembler, not
+transcripts of anything a model said.
+
+**The exposure, stated precisely rather than dramatically, because the precise version is the useful one.**
+This repository's product is an LLM system prompt. Instruction-shaped text is therefore present in it by
+construction — in source constants, in the prompt dumps written beside every arm, in test fixtures, and in
+any assertion failure whose received value is a prompt string. That channel is self-produced, permanent,
+and cannot be ruled out by any discipline, because the text is the subject matter. **The genuinely external
+channel is narrower and is worth naming separately:** the capture files' own summary and result-head
+fields hold text a model wrote, and that is the one place in this arc where content did not originate
+here. A pass reading those is reading someone else's output; a pass reading a prompt dump or a failure
+diff is reading this repository's own.
+
+**Which passes are exposed, and which rules already hold.** Any pass that runs the suite can see a prompt
+body in a failure diff; any pass reading the audits directory or the prompt assembly source sees the same
+text at rest; any pass reading a capture's summary is on the external channel. No rule needed changing to
+handle this: instructions come from the brief, every premise is a claim to verify, and running is proof
+rather than reading. The pass that met this followed those and reached the right action from the wrong
+provenance — which is the finding worth recording, since the wrong provenance is what a later reader would
+otherwise inherit from a pushed commit message that cannot be edited.
+
+**One mitigation is named and deliberately not specified.** An assertion written to compare a boolean
+rather than to search a string would keep prompt bodies out of failure output entirely. It also removes the
+received text a reader may want when diagnosing. That trade is a judgment for whoever next touches those
+assertions, and this entry does not make it for them.
+
+**Bucket: Neither**, decided with the two-way check. For: a structural fact recorded with no fix proposed —
+items 87 and 107 sit here on exactly that shape, each recording how something is built without prescribing
+a change. Against: Actionable now requires a fix specified in the entry, and the single option named here
+is explicitly declined rather than specified; Blocked on data requires an observation that does not exist
+yet, and this entry is the observation.
+
+**Where the code lives:** the prompt constants are inside `assembleAgentSystemPrompt`, `llm/agentLoop.ts`;
+the dumps are written by the audit step in `scripts/notice-regression-probe.mjs`. See item 150 for the fix
+pass this occurred during and the assertion whose failure printed it, and item 148 for the file where a
+working-discipline rule would live if one were ever filed.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 151 to find out which ones still need something. No index of
+reader the trouble of reading all 152 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (58): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 111, 117, 120, 121, 126, 128, 134, 135, 137, 144, 149
+**Closed** (59): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 111, 117, 120, 121, 126, 128, 134, 135, 137, 144, 149, 150
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (9): 108, 113, 116, 129, 130, 138, 142, 148, 150
+first (8): 108, 113, 116, 129, 130, 138, 142, 148
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (10): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143
 
-**Neither — a structural fact recorded, with no fix proposed** (74): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (75): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
-119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151
+119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
