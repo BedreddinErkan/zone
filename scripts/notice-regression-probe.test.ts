@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { writeFileSync, unlinkSync, existsSync } from "node:fs";
+import { writeFileSync, unlinkSync, existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import {
   loadGroundTasks,
   loadPredictions,
@@ -13,8 +15,16 @@ import {
   scoreTaskDiscovery,
   compareDiscovery,
   validatePredictions,
+  runPromptAudit,
 } from "./notice-regression-probe.mjs";
 import { resolveToolList, listRegisteredTools, registerTool } from "../src/tools/toolRegistry.js";
+import { buildDispatcherCapabilityFilter, QUESTION_PIPELINE } from "../src/llm/archetypeDispatcher.js";
+// runPromptAudit (imported above from notice-regression-probe.mjs) reaches the registry
+// via ../dist/tools/toolRegistry.js, a SEPARATE module instance from the src import above
+// — established by running: suppressing through the src-imported functions left
+// runPromptAudit's own offered-set check unaffected. Only the dist-imported functions
+// below can mutate the registry runPromptAudit actually reads.
+import { listRegisteredTools as listRegisteredToolsDist, registerTool as registerToolDist } from "../dist/tools/toolRegistry.js";
 
 const SNAPSHOT = new URL("../src/repo/rankerBaseline.snapshot.json", import.meta.url).pathname;
 const SCRATCH = new URL("./.notice-regression-probe.scratch.json", import.meta.url).pathname;
@@ -505,5 +515,96 @@ describe("compareDiscovery", () => {
     const cmp = compareDiscovery(predictions, [T3_ZERO]);
     expect(cmp.perTask.T3.discoveryMatch).toBeNull();
     expect(cmp.perTask.T3.predictedDiscoveryCount).toBeNull();
+  });
+});
+
+// Item 150: the prompt-audit step used to omit offeredToolNames, so its own diagnostic
+// dumps rendered eight write-tool blocks (PATCH RULES among them) the real run — which
+// does pass the real offered set — never sees. Established by running both ways before
+// writing any assertion here: for this archetype (offered = read_file,
+// run_command_readonly only), every isOffered(...) gate in assembleAgentSystemPrompt
+// checks a WRITE tool (apply_patch, write_file, multi_edit, Task, TodoWrite, revert_patch,
+// search_in_files) — none checks read_file or run_command_readonly positively — so an
+// EMPTY offered set and the real pair render byte-identical text for this configuration.
+// A text-content assertion cannot distinguish "the real set was passed" from "an empty
+// set was passed" here; only inspecting what was actually constructed and handed to the
+// assembler can. offeredToolNamesUsed exists for exactly that: it is derived from the
+// same Set object runPromptAudit passes to both assembly calls, not a separately
+// re-derived value that could silently diverge from it.
+describe("runPromptAudit", () => {
+  function scratchDir() {
+    return mkdtempSync(path.join(tmpdir(), "notice-regression-audit-test-"));
+  }
+
+  it("PATCH RULES is absent from both dumps for the question archetype — half 1's payoff", () => {
+    const dir = scratchDir();
+    try {
+      const audit = runPromptAudit({ capturesDir: dir, ARM: "B", only: null, runStamp: 1000 });
+      expect(audit.sysNoNotice).not.toContain("PATCH RULES:");
+      expect(audit.sysWithNotice).not.toContain("PATCH RULES:");
+      expect(audit.sysWithNotice).toContain("TOOLS NOT AVAILABLE THIS RUN");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("offeredToolNamesUsed is exactly the real registry-derived pair — pins the field's CONTENTS, not merely its presence", () => {
+    const dir = scratchDir();
+    try {
+      const audit = runPromptAudit({ capturesDir: dir, ARM: "B", only: null, runStamp: 1001 });
+      const expected = resolveToolList(buildDispatcherCapabilityFilter({ ...QUESTION_PIPELINE }))
+        .map((t) => t.name)
+        .sort();
+      expect(audit.offeredToolNamesUsed).toEqual(expected);
+      expect(audit.offeredToolNamesUsed).toEqual(["read_file", "run_command_readonly"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("filenames carry the run stamp — two different stamps produce two different, non-colliding paths", () => {
+    const dir = scratchDir();
+    try {
+      const a = runPromptAudit({ capturesDir: dir, ARM: "B", only: null, runStamp: 2000 });
+      const b = runPromptAudit({ capturesDir: dir, ARM: "B", only: null, runStamp: 2001 });
+      expect(a.noNoticePath).not.toBe(b.noNoticePath);
+      expect(a.withNoticePath).not.toBe(b.withNoticePath);
+      expect(a.noNoticePath).toMatch(/system-prompt-no-notice-armB-all-2000\.txt$/);
+      expect(b.noNoticePath).toMatch(/system-prompt-no-notice-armB-all-2001\.txt$/);
+      expect(existsSync(a.noNoticePath)).toBe(true);
+      expect(existsSync(b.noNoticePath)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("filenames also carry the task selection, matching the capture file's own arm+selection+stamp shape", () => {
+    const dir = scratchDir();
+    try {
+      const audit = runPromptAudit({ capturesDir: dir, ARM: "A", only: ["T2", "T4"], runStamp: 3000 });
+      expect(audit.noNoticePath).toMatch(/system-prompt-no-notice-armA-T2_T4-3000\.txt$/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("throws (not process.exit) when the registry no longer resolves to exactly [read_file, run_command_readonly] — a test importing this must survive the assertion failing", () => {
+    // Same registry seam the suppressNonOffered describe block above exercises, but
+    // against the DIST-imported registry functions — runPromptAudit reads through
+    // ../dist/tools/toolRegistry.js, a separate module instance from the src import used
+    // elsewhere in this file, established above. Disable everything except
+    // run_command_readonly, so resolveToolList(capabilityFilter) inside runPromptAudit
+    // resolves to a one-tool set instead of the expected pair, then restore.
+    const registryFns = { listRegisteredTools: listRegisteredToolsDist, registerTool: registerToolDist };
+    const dir = scratchDir();
+    const disabled = suppressNonOffered(["run_command_readonly"], registryFns);
+    try {
+      expect(() => runPromptAudit({ capturesDir: dir, ARM: "B", only: null, runStamp: 4000 })).toThrow(
+        /offered set is .*expected exactly \[read_file, run_command_readonly\]/
+      );
+    } finally {
+      restoreSuppressed(disabled, { registerTool: registerToolDist });
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

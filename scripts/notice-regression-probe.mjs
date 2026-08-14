@@ -379,6 +379,64 @@ export async function probeCredit(client, model, provider) {
   }
 }
 
+// ---------- Not pure (writes two files), but makes NO model call ----------
+
+/**
+ * Item 150, half 1: the two prompt dumps this writes used to omit `offeredToolNames`
+ * from the assembly, and the assembler's own isOffered(...) fail-opens an unset set to
+ * "offered" — so both dumps rendered every write-tool block (PATCH RULES, APPLY_ROLLED_BACK,
+ * TASK SUBAGENTS, SEARCH FIRST, five more) that this archetype's real run, which does pass
+ * the real offered set, never sees. `offeredToolNames` here is built ONCE and reused at
+ * both assembly calls and in the returned `offeredToolNamesUsed` field, so a test asserting
+ * on the return value is asserting on the exact Set that reached assembleAgentSystemPrompt
+ * — not a separately-computed value that could silently diverge from it.
+ *
+ * Item 150, half 2: the two filenames used to be fixed, so a second arm silently
+ * overwrote a first arm's dumps. runTag mirrors the exact expression main() already uses
+ * for a capture file's own name (arm+task-selection+timestamp), passed in as `runStamp`
+ * rather than computed here, so a dump pair and the capture file it accompanies share one
+ * stamp by construction rather than by two independent Date.now() calls agreeing by luck.
+ *
+ * Extracted out of main() so it can run without the credit probe ahead of it — main()'s
+ * own process.exit(4) becomes a throw here, since a unit a test imports must not be able
+ * to kill the runner; main() catches it and preserves the original exit code and message.
+ */
+export function runPromptAudit({ capturesDir, ARM, only, runStamp }) {
+  const capabilityFilter = buildDispatcherCapabilityFilter({ ...QUESTION_PIPELINE });
+  const offered = resolveToolList(capabilityFilter).map((t) => t.name).sort();
+  if (JSON.stringify(offered) !== JSON.stringify(["read_file", "run_command_readonly"])) {
+    throw new Error(`[notice-arm] FATAL: offered set is ${JSON.stringify(offered)}, expected exactly [read_file, run_command_readonly]`);
+  }
+  const notice = buildToolAbsenceBlock({
+    offeredToolNames: new Set(offered), filterSource: "capabilityFilter",
+    archetype: "question", tier: "medium", mode: "patch",
+  });
+  const offeredToolNames = new Set(offered);
+  const commonPromptInput = {
+    agentIntro: "You are Zone.", frameworkLines: [], hasFramework: false,
+    projectMemoryBlock: "", importContextSummary: undefined,
+    baseMaxIterations: QUESTION_PIPELINE.iterCap, canRunCommand: false,
+    backgroundCommandBlock: "", repoPath: REPO,
+    planProgressBlock: "", planAnnotationsBlock: "", auditFindings: undefined,
+    archetype: "question", planApproved: undefined, offeredToolNames,
+  };
+  const sysNoNotice = assembleAgentSystemPrompt({ ...commonPromptInput, toolAbsenceBlock: "" });
+  const sysWithNotice = assembleAgentSystemPrompt({ ...commonPromptInput, toolAbsenceBlock: notice });
+  const runTag = `arm${ARM}-${only ? only.join("_") : "all"}-${runStamp}`;
+  const noNoticePath = `${capturesDir}/system-prompt-no-notice-${runTag}.txt`;
+  const withNoticePath = `${capturesDir}/system-prompt-with-notice-${runTag}.txt`;
+  writeFileSync(noNoticePath, sysNoNotice);
+  writeFileSync(withNoticePath, sysWithNotice);
+  console.error(
+    `[notice-arm] prompt audit: notice=${notice.length} chars, no-notice=${sysNoNotice.length} chars, ` +
+    `with-notice=${sysWithNotice.length} chars, delta==notice.length: ${sysWithNotice.length - sysNoNotice.length === notice.length}`
+  );
+  return {
+    sysNoNotice, sysWithNotice, noNoticePath, withNoticePath, offered, notice,
+    capabilityFilter, offeredToolNamesUsed: [...offeredToolNames].sort(),
+  };
+}
+
 // ---------- CLI orchestration ----------
 
 async function main() {
@@ -421,6 +479,10 @@ async function main() {
   console.error(`[notice-arm] predictions loaded from ${predictionsPath}: ${Object.keys(predictions.perTask).length} task(s), anyRefusal=${predictions.anyRefusal}`);
 
   mkdirSync(capturesDir, { recursive: true });
+  // Item 150, half 2: computed before the credit probe so the stamp identifies this
+  // invocation regardless of that probe's outcome, and shared with outFile below so a
+  // dump pair and its capture file are stamp-correlated by construction.
+  const runStamp = Date.now();
 
   const apiKey = (await loadDiskKeys()).keys.find((k) => k.provider === provider)?.key;
   if (!apiKey) {
@@ -439,32 +501,14 @@ async function main() {
   // Prompt audit — zero model calls. Proves the two arms' prompts differ by exactly
   // the notice, and records the current lengths/content for later audit without
   // needing this transcript. Runs unconditionally, before any registry mutation.
-  const capabilityFilter = buildDispatcherCapabilityFilter({ ...QUESTION_PIPELINE });
-  const offered = resolveToolList(capabilityFilter).map((t) => t.name).sort();
-  if (JSON.stringify(offered) !== JSON.stringify(["read_file", "run_command_readonly"])) {
-    console.error(`[notice-arm] FATAL: offered set is ${JSON.stringify(offered)}, expected exactly [read_file, run_command_readonly]`);
+  let audit;
+  try {
+    audit = runPromptAudit({ capturesDir, ARM, only, runStamp });
+  } catch (e) {
+    console.error(String(e && e.message ? e.message : e));
     process.exit(4);
   }
-  const notice = buildToolAbsenceBlock({
-    offeredToolNames: new Set(offered), filterSource: "capabilityFilter",
-    archetype: "question", tier: "medium", mode: "patch",
-  });
-  const commonPromptInput = {
-    agentIntro: "You are Zone.", frameworkLines: [], hasFramework: false,
-    projectMemoryBlock: "", importContextSummary: undefined,
-    baseMaxIterations: QUESTION_PIPELINE.iterCap, canRunCommand: false,
-    backgroundCommandBlock: "", repoPath: REPO,
-    planProgressBlock: "", planAnnotationsBlock: "", auditFindings: undefined,
-    archetype: "question", planApproved: undefined,
-  };
-  const sysNoNotice = assembleAgentSystemPrompt({ ...commonPromptInput, toolAbsenceBlock: "" });
-  const sysWithNotice = assembleAgentSystemPrompt({ ...commonPromptInput, toolAbsenceBlock: notice });
-  writeFileSync(`${capturesDir}/system-prompt-no-notice.txt`, sysNoNotice);
-  writeFileSync(`${capturesDir}/system-prompt-with-notice.txt`, sysWithNotice);
-  console.error(
-    `[notice-arm] prompt audit: notice=${notice.length} chars, no-notice=${sysNoNotice.length} chars, ` +
-    `with-notice=${sysWithNotice.length} chars, delta==notice.length: ${sysWithNotice.length - sysNoNotice.length === notice.length}`
-  );
+  const { offered, capabilityFilter } = audit;
 
   let disabled = [];
   if (ARM === "A") {
@@ -480,7 +524,7 @@ async function main() {
 
   const tasks = loadGroundTasks(`${REPO}/src/repo/rankerBaseline.snapshot.json`, only);
   const gitStatus = () => execFileSync("git", ["status", "-s"], { cwd: REPO }).toString().trim();
-  const outFile = `${capturesDir}/arm${ARM}-${only ? only.join("_") : "all"}-${Date.now()}.json`;
+  const outFile = `${capturesDir}/arm${ARM}-${only ? only.join("_") : "all"}-${runStamp}.json`;
 
   const results = [];
   let stoppedOnCostGate = false;
