@@ -686,11 +686,18 @@ describe("runPromptAudit", () => {
         toolAbsenceBlock: "",
       });
 
-      // Predicted before running (established pass): 10,631 chars. Pinned as a length
-      // assertion alongside the full-string equality below, so a future change that
-      // preserves byte-identity by both sides drifting together still surfaces here —
-      // a known fragility of pinning live .zone/memory.md content, not hidden.
-      expect(audit.sysNoNotice.length).toBe(10631);
+      // Pinned as a length assertion alongside the full-string equality below, so a
+      // future change that preserves byte-identity by both sides drifting together
+      // still surfaces here. Two verified triggers, not one: live .zone/memory.md
+      // content (the originally anticipated case — a real, parser-recognized entry
+      // added to that file moves this number while equality still holds, confirmed by
+      // direct simulation), and a source change to shared prompt-assembly text, which
+      // is what moved this figure from 10631 to 10729 — item 156's directive fix
+      // landed in a pass whose own scope updated a different test file's assertions
+      // and left this pin untouched. When this goes red: confirm the equality
+      // assertion below still passes on its own before updating the number; if it
+      // does, this is maintenance for either trigger, not a regression.
+      expect(audit.sysNoNotice.length).toBe(10729);
       expect(audit.sysNoNotice).toBe(reference);
     } finally {
       rmSync(dir, { recursive: true, force: true });
