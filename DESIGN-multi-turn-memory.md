@@ -26,6 +26,18 @@ Each TUI submission is a fresh dispatch (`runId = randomUUID()`, `src/cli/tui/in
 
 **The cache guarantee:** `priorSessionSummary` is **not** a parameter of `assembleAgentSystemPrompt()` (`agentLoop.ts:382-400`). All memory content lives in the user message; the system+tools prefix is byte-identical regardless of memory.
 
+**Cache-boundary correction (`docs/deferred-work.md` item 161), applying to every "system+tools" /
+"breakpoint #1" reference in this section (§1.1–§1.5) and to the R1 row in §3's requirements
+table:** breakpoint #1 covers tools alone, not system+tools — measured against the per-call usage
+log, not assumed. A system-prompt change cannot bust a cache entry keyed on an unchanged tools
+array. Keeping memory (and the `TRUST_PHASE1_DIRECTIVE` toggle, below) out of the system prompt is
+very likely still the right call, but the mechanism as written throughout this section is wrong:
+the more plausible risk is breakpoint #2's own cumulative span, which — per CLAUDE.md's own
+account of it — reaches backward through the conversation and, on this reading, through system.
+**Unconfirmed this pass** (no new measurement was taken); offered as the starting point for
+re-examination, not as settled fact. The existing placement rules and constraints are left as
+written and should still be honored.
+
 ### 1.2 The conversation event store
 
 `src/core/conversationFilesystemStore.ts` — JSONL at `<repoPath>/.zone/conversations/<threadId>.jsonl`:
@@ -52,11 +64,11 @@ Confirmed: today the **only** cross-turn context reaching the LLM in the TUI flo
 
 `src/llm/anthropicAdapter/convertParams.ts` + `cacheControlHelpers.ts`:
 
-- **Breakpoint #1** (`convertParams.ts:124-144`): `cache_control` on system+tools (~3879-tok prefix). **Byte-sensitive to `systemContent`.**
+- **Breakpoint #1** (`convertParams.ts:124-144`): `cache_control` on system+tools (~3879-tok prefix). **Byte-sensitive to `systemContent`.** *(Covers tools alone, not system+tools — see the correction at §1.1.)*
 - **Breakpoint #2** (`cacheControlHelpers.ts:34-70`): marks the **last persistent** user message, **skipping** the per-iter manifest message.
-- **Where a window MUST go:** concatenated into the **first user message** (`userContent`), which sits **inside** breakpoint #2's prefix → cache-**written once** (iter 0), cache-**read** for iters 1..N. Pushing it as a **separate `role:"user"` message busts breakpoint #2**; putting it in the **system prompt busts breakpoint #1**.
+- **Where a window MUST go:** concatenated into the **first user message** (`userContent`), which sits **inside** breakpoint #2's prefix → cache-**written once** (iter 0), cache-**read** for iters 1..N. Pushing it as a **separate `role:"user"` message busts breakpoint #2**; putting it in the **system prompt busts breakpoint #1**. *(As reasoned when written — see the correction at §1.1: breakpoint #1 is tools-only, so the more plausible risk of a system-prompt placement is breakpoint #2, not #1. The rule — keep it out of the system prompt — is unaffected either way.)*
 
-**Verified cache anti-pattern (do not imitate):** when `auditFindings` exist, the static `TRUST_PHASE1_DIRECTIVE` is toggled **into the system prompt** (`agentLoop.ts:375-380, 577, 1937`) — its *presence* changes system bytes and busts breakpoint #1. The SESSION MEMORY directive (`:522-526`) is the **correct** pattern: **unconditional**, so its presence never changes. The design must add **zero** presence-keyed system toggles.
+**Verified cache anti-pattern (do not imitate):** when `auditFindings` exist, the static `TRUST_PHASE1_DIRECTIVE` is toggled **into the system prompt** (`agentLoop.ts:375-380, 577, 1937`) — its *presence* changes system bytes and busts breakpoint #1. The SESSION MEMORY directive (`:522-526`) is the **correct** pattern: **unconditional**, so its presence never changes. The design must add **zero** presence-keyed system toggles. *(The breakpoint attribution — see the correction at §1.1 — is unconfirmed; whichever breakpoint is actually at risk, the rule — no presence-keyed system toggles — is unaffected.)*
 
 ### 1.6 Cost-model numbers
 
@@ -151,7 +163,7 @@ No store changes: `type:"turn"` and the free-form fields are already accepted (`
 
 The window's only LLM-visible bytes are in `userContent` (`agentLoop.ts:2000-2015`); never in `assembleAgentSystemPrompt()`, never in `systemContent`.
 
-- **Breakpoint #1** stays byte-identical: no system-prompt input changes with window presence/length/content; the directive is unconditional; the Phase-4 wording edit is a one-time static change, not a presence toggle (the explicit inverse of the `auditFindings → TRUST_PHASE1_DIRECTIVE` anti-pattern).
+- **Breakpoint #1** stays byte-identical: no system-prompt input changes with window presence/length/content; the directive is unconditional; the Phase-4 wording edit is a one-time static change, not a presence toggle (the explicit inverse of the `auditFindings → TRUST_PHASE1_DIRECTIVE` anti-pattern). *(As reasoned when written — see the correction at §1.1: breakpoint #1 is tools-only, so a system-prompt-input change would not have touched it regardless. The design's own choice to keep the directive unconditional is unaffected.)*
 - **Breakpoint #2:** the window sits in the persistent first user message, **inside** the cached prefix; built **once** before `responseInput` assembly and **never mutated mid-loop** (`buildSessionWindow` is pure) → write iter 0, read iters 1..N.
 - **`isFirstAndTiny` (`cacheControlHelpers.ts:63-70`):** an empty window yields the same cold-start msg[0] as today, preserving existing breakpoint-#2-skip behavior.
 - **OpenAI/Gemini (honesty clause):** cache amortization is **Anthropic-only**; the TUI doesn't thread `conversationId` and `runId` is fresh per dispatch, so there is no cross-dispatch window cache there — the window is paid full price each dispatch (still cheap at ~500–1000 tok). Cross-provider caching is a separate `conversationId=sessionId` follow-up, **out of v1**.
@@ -180,7 +192,7 @@ Marginal over today's single summary: **+~$0.002/dispatch worst case**, often ne
 
 | # | Risk | Severity | Why it bites here | Mitigation |
 |---|------|----------|-------------------|------------|
-| R1 | **Cache busting via system-prompt toggle** (make-or-break) | **Critical** | Any future edit keying system content on window presence (the `auditFindings → TRUST_PHASE1_DIRECTIVE` anti-pattern, `agentLoop.ts:577`) turns sub-cent cost into a full ~3879-tok prefix re-write every iter | Window bytes live **only** in `userContent`; directive (`:522-526`) stays **unconditional + byte-stable**; **standing test** asserts `assembleAgentSystemPrompt()` byte-identical for empty/1-turn/3-turn; comment tag: "edit this text in ONE commit only — every wording change is a global cold-cache reset" |
+| R1 | **Cache busting via system-prompt toggle** (make-or-break) | **Critical** | Any future edit keying system content on window presence (the `auditFindings → TRUST_PHASE1_DIRECTIVE` anti-pattern, `agentLoop.ts:577`) turns sub-cent cost into a full ~3879-tok prefix re-write every iter *(breakpoint attribution unconfirmed — see the correction at §1.1; the mitigation holds regardless)* | Window bytes live **only** in `userContent`; directive (`:522-526`) stays **unconditional + byte-stable**; **standing test** asserts `assembleAgentSystemPrompt()` byte-identical for empty/1-turn/3-turn; comment tag: "edit this text in ONE commit only — every wording change is a global cold-cache reset" |
 | R2 | **Within-run breakpoint-#2 bust** | High | A builder called per-iter, or an embedded timestamp/"as of iter N", mutates msg[0] every iteration | `buildSessionWindow` is **pure** (no `Date.now`/random), built **once** before `responseInput` assembly; unit test: same input → byte-identical output |
 | R3 | **Cost blow-up / double-injection** | High | `sessionMemBlock` + the separate `PRIOR RUN CONTEXT` block both inject the newest summary (`:2006-2015`) | Phase 4(c) suppresses `PRIOR RUN CONTEXT` when `sessionMemBlock` non-empty (test: newest summary appears **at most once**); global **4096 B assembled-window cap** makes cost O(1) in turns |
 | R4 | **Framing drift → re-do** | High | Reusing `truncatePriorRunSummary` surfaces `APPLY_ROLLED_BACK` under a neutral header; `decisionMode` tags re-import rollback vocabulary | **New `truncateSessionTurn`** strips surviving markers → "(no net change remained…)"; older turns rendered **intent + paths only**, no outcome tag; directive keeps "do not re-investigate or re-apply" verbatim; anti-redo regression test forbids rollback vocabulary in window output |

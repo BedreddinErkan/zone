@@ -299,6 +299,12 @@ export function formatExecutionPlanForPrompt(plan?: ExecutionPlan | null): strin
  * system prompt, which is built once before the run and cached at breakpoint #1).
  * Shared so the initial injection and any later reference to "the approved plan" use
  * identical framing text.
+ *
+ * Cache-boundary correction (docs/deferred-work.md item 161): breakpoint #1 covers
+ * tools alone, not the system prompt. Keeping the plan out of the system prompt is
+ * very likely still correct, but "cached at breakpoint #1" above is not — the system
+ * prompt was never part of that breakpoint to begin with. Unconfirmed this pass which
+ * breakpoint, if any, the system prompt rides along with.
  */
 export function buildApprovedPlanBlock(plan: ExecutionPlan): string {
   return `--- APPROVED PLAN ---\n${formatExecutionPlanForPrompt(plan)}\n--- END APPROVED PLAN ---`;

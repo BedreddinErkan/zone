@@ -3997,7 +3997,7 @@ Example:
       //    the lowest msgIdx where cumHash differs. That's the byte-
       //    divergence position.
       // 3. Cross-reference with [zone-cache-usage] cache_read for iter N+1:
-      //    - If cache_read >> system+tools floor (3879): partial prefix match worked
+      //    - If cache_read >> tools floor (3879, not system+tools — item 161): partial prefix match worked
       //    - If cache_read ≈ 3879 (floor): full bust, prefix unreachable
       // 4. Correlate msgCount with bust events to test 20-block lookback
       //    hypothesis. If bust ALWAYS coincides with msgCount crossing

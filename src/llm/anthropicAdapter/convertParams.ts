@@ -135,7 +135,13 @@ export function convertParams(
   // Prompt caching: attach cache_control to the stable prefix so Anthropic can
   // reuse it across iterations. Cache hits cost 10% of base input, write 1.25x
   // (5-min TTL). Two strategies depending on whether tools are present:
-  //   • tools present: last-tool breakpoint covers system+tools (no separate system breakpoint needed).
+  //   • tools present: last-tool breakpoint covers tools alone, not system+tools as this
+  //     comment previously said (docs/deferred-work.md item 161, measured against the
+  //     per-call usage log). Whether that means system gets no caching benefit at all when
+  //     tools are present, or rides along inside breakpoint #2's own cumulative span once one
+  //     exists, is NOT settled by item 161 and is not re-examined here — the "defense in depth
+  //     for a future 2nd breakpoint" comment below rests on the premise this note refutes and
+  //     has not been re-verified.
   //   • no tools (synthesis calls): system block gets cache_control directly.
   const cacheEligible = isCacheEligible(finalSystem || "", tools, input.model);
   let systemForRequest: Anthropic.MessageCreateParams["system"] = finalSystem || undefined;
@@ -149,7 +155,7 @@ export function convertParams(
           { type: "text", text: finalSystem },
         ];
       }
-      // Attach cache_control to the last tool; covers system + all tools.
+      // Attach cache_control to the last tool; covers all tools (not system — item 161).
       toolsForRequest = tools.map((t, i) =>
         i === tools.length - 1
           ? { ...t, cache_control: { type: "ephemeral" } }

@@ -5,6 +5,14 @@
  * only place per-run content can safely live — see agentLoop.ts's sessionMemBlock/
  * auditContextBlock/restageSeedBlock/resumeBlock precedents).
  *
+ * CACHE-BOUNDARY CORRECTION (docs/deferred-work.md item 161): breakpoint #1 covers
+ * tools alone, not the system prompt — measured against the per-call usage log. The
+ * placement rule above (per-run content goes in the first user message, never system)
+ * is very likely still correct, but the reason is more plausibly protecting breakpoint
+ * #2's own cumulative span than breakpoint #1, which per-run system content was never
+ * part of in the first place. Unconfirmed this pass. The tests below check placement
+ * only and are unaffected.
+ *
  * Placement-specific, not presence-only: every positive assertion checks the message
  * with role:"user" specifically, and a companion assertion confirms the block's header
  * is absent from the role:"system" message — the assertion that actually breaks if a

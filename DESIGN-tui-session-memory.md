@@ -70,6 +70,11 @@ The read path already exists end-to-end; we add a **neutral-framed** field and t
 Inject at `agentLoop.ts:1992` into the **first user message** (`userContent`), alongside where `PRIOR RUN CONTEXT`/`AUDIT CONTEXT` already go, then `input.task`.
 
 - **Breakpoint 1 (static system+tools)** is anchored on the last tool (`convertParams.ts:124-137`); the system stream is extracted separately (`extractSystem`, `:194-214`). The summary lives in a user message → **breakpoint 1 is byte-identical** whether memory is on or off. `assembleAgentSystemPrompt` takes **no** summary parameter (`agentLoop.ts:380-398`) — do **not** add one, and do **not** put the summary where `projectMemoryBlock` goes (system), or it busts the static prefix.
+  **Cache-boundary correction (`docs/deferred-work.md` item 161):** breakpoint 1 covers tools
+  alone, not system+tools — measured against the per-call usage log. A system-prompt change
+  cannot bust a cache keyed on an unchanged tools array; the placement rule above is very
+  likely still right, but more plausibly guards breakpoint 2's own cumulative span, not
+  breakpoint 1. Unconfirmed this pass — offered as a starting point for re-examination.
 - **Breakpoint 2 (conversation)** anchors on the last *non-manifest* user message (`cacheControlHelpers.ts:42-56`). `userContent` is built once before the loop (`agentLoop.ts:1992`, loop starts `:2441`) and never mutated per-iter, so it becomes a **stable cached prefix**; from iter 2 the marker moves forward to tool-result blocks (`convertParams.ts:309-333`). No per-iter bust.
 - **Two hard constraints:** (a) the summary must not be prefixed with `## Files already read this run` (the manifest classifier, `cacheControlHelpers.ts:9-21`); (b) keep it small (it is a one-time cache *write* per session on iter 1).
 
@@ -80,7 +85,7 @@ Let **N** = number of prior submissions in the session.
 | Mode | Per-submission memory overhead | Scaling |
 |---|---|---|
 | **Stateless (today)** | 0 | — |
-| **Phase 1 (this design)** | ≤2048 bytes (~512 tok) in the first user message, a one-time cache **write** at ~1.25× input rate on iter 1, then prefix-cached for all later iters. ~sub-cent. **Does not touch the shared system+tools prefix.** | **O(1)** — independent of N (single-prior + hard 2KB cap). |
+| **Phase 1 (this design)** | ≤2048 bytes (~512 tok) in the first user message, a one-time cache **write** at ~1.25× input rate on iter 1, then prefix-cached for all later iters. ~sub-cent. **Does not touch the shared tools prefix** (not "system+tools" — item 161). | **O(1)** — independent of N (single-prior + hard 2KB cap). |
 | **Phase 3 (cumulative)** | ≤ cap C (e.g. 2–4KB) one-time write, + an occasional `summarize()` call at run-close (cheap model, only when the cap is exceeded). | **O(1)** in N (compression keeps it flat). |
 | **Naive transcript-replay (REJECTED)** | Re-sends all prior turns; tool results alone are ~10–50KB/run. | **O(N) → superlinear**: busts breakpoint-2 cache every iter (new content), overflows the context window → triggers intra-run compaction (extra LLM calls) or fails. |
 
@@ -117,7 +122,7 @@ Steps: items 1–9 in §2.2. Reuses the store, `extractPriorRunSummary`, `trunca
 
 **Protected zones / invariants:**
 - Do **not** modify the existing `priorRunSummary` / rollback path (J.5 recovery; `applyRollbackFeedback.ts`, `runLlmPatchFlow.ts:5942-5949`).
-- Do **not** add the summary to `assembleAgentSystemPrompt` / `systemContent` / `projectMemoryBlock` (busts breakpoint 1).
+- Do **not** add the summary to `assembleAgentSystemPrompt` / `systemContent` / `projectMemoryBlock` (busts breakpoint 1 as originally reasoned here; item 161 finds breakpoint 1 covers tools alone, so the more plausible risk is breakpoint 2 — unconfirmed, this constraint is not re-examined here and should still be honored).
 - Keep `DiskModelSettings.version === 2` (`loadDiskModel` rejects on mismatch).
 - The `[ZONE_VERIFICATION]` tag and verdict derivation are untouched (memory is prompt-input only).
 

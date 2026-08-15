@@ -16,6 +16,17 @@ import type { LLMClient } from "../types.js";
  *
  * Breakpoint #2 busts either way — compaction deletes history by design. #1 is
  * the avoidable half, and this is the test that keeps it avoided.
+ *
+ * CACHE-BOUNDARY CORRECTION (docs/deferred-work.md item 161): breakpoint #1
+ * covers tools alone, not system+tools, measured against the per-call usage
+ * log — so the mechanism above and the ~4,500 token-equivalent figure it implies
+ * are not reliable; a system-prompt change cannot invalidate a cache entry keyed
+ * on an unchanged tools array. Keeping the top-level system prompt byte-stable
+ * across compaction is very likely still correct, but more plausibly protects
+ * breakpoint #2's own cumulative span than breakpoint #1. Unconfirmed this pass
+ * — offered as a starting point for re-examination, not as settled fact. The
+ * assertions below only check system-prompt byte-stability, which holds either
+ * way and needed no change.
  */
 
 const MODEL = "claude-opus-5";
@@ -56,7 +67,7 @@ function buildHistory(): ChatCompletionMessageParam[] {
   return h;
 }
 
-/** The top-level system prompt as it goes on the wire — breakpoint #1's content. */
+/** The top-level system prompt as it goes on the wire (not breakpoint #1's content — item 161). */
 function wireSystem(messages: ChatCompletionMessageParam[]): string {
   const { params } = convertParams({ model: MODEL, messages, max_tokens: 1024, tools: TOOLS });
   return JSON.stringify(params.system);

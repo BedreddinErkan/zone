@@ -181,6 +181,13 @@ Cost/cache consequence of the port itself: **exactly zero new prompt or cache to
   in the **static, per-run-stable system prefix**, so under Anthropic prompt caching they are part of
   breakpoint #1 and amortize to ≈ $0/run after the first iteration (cache-aware math per the
   prompt-cost note in CLAUDE.md; do **not** use naive base-rate math here).
+  **Cache-boundary correction (`docs/deferred-work.md` item 161):** breakpoint #1 covers tools
+  alone, not the full system prefix — measured against the per-call usage log. The **tool schema**
+  half of this claim is correct (schemas are exactly what breakpoint #1 caches); the
+  **`planProgressBlock` directive** half is not, since it is injected into the system prompt, not
+  the tools array. Whether it still amortizes to ≈$0/run via breakpoint #2 (which plausibly
+  includes system cumulatively once it exists) is unconfirmed this pass — the cost conclusion is
+  very likely still directionally right, but not for the stated reason.
 - The TUI is a **pure event consumer**. Events already cross the `onProgress → bus.emit` seam
   (`index.tsx:249`). Adding `bus.on` listeners is client-side React only — **no LLM round-trips, no
   schema, no per-update token overhead.**
@@ -326,7 +333,7 @@ for the core (1–5) — confirming "pure consumer."
 | **`bus.off` removes nothing** (reference-equality footgun) | Med | Named-const handlers, mirrored in cleanup — the existing file convention (`useAgentEvents.ts:296-303`). |
 | **Noise from per-status Static appends** | Med | Snapshot only on init/revise/complete; status deltas drive the live cursor, **not** Static. |
 | **Single-`in_progress` invariant broken by deltas** | Med | `todo_status_changed` is a single delta; reducer flips stray `in_progress`→`completed` locally (mirror `startTodo`). |
-| **Cost if it were tool-based** | None (already paid) | Tool schema + ~900-char directive are in the **cached static prefix** on every patch run already; marginal ≈ $0. TUI port adds **zero** tokens (consumer only). Cache breakpoint #1 untouched. |
+| **Cost if it were tool-based** | None (already paid) | Tool schema + ~900-char directive are in the **cached static prefix** on every patch run already; marginal ≈ $0. TUI port adds **zero** tokens (consumer only). Cache breakpoint #1 untouched *(the tool-schema half of this is correct; the directive half is a system-prompt injection, not breakpoint #1 — see the correction in §(f) above)*. |
 | **Derive-vs-tool mis-decision** | Low | Tool already exists *and* is the default live source; we render existing events. Derive-from-`[zone-plan]` is the cheap **fallback** if adoption is low (Phase 7), not the primary. |
 | **Low TodoWrite adoption** (model underuses it, like subagents at 0%) | Med | Directive already nudges; if telemetry shows low usage, enable the already-built `initializeTodosFromPlan` seed on the default path (Phase 7) so the panel populates from the planner even without a TodoWrite call. |
 | **Simple-tier runs show nothing** | None (correct) | Simple tier lacks TodoWrite; panel renders only when `todos` non-empty — graceful no-op. |

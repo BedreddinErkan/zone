@@ -648,7 +648,9 @@ describe("ContextCompactor.checkAndMaybeCompact — compaction structure", () =>
     expect(nr[1]).toEqual({ role: "user", content: "task" });
     // Third: synthetic turn with compacted_history wrapper. role:"user", not
     // "system" — a mid-array system message is hoisted into the top-level system
-    // prompt by extractSystem, rewriting cache breakpoint #1.
+    // prompt by extractSystem, rewriting cache breakpoint #1 as originally reasoned
+    // (item 161: breakpoint #1 is tools-only; see ContextCompactor.ts's own
+    // correction for the fuller note — the more plausible risk is breakpoint #2).
     expect(nr[2].role).toBe("user");
     expect(typeof nr[2].content).toBe("string");
     expect((nr[2].content as string)).toMatch(/\[compacted_history\]/);

@@ -36,7 +36,7 @@ The normalized tool-call contract the loop consumes is `{ id, type:"function", f
 
 `handleToolResult.ts:133` pushes each result as `{ role:"tool", tool_call_id, content }` onto `responseInput`, **after** the system message (`agentLoop.ts:2025–2034`) and the assistant tool-call message (`:2814`). The two Anthropic cache breakpoints are **upstream** of this tail:
 
-- **Breakpoint #1** — `cache_control` on the **last tool** in the request, covering system+tools (`convertParams.ts:124–144`). ~3879-tok prefix.
+- **Breakpoint #1** — `cache_control` on the **last tool** in the request, covering tools alone (`convertParams.ts:124–144`; not system+tools — `docs/deferred-work.md` item 161). ~3879-tok prefix.
 - **Breakpoint #2** — the last persistent user message (`cacheControlHelpers.ts` `applyMessageCacheBreakpoint2`), skipping the per-iter manifest.
 
 Tool-result messages are the **uncached tail** (written iter N, never part of the cached prefix). **This is exactly where web-search result tokens want to be** — confirmed §3.6.
@@ -55,7 +55,7 @@ Tool-result messages are the **uncached tail** (written iter N, never part of th
 
 > `GIT CONTEXT: when the task involves recent changes, regressions, or "what changed" — inspect git before reading broadly. Bounded only: … Skip git entirely when the task has no historical dimension; never dump a full repo diff.`
 
-It is **static text** (zero per-run cost, part of breakpoint #1). The prompt already carries **presence-conditional** params — `canRunCommand` (`:394`), `archetype` (`:476`), `hasFramework` (`:493`) — each stable for the whole run. A `webSearchEnabled`-gated directive follows this established pattern (§3.5).
+It is **static text** (zero per-run cost, part of breakpoint #1 *(system-prompt text, not breakpoint #1 — see the correction at §3.6)*). The prompt already carries **presence-conditional** params — `canRunCommand` (`:394`), `archetype` (`:476`), `hasFramework` (`:493`) — each stable for the whole run. A `webSearchEnabled`-gated directive follows this established pattern (§3.5).
 
 ### 1.8 The approval precedent — run_command (and why it does NOT transfer)
 
@@ -166,6 +166,15 @@ Because v1 defaults OFF and is server-capped, **auto-approve once enabled** is t
 
 ### 3.6 Cache-safety proof
 
+**Cache-boundary correction (`docs/deferred-work.md` item 161):** breakpoint #1 covers tools
+alone, not system prompt text — measured against the per-call usage log. Below, the **tool
+declaration** row is correct as written (schemas are exactly what breakpoint #1 caches); the
+**WEB SEARCH directive** row is not — it is injected into the system prompt, which item 161
+finds is not part of breakpoint #1. The directive's own byte-stability (static, per-run-stable,
+never toggled mid-run — the actual property the standing test checks) is unaffected by which
+breakpoint it rides on, so the "no static-prefix churn" conclusion above very likely still holds;
+which breakpoint carries that stability is unconfirmed this pass.
+
 | Element | Where it lives | Cache effect |
 |---|---|---|
 | WEB SEARCH directive | system prompt, breakpoint #1 (`agentLoop.ts` else branch) | static; one-time on toggle/provider change; **stable within a run** |
@@ -173,7 +182,10 @@ Because v1 defaults OFF and is server-capped, **auto-approve once enabled** is t
 | `server_tool_use` / result blocks | inside the provider turn (dropped, Fact 2) | **never** in Zone's context → zero prefix impact |
 | Result **tokens** (model continuation) | dynamic conversation tail (`responseInput`, §1.4) | uncached tail, like every tool result — correct |
 
-No element keys system bytes on a per-**run** value, so breakpoint #1 holds within every run. This mirrors the §1.7 GIT CONTEXT invariant.
+No element keys system bytes on a per-**run** value, so breakpoint #1 holds within every run —
+correct for the tool entry row; for the directive row, read as "the system prompt holds
+byte-stable within every run" per the correction above. This mirrors the §1.7 GIT CONTEXT
+invariant.
 
 ### 3.7 v1 vs deferred
 

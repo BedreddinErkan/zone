@@ -164,6 +164,16 @@ describe("cache prefix stability — buildOpenAIPromptCacheKey", () => {
 // into the user message (userContent) only. The system prompt must be byte-stable
 // whether memory is enabled or disabled, so breakpoint 1 (system+tools cache) is
 // never busted by a session memory value.
+//
+// Cache-boundary correction (docs/deferred-work.md item 161): breakpoint 1 covers
+// tools alone, not system+tools — measured against the per-call usage log. Keeping
+// memory out of the system prompt is very likely still the right call, but the
+// mechanism above is wrong: a system-prompt change cannot bust a cache entry keyed
+// on the (unchanged) tools array. If anything is protected by this design, it is
+// more plausibly breakpoint 2's own cumulative span, not breakpoint 1 — unconfirmed
+// this pass, offered as the starting point for re-examination, not as fact. The
+// test below still holds either way: it only asserts system-prompt byte-stability,
+// which is true regardless of which breakpoint that stability protects.
 
 describe("session memory — assembleAgentSystemPrompt static prefix invariant", () => {
   it("system prompt is byte-identical regardless of (absent) priorSessionSummary", () => {

@@ -246,6 +246,17 @@ export class ContextCompactor {
           // chars with the summary hoisted in; as user it is byte-identical.
           // Breakpoint #2 still busts here, which is inherent to deleting
           // history; #1 is the avoidable half.
+          //
+          // CACHE-BOUNDARY CORRECTION (docs/deferred-work.md item 161): breakpoint #1
+          // covers tools alone, not system+tools — measured against the per-call usage
+          // log. A system-prompt change cannot rewrite a cache entry keyed on an
+          // unchanged tools array, so the mechanism above is wrong and the ~4,500
+          // token-equivalent figure it implies is not reliable. Keeping the summary as
+          // role:"user" is very likely still correct, but the breakpoint actually at
+          // risk from a mid-array system turn is more plausibly breakpoint #2 (its
+          // cumulative span), not #1. Unconfirmed this pass — offered as the starting
+          // point for re-examination, not as settled fact. The measured byte-identity
+          // above (22,427 -> 22,664 vs unchanged) is a real observation and stands.
           newResponseInput.push({
             role: "user",
             content: `[compacted_history]\n${manifestBlock}${summaryText}${recurringNotice}\n[/compacted_history]`,

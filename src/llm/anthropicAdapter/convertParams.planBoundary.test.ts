@@ -42,9 +42,9 @@ function cachedPrefixOf(params: Anthropic.MessageCreateParams): { system: string
 describe("convertParams — no prefix continuity across the plan boundary", () => {
   it("investigation and execution produce different cached prefixes, with identical messages", () => {
     // Measured on a real dogfood run: system prompt 8,118 -> 19,260 chars/call, tool
-    // descriptions 4,266 -> 8,950 chars/call. Position 0 of the wire prefix (system+tools)
-    // changes at the plan->execute boundary, so no downstream cache breakpoint can match no
-    // matter how cleanly the conversation is carried across.
+    // descriptions 4,266 -> 8,950 chars/call. Position 0 of the wire prefix (tools, not
+    // system+tools — item 161) changes at the plan->execute boundary, so no downstream cache
+    // breakpoint can match no matter how cleanly the conversation is carried across.
     const systemInv = assembleInvestigationSystemPrompt({
       repoPath: "/repo",
       projectMemoryBlock: PROJECT_MEMORY,
