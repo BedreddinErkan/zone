@@ -11377,6 +11377,23 @@ sweep, and the one a reader would assume was done — could not have found this.
 variables currently set in this shell, checked against what the configuration pins and what the source reads;
 what it does not cover is any variable read by any dependency, which is exactly where this one lived.
 
+**A second dependency, on an axis the first did not reach — this entry was true and incomplete, and is
+completed rather than rewritten.** Its opening says one figure turned out to depend on its environment. It
+is now two, and the second is not an environment variable at all. Every full-suite figure recorded across
+the window between the prompt-audit fix and bullet one's precondition entry was true locally and false on
+continuous integration, for two reasons that are both machine-local state **outside what the repository
+carries**: an untracked project-memory file present in this working tree and absent from a fresh checkout,
+and the absolute path of the checkout itself, which the prompt assembler embeds verbatim. The first
+instance's framing — a variable the invoking shell exports — covers neither. The corrective is unchanged
+and now covers more: what a suite figure is conditional on is not confined to the environment block.
+
+**What was swept and what was not owed, because the obvious correction turns out not to be needed.** A
+word-boundary sweep for the window's own counts returns two lines under both instruments, reconciled
+against a looser sweep returning four whose extra two were substring matches inside unrelated numbers; a
+broader sweep for suite-run language returns fifteen lines across nine entries. **No entry in this document
+carries a raw suite figure from that window** — the ones that carry counts at all predate it. So no entry
+owes a corrected number, and this entry owes the boundary instead.
+
 **No fix proposed, and the rule that would follow is deliberately not filed yet.** The corrective is a
 workflow rule rather than repository knowledge: record the environment alongside a suite figure, or state
 that it was not recorded. Where such rules should live is item 148's subject, and creating a file for a
@@ -12015,13 +12032,16 @@ fields and the gates that read them are in `assembleAgentSystemPrompt`, `llm/age
 for the divergences that were closed, and item 155 for the maintenance property of the test that pins the
 closure.
 
-## 155. The audit's byte-identity test pins a length derived from an untracked file, and a red result there is maintenance rather than a finding
+## 155. The audit's byte-identity test pins a length that has now had three distinct triggers, and the third met this entry's own prescription exactly while making it the wrong action
 
-**What it is.** The test that pins item 150's closure asserts two things about the audit's assembled
-output: that it equals an independently built reference, and that its length equals one specific number.
-That number is derived from the current contents of the per-repo project-memory file, which the assembled
-prompt embeds. **That file is untracked and gitignored**, confirmed directly against the index and against
-both check-ignore forms, so it can change without any commit and the pinned number goes stale silently.
+**What it is, true when written and superseded by a later fix rather than wrong.** The test that pins item
+150's closure asserts two things about the audit's assembled output: that it equals an independently built
+reference, and that its length equals one specific number. That number **was** derived from the current
+contents of the per-repo project-memory file, which the assembled prompt embeds — a file that is untracked
+and gitignored, confirmed directly against the index and against both check-ignore forms, so it could change
+without any commit and the pinned number would go stale silently. **Since the fix at `16e479a6` the number
+is derived from fixture content the test itself constructs**, so that derivation no longer holds. Everything
+below about what a red result means still applies, and the entry stays open because the prescription does.
 
 **What a reader should do when it goes red, stated plainly because the wrong response is the tempting
 one.** Check the full-string equality assertion beside it first. That assertion is the real one and is
@@ -12042,6 +12062,25 @@ clause, not the instruction.
 **Why naming both matters more than it looks.** A reader who believes only the first trigger will look at
 the memory file, find it untouched, and conclude something is genuinely broken — which is the wasted work
 this paragraph exists to prevent, arrived at from the opposite direction.
+
+**A third trigger, and it is the one the prescription does not fit — which is why this entry stays open
+rather than closing.** Continuous integration ran this test red across the whole window between the
+prompt-audit fix and the entry that opened bullet one's precondition defect. The cause was neither named
+trigger: the memory file had not changed and had not been left stale, it was **absent** — untracked files
+are not in a fresh checkout — and a **second machine-dependent input** moved the number independently, the
+absolute path of the checkout itself, which the assembler embeds verbatim as its closing line. **The
+prescription's precondition was met exactly.** Equality passed, because both sides read the same absent
+file and the same real path; only the length differed. A reader following the instruction would have
+updated the number to a value true on one machine and false on every other, and the next machine would go
+red again for a third reason. **The instruction is not rewritten**, because it is correct for both triggers
+it names and for the shape they share — a number that has drifted for a reason the reader can confirm. What
+this case adds is the missing precondition on the precondition: confirm the number is a property of content
+the test controls before treating a length-only difference as maintenance.
+
+**Why that case is worth more than the rule it breaks.** A prescription that has only ever been followed
+successfully is untested guidance. This one now carries a recorded instance where its own trigger condition
+fired and its own instruction was the wrong action, with the discriminator that separates the two named. A
+later reader gets the rule and the exception together, from one entry, at the moment the rule fires.
 
 **Why the length pin is there at all, given that equality is the real assertion.** Equality alone can be
 satisfied by both sides drifting together, which is precisely the flaw that made the previous proof
@@ -12067,14 +12106,26 @@ result as evidence of anything.
 fired correctly, for a cause this entry had not named, and it did not fire falsely. A pin that only ever
 caught its anticipated trigger would be worth less than one that catches an unanticipated one.
 
-**No fix proposed.** Deriving the expected length at test time from the same file would remove the
-fragility and remove the anchor with it, which is the trade this entry exists to make visible rather than
-to decide.
+**The no-fix paragraph is superseded, and the fix that landed took neither horn of the trade it named.**
+It read: deriving the expected length at test time from the same file would remove the fragility and remove
+the anchor with it, which is the trade this entry exists to make visible rather than to decide. That framing
+was sound and the choice it posed turned out to be false. `16e479a6` kept the anchor and removed the
+fragility by **controlling the content the pin measures** — a fixture directory the test builds, with a
+marker it owns, and a fixed literal in place of the real checkout path. **That is what made the prescription
+applicable again; the rule itself did not change.**
 
 **Bucket: Neither**, decided with the two-way check, on the same precedent as item 154 — a structural fact
 with no fix proposed, the shape items 87 and 107 sit under. Against: Actionable now needs a fix specified
 now, and this prescribes what to do only when a condition fires; Blocked on data needs a missing
 observation, and nothing here is waiting on one.
+
+**A move to Closed was considered and declined, recorded so a later pass does not re-propose it.** The
+argument for it is real: the untracked-file derivation this entry's original heading named is gone. The
+argument against is stronger in two parts. The entry carries a **live prescription** — what to do when this
+pin goes red — which is still needed and still fires; closing files a live instruction under a heading
+readers scan past. And the entry now carries a case where its own precondition was met exactly and
+following it would have been wrong, which is the most useful thing in it and is only useful while the entry
+is open.
 
 **Where the code lives:** the assertion pair is in `scripts/notice-regression-probe.test.ts`, in the
 byte-identity case of the prompt-audit block; the file it depends on is the per-repo memory file the
@@ -12301,6 +12352,22 @@ test reaching prompt text that way. **So this is not a class-wide hole.** In the
 **continuous integration builds before it tests**, running a typecheck, then a build, then the suite, so the
 guard exists — it is simply not on the local machine.
 
+**The narrowness finding above is true and stands; the inference drawn beside it is incomplete and is
+completed here, and the two are separate claims that need deciding separately.** That one file imports from
+the build directory and seven others only mention it was verified by reading and is verified again — nothing
+touches it. What does not follow is the conclusion the second half invited, that a pushed commit is
+therefore covered. **The guard ran on every commit in that window, produced the correct answer, and nobody
+read it across nine consecutive runs.** Its existence and its effect are different facts, and recording the
+first as though it established the second is what let a known-red signal sit unexamined while eight further
+commits landed on top of it. A guard whose output no one consumes is not coverage.
+
+**The undetermined sub-question below resolved, and how it resolved is the sharper half.** It ran red. The
+command-line client is **still unauthenticated in this pass**, confirmed by running it again — so what
+answered the question was not a tool becoming available but a person opening a browser, which was possible
+throughout. The entry treated an unauthenticated client as though it bounded what was knowable, when it
+bounded only what was scriptable, and the distinction is worth keeping because this arc reaches for a CLI
+first by habit.
+
 **What is missing is any local coupling, and that was proven rather than read.** The test script is a bare
 runner invocation with no build step, and the only lifecycle hook in the manifest is attached to build
 rather than to test. Running the relevant test file leaves the build artefact's modification time
@@ -12320,7 +12387,10 @@ entry does not decide it.
 **One sub-question is open and is named rather than bucketed separately.** Whether the workflow actually ran
 red on the offending commit could not be read here — the command-line client is unauthenticated on this
 machine — so it is undetermined rather than assumed either way. It bears only on whether the existing
-off-machine guard fired in this instance, not on whether it exists.
+off-machine guard fired in this instance, not on whether it exists. **That paragraph is now answered and is
+left standing rather than rewritten**, because what it got right is the part worth keeping: it fired, and
+the entry was correct that firing and existing are different questions. What it got wrong is treating the
+question as closed by the tooling available to it.
 
 **Bucket: Neither**, decided with the two-way check. For: a structural fact recorded with no fix proposed,
 the shape items 87 and 107 sit under — the three candidate guards are named as alternatives, not chosen.
@@ -12392,11 +12462,131 @@ bullet of it. See item 156 for the scope defect and its fix, item 157 for the me
 surviving behaviour, item 149 for the control this entry cites, and item 90 for the criterion the
 conditional bears on.
 
+## 160. The assembled prompt closes with the repository's absolute path, so a cache prefix that must be byte-stable is keyed on where the checkout happens to sit — a tension nothing has weighed
+
+**What it is, and it is recorded as a tension rather than a defect because both sides are real.** The
+assembled system prompt ends with a location line carrying `repoPath` verbatim — it is the final content of
+the string, with nothing after it. That value is a real absolute filesystem path, different on every
+machine, every clone location, and the same machine after a move. The prompt-cache prefix must be
+byte-stable to be reused. Those two requirements are in conflict, and no pass before this one weighed them
+against each other.
+
+**The measurement, because the size decides how the tension reads.** Against the question-archetype prompt
+the line is **thirty-two characters of ten thousand seven hundred and twenty-nine**, under three tenths of
+one percent, and every preceding byte is identical between two machines. So the whole question is what a
+difference in the last fraction of a percent costs.
+
+**What it costs, and the answer corrects the framing this entry was opened under.** Anthropic's cache is
+matched at breakpoints, and a difference anywhere inside a breakpoint's span invalidates that entry
+**entirely** — there is no partial credit from the differing byte onward. The location line sits inside the
+span of the second breakpoint, which marks the last persistent user message and therefore reaches tools,
+system and the conversation so far. But **within one run the path never changes**, so there is no
+per-iteration cost at all; and the adapter marks its cache entries with a bare ephemeral control and **sets
+no time-to-live anywhere**, confirmed under both instruments, so the default five-minute window applies. Two
+developers would have to be running within five minutes of each other to share any prefix regardless of the
+path. **The cost this line imposes today is therefore almost entirely latent** — one cold start per machine
+per move — and it would only bite if a longer window or a deliberately shared prefix were adopted.
+Recording it as an expensive defect would have been wrong.
+
+**Intentional and load-bearing, traced rather than assumed.** A pickaxe search over the phrase finds one
+introducing commit, whose message names cwd resolution, and whose **same diff hunk** adds spawn-failure
+coaching instructing the agent to pass the absolute repository path when a command fails to spawn. That
+coaching presupposes the agent knows the path, and this line is the only place in the prompt supplying it.
+The same line appears verbatim in the investigation assembler and in a differently-labelled form in the chat
+assembler, whose own comment records that no production caller reaches it.
+
+**Knowledge that was present in one place and never travelled — this document's twenty-sixth pattern in its
+quieter form.** The cache-stability bench already pins a fixed literal repository path, and its own header
+says why: any per-invocation dynamic injection would invalidate the content-addressed cache. That is exactly
+the production concern, written down, in a test file, beside the production assembler, and never connected
+to the production line. Nothing propagated a false claim here; a true one simply stayed where it was
+written. **Item 151 came closest and stopped one step short** — it correctly classifies the repository path
+as a property of the tree, in the service of showing that prompt is task-independent, without the cache
+consequence following from it.
+
+**What a fix would have to decide, and none of the options is free — established rather than assumed.**
+Three shapes are available: let the path move past a breakpoint, replace it with a stable token, or drop it
+for a repo-relative convention. The first is not available at all, because the second breakpoint's span
+reaches the last tool result — every position inside system and inside the early conversation is already
+within it, so relocating the line changes nothing. The other two remove the machine-specific bytes and
+thereby trade against the coaching the line exists to serve. **This entry does not choose**, and the
+weighing it names is the work, not the wording.
+
+**Deliberately out of scope here.** The related boundary question — what the first breakpoint actually
+covers — is item 161's, and correcting the places that assert it is a separate pass.
+
+**Bucket: Neither**, two-way check. For: a structural fact recorded with no fix proposed — the shape items
+87, 107, 154, 155 and 158 sit under, and the three candidate fixes are named as a decision to be made
+rather than a decision taken. Against: Actionable now requires a fix specified in the entry, and this
+specifies none; Blocked on data requires a missing observation, and everything asserted here was measured
+from committed source and built artefacts.
+
+**Where the code lives:** the location line closes `assembleAgentSystemPrompt` in `llm/agentLoop.ts` and
+recurs in that file's other two assemblers; the breakpoint placement is in the Anthropic adapter's
+parameter conversion; the fixed literal that anticipated the concern is in the cache-stability bench. See
+item 161 for the boundary this entry's cost reasoning depends on, item 151 for the classification that came
+closest, and item 147 for the pattern this line's per-machine variation supplied a third instance of.
+
+## 161. Twelve places state that the first cache breakpoint covers system plus tools; the one measured figure in this repository is consistent only with tools alone
+
+**What it is, and it is separable from item 160 rather than a detail inside it.** That entry is about a
+path in the prompt. This is about a documented cache boundary, and it would matter identically if the
+location line did not exist — every claim about what survives a prefix bust rests on it. Its evidence, its
+blast radius and the observation that would settle it are all its own.
+
+**The claim, counted precisely rather than estimated.** Twelve tracked lines across ten files state that the
+last-tool breakpoint covers system plus tools: the project guidance file, three design documents, the
+adapter's own comment, the loop's cache-probe protocol, the cache-stability bench, the compactor, and two
+test files. That count comes from reading all fifteen tracked mentions of the phrase individually and
+classifying each, not from a pattern — **the other three are cache-*eligibility* uses**, which correctly sum
+system and tools against a per-model minimum and are unaffected by anything here. Eleven further lines sit
+in untracked audit files.
+
+**The evidence against, which is arithmetic on this repository's own measured figure.** A production run is
+recorded, in the loop's probe protocol and again as a classifier fixture, dropping to a floor of three
+thousand eight hundred and seventy-nine cached tokens on a full prefix bust. The tool schemas serialize to
+sixteen thousand one hundred and fifty-one characters; the patch-branch system prompt is fourteen thousand
+one hundred and one with memory empty. So that floor implies **four point one six characters per token if it
+is tools alone, and seven point eight if it is system and tools together**. The first is an ordinary rate for
+JSON schemas; the second is roughly double any realistic tokenization. **The floor is consistent only with
+tools alone.**
+
+**The limit, stated here rather than discovered by a later reader.** The run behind that floor may not have
+offered all twenty tools, and a smaller offered set would change the ratio — so this is strong evidence and
+not proof. **The strongest counter-evidence is recorded rather than omitted:** one of the twelve lines
+asserts the wire ordering directly, placing system and tools together at position zero of the prefix, which
+is the very proposition in question.
+
+**What would settle it outright, named so a later pass can run it cheaply.** Two runs differing only in
+system-prompt bytes against an identical tool set. If the first breakpoint is tools alone, the second run's
+first iteration still reads the tools floor; if it covers system too, that read is zero. One billed call
+decides it.
+
+**What depends on it, swept under both instruments, and the answer is narrower than the question suggests.**
+Three lines in this document mention a cached prefix. All three were read: they concern byte-stability
+within a run — a system prompt assembled once before the loop opens, a notice that must not shift, an empty
+string that must not add a separator — and none reasons about which breakpoint covers what or about a bust
+floor. **No cost figure in this document rests on the wrong boundary.** The discrepancy does not touch
+"system is cached", because system sits inside a cached span under either reading; it changes only **what is
+retained when the later prefix busts**, which is a quantity nothing here has yet had occasion to use.
+
+**Bucket: Blocked on data**, two-way check. For: closing requires an observation that does not exist yet,
+and this entry names the run that would produce it — the shape items 90 and 157 sit under. Against: Neither
+would require no missing observation, and a specific cheap run is specified; Actionable now would require
+the fix specified in the entry, and correcting twelve assertion sites cannot be specified before the
+boundary is settled.
+
+**Where the code lives:** the breakpoint placement and its comment are in the Anthropic adapter's parameter
+conversion; the measured floor and its analysis protocol are in the agent loop's cache-probe block. See item
+160 for the entry whose cost reasoning surfaced this, and item 147 for the discipline of naming what a
+figure was measured under, which the floor's own provenance is recorded as lacking in the project guidance
+file that cites it.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 159 to find out which ones still need something. No index of
+reader the trouble of reading all 161 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -12407,13 +12597,13 @@ first.
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (8): 108, 113, 116, 129, 130, 138, 142, 148
 
-**Blocked on data** — closing requires an observation that doesn't exist yet (11): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143, 157
+**Blocked on data** — closing requires an observation that doesn't exist yet (12): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143, 157, 161
 
-**Neither — a structural fact recorded, with no fix proposed** (79): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (80): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152, 154, 155, 158,
-159
+159, 160
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
