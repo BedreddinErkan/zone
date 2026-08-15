@@ -5,9 +5,16 @@ import {
   REFACTOR_PIPELINE,
   SIMPLE_ADD_PIPELINE,
   TARGETED_FIX_PIPELINE,
+  applyRequestedToolsGrant,
+  buildDispatcherCapabilityFilter,
   buildPipelineConfig,
   readArchetypeFlagsFromEnv,
 } from "./archetypeDispatcher.js";
+import { resolveToolList } from "../tools/toolRegistry.js";
+import { READ_ONLY_CAPABILITIES, type CapabilityFilter } from "../tools/capabilities.js";
+
+const names = (filter: CapabilityFilter | undefined) =>
+  new Set(resolveToolList(filter).map((t) => t.name));
 
 describe("readArchetypeFlagsFromEnv", () => {
   it("returns defaults when env is empty (dispatcher/question/investigation/targetedFix/refactor ON, simpleAdd OFF)", () => {
@@ -265,5 +272,147 @@ describe("investigation has its own pipeline", () => {
     expect(
       buildPipelineConfig("investigation", { ...ALL_ON, investigationEnabled: false }),
     ).toBeNull();
+  });
+});
+
+// Item 166 stage one. The headline finding from this feature's own design pass:
+// TARGETED_FIX/REFACTOR both set allowSubagentDispatch/allowScopeRevision true,
+// so buildDispatcherCapabilityFilter returns undefined for them — nothing to
+// grant. SIMPLE_ADD is the one archetype with a real, non-trivial, always
+// non-empty excludeToolNames ({Task, suggest_scope_change}) to test a grant
+// against — established by running buildDispatcherCapabilityFilter against all
+// five PipelineConfig literals before this test was written, not assumed.
+describe("applyRequestedToolsGrant — superset invariant (required, not optional)", () => {
+  // Shape 1: hadAllowFilter=false — SIMPLE_ADD's own filter shape (excludeToolNames
+  // only, no allow, no allowToolNames). The grant must NEVER introduce
+  // allowToolNames here: doing so flips resolveToolList's hasAllowFilter from
+  // false to true, and with no `allow` set, only tools named in allowToolNames
+  // would resolve — collapsing the offered set instead of widening it. Proven by
+  // a live experiment before this function was written (18 tools -> 1 when
+  // allowToolNames was introduced unconditionally; 18 -> 19, +1, when the
+  // introduction was gated on hadAllowFilter).
+  it("shape 1 (no pre-existing allow/allowToolNames — SIMPLE_ADD): resolved list is a strict superset, +Task only", () => {
+    const before = buildDispatcherCapabilityFilter(SIMPLE_ADD_PIPELINE);
+    expect(before?.allow).toBeUndefined();
+    expect(before?.allowToolNames).toBeUndefined();
+    const beforeNames = names(before);
+
+    const result = applyRequestedToolsGrant(before, ["Task"], false);
+    const afterNames = names(result.filter);
+
+    for (const n of beforeNames) expect(afterNames.has(n)).toBe(true); // superset
+    const added = [...afterNames].filter((n) => !beforeNames.has(n));
+    expect(added).toEqual(["Task"]);
+    expect(result.filter?.allowToolNames).toBeUndefined(); // never introduced here
+    expect(result.grantedNames).toEqual(["Task"]);
+  });
+
+  // Shape 2: hadAllowFilter=true — QUESTION/INVESTIGATION_PIPELINE's shape
+  // (allow: READ_ONLY_CAPABILITIES + excludeToolNames). Task declares only
+  // "agent.spawn" (builtinCapabilities.ts), never satisfying READ_ONLY_CAPABILITIES
+  // on its own — the allowToolNames escape hatch is genuinely required here, and
+  // is safe because hasAllowFilter was already true before the grant touched
+  // anything.
+  it("shape 2 (pre-existing allow=READ_ONLY_CAPABILITIES — INVESTIGATION_PIPELINE via answer-only override): resolved list is a strict superset, +Task only", () => {
+    const before = buildDispatcherCapabilityFilter(INVESTIGATION_PIPELINE);
+    expect(before?.allow).toBe(READ_ONLY_CAPABILITIES);
+    const beforeNames = names(before);
+    expect(beforeNames.has("Task")).toBe(false);
+
+    const result = applyRequestedToolsGrant(before, ["Task"], false);
+    const afterNames = names(result.filter);
+
+    for (const n of beforeNames) expect(afterNames.has(n)).toBe(true); // superset
+    const added = [...afterNames].filter((n) => !beforeNames.has(n));
+    expect(added).toEqual(["Task"]);
+    expect(result.filter?.allowToolNames?.has("Task")).toBe(true);
+    expect(result.grantedNames).toEqual(["Task"]);
+  });
+
+  // Matching mutation (#7): drop the hadAllowFilter conditional — always-write and
+  // never-write both break one of the two shapes above. Verified here directly by
+  // constructing both mutated variants inline, rather than asserted as a claim.
+  it("mutation check: unconditionally writing allowToolNames breaks shape 1's superset property", () => {
+    const before = buildDispatcherCapabilityFilter(SIMPLE_ADD_PIPELINE);
+    const beforeNames = names(before);
+    // Simulates the "always write allowToolNames" mutation directly, bypassing
+    // applyRequestedToolsGrant's hadAllowFilter guard.
+    const mutatedFilter: CapabilityFilter = {
+      excludeToolNames: new Set([...(before?.excludeToolNames ?? [])].filter((n) => n !== "Task")),
+      allowToolNames: new Set(["Task"]),
+    };
+    const mutatedNames = names(mutatedFilter);
+    const isSuperset = [...beforeNames].every((n) => mutatedNames.has(n));
+    expect(isSuperset).toBe(false); // the bug this test exists to catch
+  });
+
+  it("mutation check: never writing allowToolNames breaks shape 2's grant (Task stays absent)", () => {
+    const before = buildDispatcherCapabilityFilter(INVESTIGATION_PIPELINE);
+    // Simulates the "never write allowToolNames" mutation: un-exclude only.
+    const mutatedFilter: CapabilityFilter = {
+      ...before,
+      excludeToolNames: new Set([...(before?.excludeToolNames ?? [])].filter((n) => n !== "Task")),
+    };
+    const mutatedNames = names(mutatedFilter);
+    expect(mutatedNames.has("Task")).toBe(false); // capability check still fails
+  });
+});
+
+describe("applyRequestedToolsGrant — eligibility, cap, and the one-shot guard", () => {
+  it("out-of-universe name is dropped with reason unknown_tool_name", () => {
+    const before = buildDispatcherCapabilityFilter(SIMPLE_ADD_PIPELINE);
+    const result = applyRequestedToolsGrant(before, ["not_a_real_tool"], false);
+    expect(result.grantedNames).toEqual([]);
+    expect(result.dropped).toEqual([{ name: "not_a_real_tool", reason: "unknown_tool_name" }]);
+  });
+
+  it("a real tool name not excluded by the dispatcher is dropped as not_dispatcher_excluded", () => {
+    const before = buildDispatcherCapabilityFilter(SIMPLE_ADD_PIPELINE); // {Task, suggest_scope_change}
+    const result = applyRequestedToolsGrant(before, ["run_command"], false);
+    expect(result.grantedNames).toEqual([]);
+    expect(result.dropped).toEqual([{ name: "run_command", reason: "not_dispatcher_excluded" }]);
+  });
+
+  it("undefined currentFilter (no dispatcher restriction — TARGETED_FIX/REFACTOR) makes every request a no-op", () => {
+    const before = buildDispatcherCapabilityFilter(TARGETED_FIX_PIPELINE);
+    expect(before).toBeUndefined();
+    const result = applyRequestedToolsGrant(before, ["Task", "suggest_scope_change"], false);
+    expect(result.filter).toBeUndefined();
+    expect(result.grantedNames).toEqual([]);
+    expect(result.dropped).toEqual([
+      { name: "Task", reason: "not_dispatcher_excluded" },
+      { name: "suggest_scope_change", reason: "not_dispatcher_excluded" },
+    ]);
+  });
+
+  it("over-cap request: first 3 evaluated, the rest dropped as over_cap_truncated, plan-adjacent data intact", () => {
+    const before: CapabilityFilter = { excludeToolNames: new Set(["Task", "suggest_scope_change", "list_files", "search_in_files"]) };
+    const result = applyRequestedToolsGrant(before, ["Task", "suggest_scope_change", "list_files", "search_in_files"], false);
+    expect(result.dropped).toContainEqual({ name: "search_in_files", reason: "over_cap_truncated" });
+    expect(result.dropped.filter((d) => d.reason === "over_cap_truncated")).toHaveLength(1);
+    expect(result.grantedNames).toEqual(["Task", "suggest_scope_change", "list_files"]);
+  });
+
+  it("second grant in one run is refused — direct unit test on the pure function", () => {
+    // Defensive-only: applyRequestedToolsGrant runs once, straight-line, inside
+    // runLlmPatchFlow.ts, which is never re-entered mid-flight — there is no live
+    // path today that reaches a second grant through one real run. This proves
+    // the function's own correctness under a hypothetical double-call, not that
+    // the scenario is reachable in production.
+    const before = buildDispatcherCapabilityFilter(SIMPLE_ADD_PIPELINE);
+    const result = applyRequestedToolsGrant(before, ["Task"], true);
+    expect(result.filter).toBe(before); // same reference, untouched
+    expect(result.grantedNames).toEqual([]);
+    expect(result.dropped).toEqual([{ name: "Task", reason: "already_granted_this_run" }]);
+  });
+
+  it("absent/empty requestedTools upstream never reaches this function — byte-identity is the caller's job (runLlmPatchFlow.ts), covered there", () => {
+    // Documented here so the split of responsibility is explicit: this function
+    // assumes requestedTools is non-empty by the time it's called; the guard
+    // that skips calling it entirely lives in runLlmPatchFlow.ts.
+    const before = buildDispatcherCapabilityFilter(SIMPLE_ADD_PIPELINE);
+    const result = applyRequestedToolsGrant(before, [], false);
+    expect(result.filter).toBe(before);
+    expect(result.grantedNames).toEqual([]);
   });
 });

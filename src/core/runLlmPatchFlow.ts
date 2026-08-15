@@ -112,9 +112,11 @@ import {
   buildPipelineConfig,
   readArchetypeFlagsFromEnv,
   buildDispatcherCapabilityFilter,
+  applyRequestedToolsGrant,
   INVESTIGATION_PIPELINE,
   type PipelineConfig,
 } from "../llm/archetypeDispatcher.js";
+import { emitRequestedToolsGranted } from "../llm/loopTelemetry.js";
 import { type CapabilityFilter } from "../tools/capabilities.js";
 import { getRunCost } from "../usage/usageTracker.js";
 import {
@@ -5109,6 +5111,13 @@ const initializeTodosFromPlan = (): void => {
   // Path 2 (legacy) always sees null → no behavioral change.
   let pipelineCfg: PipelineConfig | null = null;
   let _dispatcherCapabilityFilter: CapabilityFilter | undefined = undefined;
+  // Item 166 stage one — one-shot guard for the requestedTools grant below.
+  // Defensive: this function's grant logic runs once, straight-line, and is
+  // never re-entered mid-flight, so this guard cannot double-fire through any
+  // currently-reachable control flow. Kept because a future change to this
+  // call structure could change that, and because it lets the pure grant
+  // function's own double-call behaviour be tested directly.
+  let _requestedToolsGranted = false;
 
   if (_useAgentLoop) {
     const runId = typeof input.runId === "string" ? input.runId.trim() : "";
@@ -5778,6 +5787,28 @@ const initializeTodosFromPlan = (): void => {
     // but depending on that distant invariant is exactly how a guard goes quietly inert.
     if (isAnswerOnlyRun) {
       _dispatcherCapabilityFilter = buildDispatcherCapabilityFilter(INVESTIGATION_PIPELINE);
+    }
+
+    // Item 166 stage one — grant tools the plan's investigation phase requested,
+    // bounded to what THIS dispatcher pipeline construction excluded by name
+    // (applyRequestedToolsGrant's own eligibility check — see its doc comment).
+    // Absent/empty requestedTools: this block does not run at all, so
+    // _dispatcherCapabilityFilter keeps the exact same reference as before —
+    // true identity, not just deep-equality, for runs that never request anything.
+    if (executionPlan?.requestedTools?.length) {
+      const grantResult = applyRequestedToolsGrant(
+        _dispatcherCapabilityFilter,
+        executionPlan.requestedTools,
+        _requestedToolsGranted,
+      );
+      _dispatcherCapabilityFilter = grantResult.filter;
+      _requestedToolsGranted = true;
+      emitRequestedToolsGranted({
+        runId: runId ?? null,
+        requested: executionPlan.requestedTools,
+        granted: grantResult.grantedNames,
+        dropped: grantResult.dropped,
+      });
     }
 
     const agentLoopBaseInput = {

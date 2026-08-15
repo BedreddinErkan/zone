@@ -97,7 +97,7 @@ const ANSWER_ONLY_PLAN = {
   answerOnlyReason: "The task is a question; nothing needs to change.",
 };
 
-function classification(archetype: "investigation" | "question") {
+function classification(archetype: "investigation" | "question" | "simple_add") {
   return {
     tier: "medium" as const,
     archetype,
@@ -105,6 +105,12 @@ function classification(archetype: "investigation" | "question") {
     archetypeConfidence: 0.9,
     fallbackUsed: false,
   };
+}
+
+// Item 166 stage one. Same shape as APPROVED_PLAN, plus requestedTools — a real,
+// non-empty steps plan so it flows the normal success path (not noChange/answerOnly).
+function planWithRequestedTools(requestedTools: string[]) {
+  return { ...APPROVED_PLAN, requestedTools };
 }
 
 beforeEach(() => {
@@ -141,8 +147,8 @@ afterEach(() => {
 });
 
 async function runWith(opts: {
-  archetype: "investigation" | "question";
-  preGeneratedPlan?: typeof APPROVED_PLAN | typeof STEPLESS_PLAN | typeof ANSWER_ONLY_PLAN;
+  archetype: "investigation" | "question" | "simple_add";
+  preGeneratedPlan?: typeof APPROVED_PLAN | typeof STEPLESS_PLAN | typeof ANSWER_ONLY_PLAN | ReturnType<typeof planWithRequestedTools>;
   runId: string;
 }) {
   classifyTaskMock.mockResolvedValue(classification(opts.archetype));
@@ -320,6 +326,81 @@ describe("answer-only budget exhaustion marker (C6)", () => {
     await runWith({ archetype: "investigation", preGeneratedPlan: STEPLESS_PLAN, runId: "run-stepless-exhausted" });
 
     expect(findMarkerCall(logSpy)).toBeUndefined();
+
+    logSpy.mockRestore();
+  });
+});
+
+// Item 166 stage one. simple_add is the one archetype (of the five PipelineConfig
+// literals) with a real, non-trivial, always non-empty excludeToolNames
+// ({Task, suggest_scope_change}) — established by running
+// buildDispatcherCapabilityFilter against all five before this test was written.
+// investigation/question both hit the suppression branch above whenever a plan
+// has real steps, clearing capabilityFilter to undefined before this feature's
+// grant logic would ever see it — not useful fixtures for a live grant test.
+describe("item 166 stage one — requestedTools grant, live through runLlmPatchFlow", () => {
+  beforeEach(() => {
+    process.env["ZONE_ARCHETYPE_ENABLE_SIMPLE_ADD"] = "1";
+  });
+  afterEach(() => {
+    delete process.env["ZONE_ARCHETYPE_ENABLE_SIMPLE_ADD"];
+  });
+
+  it("byte-identity regression pin: no requestedTools on the plan → filter shape completely unaffected", async () => {
+    const call = await runWith({ archetype: "simple_add", preGeneratedPlan: APPROVED_PLAN, runId: "run-sa-noreq" });
+
+    const filter = call?.capabilityFilter as { excludeToolNames?: Set<string>; allowToolNames?: Set<string> } | undefined;
+    expect(filter?.excludeToolNames).toEqual(new Set(["Task", "suggest_scope_change"]));
+    expect(filter?.allowToolNames).toBeUndefined(); // never introduced when nothing was requested
+  });
+
+  // The required live-path test (approval addition #2): requestedTools:["run_command"]
+  // through a realistic write-capable pipeline. The outcome is not predicted in the
+  // plan — asserted here on whatever the real, wired-up code path actually produces.
+  it("live path: requestedTools=[\"run_command\"] through simple_add — asserts the actual observed outcome", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    const call = await runWith({
+      archetype: "simple_add",
+      preGeneratedPlan: planWithRequestedTools(["run_command"]),
+      runId: "run-sa-runcommand",
+    });
+
+    const filter = call?.capabilityFilter as { excludeToolNames?: Set<string>; allowToolNames?: Set<string> } | undefined;
+    // Observed: run_command is not a member of simple_add's excludeToolNames (it's
+    // already offered outright at this pipeline), so applyRequestedToolsGrant drops
+    // it as not_dispatcher_excluded and the filter is untouched.
+    expect(filter?.excludeToolNames).toEqual(new Set(["Task", "suggest_scope_change"]));
+    expect(filter?.allowToolNames).toBeUndefined();
+
+    const markerCall = logSpy.mock.calls.find((args) => String(args[0]).includes("[zone-requested-tools-granted]"));
+    expect(markerCall).toBeDefined();
+    const payload = JSON.parse(String(markerCall![1]));
+    expect(payload.requested).toEqual(["run_command"]);
+    expect(payload.granted).toEqual([]);
+    expect(payload.dropped).toEqual([{ name: "run_command", reason: "not_dispatcher_excluded" }]);
+    expect(payload.runId).toBe("run-sa-runcommand");
+
+    logSpy.mockRestore();
+  });
+
+  it("live path: requestedTools=[\"Task\"] through simple_add — eligible name is actually granted end-to-end", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    const call = await runWith({
+      archetype: "simple_add",
+      preGeneratedPlan: planWithRequestedTools(["Task"]),
+      runId: "run-sa-task",
+    });
+
+    const filter = call?.capabilityFilter as { excludeToolNames?: Set<string>; allowToolNames?: Set<string> } | undefined;
+    expect(filter?.excludeToolNames).toEqual(new Set(["suggest_scope_change"])); // Task removed
+    expect(filter?.allowToolNames).toBeUndefined(); // hadAllowFilter was false — never introduced
+
+    const markerCall = logSpy.mock.calls.find((args) => String(args[0]).includes("[zone-requested-tools-granted]"));
+    const payload = JSON.parse(String(markerCall![1]));
+    expect(payload.granted).toEqual(["Task"]);
+    expect(payload.dropped).toEqual([]);
 
     logSpy.mockRestore();
   });

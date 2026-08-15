@@ -1,5 +1,6 @@
 import type { TaskArchetype } from "./taskClassifier.js";
 import { READ_ONLY_CAPABILITIES, type CapabilityFilter } from "../tools/capabilities.js";
+import { resolveToolList } from "../tools/toolRegistry.js";
 
 export interface PipelineConfig {
   skipPlan: boolean;
@@ -198,4 +199,94 @@ export function buildPipelineConfig(
     return { ...REFACTOR_PIPELINE };
   }
   return null;
+}
+
+/** Item 166 stage one. Cap on a single grant request — enforced HERE, never as a
+ *  schema `.max()` on ExecutionPlan.requestedTools (D2): Zod validates an object
+ *  atomically, so a schema-level cap would let one extra name throw away the
+ *  entire plan, not just the field that overreached. */
+const REQUESTED_TOOLS_CAP = 3;
+
+export interface RequestedToolsGrantResult {
+  filter: CapabilityFilter | undefined;
+  grantedNames: string[];
+  dropped: { name: string; reason: string }[];
+}
+
+/**
+ * Widens `currentFilter` to include specific plan-requested tool names, bounded
+ * to what the dispatcher pipeline itself excluded by name — never the broader
+ * "not currently offered" (which would include tools excluded purely by
+ * capability class, e.g. `write_file` under a read-only-capability filter, and
+ * would require the `allowToolNames` escape hatch to reach names the pipeline
+ * never named at all). Pure; runId/telemetry is the caller's job.
+ *
+ * The `allowToolNames` escape hatch is used, but ONLY when `currentFilter`
+ * already had an active allow-filter (`allow` or non-empty `allowToolNames`)
+ * before this function touched anything. Introducing `allowToolNames` where
+ * NEITHER existed flips `resolveToolList`'s internal `hasAllowFilter` from
+ * false to true, and with no `allow` capability set, only tools named in
+ * `allowToolNames` would resolve — collapsing the offered set instead of
+ * widening it. Reproduced directly against `resolveToolList` before this
+ * function was written: an 18-tool exclude-only filter collapsed to 1 tool
+ * when `allowToolNames` was introduced unconditionally, and stayed a clean
+ * 18→19-tool superset when the introduction was gated on this same
+ * `hadAllowFilter` check. See the superset-invariant tests in
+ * archetypeDispatcher.test.ts, which assert on `resolveToolList` output, not
+ * on this function's returned filter object.
+ */
+export function applyRequestedToolsGrant(
+  currentFilter: CapabilityFilter | undefined,
+  requestedTools: string[],
+  alreadyGranted: boolean,
+): RequestedToolsGrantResult {
+  if (alreadyGranted) {
+    return {
+      filter: currentFilter,
+      grantedNames: [],
+      dropped: requestedTools.map((name) => ({ name, reason: "already_granted_this_run" })),
+    };
+  }
+
+  const capped = requestedTools.slice(0, REQUESTED_TOOLS_CAP);
+  const dropped: { name: string; reason: string }[] = requestedTools
+    .slice(REQUESTED_TOOLS_CAP)
+    .map((name) => ({ name, reason: "over_cap_truncated" }));
+
+  const universe = new Set(resolveToolList(undefined).map((t) => t.name));
+  const preGrantExclude = currentFilter?.excludeToolNames ?? new Set<string>();
+
+  const eligible: string[] = [];
+  for (const name of capped) {
+    if (!universe.has(name)) {
+      dropped.push({ name, reason: "unknown_tool_name" });
+      continue;
+    }
+    if (!preGrantExclude.has(name)) {
+      // Covers both "already offered" and "excluded by capability class, not by
+      // name" — undefined currentFilter (nothing dispatcher-excluded at all)
+      // falls here for every requested name, making the grant a no-op by
+      // construction rather than a special-cased branch.
+      dropped.push({ name, reason: "not_dispatcher_excluded" });
+      continue;
+    }
+    eligible.push(name);
+  }
+
+  if (eligible.length === 0) {
+    return { filter: currentFilter, grantedNames: [], dropped };
+  }
+
+  const newExcludeToolNames = new Set([...preGrantExclude].filter((n) => !eligible.includes(n)));
+  const hadAllowFilter =
+    currentFilter?.allow !== undefined || (currentFilter?.allowToolNames?.size ?? 0) > 0;
+  const newFilter: CapabilityFilter = {
+    ...currentFilter,
+    excludeToolNames: newExcludeToolNames,
+    ...(hadAllowFilter
+      ? { allowToolNames: new Set([...(currentFilter?.allowToolNames ?? []), ...eligible]) }
+      : {}),
+  };
+
+  return { filter: newFilter, grantedNames: eligible, dropped };
 }
