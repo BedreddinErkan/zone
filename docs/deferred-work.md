@@ -13079,6 +13079,36 @@ on the identifier the two share —
 though item 165's finding applies to that join unchanged, since an identifier names a dispatch rather than
 a loop.
 
+**What a four-run measurement arc established, stated as evidence with its bounds rather than as settled
+fact.** The criteria are **selective, not suppressive**: given a fanout that reaches the plan stage, the
+repaired prompt produced a conforming worker mark in five of six emitted cells, across two fixtures at
+three draws each, and the shipped rule granted in the same five. That is existence evidence at three draws
+per fixture, not a rate, and it **corrects a reading this arc itself nearly recorded** — an earlier run saw
+one mark across four plans and read it as prompt conservatism, when the cause was that only two negative
+controls and an answer-only case had survived to emit a plan at all.
+
+**Zero explore marks, cause unestablished, and a carried figure corrected.** Across every criteria-carrying
+arm of every run, nine marked steps and **not one** of them `explore`. The pre-port baseline is the only
+artefact in the set containing any, two of its thirteen. A figure of twenty-nine marked steps was carried
+alongside this observation and is wrong for the purpose: it spans both arms of two runs, and the bare arm
+carries no criteria at all, so the count that bears on the criteria is nine. Item 175 records the nearest
+candidate explanation and states plainly that it is not a demonstrated cause.
+
+**The sampling floor, which bounds every single-draw comparison in this arc.** A bare-arm prompt that is
+byte-identical between two runs changed cell behaviour in one of its six cells — a plan that never emerged
+in the first run emerged as five steps in the second, on the same input. Production pins neither
+temperature nor top_p, so nothing upstream removes that variance. Several cross-run differences recorded
+during this arc are therefore uninterpretable at one draw per cell, and are named as such where they appear
+rather than reconciled.
+
+**The shipped rule's predicate reads a property of step grouping, and grouping is itself unstable.** The
+qualifying test is a step's file-count reaching three, which is decided by how the plan divides work into
+steps rather than by how the work is shaped. Observed directly: on one fixture, two draws produced a
+three-file worker step and granted, while the third collapsed the same four-file fanout into a two-step
+plan where no step reached the threshold and no qualifying mark existed — identical input, three draws.
+Item 167 already proposes moving the grant; this is a separate reason to revisit the predicate, and it is
+not the same reason.
+
 **Bucket: Blocked on data**, moved from Neither, and decided by this entry's own stated closing condition
 rather than by the fact that code shipped. Four things were named as needing to be learned before it
 closes. Three are observations that do not exist yet — whether a model asks accurately, whether honouring
@@ -13242,28 +13272,176 @@ awaiting data rather than a structural fact.
 grant function beside the dispatcher's filter builder. See item 166 for the channel, item 167 for the
 ceiling that bounds the second quantity, and item 168 for the vocabulary that bounds the first.
 
+## 171. Closed — a probe transcript that reads some of an enumerated set never terminates naturally, and the coverage rule that fixes it was validated in the same pass
+
+**Mechanism, and it is mechanical rather than a matter of judgement.** A synthetic investigation transcript
+enumerates files in a tool result — a search listing call sites, a directory listing naming variants — and
+then reads some of them. Reading **some** is what stalls: the model asks for the remainder instead of
+producing its plan. Reading **none** terminates, and reading **all** terminates. The failure is not about
+how much context the transcript carries but about whether it leaves an enumerated set half-covered.
+
+**Established rather than reasoned.** Every stalled continuation across two full runs — eleven of eleven,
+no exception — requested a file the transcript had enumerated in a result and never read. The three
+fixtures that stalled sat at half, two-fifths and half coverage; the two that terminated in a single round
+sat at full coverage. One fixture at a third of coverage terminated anyway, and it is the exception that
+locates the property precisely: it read **none** of its fanout targets, so it never began the pattern the
+others left unfinished.
+
+**The fix and its validation landed together.** Two fixtures were rewritten so every enumerated file is
+also read, with their tasks left byte-identical so the correct answer and the cross-run comparison were
+preserved. Continuation rounds went from five of twelve and six of twelve in the two prior runs to **zero
+of six**, every cell terminating in one round, and spend fell to about fifteen cents from roughly forty-one
+and forty-five. **The standing rule for every future probe fixture:** enumerate and read all, or enumerate
+and read none; never leave an enumerated set partly read.
+
+**Why this matters beyond fixture hygiene.** Three separate passes lost cells to this and each treated it
+as a one-off defect of the fixture at hand. The cost was not only wasted calls: the cells it removed were
+not random, which is the subject of the thirty-first pattern.
+
+**Bucket: Closed on arrival**, on item 126's precedent — an entry documenting a convention whose amendment
+landed in the same commit, rather than proposing work still pending. Actionable now was checked and does
+not fit: it presupposes an outstanding fix, and the fix here is the rule, already applied and already
+validated.
+
+**Where the code lives:** nowhere in the tree — this governs probe fixtures, which live in the scratch
+artefacts under the per-repo bookkeeping directory, not in the repository. See the thirty-first pattern for
+what the lost cells cost the measurement, and item 166 for the arc that surfaced it.
+
+## 172. The render test guarding a restored prompt clause pins its presence anywhere in the prompt, not its placement in the section that gives it meaning
+
+**What it is.** A clause was restored to the investigation prompt's rules section because its absence had
+been traced to a measurable behavioural difference. The test written to guard it asserts that the rendered
+prompt contains the clause's text. A mutation moved that same text out of the rules section and into the
+JSON-shape block — a different position with a different reading — and **the test still passed**.
+
+**So content is guarded and structure is not.** The distinction matters here more than it usually would,
+because this arc's own open question about the explore branch (item 175) is a placement hypothesis: whether
+a threshold stated before a branch carries into it. A test that cannot tell rules-section placement from
+JSON-block placement cannot rule that hypothesis in or out, and cannot stop a future compression from
+relocating the clause while staying green.
+
+**The fix is specified.** Scope the assertion to the rules-section slice of the rendered prompt rather than
+the whole string — the section boundary is already locatable by shape, since the sweep instruments used
+throughout this arc locate it that way. Nothing needs to be learned first.
+
+**Bucket: Actionable now.** For: a fix is specified and nothing new must be learned. Against Neither: work
+is specified, not merely recorded. Against Blocked on data: the change and its verification are both local
+to the test.
+
+**Where the code lives:** the assertion is in the plan-investigation prompt test beside the other
+buildPrompt render assertions; the clause it guards is in that module's rules section. See item 175 for the
+placement question this blindness prevents settling, and the twenty-fourth pattern for why only a mutation
+surfaced it.
+
+## 173. The investigation-phase tool-absence notice always names the archetype as unknown, because no classification exists at that call site
+
+**What it is.** The notice that tells an agent which tools are withheld also names the cause. On the
+capability-filter arm it renders the run's archetype — and on the investigation path it renders the literal
+placeholder every time, because the caller passes no classification and the notice falls back.
+
+**Not an oversight at the call site, a property of the ordering.** The classifier has exactly one
+production call site, and it runs after the investigation phase has already completed. The investigation
+module's own input interface carries no classification field, and the gate deciding whether to investigate
+at all uses a separate lexical test on the task's lead verb rather than the classifier. So there is nothing
+at that point to pass.
+
+**What would have to change.** Classification ordered before investigation. That moves a model call onto
+every run that investigates, including runs that would never have reached the classifier otherwise, and
+that cost is unpriced. Whether a correctly-named cause in a notice is worth it is exactly the question this
+entry does not answer.
+
+**Bucket: Neither.** A structural fact recorded with its prerequisite named and no fix proposed — the shape
+items 87, 107, 154, 155, 158, 160, 163, 164, 165, 168 and 174 sit under. Against Actionable now: the fix is
+a reordering whose cost is unpriced, so something does need to be learned first. Against Blocked on data:
+nothing waits on an observation; both facts were established by reading source.
+
+**Where the code lives:** the notice and its cause-describing helper are in the tool-absence module; the
+classifier's sole call site is in the patch-flow driver; the investigation module's input interface sits
+beside its prompt builder. See item 168 for the other consequence of the same ordering, and item 166 for
+the arc that surfaced both.
+
+## 174. The investigation path never receives the mode line every patch-mode run gets, because the guard tests for a spelling its callers do not use
+
+**What it is.** The first user message ends with an explicit mode marker when the run declares its mode.
+The guard producing it accepts three spellings — chat, investigate, patch — and the two production callers
+that run the loop in investigation mode both pass a fourth, longer spelling that the loop normalises
+correctly everywhere else. The normalisation happens after the guard has already been evaluated, so the
+marker is empty on that path, always.
+
+**What the other modes gain that this path loses.** Patch-mode runs — dispatched from the CLI, from the
+patch-flow driver and from the full-patch planner — receive a short trailing line naming the run's mode, an
+explicit statement of posture at the end of the first user message. Investigation runs never receive their
+equivalent. Whether that costs anything is not established here: no measurement in this arc varied it, and
+the investigation prompt states its read-only posture at length in the system prompt regardless.
+
+**Recorded rather than fixed, deliberately.** The change is a one-line widening of the guard, or passing
+the accepted spelling. What is not established is whether the marker should appear at all on a path whose
+posture is already stated — so the cheapness of the fix is not an argument for making it.
+
+**Bucket: Neither.** A structural fact recorded with no fix proposed, on item 46's shape: an undecided
+choice, where what is missing is a decision rather than an observation or a specified fix. Against
+Actionable now: the fix is trivial to write and its desirability is unevaluated, which is the bar that
+bucket sets. Against Blocked on data: no observation is missing; what is missing is a judgement.
+
+**Where the code lives:** the guard, the normaliser and the marker are all in the agent loop's own prompt
+assembly; the two investigation-mode callers are the plan-investigation wrapper and the investigation flow.
+See item 173 for the other defect on this same path.
+
+## 175. The explore branch's file-count ambiguity is the nearest explanation for zero explore marks, and it is not a demonstrated cause
+
+**What it is.** The prompt's marking rule carries two branches in a single list item. The worker branch
+states a three-file threshold; the explore branch, which follows it in the same item with no sub-bullet
+between them, states no file-count condition at all — its own limit is expressed in reads rather than
+files. The worked example that closes the item cites a file count on its worker leg and none on its explore
+leg.
+
+**The reading the text supports, and the one it fails to prevent.** Read strictly, explore has no
+file-count condition; that is what the sentences say. But a reader tracking what makes a step markable
+meets a numeric threshold first, inside the same item, with nothing scoping it to the branch that stated
+it. Nothing in the text rules out carrying it across.
+
+**Why it is a candidate and not a finding.** Across every criteria-carrying run, nine marked steps and zero
+explore among them, while the only artefact containing explore marks at all is the pre-port baseline
+written before these criteria existed. The ambiguity is the nearest available explanation and **it has not
+been tested**. Competing explanations are not excluded: the mapping-shaped steps observed in these runs
+were single-file, so a threshold carried across would suppress them, but so would several other readings.
+
+**What would separate it.** A render variant that states explore's independence from file count explicitly,
+measured against the current text on fixtures containing mapping-shaped work at more than one file count.
+Until that exists this entry stays a hypothesis, and item 172 records why the current test suite cannot
+help: it pins the clause's presence anywhere in the prompt, not its placement, so it cannot detect a
+placement effect either way.
+
+**Bucket: Blocked on data.** Closing requires an observation that does not exist yet — the paired render
+comparison above. Against Neither: this is a registered candidate explanation awaiting a discriminating
+measurement, not a structural fact with no fix proposed. Against Actionable now: the fix would be a prompt
+change whose direction is exactly what is unestablished.
+
+**Where the code lives:** the marking rule is one bullet in the plan-investigation prompt's rules section.
+See item 166 for the observation that prompted this, and item 172 for the test blindness that bounds it.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 170 to find out which ones still need something. No index of
+reader the trouble of reading all 175 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (63): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 111, 117, 120, 121, 126, 128, 134, 135, 137, 144, 149, 150, 153, 156, 161, 162
+**Closed** (64): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 111, 117, 120, 121, 126, 128, 134, 135, 137, 144, 149, 150, 153, 156, 161, 162, 171
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (10): 108, 113, 116, 129, 130, 138, 142, 148, 167, 169
+first (11): 108, 113, 116, 129, 130, 138, 142, 148, 167, 169, 172
 
-**Blocked on data** — closing requires an observation that doesn't exist yet (13): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143, 157, 166, 170
+**Blocked on data** — closing requires an observation that doesn't exist yet (14): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143, 157, 166, 170, 175
 
-**Neither — a structural fact recorded, with no fix proposed** (84): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (86): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152, 154, 155, 158,
-159, 160, 163, 164, 165, 168
+159, 160, 163, 164, 165, 168, 173, 174
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
@@ -15500,3 +15678,70 @@ assertion nor a broken mutation: a test reading the right surface at the right s
 discriminate, because two production paths collapse to one observable. That would be a fact about the
 code's observability rather than about the test's aim, and the twenty-fourth's corrective would not reach
 it.
+
+## A thirty-first pattern: an instrument whose failure mode correlates with the property being measured, so the surviving sample answers a different question
+
+**The instance.** A measurement asked whether a prompt's criteria suppress marking or select it. Six
+fixtures went in; four emitted a plan, and those four carried one mark between them. Read at face value
+that is prompt conservatism, and it was nearly recorded as such. The two fixtures that failed to emit were
+the two genuine multi-file fanouts — precisely the cases where marking is correct and would have appeared.
+What survived to be counted was two negative controls, where the right answer is no mark, and one
+answer-only case, which is structurally incapable of carrying a mark at all. **The sample was not thin, it
+was selected**, and selected in the exact direction of the hypothesis under test. Re-run against fixtures
+repaired for the unrelated defect described in item 171, the same prompt marked five of six.
+
+**The mechanism, stated so it is recognisable elsewhere.** An instrument fails on some inputs and not
+others. That is ordinary and usually harmless. It stops being harmless when what determines failure is
+correlated with what is being measured — here, the fanout fixtures were also the fixtures whose transcripts
+left an enumerated file set half-read, so the property that made them the informative cases and the
+property that made them stall travelled together. The resulting bias is invisible in the data, because a
+cell that never emitted leaves nothing to inspect; it shows up only as a smaller n, which reads as weaker
+evidence rather than as different evidence.
+
+**Checked against the twenty-eighth, which is nearest and is a different thing.** That pattern is about a
+question filed unanswerable because the first instrument could not reach it while another instrument held
+the answer: a claim about the world made from a fact about a tool, with **no outcome attributed** — its
+instances produce a status, undetermined or blocked, not a conclusion. Here an outcome was very nearly
+attributed. The instrument reached the subject, produced data, and the data supported a specific
+substantive conclusion that was wrong. Missing evidence and biased evidence fail differently: the first
+leaves a gap that announces itself, the second fills the gap with an answer.
+
+**Checked against the twenty-seventh**, which governs a measured figure whose context went unstated so it
+read as universal. In both of that one's instances **both readings were true** under their own conditions,
+and the fault was omitting the condition. Here the surviving reading was not true under any condition — the
+prompt does mark fanouts, and no framing of the four-plan sample makes it otherwise.
+
+**Novel. Recorded as the thirty-first pattern.**
+
+**The rule: before reading a result from n cells, ask which cells did not produce one and whether that set
+is random with respect to the question.** A dropped cell is not a smaller sample; it is a sample with an
+unknown selection rule. The cheap check is to describe the failing cells in the vocabulary of the
+hypothesis — here, "the two fanouts" rather than "two cells" — and see whether the description sounds like
+the thing being measured. If it does, the result is not weak evidence, it is evidence about something else.
+
+**Where it stands:** item 171 records the fixture property that produced the correlated failure and the
+coverage rule that removed it; item 166 records the corrected measurement and the reading it replaced.
+
+## A seventh candidate considered and not promoted: verifying a built artefact by content rather than by timestamp
+
+**The candidate.** Across this arc the rule was applied repeatedly and stated in every report: check
+whether a compiled artefact carries a change by searching it for the changed text, never by comparing
+modification times. Both failure directions were observed. A build older than its source reported fresh and
+produced a false green, which item 158 records. And in the other direction, a mutation-testing revert
+restored source content without restoring its timestamp, so a comparison reported two files stale whose
+content was already current — a false alarm that would have caused an unnecessary rebuild had it been
+believed.
+
+**Not promoted, because it is a corrective procedure for a mechanism already recorded.** The sixth
+candidate considered and not promoted covers exactly the underlying fact: a check whose authority rests on
+an artefact it does not itself refresh. Timestamps versus content is how that mechanism is defeated in the
+specific case of a compiled tree, not a separate way for a check to go wrong. Both directions observed here
+reduce to one sentence — a timestamp is not a content hash — and a rule that follows from a mechanism
+already written is a corollary of it. Recording it as its own pattern would mean recording the corrective
+alongside the defect and counting them twice.
+
+**The condition under which it reopens.** A second artefact class outside the compiled tree showing the
+same divergence between what a staleness signal reports and what the artefact contains — a cache, a lock
+file, a generated fixture — or a case where a timestamp misleads for some reason other than not being a
+content hash. Either would make this a claim about staleness signals generally rather than about build
+discipline in one directory, and at that point it stops being a corollary.
