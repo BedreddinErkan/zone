@@ -113,6 +113,7 @@ import {
   readArchetypeFlagsFromEnv,
   buildDispatcherCapabilityFilter,
   applyRequestedToolsGrant,
+  deriveTaskRequestFromPlanMarks,
   INVESTIGATION_PIPELINE,
   type PipelineConfig,
 } from "../llm/archetypeDispatcher.js";
@@ -5789,26 +5790,78 @@ const initializeTodosFromPlan = (): void => {
       _dispatcherCapabilityFilter = buildDispatcherCapabilityFilter(INVESTIGATION_PIPELINE);
     }
 
-    // Item 166 stage one — grant tools the plan's investigation phase requested,
-    // bounded to what THIS dispatcher pipeline construction excluded by name
-    // (applyRequestedToolsGrant's own eligibility check — see its doc comment).
-    // Absent/empty requestedTools: this block does not run at all, so
-    // _dispatcherCapabilityFilter keeps the exact same reference as before —
-    // true identity, not just deep-equality, for runs that never request anything.
-    if (executionPlan?.requestedTools?.length) {
-      const grantResult = applyRequestedToolsGrant(
-        _dispatcherCapabilityFilter,
-        executionPlan.requestedTools,
-        _requestedToolsGranted,
-      );
-      _dispatcherCapabilityFilter = grantResult.filter;
-      _requestedToolsGranted = true;
-      emitRequestedToolsGranted({
-        runId: runId ?? null,
-        requested: executionPlan.requestedTools,
-        granted: grantResult.grantedNames,
-        dropped: grantResult.dropped,
-      });
+    // Item 166 stage one/two — grant tools the plan requested, via TWO channels
+    // merged into ONE call to applyRequestedToolsGrant (never a second grant
+    // mechanism): an explicit executionPlan.requestedTools entry, and an
+    // IMPLICIT Task request derived from the plan's own per-step delegation
+    // marks (deriveTaskRequestFromPlanMarks — item 166 stage two; see its doc
+    // comment for the criterion-conformance rule and why an earlier
+    // mark-density rule was rejected). Bounded to what THIS dispatcher
+    // pipeline construction excluded by name (applyRequestedToolsGrant's own
+    // eligibility check). Neither signal present: this block does not run at
+    // all, so _dispatcherCapabilityFilter keeps the exact same reference as
+    // before — true identity, not just deep-equality, for runs that never
+    // request anything.
+    {
+      const explicitRequested = executionPlan?.requestedTools ?? [];
+      const anyStepMarked = (executionPlan?.steps ?? []).some((s) => s.subagentEligible === true);
+      if (explicitRequested.length > 0 || anyStepMarked) {
+        const sourceByName = new Map<string, "explicit" | "plan_marks">();
+        for (const name of explicitRequested) sourceByName.set(name, "explicit");
+
+        const combined = [...explicitRequested];
+        // Only reachable when anyStepMarked but the marks-derived request never
+        // qualified (or there were no marks after all — anyStepMarked already
+        // rules that out here) — recorded at THIS call site, before
+        // applyRequestedToolsGrant is ever reached, which is why the reason
+        // vocabulary here ("no_qualifying_marks"/"no_steps_marked") is disjoint
+        // from that function's own ("not_dispatcher_excluded" etc.): a name that
+        // never entered the grant function was never evaluated against it.
+        const preGrantDropped: { name: string; reason: string; source: "plan_marks" }[] = [];
+        if (anyStepMarked) {
+          const marksSignal = deriveTaskRequestFromPlanMarks(executionPlan?.steps);
+          if (marksSignal.taskRequested) {
+            if (!sourceByName.has("Task")) sourceByName.set("Task", "plan_marks");
+            if (!combined.includes("Task")) combined.push("Task");
+          } else {
+            preGrantDropped.push({
+              name: "Task",
+              reason: marksSignal.reason ?? "no_qualifying_marks",
+              source: "plan_marks",
+            });
+          }
+        }
+
+        if (combined.length > 0) {
+          const grantResult = applyRequestedToolsGrant(
+            _dispatcherCapabilityFilter,
+            combined,
+            _requestedToolsGranted,
+          );
+          _dispatcherCapabilityFilter = grantResult.filter;
+          _requestedToolsGranted = true;
+          emitRequestedToolsGranted({
+            runId: runId ?? null,
+            requested: combined.map((name) => ({ name, source: sourceByName.get(name) ?? "explicit" })),
+            granted: grantResult.grantedNames,
+            dropped: [
+              ...grantResult.dropped.map((d) => ({ ...d, source: sourceByName.get(d.name) ?? "explicit" as const })),
+              ...preGrantDropped,
+            ],
+          });
+        } else {
+          // combined.length === 0 here means: no explicit request, and marks
+          // were present but refused by the conformance rule. Nothing to grant,
+          // but the refusal must still be recorded — this is the discard the
+          // read-only pass found nothing observing.
+          emitRequestedToolsGranted({
+            runId: runId ?? null,
+            requested: [],
+            granted: [],
+            dropped: preGrantDropped,
+          });
+        }
+      }
     }
 
     const agentLoopBaseInput = {

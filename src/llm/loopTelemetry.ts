@@ -65,24 +65,34 @@ export function emitArchetypePromoted(data: ArchetypePromotedData): void {
 
 // ---------------------------------------------------------------------------
 // emitRequestedToolsGranted — [zone-requested-tools-granted]
-// Item 166 stage one. Emitted once in runLlmPatchFlow.ts, before any agentLoop
-// call, when a plan's requestedTools field is present. NOT a new trigger value
-// on ArchetypePromotedData above: that shape's toArchetype is hardcoded to the
+// Item 166 stage one/two. Emitted once in runLlmPatchFlow.ts, before any
+// agentLoop call, when a plan carries an explicit requestedTools entry, a
+// qualifying per-step delegation mark, or both. NOT a new trigger value on
+// ArchetypePromotedData above: that shape's toArchetype is hardcoded to the
 // single literal "complex_multi_file" and its trigger union is duplicated
 // verbatim across four sites — neither fits a tool-grant event, whose subject
 // is a capability change, not an archetype promotion. Joinable by runId
 // against toolSubsetSize-bearing markers already in ~/.zone/markers.jsonl
 // (e.g. [zone-write-capability-absent]) and against ~/.zone/usage/*.jsonl —
-// both use the identical top-level runId key/shape, confirmed by an actual
-// join before this marker was written (20/20 existing toolSubsetSize-carrying
-// marker runIds found in local-dev.jsonl's runId set).
+// both use the identical top-level runId key/shape, re-confirmed by an actual
+// join immediately before this stage-two widening (20/20 toolSubsetSize-
+// carrying marker runIds found in local-dev.jsonl's runId set, re-run fresh
+// rather than adopted from the stage-one figure).
+//
+// `source` on `requested`/`dropped` distinguishes an explicit plan field
+// entry from one derived purely from the plan's own subagentEligible marks
+// (item 166 stage two) — the two channels are merged into ONE grant call and
+// ONE marker line per run (never two), so without this field a mark-derived
+// grant/refusal would be indistinguishable from an explicit one in the sink.
 // ---------------------------------------------------------------------------
+
+export type RequestedToolSource = "explicit" | "plan_marks";
 
 export interface RequestedToolsGrantedData {
   runId: string | null | undefined;
-  requested: string[];
+  requested: { name: string; source: RequestedToolSource }[];
   granted: string[];
-  dropped: { name: string; reason: string }[];
+  dropped: { name: string; reason: string; source: RequestedToolSource }[];
 }
 
 export function emitRequestedToolsGranted(data: RequestedToolsGrantedData): void {

@@ -97,7 +97,7 @@ const ANSWER_ONLY_PLAN = {
   answerOnlyReason: "The task is a question; nothing needs to change.",
 };
 
-function classification(archetype: "investigation" | "question" | "simple_add") {
+function classification(archetype: "investigation" | "question" | "simple_add" | "targeted_fix") {
   return {
     tier: "medium" as const,
     archetype,
@@ -111,6 +111,29 @@ function classification(archetype: "investigation" | "question" | "simple_add") 
 // non-empty steps plan so it flows the normal success path (not noChange/answerOnly).
 function planWithRequestedTools(requestedTools: string[]) {
   return { ...APPROVED_PLAN, requestedTools };
+}
+
+// Item 166 stage two. A step carrying the plan's own delegation mark — real ExecutionPlan
+// step shape, not a partial. filesLikely defaults to a single path unless overridden, since
+// most marked-step fixtures below care about the mark/type/count triple, not the path itself.
+function markedStep(
+  filesLikely: string[],
+  subagentType: "worker" | "explore" = "worker"
+): (typeof APPROVED_PLAN)["steps"][number] & { subagentEligible: true; subagentType: "worker" | "explore" } {
+  return { title: "step", description: "d", filesLikely, subagentEligible: true, subagentType };
+}
+
+// Same non-empty-steps shape as planWithRequestedTools, but the steps carry the plan's own
+// delegation marks instead of (or alongside) an explicit requestedTools entry.
+function planWithMarkedSteps(
+  steps: Array<ReturnType<typeof markedStep> | { title: string; description: string; filesLikely: string[] }>,
+  requestedTools?: string[]
+) {
+  return {
+    ...APPROVED_PLAN,
+    steps,
+    ...(requestedTools ? { requestedTools } : {}),
+  };
 }
 
 beforeEach(() => {
@@ -147,8 +170,13 @@ afterEach(() => {
 });
 
 async function runWith(opts: {
-  archetype: "investigation" | "question" | "simple_add";
-  preGeneratedPlan?: typeof APPROVED_PLAN | typeof STEPLESS_PLAN | typeof ANSWER_ONLY_PLAN | ReturnType<typeof planWithRequestedTools>;
+  archetype: "investigation" | "question" | "simple_add" | "targeted_fix";
+  preGeneratedPlan?:
+    | typeof APPROVED_PLAN
+    | typeof STEPLESS_PLAN
+    | typeof ANSWER_ONLY_PLAN
+    | ReturnType<typeof planWithRequestedTools>
+    | ReturnType<typeof planWithMarkedSteps>;
   runId: string;
 }) {
   classifyTaskMock.mockResolvedValue(classification(opts.archetype));
@@ -390,9 +418,11 @@ describe("item 166 stage one — requestedTools grant, live through runLlmPatchF
     const markerCall = logSpy.mock.calls.find((args) => String(args[0]).includes("[zone-requested-tools-granted]"));
     expect(markerCall).toBeDefined();
     const payload = JSON.parse(String(markerCall![1]));
-    expect(payload.requested).toEqual(["run_command"]);
+    expect(payload.requested).toEqual([{ name: "run_command", source: "explicit" }]);
     expect(payload.granted).toEqual([]);
-    expect(payload.dropped).toEqual([{ name: "run_command", reason: "not_dispatcher_excluded" }]);
+    expect(payload.dropped).toEqual([
+      { name: "run_command", reason: "not_dispatcher_excluded", source: "explicit" },
+    ]);
     expect(payload.runId).toBe("run-sa-runcommand");
 
     logSpy.mockRestore();
@@ -413,6 +443,125 @@ describe("item 166 stage one — requestedTools grant, live through runLlmPatchF
 
     const markerCall = logSpy.mock.calls.find((args) => String(args[0]).includes("[zone-requested-tools-granted]"));
     const payload = JSON.parse(String(markerCall![1]));
+    expect(payload.granted).toEqual(["Task"]);
+    expect(payload.dropped).toEqual([]);
+
+    logSpy.mockRestore();
+  });
+});
+
+describe("item 166 stage two — Task granted from the plan's own delegation marks, live through runLlmPatchFlow", () => {
+  beforeEach(() => {
+    process.env["ZONE_ARCHETYPE_ENABLE_SIMPLE_ADD"] = "1";
+  });
+  afterEach(() => {
+    delete process.env["ZONE_ARCHETYPE_ENABLE_SIMPLE_ADD"];
+  });
+
+  it("qualifying mark (worker, 3+ files) → Task granted end-to-end, telemetry source:plan_marks", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    const call = await runWith({
+      archetype: "simple_add",
+      preGeneratedPlan: planWithMarkedSteps([
+        markedStep(["a.ts"]),
+        markedStep(["b.ts"]),
+        markedStep(["c.ts", "d.ts", "e.ts", "f.ts"]),
+      ]),
+      runId: "run-sa-marks-qualify",
+    });
+
+    const filter = call?.capabilityFilter as { excludeToolNames?: Set<string>; allowToolNames?: Set<string> } | undefined;
+    // Superset invariant: only Task is removed from simple_add's two-name exclusion set.
+    expect(filter?.excludeToolNames).toEqual(new Set(["suggest_scope_change"]));
+    expect(filter?.allowToolNames).toBeUndefined();
+
+    const markerCall = logSpy.mock.calls.find((args) => String(args[0]).includes("[zone-requested-tools-granted]"));
+    expect(markerCall).toBeDefined();
+    const payload = JSON.parse(String(markerCall![1]));
+    expect(payload.requested).toEqual([{ name: "Task", source: "plan_marks" }]);
+    expect(payload.granted).toEqual(["Task"]);
+    expect(payload.dropped).toEqual([]);
+
+    logSpy.mockRestore();
+  });
+
+  it("marks present but none qualify (single-file worker marks only) → no grant, filter untouched, telemetry still fires with no_qualifying_marks", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    const call = await runWith({
+      archetype: "simple_add",
+      preGeneratedPlan: planWithMarkedSteps([
+        markedStep(["a.ts"]),
+        markedStep(["b.ts"]),
+        { title: "unmarked", description: "d", filesLikely: ["c.ts"] },
+      ]),
+      runId: "run-sa-marks-norule",
+    });
+
+    const filter = call?.capabilityFilter as { excludeToolNames?: Set<string>; allowToolNames?: Set<string> } | undefined;
+    // No qualifying mark reached applyRequestedToolsGrant at all — the pre-grant dropped
+    // entry is synthesized at the call site, never passed through the grant function — so
+    // the filter is exactly what buildDispatcherCapabilityFilter(SIMPLE_ADD_PIPELINE) produces,
+    // untouched by this run.
+    expect(filter?.excludeToolNames).toEqual(new Set(["Task", "suggest_scope_change"]));
+    expect(filter?.allowToolNames).toBeUndefined();
+
+    const markerCall = logSpy.mock.calls.find((args) => String(args[0]).includes("[zone-requested-tools-granted]"));
+    expect(markerCall).toBeDefined(); // this IS the discard the read-only pass found nothing observing
+    const payload = JSON.parse(String(markerCall![1]));
+    expect(payload.requested).toEqual([]);
+    expect(payload.granted).toEqual([]);
+    expect(payload.dropped).toEqual([{ name: "Task", reason: "no_qualifying_marks", source: "plan_marks" }]);
+
+    logSpy.mockRestore();
+  });
+
+  it("qualifying mark under an archetype whose dispatcher ceiling is empty (targeted_fix) → no grant, reason names the empty ceiling, not the rule", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    await runWith({
+      archetype: "targeted_fix",
+      preGeneratedPlan: planWithMarkedSteps([markedStep(["a.ts", "b.ts", "c.ts"])]),
+      runId: "run-tf-marks-emptyceiling",
+    });
+
+    const markerCall = logSpy.mock.calls.find((args) => String(args[0]).includes("[zone-requested-tools-granted]"));
+    expect(markerCall).toBeDefined();
+    const payload = JSON.parse(String(markerCall![1]));
+    // The rule PASSED (a qualifying mark exists), so "Task" reached applyRequestedToolsGrant
+    // and got that function's OWN vocabulary — not_dispatcher_excluded — proving the two
+    // refusal paths (pre-grant rule refusal vs. grant-function refusal) are distinguishable
+    // by reason string alone, exactly as targeted_fix/refactor's empty filter already made
+    // an explicit requestedTools:["Task"] request fail for the same reason.
+    expect(payload.requested).toEqual([{ name: "Task", source: "plan_marks" }]);
+    expect(payload.granted).toEqual([]);
+    expect(payload.dropped).toEqual([{ name: "Task", reason: "not_dispatcher_excluded", source: "plan_marks" }]);
+
+    logSpy.mockRestore();
+  });
+
+  it("both channels present (explicit requestedTools:[\"Task\"] AND a qualifying mark) → exactly one grant, one telemetry line, not two", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    const call = await runWith({
+      archetype: "simple_add",
+      preGeneratedPlan: planWithMarkedSteps(
+        [markedStep(["a.ts", "b.ts", "c.ts"])],
+        ["Task"]
+      ),
+      runId: "run-sa-both-channels",
+    });
+
+    const filter = call?.capabilityFilter as { excludeToolNames?: Set<string>; allowToolNames?: Set<string> } | undefined;
+    expect(filter?.excludeToolNames).toEqual(new Set(["suggest_scope_change"]));
+
+    const markerCalls = logSpy.mock.calls.filter((args) => String(args[0]).includes("[zone-requested-tools-granted]"));
+    expect(markerCalls).toHaveLength(1); // one grant, not two — the one-shot guard and the de-dup both hold
+    const payload = JSON.parse(String(markerCalls[0]![1]));
+    // Explicit wins the source label on a name both channels named — assembled explicit-first,
+    // so "Task" is already in sourceByName as "explicit" before the marks branch is consulted.
+    expect(payload.requested).toEqual([{ name: "Task", source: "explicit" }]);
     expect(payload.granted).toEqual(["Task"]);
     expect(payload.dropped).toEqual([]);
 
