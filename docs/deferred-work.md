@@ -12625,10 +12625,20 @@ and said nothing about where system content is cached instead — correctly, sin
 measured. Joined per run and iteration, the same instruments show the maximum cached read exceeding the
 tools floor by more than the whole system prompt in **thirty-one of thirty-one runs, none contradicting**.
 A cached read is a prefix, so content above the tools floor is cached; the adapter carries exactly two
-marker sites, one on the last tool and one on the system block only when no tools are present; so the only
-span that can hold system is the second breakpoint's. **System is cached, inside breakpoint two.** Recorded
-here so a reader does not take this entry's silence for an open question. Item 164 carries what that means
-for the decisions built on the older reading.
+markers, and system carries neither of them when tools are present; so the only span that can hold system
+is the second breakpoint's. **System is cached, inside breakpoint two.** Recorded here so a reader does not
+take this entry's silence for an open question. Item 164 carries what that means for the decisions built on
+the older reading.
+
+**The inventory sentence said "two marker sites" and that wording is false, corrected here while the
+conclusion it supports stands untouched.** There are **two markers across four assignment sites**: the
+first is placed either on the last tool or, only when no tools are present, on the system block — two
+mutually exclusive branches in parameter conversion — and the second is placed on the last persistent user
+message by the cache-control helper, in two branches for string and array content. The original phrasing
+counted the first marker's two branches and called them the adapter's whole inventory, omitting the second
+marker's sites entirely. **What the argument needs is unaffected:** there are two markers, and neither
+lands on system when tools are present, which is what makes the second breakpoint's span the only
+candidate.
 
 **Where the code lives:** the breakpoint placement and its comment are in the Anthropic adapter's parameter
 conversion; the measured floor and its analysis protocol are in the agent loop's cache-probe block; the
@@ -12802,20 +12812,49 @@ always right; the tools array is the first breakpoint. The directive half named 
 what carries the conclusion is per-run stability, which holds wherever the directive is cached.
 **Conclusion survives, mechanism corrected.**
 
+**A boundary on that third decision, added later and true as far as its own design document goes.** That
+document says the tool entry sits in a deterministic position so the marker stays put, and it does — but
+the entry is appended **after** the marker has already been placed on what was then the last tool, so the
+entry itself falls outside the cached prefix. Nothing is invalidated: a marker caches up to itself, and
+content after it is simply uncached. The quantity is roughly three fields of JSON. **No action follows**,
+and this is recorded as a qualification on a true sentence rather than as a defect, because a reader
+checking whether web search is cache-safe should know which part of it is cached.
+
 **Four — the plan-progress tool schema and directive cost about nothing per run.** Same shape as the third:
 schema half correct, directive half misattributed, amortization conclusion surviving through the second
 breakpoint instead of the first. **Survives.**
 
-**Five — the adapter needs no separate marker on the system block. This is the one that may be a live
-defect rather than stale wording.** Its stated reason was that the last-tool marker already covers system.
-It does not. System is therefore cached only inside the second breakpoint, which advances every iteration
-and is re-written whenever the conversation prefix changes — and item 161's own floor observations show
-exactly that, cached reads collapsing to the tools floor with system not retained. **A third marker on the
-system block would give system its own stable entry, surviving conversation churn.** The system prompt runs
-between roughly two thousand and forty-six hundred tokens in the observed runs, so the quantity at stake is
-not trivial. **This entry does not decide whether to add it** — that is a cost question with its own
-measurement, and the point recorded here is narrower: the reasoning that ruled the option out is now known
-to be false, so the option is unruled-out rather than rejected.
+**Five — the adapter needs no separate marker on the system block. Recorded first as possibly a live
+defect; that framing overstates it and is rewritten, while the claim under it stands.** Its stated reason
+was that the last-tool marker already covers system. It does not. System is therefore cached only inside
+the second breakpoint, which advances every iteration and is re-written whenever the conversation prefix
+changes — and item 161's own floor observations show exactly that, cached reads collapsing to the tools
+floor with system not retained. **A third marker on the system block would give system its own stable
+entry, surviving conversation churn.** **The operative claim is true and unchanged:** the reasoning that
+ruled the option out is false, so the option is unruled-out rather than rejected. **What overstated it was
+the severity**, and that is now measured rather than asserted.
+
+**The measurement, and it is a bound rather than a figure.** Joining the two marker streams positionally
+within each run — validated first by confirming equal stream counts per run, true for thirty-three of
+thirty-five — gives three hundred and thirty-nine paired calls. Per-call system size runs from two thousand
+and thirty to four thousand eight hundred and fifteen tokens, median four thousand two hundred and
+thirty-four. **Nineteen warm calls, five and a half percent, had a cached read below the call's own system
+size** — the only calls where a system marker could have paid — which is **0.58 events per run**. At the
+write and read multipliers that is about **two thousand eight hundred token-equivalents per run, roughly
+eight-tenths of a cent**, against a median run cost of about eight and a half cents over six hundred and
+nineteen runs.
+
+**Why that is a bound and not a saving.** The offsetting exposure is an extra system write on each of
+roughly one and a quarter cold starts per run. **Under per-entry billing that exceeds the saving; under
+once-only billing it is nothing.** The sign is unknown, so the eight-tenths-of-a-cent figure is what the
+change could win at best, not what it would win.
+
+**What would settle it is a documentation reading, not a measurement.** Whether the provider bills
+overlapping breakpoints once or per entry. Per entry, the idea dies on the arithmetic already recorded and
+no code need be written. Once only, the saving stands at under a cent per run and the question becomes
+whether that is worth a change to the adapter's cache block. **This repository does not document the
+breakpoint limit or the billing rule anywhere**, confirmed under both instruments, so neither can be closed
+from here.
 
 **What is not claimed.** No decision is asserted to be wrong in its outcome. Four are right on other
 grounds and the fifth concerns an option never taken. Nothing here proposes a code change.
@@ -12829,15 +12868,72 @@ observation, and the premise-survival of all five was settled by reading in this
 **Where the code lives:** the compaction routing is in the compaction orchestrator and its two test files;
 the memory and plan placement rules are in two design documents, the plan formatter and the plan-prompt
 placement test; the web-search and plan-progress claims are in their own design documents; and the
-no-separate-marker reasoning is in the Anthropic adapter's parameter conversion, beside the two marker
-sites themselves. See item 161 for the boundary and for where system is cached, item 162 for the
-correction that warned readers without re-deciding anything, and item 163 for the instruments.
+no-separate-marker reasoning is in the Anthropic adapter's parameter conversion, beside the first marker's
+own two branches — this paragraph said "the two marker sites", which is false in the same way item 161's
+was and is corrected the same way: two markers across four assignment sites, the second pair living in the
+cache-control helper rather than in parameter conversion at all. See item 161 for the boundary, for where
+system is cached and for the full inventory, item 162 for the correction that warned readers without
+re-deciding anything, item 163 for the instruments, and item 165 for why a run identifier does not identify
+one loop.
+
+## 165. A run identifier spans two agent loops, so anything keyed on it alone conflates or drops a phase
+
+**What it is.** The plan-investigation phase is a thin wrapper over the same agent loop in investigation
+mode, and it passes the caller's own run identifier straight through while overriding the iteration cap.
+The execution loop then runs under that identifier too, with its own counter starting at zero. **A run
+identifier therefore names a dispatch, not a loop**, and in the observed telemetry twelve of thirty-five
+runs are two-phase.
+
+**How it was established, because the first reading of the same data was wrong.** Sorted by iteration, the
+two phases interleave into a convincing alternation — a system prompt appearing to flip between two sizes
+call after call. Dumped in **file order** instead, they are contiguous: six calls at one size, then eighteen
+at another, minutes apart. **Across every affected run, twelve of twelve, each size change coincides with an
+iteration reset and none occurs without one.** The investigation cap constant is six and the observed
+phase-one call counts are six, six, six, six, six, six, six, five, three, four, three, four — never above
+it. The plan-boundary test already records the two prompt sizes and the two tool-set sizes as a measured
+observation, which is a second source arriving at the same boundary from a different direction.
+
+**The telemetry is correct; the exposure is in its consumers.** Two-phase runs emit **two** per-run token
+summaries under one identifier — reporting six and eighteen, six and twenty, six and ten, six and twenty —
+and seventeen of thirty-three runs carry two. A consumer that indexes summaries by identifier keeps the
+last and silently drops the investigation phase's calls.
+
+**Two confirmed instances of that exposure, both established by reading.** The loop's own repeat-read
+counter is declared at function scope, so despite carrying "this run" in its name it is **per loop
+instance** — a file read in both phases counts once in each, not twice in one. And a join keyed on
+identifier-plus-iteration **collides**, because both phases number their iterations from zero; that
+collision is what produced the false alternation described above, in the pass that opened this entry.
+
+**What else it may move, swept and deliberately not corrected.** A line-based sweep for per-run figures in
+this document returns seventy-four lines against the tracked-file instrument's seventy-nine — **the two
+disagree, which is the twenty-ninth pattern again**, the difference being wrapped phrasing and an
+apostrophe variant. Filtered to figure-bearing lines, three entries carry a per-run quantity this could
+move: a per-run trigger rate, the repeat-read counter already named, and the per-run iteration budget,
+where a two-phase dispatch executes up to six investigation iterations **in addition to** the tier's own
+cap. **None is corrected here.** Each needs checking against what its figure was actually derived from, and
+doing that inside this entry would produce three unverified corrections in place of one recorded fact.
+
+**No fix proposed.** Whether the investigation phase should carry its own identifier, or consumers should
+key on identifier-plus-phase, is a design question with consequences for every existing telemetry consumer,
+and it is not this entry's to settle.
+
+**Bucket: Neither**, two-way check. For: a structural fact recorded with no fix proposed — the shape items
+87, 107, 154, 155, 158, 160, 163 and 164 sit under, with the three candidate consumers named as needing
+their own checks rather than fixed. Against: Actionable now requires a fix specified in the entry, and none
+is; Blocked on data requires a missing observation, and everything asserted here was established by reading
+source and by instruments already on disk.
+
+**Where the code lives:** the wrapper is the plan-investigation module, its cap constant beside it; the
+repeat-read counter is a function-scope declaration in the agent loop; the per-call and per-run token
+markers are emitted from the token-breakdown module. See item 163 for the instruments, item 164 for the
+decision whose pricing surfaced this, and the twenty-ninth pattern for the sweep disagreement recorded
+above.
 
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 164 to find out which ones still need something. No index of
+reader the trouble of reading all 165 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -12850,11 +12946,11 @@ first (8): 108, 113, 116, 129, 130, 138, 142, 148
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (11): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143, 157
 
-**Neither — a structural fact recorded, with no fix proposed** (82): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (83): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152, 154, 155, 158,
-159, 160, 163, 164
+159, 160, 163, 164, 165
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
@@ -14801,6 +14897,15 @@ criterion stated before the counting starts so a later reader can re-derive the 
 inheriting it. **Both instances here are from one arc**, which is weighed and not treated as decisive on
 the fifth candidate's own precedent; two is the count the twenty-seventh and twenty-eighth were each
 promoted on.
+
+**One addition to that rule, demonstrated on the sweep for this pattern's own subject rather than
+argued.** Run a wrap-normalized instrument beside the line-based one — join each paragraph and collapse
+its whitespace before matching, exactly as the anaphor check already does. A later pass sweeping for a
+phrase this document itself carries found **one** occurrence under both line-based instruments and **two**
+under the paragraph join: the second carrier was split across a line break, and no line-based pattern can
+see it. A prose claim has no canonical form *and no canonical line width*, so the second half of that
+sentence needs its own instrument. This is a corrective the pattern lacked, not a third instance; the count
+stays at two.
 
 ## A candidate pattern considered this pass and not promoted: an instrument that enforces the front half of a discipline and leaves the back half to memory
 
