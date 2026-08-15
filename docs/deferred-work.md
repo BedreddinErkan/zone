@@ -9500,6 +9500,31 @@ of the three prose-asking cells searched first and asked afterwards under exactl
 149 records the reading that routed a suppressed-shell finding through this entry, and records its
 refutation. This entry is a real defect and, for that question, a permissive condition at most.
 
+**A second thing this entry does not explain, and this one was invented around it rather than read out of
+it.** Across several sessions this entry was carried in conversation as the *precondition* for building a
+path by which an agent could request a tool it was not offered. **It never said that, and neither did
+anything else in this document** — swept under three instruments, line-based both ways and
+wrap-normalized, for any text tying this entry to a precondition, prerequisite, gate or block: zero, zero,
+zero. The bare word appears twenty-two times in unrelated senses. **The false premise lived only in
+conversation and never entered the record**, which is worth stating plainly so a later reader does not
+assume this entry was misread when in fact a claim was built around it.
+
+**They are independent in both directions, argued from mechanism rather than from resemblance.** A tool
+request's destination is **code** — the capability-filter recompute, which item 166 establishes the
+forced-tier path already performs with no human, no channel and no approval. This entry's subject is
+asking **a human** about an ambiguous task, which parks on an interactive channel. Adding a request path
+would leave this entry's defect exactly as it stands; fixing this entry's defect would not supply a
+request path.
+
+**What this entry does bear on, which reframes it from a gate into evidence — its own finding, completed
+rather than corrected.** The paragraph recording that three of seven cells asked clarifying questions in
+prose under this identical withholding was written as a finding about what the absence costs, and it is
+true. It also bears on something it does not name: if models already express requests in prose without a
+tool, then the missing stage of item 166's path — the agent emitting a request at all — **may be
+satisfiable by parsing what the agent already emits**, rather than by adding a tool and paying a
+cold-start for it. That makes this entry evidence for the cheapest version of that path rather than an
+obstacle in front of it.
+
 **Where the code lives:** `ask_user`'s registration is in the tool registry; its absence from this archetype's
 offered set resolves through the same capability filter item 94's own measurement used,
 `buildDispatcherCapabilityFilter` against `QUESTION_PIPELINE`. The notice is `llm/toolAbsenceNotice.ts`. See
@@ -12929,11 +12954,96 @@ markers are emitted from the token-breakdown module. See item 163 for the instru
 decision whose pricing surfaced this, and the twenty-ninth pattern for the sweep disagreement recorded
 above.
 
+## 166. The path for an agent to request a tool it was not offered is three-quarters built, and the missing quarter costs more than the run it would fire inside
+
+**What it is.** An agent under a restrictive tool set cannot ask for a tool it lacks. Establishing what
+building that would take found most of it already shipped. The path has four stages — the agent emits
+something, the loop reads it, a gate decides, something changes what is offered — and **three of the four
+exist in production code today**.
+
+**Stage two, the interception block, exists.** Seven interception sites across six tool names sit in the
+agent loop, confirmed identical under both instruments; tools handled there never reach the executor at
+all. Any new signal would be read in the same place the existing six are.
+
+**Stage three, the deciding gate, exists three times over.** The ask-user allowlist keyed on an
+interactive channel and a non-subagent caller; the replan guard keyed on an environment flag and a
+one-shot counter; and the forced-tier eligibility gate. Each appears exactly once.
+
+**Stage four — changing what the model is offered, mid-run, without restarting — exists, and the proof
+that it exists in only one place is mechanical.** The offered tool list is declared once and **reassigned
+exactly once**; the allowed-name set is reassigned once; the capability filter is assigned five ways at
+initialisation and reassigned once. **All three reassignments sit in the same block**, the forced-tier
+promotion, which relaxes the filter and recomputes both so the model sees a wider set from the next
+iteration, under a one-shot guard, with its own telemetry. No human, no channel, no approval.
+
+**Stage one is what is missing, and only for this request.** The same expansion fires today **by inference
+from behaviour** — a forced-simple tier mismatched against an archetype that needs exploration, a detected
+failure, iteration two or later, and some file read at least twice — rather than from the agent saying
+anything. Nothing carries an agent-initiated request for a capability.
+
+**Two working precedents for stage one exist for other requests, and one of them deserves recording
+properly rather than as a mere precedent.** The scope-change tool is a **working instance of this same
+path**: it assembles the agent's stated mismatch type, its reason and its revised plan summary, marks
+already-modified files immutable and already-completed steps do-not-redo, and calls the replanner under
+its own trigger name; the agent gets the revised plan back as its tool reply. **It is env-gated off on the
+patch path** — the flag must equal exactly one and defaults empty — while in investigation mode it
+validates and records with no gate at all. **A carried figure of eleven wiring sites is wrong and is
+corrected here: ten non-test files and twenty-five occurrences, twenty-two files including tests**, both
+instruments reconciling once the pathspec matches. **It has no module of its own** — a test file bears its
+name, but the implementation lives entirely inside the agent loop, as the executor's own comment states.
+The ask-user tool is the second precedent, with a full park-and-resume path to a human.
+
+**The cost, priced from the instruments at no charge, and it is the sharpest thing here.** A mid-run
+tool-set change rewrites the tools array, which item 161 established is exactly what the first breakpoint
+caches — **and because the second breakpoint's span contains the tools array, it invalidates that one
+too**. The exposure is the whole cached prefix, not the tools alone. At the iteration where promotions
+actually fire, nine runs reach a warm read with a median of roughly twenty-seven thousand tokens;
+re-writing that rather than reading it costs about **thirty-one thousand four hundred token-equivalents,
+near nine and a half cents**, against a **median run cost near eight and a half cents**. **One mid-run
+expansion costs more than the median run it happens inside**, and about seven times the figure for the
+tools array alone.
+
+**Which reframes where such a trigger would belong, and item 165 supplies the alternative.** That entry
+established that a run identifier already spans two agent loops with different tool sets, the two phases'
+tool descriptions differing by more than double. **A tool-set change at that boundary is already paid
+for.** A request routed to a phase boundary inherits a prefix that is cold regardless; the same request
+routed mid-loop costs a run.
+
+**The working instance has never been observed to fire.** The promotion marker appears five times in the
+instrument sink — three at the iteration cap, two at coaching exhaustion — and **no record mentions the
+forced-tier trigger at all**. The relationship is inverse and confirmed in source: the forced-tier path is
+tool-only and deliberately does not relax budgets, while the triggers that do fire relax budgets and,
+provably from the single-reassignment fact, never touch the tool set. **So the one trigger that changes
+tools has no observed firing, and the ones that fire never change tools.**
+
+**The smallest demonstration, recorded and explicitly not proposed.** One archetype, one tool, one
+decision point: the question archetype, its read-only shell widened to the full shell, decided at the gate
+that already exists. **What it would prove:** that an agent-initiated signal can reach the recompute, and
+that the model uses the widened set on the following iteration. **What it would leave unproven, four
+things:** whether models request accurately, since no cell in any arm has run with such a tool offered;
+whether honouring a request pays for itself; how to stop it becoming an unconditional escalation to the
+full toolset; and the cold-start cost, which this entry prices without resolving. **This entry does not
+propose building it.** The record is the point; the decision is not this entry's.
+
+**Bucket: Neither**, two-way check, **with Actionable now considered and declined on the bar rather than
+on how close the work looks.** For Actionable now: a fix shape is nameable, and three of four stages
+exist. Against, and decisive: that bucket requires nothing new to be learned first, and four things are —
+the three unprovens above, plus the design question this entry's own pricing opens, which is whether a
+mid-loop trigger is the right shape at all. For Neither: a structural fact recorded with no fix proposed,
+the shape items 87, 107, 154, 155, 158, 160, 163, 164 and 165 sit under. Against Blocked on data: closing
+needs no observation that does not exist, since what is recorded is what ships today.
+
+**Where the code lives:** the interception block, the three gates and the sole recompute are all in the
+agent loop; the scope-change handler is two branches of that same block with no module of its own; the
+ask-user park is the question-approvals registry. See item 99 for the evidence bearing on stage one, item
+161 for what the first breakpoint caches, item 163 for the instruments that priced this, and item 165 for
+the phase boundary that already pays the cost once.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 165 to find out which ones still need something. No index of
+reader the trouble of reading all 166 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -12946,11 +13056,11 @@ first (8): 108, 113, 116, 129, 130, 138, 142, 148
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (11): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143, 157
 
-**Neither — a structural fact recorded, with no fix proposed** (83): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (84): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152, 154, 155, 158,
-159, 160, 163, 164, 165
+159, 160, 163, 164, 165, 166
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
