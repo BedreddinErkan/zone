@@ -26,6 +26,13 @@ export type ExecutionPlan = {
   riskHints: string[];
   scopeSummary: string;
   scopeNotes?: string;
+  /** Item 166 stage one: tools investigation was not offered but needs, named exactly.
+   *  An annotation, not part of the noChangeReason/cannotVerifyReason/answerOnlyReason
+   *  mutual-exclusion group below — may be set on any terminal shape. Consumed at the
+   *  execution-phase capabilityFilter construction site (runLlmPatchFlow.ts), never
+   *  rendered into the execution prompt (formatExecutionPlanForPrompt does not read
+   *  it, deliberately). */
+  requestedTools?: string[];
   /** Reproduce-first: set when the agent verified the asserted problem does not exist
    *  (e.g. build exits 0). IFF invariant: steps MUST be [] when this is set.
    *  Mutually exclusive with cannotVerifyReason. */
@@ -103,6 +110,10 @@ const executionPlanSchema = z
     riskHints: z.array(z.string()),
     scopeSummary: z.string(),
     scopeNotes: z.string().optional(),
+    // No .max() — deliberately unconstrained. An over-length request must never
+    // throw and destroy the whole plan (D2); truncation happens only at the grant
+    // site (archetypeDispatcher.ts's applyRequestedToolsGrant), which cannot throw.
+    requestedTools: z.array(z.string()).optional(),
     noChangeReason: z.string().optional(),
     cannotVerifyReason: z.string().optional(),
     answerOnlyReason: z.string().optional(),
@@ -253,6 +264,7 @@ export function tryParseExecutionPlan(text: string): ExecutionPlan | null {
       riskHints: plan.riskHints,
       scopeSummary: plan.scopeSummary,
       ...(plan.scopeNotes ? { scopeNotes: plan.scopeNotes } : {}),
+      ...(plan.requestedTools?.length ? { requestedTools: plan.requestedTools } : {}),
       ...(plan.noChangeReason ? { noChangeReason: plan.noChangeReason } : {}),
       ...(plan.cannotVerifyReason ? { cannotVerifyReason: plan.cannotVerifyReason } : {}),
       ...(plan.answerOnlyReason ? { answerOnlyReason: plan.answerOnlyReason } : {}),
@@ -521,6 +533,7 @@ ${input.forceSteps
     riskHints: plan.riskHints,
     scopeSummary: plan.scopeSummary,
     ...(plan.scopeNotes ? { scopeNotes: plan.scopeNotes } : {}),
+    ...(plan.requestedTools?.length ? { requestedTools: plan.requestedTools } : {}),
     ...(plan.noChangeReason ? { noChangeReason: plan.noChangeReason } : {}),
     ...(plan.cannotVerifyReason ? { cannotVerifyReason: plan.cannotVerifyReason } : {}),
     ...(plan.answerOnlyReason ? { answerOnlyReason: plan.answerOnlyReason } : {}),

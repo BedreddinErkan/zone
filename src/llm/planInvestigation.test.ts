@@ -209,6 +209,12 @@ describe("E3/S4: buildPrompt — reproduce-first + noChangeReason + cannotVerify
     expect(prompt).toContain("cannotVerifyReason");
   });
 
+  it("buildPrompt contains requestedTools in JSON shape and Rules (item 166 stage one)", () => {
+    const prompt = buildPrompt("fix the build error", ["src/index.ts"], true);
+    expect(prompt).toContain('"requestedTools"');
+    expect(prompt).toContain("name tools you were not offered but genuinely need");
+  });
+
   it("buildPrompt contains reproduce-first instruction (step 0)", () => {
     const prompt = buildPrompt("fix the build error", ["src/index.ts"], true);
     expect(prompt).toContain("exit_code=0");

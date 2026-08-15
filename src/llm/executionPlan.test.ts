@@ -95,6 +95,27 @@ describe("generateExecutionPlan — Q.3 subagent annotation", () => {
     expect(plan.steps[1].subagentType).toBeUndefined();
   });
 
+  // Item 166 stage one: generateExecutionPlan has its own separate manual
+  // result-reconstruction (distinct from tryParseExecutionPlan's) — must be fixed
+  // independently; confirmed here rather than assumed from the sibling function.
+  it("preserves requestedTools through generateExecutionPlan's result reconstruction", async () => {
+    mockPlanResponse({
+      objective: "Add a background job",
+      steps: [{ title: "Add job", description: "Add a scheduled job.", filesLikely: ["src/jobs/x.ts"] }],
+      riskHints: [],
+      scopeSummary: "Add background job.",
+      requestedTools: ["Task", "suggest_scope_change"],
+    });
+
+    const plan = await generateExecutionPlan({
+      task: "add a background job",
+      repoSummary: "small monorepo",
+      relevantFiles: [],
+    });
+
+    expect(plan.requestedTools).toEqual(["Task", "suggest_scope_change"]);
+  });
+
   it("preserves subagentType=explore on read-only investigation steps", async () => {
     mockPlanResponse({
       objective: "Identify usages of authService",
@@ -494,6 +515,31 @@ describe("tryParseExecutionPlan", () => {
   it("scopeNotes is absent when not in JSON", () => {
     const result = tryParseExecutionPlan(wrapJson(VALID_PLAN));
     expect(result!.scopeNotes).toBeUndefined();
+  });
+
+  // Item 166 stage one: requestedTools survives schema validation AND the manual
+  // result-reconstruction in this function — the schema alone is not sufficient,
+  // since tryParseExecutionPlan rebuilds `result` field-by-field rather than
+  // spreading the validated object (D2's load-bearing finding).
+  it("extracts requestedTools when present in the JSON", () => {
+    const withRequest = { ...VALID_PLAN, requestedTools: ["Task", "suggest_scope_change"] };
+    const result = tryParseExecutionPlan(wrapJson(withRequest));
+    expect(result!.requestedTools).toEqual(["Task", "suggest_scope_change"]);
+  });
+
+  it("requestedTools is absent when not in JSON", () => {
+    const result = tryParseExecutionPlan(wrapJson(VALID_PLAN));
+    expect(result!.requestedTools).toBeUndefined();
+  });
+
+  // D2: no .max() on the schema field — an over-length request must not throw and
+  // destroy the whole plan. Cap enforcement lives only at the grant site.
+  it("does not reject a plan when requestedTools exceeds any sensible grant cap", () => {
+    const overCap = { ...VALID_PLAN, requestedTools: ["Task", "suggest_scope_change", "write_file", "apply_patch", "run_command"] };
+    const result = tryParseExecutionPlan(wrapJson(overCap));
+    expect(result).not.toBeNull();
+    expect(result!.requestedTools).toHaveLength(5);
+    expect(result!.steps).toHaveLength(1); // the rest of the plan survives intact
   });
 
   it("uses the LAST ```json block when multiple are present", () => {

@@ -107,6 +107,7 @@ JSON shape:
   "riskHints": ["string"],
   "scopeSummary": "string",
   "scopeNotes": "string (optional — what is already done / out of scope)",
+  "requestedTools": ["string"] (optional — name tools you were not offered but need, by exact name),
   "noChangeReason": "string (optional — set when reproduce command ran and exited 0; steps MUST be [])",
   "cannotVerifyReason": "string (optional — set when reproduce command did NOT run; steps MUST be [])"${allowAnswerOnly ? `,
   "answerOnlyReason": "string (optional — set when the investigation concluded the current behavior is correct and deliberate and no code change is warranted; steps MUST be [])"` : ""}
@@ -115,6 +116,7 @@ JSON shape:
 Rules:
 - filesLikely: copy paths VERBATIM from the files you read. Never invent or alter extensions.
 - scopeNotes: populate if you observed already-implemented or out-of-scope work; omit if nothing notable.
+- requestedTools: name tools you were not offered but genuinely need, by exact name — only when the tool-absence notice told you they're withheld. Do not invent tool names.
 - noChangeReason: if you ran the reproduce step and exit_code=0, set this and use steps:[]. Never fabricate steps for a problem that did not reproduce.
 - cannotVerifyReason: mutually exclusive with noChangeReason. Set only when the reproduce command did not run even bare. Do NOT set this to avoid investigation — only for genuine infrastructure blocks.${allowAnswerOnly ? `
 - answerOnlyReason: mutually exclusive with the other two. Set ONLY when the investigation concluded the existing behavior is correct and deliberate and no code change is warranted — judged on findings, never on the task's phrasing. If the investigation found a real defect, produce steps even if the task was phrased as a question. Not for a claimed bug that didn't reproduce (that's noChangeReason) and not for a blocked reproduce attempt (that's cannotVerifyReason).` : ""}
