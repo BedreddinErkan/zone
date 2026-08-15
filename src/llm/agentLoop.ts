@@ -2450,6 +2450,11 @@ async function runAgentLoopScoped(input: AgentLoopInput, stats: LoopRunStats): P
     tier: input.taskClassification?.tier,
     archetype: input.taskClassification?.archetype,
     mode,
+    // Item 166 stage one: only investigation gets the redirection — the
+    // requestedTools channel is read at the execution-phase capabilityFilter
+    // construction site, so an execution-mode run has nowhere for a request
+    // to go. isInvestigationMode is computed above at loop entry (:2280).
+    allowToolRequest: isInvestigationMode,
   });
 
   let midWarnInjected = false;

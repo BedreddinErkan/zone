@@ -138,6 +138,61 @@ describe("buildToolAbsenceBlock — determinism", () => {
   });
 });
 
+describe("buildToolAbsenceBlock — item 166 stage one: allowToolRequest redirection", () => {
+  const SIMPLE_ADD_OFFERED = new Set([
+    "run_command", "TodoWrite", "kill_background", "list_background", "read_background_output",
+    "run_command_background", "read_file", "list_files", "apply_patch", "multi_edit", "write_file",
+    "search_in_files", "find_references", "update_memory", "run_command_readonly", "ask_user",
+    "revert_patch", "fetch_url",
+  ]);
+
+  it("allowToolRequest:true keeps the prohibition verbatim and appends the redirection", () => {
+    const block = buildToolAbsenceBlock({
+      offeredToolNames: SIMPLE_ADD_OFFERED, filterSource: "capabilityFilter", archetype: "simple_add",
+      allowToolRequest: true,
+    });
+    expect(block).toBe(
+      "TOOLS NOT AVAILABLE THIS RUN — withheld by this task's archetype (simple_add), not a permission error: " +
+      "Task, suggest_scope_change. Do not attempt these via another tool or a shell workaround" +
+      " — if you need one, name it in requestedTools in your plan JSON.\n\n"
+    );
+  });
+
+  it("allowToolRequest:true still returns \"\" when nothing is absent — no redirection on an empty notice", () => {
+    const offered = new Set([
+      "Task", "TodoWrite", "apply_patch", "ask_user", "fetch_url", "find_references",
+      "kill_background", "list_background", "list_files", "multi_edit", "read_background_output",
+      "read_file", "revert_patch", "run_command", "run_command_background", "run_command_readonly",
+      "search_in_files", "suggest_scope_change", "update_memory", "write_file",
+    ]);
+    const block = buildToolAbsenceBlock({
+      offeredToolNames: offered, filterSource: "capabilityFilter", archetype: "targeted_fix",
+      allowToolRequest: true,
+    });
+    expect(block).toBe("");
+  });
+
+  // The execution-mode byte-identity guarantee, proven directly rather than only
+  // inferred from the pre-existing six tests never setting the field: the SAME
+  // input, once with allowToolRequest omitted and once explicitly false, must
+  // both equal the plain (no-redirection) text — matching the archetype=simple_add
+  // byte-pinned test above verbatim.
+  it("allowToolRequest omitted or false: byte-identical to the pre-existing (no-redirection) text", () => {
+    const expected =
+      "TOOLS NOT AVAILABLE THIS RUN — withheld by this task's archetype (simple_add), not a permission error: " +
+      "Task, suggest_scope_change. Do not attempt these via another tool or a shell workaround.\n\n";
+    const omitted = buildToolAbsenceBlock({
+      offeredToolNames: SIMPLE_ADD_OFFERED, filterSource: "capabilityFilter", archetype: "simple_add",
+    });
+    const explicitFalse = buildToolAbsenceBlock({
+      offeredToolNames: SIMPLE_ADD_OFFERED, filterSource: "capabilityFilter", archetype: "simple_add",
+      allowToolRequest: false,
+    });
+    expect(omitted).toBe(expected);
+    expect(explicitFalse).toBe(expected);
+  });
+});
+
 describe("buildToolAbsenceBlock — collision suppression, both directions", () => {
   // The reverse direction on purpose: run_command is OFFERED, run_command_readonly
   // and run_command_background are WITHHELD. Neither withheld name is a prefix of

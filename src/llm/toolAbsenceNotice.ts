@@ -13,6 +13,12 @@ export interface ToolAbsenceInput {
   tier?: string;
   archetype?: string;
   mode?: string;
+  /** Item 166 stage one. Investigation-mode-only: when true, the closing
+   *  prohibition gains a redirection to the plan's requestedTools field
+   *  instead of staying a bare "don't". Omitted/false (every execution-mode
+   *  call) must render byte-identical to before this field existed — pinned
+   *  by the existing byte-exact tests in toolAbsenceNotice.test.ts. */
+  allowToolRequest?: boolean;
 }
 
 function describeCause(input: ToolAbsenceInput): string {
@@ -47,9 +53,12 @@ function describeCause(input: ToolAbsenceInput): string {
  * is what keeps this affordable in the cached system-prompt prefix; a block
  * that varied per run would defeat the cache it is meant to sit inside.
  *
- * Does not invite a request for an absent tool — no such path exists, and
- * telling the agent to ask for one it cannot receive is worse than the
- * silence this replaces.
+ * Does not invite a request for an absent tool in execution mode — that path
+ * doesn't reach anywhere from there, and telling the agent to ask for one it
+ * cannot receive is worse than the silence this replaces. In investigation
+ * mode (allowToolRequest:true) a request DOES reach somewhere — the plan's
+ * requestedTools field, read at the execution-phase capabilityFilter
+ * construction site — so the redirection is offered there instead.
  */
 export function buildToolAbsenceBlock(input: ToolAbsenceInput): string {
   const fullNames = resolveToolList(undefined).map((t) => t.name);
@@ -71,6 +80,9 @@ export function buildToolAbsenceBlock(input: ToolAbsenceInput): string {
 
   return (
     `TOOLS NOT AVAILABLE THIS RUN — withheld by ${describeCause(input)}, not a permission error: ` +
-    `${absent.join(", ")}. Do not attempt these via another tool or a shell workaround.\n\n`
+    `${absent.join(", ")}. Do not attempt these via another tool or a shell workaround` +
+    (input.allowToolRequest
+      ? ` — if you need one, name it in requestedTools in your plan JSON.\n\n`
+      : `.\n\n`)
   );
 }
