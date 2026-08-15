@@ -215,16 +215,24 @@ describe("E3/S4: buildPrompt — reproduce-first + noChangeReason + cannotVerify
     expect(prompt).toContain("name tools you were not offered but genuinely need");
   });
 
-  it("buildPrompt carries the subagent-eligibility criteria: both patterns, both negatives, one worked contrast (item 166 stage two)", () => {
+  it("buildPrompt carries the subagent-eligibility criteria: per-step framing, both patterns, both negatives, three-way worked contrast (item 166 stage two)", () => {
     const prompt = buildPrompt("fix the build error", ["src/index.ts"], true);
+    // per-step framing: decomposition is already decided, marking is a per-step label
+    // decision — restored after a measurement pass found its absence changed how the
+    // model decomposes a fanout into steps, not just how it labels them.
+    expect(prompt).toContain("decide this per step, after the plan's steps are already decided");
+    expect(prompt).toContain("do not restructure steps around the marking decision");
     // worker pattern + its negative
     expect(prompt).toContain('subagentType: "worker" ONLY for independent multi-file edits');
     expect(prompt).toContain("NOT for a single-file edit, even if complex");
     // explore pattern + its negative
     expect(prompt).toContain('subagentType: "explore" ONLY for pure read-only investigation');
     expect(prompt).toContain("NOT for a trivial lookup you can do in one read");
-    // one worked contrast: fanout marks, trivial omits
+    // three-way worked contrast: fanout marks worker, mapping marks explore, trivial omits —
+    // the explore leg was entirely absent pre-repair; a post-port probe measured 0/13
+    // explore marks across 12 cells before this line existed.
     expect(prompt).toContain("renaming an identifier across 5 files");
+    expect(prompt).toContain("mapping every caller of a function across the codebase → mark explore");
     expect(prompt).toContain("omit the annotation entirely");
   });
 
