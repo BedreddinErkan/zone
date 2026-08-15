@@ -421,7 +421,7 @@ export async function probeCredit(client, model, provider) {
  * either a src/ change (exporting a new constant) or a duplicated string as a second source
  * of truth, so it stays "" as a named, currently-inert gap rather than a silent one.
  */
-export async function runPromptAudit({ capturesDir, ARM, only, runStamp }) {
+export async function runPromptAudit({ capturesDir, ARM, only, runStamp, memoryRepoPath, renderedRepoPath }) {
   const capabilityFilter = buildDispatcherCapabilityFilter({ ...QUESTION_PIPELINE });
   const offered = resolveToolList(capabilityFilter).map((t) => t.name).sort();
   if (JSON.stringify(offered) !== JSON.stringify(["read_file", "run_command_readonly"])) {
@@ -434,7 +434,7 @@ export async function runPromptAudit({ capturesDir, ARM, only, runStamp }) {
   const offeredToolNames = new Set(offered);
   let projectMemoryBlock = "";
   try {
-    projectMemoryBlock = await readProjectMemoryBlock(REPO);
+    projectMemoryBlock = await readProjectMemoryBlock(memoryRepoPath ?? REPO);
   } catch {
     projectMemoryBlock = "";
   }
@@ -442,7 +442,7 @@ export async function runPromptAudit({ capturesDir, ARM, only, runStamp }) {
     agentIntro: "You are Zone, an AI code agent.", frameworkLines: [], hasFramework: false,
     projectMemoryBlock, importContextSummary: undefined,
     baseMaxIterations: QUESTION_PIPELINE.iterCap, canRunCommand: false,
-    backgroundCommandBlock: "", repoPath: REPO,
+    backgroundCommandBlock: "", repoPath: renderedRepoPath ?? REPO,
     planProgressBlock: "", planAnnotationsBlock: "",
     archetype: "question", planApproved: undefined, offeredToolNames,
   };

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { writeFileSync, unlinkSync, existsSync, mkdtempSync, rmSync } from "node:fs";
+import { writeFileSync, unlinkSync, existsSync, mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -543,6 +543,29 @@ describe("runPromptAudit", () => {
     return mkdtempSync(path.join(tmpdir(), "notice-regression-audit-test-"));
   }
 
+  // Fixed literal, not a real path anywhere — repoPath is spliced literally into the
+  // assembled prompt (see agentLoop.ts's "Repository path:" line), so a real repoPath
+  // here would make the tests below sensitive to this machine's own absolute checkout
+  // path length. Item 159 investigation: notice-regression-probe.mjs and its own test
+  // are the only place this class of test previously used a real, machine-dependent
+  // repoPath (docs/deferred-work.md item 90's addendum records the broader mechanism —
+  // out of scope to fix here).
+  const FIXTURE_REPO_PATH = "/fixture/repo";
+
+  // A real, throwaway directory with a test-owned .zone/memory.md — never the live,
+  // untracked one at this repo's own root, which is absent on a fresh CI checkout
+  // (item 159). marker must be unique enough that it cannot coincidentally appear
+  // anywhere else in the assembled prompt.
+  function memoryFixtureDir(marker: string): string {
+    const dir = mkdtempSync(path.join(tmpdir(), "notice-regression-memory-fixture-"));
+    mkdirSync(path.join(dir, ".zone"), { recursive: true });
+    writeFileSync(
+      path.join(dir, ".zone", "memory.md"),
+      `# Zone Project Memory\n\n- [2026-01-01] ${marker}\n`
+    );
+    return dir;
+  }
+
   it("PATCH RULES is absent from both dumps for the question archetype — half 1's payoff", async () => {
     const dir = scratchDir();
     try {
@@ -634,11 +657,19 @@ describe("runPromptAudit", () => {
 
   it("project memory reaches the audit exactly as the real call site reads it, and degrades the same way when absent", async () => {
     const dir = scratchDir();
+    // Item 159: the real .zone/memory.md is untracked and absent on a fresh CI checkout
+    // — asserting against its live prose (the previous "## Project" heading check) made
+    // this test pass locally and fail on CI. A fixture with a marker this test owns
+    // proves the same plumbing without depending on what today's live file happens to
+    // say, or on it existing at all.
+    const MARKER = "ZONE-PROBE-FIXTURE-MEMORY-MARKER-7f3a";
+    const memDir = memoryFixtureDir(MARKER);
     try {
-      const audit = await runPromptAudit({ capturesDir: dir, ARM: "B", only: null, runStamp: 5001 });
-      // A section header from the real .zone/memory.md, not the whole block — survives
-      // routine edits to that file's own prose.
-      expect(audit.sysNoNotice).toContain("## Project");
+      const audit = await runPromptAudit({
+        capturesDir: dir, ARM: "B", only: null, runStamp: 5001,
+        memoryRepoPath: memDir, renderedRepoPath: FIXTURE_REPO_PATH,
+      });
+      expect(audit.sysNoNotice).toContain(MARKER);
 
       // The exact function runPromptAudit calls, pointed at a directory with no memory
       // file: confirms the ENOENT path it wraps degrades to "" rather than throwing,
@@ -652,13 +683,27 @@ describe("runPromptAudit", () => {
       }
     } finally {
       rmSync(dir, { recursive: true, force: true });
+      rmSync(memDir, { recursive: true, force: true });
     }
   });
 
   it("the audit's no-notice output is byte-identical to a reference built independently from the real call site's own field values", async () => {
     const dir = scratchDir();
+    // Item 159: the previous version of this fixture read the live, untracked
+    // .zone/memory.md (via process.cwd()) AND rendered the real, machine-dependent
+    // repoPath into the prompt (runPromptAudit's own REPO constant). Both are absent
+    // or different-length on a fresh CI checkout — confirmed by reproducing the CI
+    // condition in a detached worktree: the live file is genuinely absent there, and
+    // the worktree's own longer absolute path alone shifted this length by exactly the
+    // path's own extra character count. A fixture directory and a fixed literal
+    // repoPath make both sides of this comparison depend on nothing outside the test.
+    const MARKER = "ZONE-PROBE-FIXTURE-MEMORY-MARKER-7f3a";
+    const memDir = memoryFixtureDir(MARKER);
     try {
-      const audit = await runPromptAudit({ capturesDir: dir, ARM: "B", only: null, runStamp: 5002 });
+      const audit = await runPromptAudit({
+        capturesDir: dir, ARM: "B", only: null, runStamp: 5002,
+        memoryRepoPath: memDir, renderedRepoPath: FIXTURE_REPO_PATH,
+      });
 
       // Independently constructed: its own call to readProjectMemoryBlock and
       // resolveToolList, not a reuse of anything runPromptAudit computed — the two
@@ -667,7 +712,7 @@ describe("runPromptAudit", () => {
       const off = resolveToolList(buildDispatcherCapabilityFilter({ ...QUESTION_PIPELINE }))
         .map((t) => t.name)
         .sort();
-      const mem = await readProjectMemoryBlock(process.cwd());
+      const mem = await readProjectMemoryBlock(memDir);
       const reference = assembleAgentSystemPrompt({
         agentIntro: "You are Zone, an AI code agent.",
         frameworkLines: [],
@@ -677,7 +722,7 @@ describe("runPromptAudit", () => {
         baseMaxIterations: QUESTION_PIPELINE.iterCap,
         canRunCommand: false,
         backgroundCommandBlock: "",
-        repoPath: process.cwd(),
+        repoPath: FIXTURE_REPO_PATH,
         planProgressBlock: "",
         planAnnotationsBlock: "",
         archetype: "question",
@@ -688,19 +733,18 @@ describe("runPromptAudit", () => {
 
       // Pinned as a length assertion alongside the full-string equality below, so a
       // future change that preserves byte-identity by both sides drifting together
-      // still surfaces here. Two verified triggers, not one: live .zone/memory.md
-      // content (the originally anticipated case — a real, parser-recognized entry
-      // added to that file moves this number while equality still holds, confirmed by
-      // direct simulation), and a source change to shared prompt-assembly text, which
-      // is what moved this figure from 10631 to 10729 — item 156's directive fix
-      // landed in a pass whose own scope updated a different test file's assertions
-      // and left this pin untouched. When this goes red: confirm the equality
-      // assertion below still passes on its own before updating the number; if it
-      // does, this is maintenance for either trigger, not a regression.
-      expect(audit.sysNoNotice.length).toBe(10729);
+      // still surfaces here. Item 155's justification, now against a fixture the test
+      // fully controls rather than the live memory file: both sides read the same
+      // fixture independently, so a change to the fixture (or to shared prompt-assembly
+      // text) that moves both sides together in a way that still leaves them equal to
+      // EACH OTHER is exactly what the length assertion, not the equality assertion,
+      // would catch. When this goes red: confirm the equality assertion below still
+      // passes on its own before updating the number.
+      expect(audit.sysNoNotice.length).toBe(7099);
       expect(audit.sysNoNotice).toBe(reference);
     } finally {
       rmSync(dir, { recursive: true, force: true });
+      rmSync(memDir, { recursive: true, force: true });
     }
   });
 });
