@@ -13042,10 +13042,13 @@ later pass, and stage one is now built — routed to the phase boundary this ent
 rather than mid-loop, so it pays nothing the dispatch was not already paying. **Four pieces, and none of
 them is a new tool.** The plan artefact carries the request: the execution plan gains an optional
 `requestedTools` list of names, so the investigation phase asks by emitting the plan it already emits, and
-no interception site changes. The grant runs once at the execution-phase capability filter's own
-construction site, before the loop that filter configures is entered, and is bounded to that filter's own
+no interception site changes. The grant ran once at the execution-phase capability filter's own
+construction site, before the loop that filter configures is entered, and was bounded to that filter's own
 `excludeToolNames` — a name the dispatcher never excluded by name cannot be granted, which is what keeps a
-request from reaching anything withheld by capability class instead. The tool-absence notice gains a
+request from reaching anything withheld by capability class instead. **That call site is no longer where the
+grant runs:** item 167 moved it one layer down, to the agent loop's own resolved filter at loop entry, and
+the bound is now that filter's name-level withholding whichever shape it takes. The grant *function* did not
+move and is still beside `buildDispatcherCapabilityFilter`; only its caller did. The tool-absence notice gains a
 redirection offered in investigation mode only, so the block that already names every withheld tool now
 says where to put a request, and every execution-mode run renders it byte-identical to before. And
 `[zone-requested-tools-granted]` records each grant's requested, granted and dropped names against the run
@@ -13107,7 +13110,37 @@ steps rather than by how the work is shaped. Observed directly: on one fixture, 
 three-file worker step and granted, while the third collapsed the same four-file fanout into a two-step
 plan where no step reached the threshold and no qualifying mark existed — identical input, three draws.
 Item 167 already proposes moving the grant; this is a separate reason to revisit the predicate, and it is
-not the same reason.
+not the same reason. **Both paragraphs above are left standing as what was established of the rule as it
+then stood, and the boundary is that the predicate they describe no longer exists** — the retirement below
+deleted it, so the selectivity evidence and the grouping instability are now history of a rule rather than
+properties of a live one.
+
+**The mark-derived channel is retired, and what established that is a count of one against three.** The
+channel could request exactly **one** name, hardcoded — the signal it derives carries a boolean and a
+refusal reason, never a name — and that one name is withheld below complex tier by **three independent
+enforcement points**: the tier tool subset omits it from the names it allows, the budget gate strips it from
+the array actually sent to the provider after the filter has already admitted it, and the runtime cap
+refuses the dispatch when it is called. **Only the last actually refuses**; the first two keep it out of the
+offered array, which is a different thing and is why lifting either alone would have produced a tool the
+model can see and cannot use. The three share a cost rationale and no source of truth — the tier subset's
+own doc carries the citation, the other two carried nothing until this pass put a note at each.
+
+**And the marks had no consumer at the prompt layer either, which is the half that makes the grant question
+moot rather than merely bounded.** Both blocks that would consume a mark — the annotations block that
+renders the marked steps, and the subagent coaching block that tells the agent to check it — are gated on
+the same offered-tool test. Below complex tier that test is false, so neither block renders. The marks
+therefore reached nothing at either layer: not the grant, because three locks stood between the filter and a
+usable tool, and not the prompt, because the two blocks that read them were suppressed by the same condition
+that made the tool unavailable in the first place.
+
+**What was retired and what was kept, split on whether anything else reads it.** The grant path went: the
+derivation function, its signal type, the branch that called it, and the telemetry arm distinguishing a
+mark-derived request from an explicit one, whose union collapsed to a single value. **The annotation fields,
+their normalization, and the renderer stayed** — they have a live consumer at complex tier, where the tool is
+offered and both blocks do render, and they predate this arc rather than arriving with it. **The explicit
+request channel is unaffected and was re-verified by running rather than assumed:** against the tier-derived
+filter it grants at simple tier, five names to six, and at medium, nine to ten, on names outside each
+subset, strict superset both times.
 
 **Bucket: Blocked on data**, moved from Neither, and decided by this entry's own stated closing condition
 rather than by the fact that code shipped. Four things were named as needing to be learned before it
@@ -13115,7 +13148,11 @@ closes. Three are observations that do not exist yet — whether a model asks ac
 a request pays for itself, and the cold-start cost — and item 170 registers the first of those with its
 instrument named. The fourth, how to stop a request becoming an unconditional escalation, is the one the
 shipped work answers, and it answers it by construction rather than by measurement: a cap of three names
-and a ceiling that is the dispatcher's own name-level exclusions. **Against Neither, which is what this
+and a ceiling that is whatever the filter in force withholds by name. **The retirement does not move this
+bucket, and the reason is worth stating rather than leaving to inference:** retiring one of two input
+channels removes a way of asking, not a missing observation. All three unmet quantities bear on the explicit
+channel exactly as they did on both, and that channel is still live and still unmeasured. **Against Neither,
+which is what this
 entry carried until now:** that bucket is a structural fact recorded with no fix proposed, and a fix has
 now been proposed and built, so the description stopped fitting. **Against Actionable now:** it requires
 nothing new to be learned first, and three things still are. **Against Closed:** none of the three has been
@@ -13127,15 +13164,16 @@ ask-user park is the question-approvals registry. **What shipped sits in four mo
 field and its schema entry are in the execution-plan module, whose two manual result reconstructions each
 needed the field added by hand or it would have validated and then been dropped before any caller saw it;
 the grant function is beside `buildDispatcherCapabilityFilter` in the archetype dispatcher, and its call
-site is the patch-flow driver where the execution filter is assembled; the redirection is a conditional in
+site is the agent loop, at the point its own filter is resolved — the patch-flow driver where the execution
+filter is assembled was the original call site and is no longer one; the redirection is a conditional in
 the tool-absence notice, wired from the agent loop's own investigation-mode flag; the marker is in the loop
 telemetry module. See item 99 for the evidence bearing on stage one, item 161 for what the first breakpoint
 caches, item 163 for the instruments that priced this, item 165 for the phase boundary that already pays
 the cost once, and items 167 through 170 for what the shipped version leaves open.
 
-## 167. The grant's ceiling is empty at the layer it was built into, and one layer down is where a request could bind
+## 167. Closed — the grant moved to the layer whose ceiling is not empty, and the one-shot guard this entry told it to reuse was the wrong guard
 
-**What it is.** Item 166's grant runs where the execution capability filter is assembled and is bounded to
+**What it was.** Item 166's grant ran where the execution capability filter is assembled and was bounded to
 that filter's own name-level exclusions. Measured against every pipeline, that ceiling is two names on
 `simple_add`, five on the two read-only shapes, and **zero on targeted-fix, refactor, debug and
 complex-multi-file** — the four archetypes that carry substantial multi-step work. This is not a tuning
@@ -13157,24 +13195,48 @@ the grant moves into the loop, which is the larger change and puts a plan-derive
 that currently receives its filter as a parameter. **This entry names the second**, on the ground that the
 first duplicates a decision rather than reusing one.
 
-**The reuse candidate at that layer already exists.** The forced-tier promotion holds a mutable
+**The reuse candidate at that layer already exists — and reusing it was this entry's own error, corrected
+here rather than quietly dropped.** The forced-tier promotion holds a mutable
 archetype-promotion marker initialised to null and consulted as a one-shot, sitting beside the sole
-recompute of the offered list, the allowed-name set and the filter. A grant arriving there would reuse both
-the guard and the recompute rather than adding either. **Item 166's pricing applies unchanged and
+recompute of the offered list, the allowed-name set and the filter. This entry read that as a free
+saving and prescribed reusing it. **That was wrong, and the mechanism is that the marker is not one
+guard but the shared guard of two orthogonal promotions** — the dispatcher soft promotion and the
+forced-tier one both test it for null and both write it. A grant writing it at loop entry would have
+permanently disabled both for the remainder of any run carrying a request, silently, since neither
+promotion reports being skipped. The implementation added a separate loop-scoped flag instead and
+pinned the independence with its own test: a run that takes a grant still promotes later from observed
+mid-loop failure. **The recompute half of the prescription was sound and was reused as written.**
+**Item 166's pricing applies unchanged and
 constrains how:** a mid-loop recompute rewrites the tools array and invalidates the whole cached prefix,
 costing more than the median run it fires inside — so the grant must still be applied before the loop's
 first call rather than during it. The destination is the layer, not the middle of the loop.
 
-**Bucket: Actionable now.** The fix is specified — apply the grant against the loop's own resolved filter,
-before its first call, reusing the one-shot guard that is already there — and nothing new needs to be
-learned first: the ceiling is measured, both costs are named, and the cache constraint is priced. **Against
-Neither:** a fix is proposed rather than a fact recorded. **Against Blocked on data:** choosing between the
-two costs is a design preference, not a missing observation.
+**What shipped, and the one measurement that changed while it did.** The grant now runs against the loop's
+own resolved filter, before the loop's first call, under a flag of its own. The ceiling this entry predicted
+at that layer is real and was re-measured there: fifteen liftable names at simple tier, eleven at medium.
+**One name in that ceiling is liftable in the filter and not in fact** — the subagent tool, which the budget
+gate strips from the array after the filter has admitted it, so a grant of that name changes the filter and
+not the request. The telemetry was rewritten during implementation to report the array as sent rather than
+the filter's own resolution, because the first draft would have recorded an intent the provider never saw.
+**A second defect surfaced only by moving the code:** the grant's eligibility test recognised one shape of
+name-level withholding, the dispatcher's exclusion list, and the tier filter uses the other, an allow-list —
+so every grant against a tier-derived filter had been silently refused. That is why the ceiling this entry
+measured as real was unreachable until the move; the fix was a second eligibility branch, scoped to filters
+carrying no capability allow-set so absence from a name-list still means withheld.
 
-**Where the code lives:** the current grant sits beside the dispatcher's filter builder with its call site
-in the patch-flow driver; the destination is the agent loop's own filter local and the forced-tier
-promotion block that already recomputes beside it. See item 166 for what shipped, item 110 for what tier
-still reaches, and item 165 for the identifier caveat on any measurement of this.
+**Bucket: Closed**, decided on this entry's own stated closing condition — the fix it specified was to apply
+the grant against the loop's own resolved filter before its first call, and that shipped. **Against
+Actionable now**, which is what this entry carried until now: nothing is outstanding, and the one part of
+the prescription that did not ship was rejected on a mechanism this entry had not seen rather than deferred.
+**Against Blocked on data:** nothing was waiting on an observation; the ceiling was measured before the work
+and re-measured after it. **Against Neither:** a fix was proposed and built, not a fact recorded.
+
+**Where the code lives:** the grant function still sits beside the dispatcher's filter builder, and its call
+site is now the agent loop, at the point that loop resolves its own filter; the eligibility fix is in the
+same function, and the loop-scoped flag is declared beside the grant rather than shared with the promotion
+marker. See item 166 for the channel and its retired half, item 176 for the three enforcement points that
+make one of the ceiling's names unliftable, item 110 for what tier still reaches, and item 165 for the
+identifier caveat on any measurement of this.
 
 ## 168. The tool-request redirection names fifteen tools, at most two of which can ever be granted, and narrowing it needs a classification that does not exist yet at that point
 
@@ -13417,31 +13479,181 @@ comparison above. Against Neither: this is a registered candidate explanation aw
 measurement, not a structural fact with no fix proposed. Against Actionable now: the fix would be a prompt
 change whose direction is exactly what is unestablished.
 
+**What the marks retirement changes here, which is the stakes and not the claim.** This entry is about mark
+*production* — why the prompt yields no `explore` marks — and nothing about that depends on what reads them,
+so the candidate explanation and its unmeasured status both stand unchanged. What moved is what a mark is
+worth: marks no longer feed a tool grant, so the only thing riding on this now is annotation quality at
+complex tier, where the block that renders them is the sole consumer. Item 178 records the cost that
+quality is being paid for and names the instrument that would measure it.
+
 **Where the code lives:** the marking rule is one bullet in the plan-investigation prompt's rules section.
-See item 166 for the observation that prompted this, and item 172 for the test blindness that bounds it.
+See item 166 for the observation that prompted this, item 178 for the criteria's per-run cost, and item 172
+for the test blindness that bounds it.
+
+## 176. One policy, three enforcement points, no shared source of truth — and the guidance file describes it as one
+
+**What it is.** Subagent dispatch is withheld below complex tier, deliberately, on a cost argument: a
+fresh-context worker re-reads files and returns a lossy summary, which makes dispatch cost-negative on
+single-feature work. That judgment is enforced **three times, by three mechanisms that reference each other
+nowhere in code**. The tier tool subset simply does not list the tool among the names it allows. The budget
+gate, one layer down, strips it from the array actually sent to the provider **after** the filter has
+admitted it. The runtime cap, in the executor, refuses the call when it arrives. Each is individually
+liftable. **None is individually sufficient**, and the asymmetry matters: only the third actually refuses
+anything, while the first two keep the tool out of the offered array — so lifting either of those alone
+produces a tool the model can see, spends tokens describing, calls, and is refused, which is strictly worse
+than leaving it hidden.
+
+**Where the rationale lives, and where it did not.** One of the three carried the cost citation in its own
+doc comment; the other two carried nothing. This pass put a note at each of the three naming the other two
+and stating that lifting one alone is insufficient, and a fourth note on the annotation renderer that item
+177 records. The citation itself is not restated three times — the two additions point at the one site that
+already carries it, because a rationale copied is a rationale that can drift.
+
+**The guidance-file discrepancy, checked by reading rather than assumed, and it holds.** The project's
+top-level guidance attributes the withholding to the quota constant alone and names exactly one consequence,
+exclusion from the offered array when that constant is zero. The tier subset is described elsewhere in the
+same file as a list of sizes and contents, never as the thing that withholds this tool; the runtime cap is
+**absent from that file entirely**, zero hits under both instruments. So a reader following the guidance
+would find one lock and change it. **A second, narrower inaccuracy surfaced while checking the first:** the
+stated condition is sufficient but not necessary. The gate's real predicate is a disjunction — quota at zero
+**or** the task judged small — and the second disjunct fires at complex tier, where the quota is four. So
+the tool is withheld in cases the guidance's condition does not cover.
+
+**Bucket: Actionable now.** The fix is specified — correct the guidance file to describe three enforcement
+points rather than one, and correct the exclusion condition from an equality to the disjunction it actually
+is — and nothing new needs to be learned first: all three points are named, and both inaccuracies were
+established by reading the file against the code. **Against Neither:** a fix is proposed, not just a fact
+recorded. **Against Blocked on data:** no observation is missing; this was settled from source.
+
+**Where the code lives:** the tier subset and its citation are in the tier-subset module; the budget gate is
+a predicate in the agent loop, applied where the offered array is built and again where a promotion
+recomputes it; the runtime cap is in the executor's subagent branch. See item 167 for why one name in its
+measured ceiling is liftable in the filter and not in fact, and the thirty-second pattern for the general
+shape and the check it prescribes.
+
+## 177. The annotation renderer takes no tier argument, so its correctness is entirely the caller's
+
+**What it is.** The block that renders a plan's delegation marks into the prompt decides whether to render
+from the marks alone. It has no tier parameter and no knowledge of what the run was offered. Its text
+instructs the agent to prefer dispatching over inline work — naming a tool that, below complex tier, the run
+does not have. What makes that safe today is a condition held entirely outside the function: its single
+caller splices it in only when that tool is in the offered set. The function is correct in production and
+would be wrong the moment it were called anywhere else.
+
+**A comment now records the dependency, and a signature change was considered and rejected.** Threading the
+tier or the offered set into the function would move the invariant inside it, which is the more defensive
+shape. It was rejected because it widens a pure function's contract to serve one caller that already holds
+the right information at the right moment, and because the resulting parameter would be unused on every
+path except an assertion. The rejection is recorded rather than the alternative silently not taken.
+
+**The condition under which the signature change becomes right, stated so the decision can be revisited on
+evidence rather than taste.** A second caller. With one caller, the gate and the renderer are checked
+together by reading two adjacent expressions, and the comment is enough. With two, the invariant stops being
+local to either site — each caller has to re-derive a condition the function could have enforced once — and
+the argument that the parameter serves one caller no longer holds. That is the trigger, and it is
+mechanical rather than a matter of preference.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed: the comment is not a fix, it is
+the record. **Against Actionable now:** the change that would be a fix was considered and deliberately not
+made, and re-listing it as pending would misrepresent a decision as an omission. **Against Blocked on
+data:** nothing is waiting on an observation; the trigger is a code condition, not a measurement.
+
+**Where the code lives:** the renderer and its caller are both in the agent loop, the caller in the
+system-prompt assembly where the offered-set test is applied. See item 176 for the enforcement points that
+make the offered set false below complex tier, and item 178 for what the marks it renders cost to produce.
+
+## 178. The subagent-eligibility criteria sit in two prompts, cost every run, and have no consumer below complex tier
+
+**What it is.** The criteria that tell a model when to mark a step delegatable exist in two separate
+prompts, and both are paid on every run that reaches them. Re-derived from source: **889 characters, about
+222 tokens**, in the plan-investigation prompt, as one rule line plus two lines of JSON shape; and **1173
+characters, about 293 tokens**, in the plan-generation prompt, as the criteria plus their worked examples.
+Neither figure is a share of anything — they are the literal spans, measured against the current tree.
+
+**Below complex tier they buy nothing, and that is now established rather than suspected.** The marks they
+produce fed two consumers. One was the tool grant, retired. The other is the annotations block, which
+renders only when the subagent tool is offered — and it is not offered below complex tier, for the three
+reasons item 176 records. So on a simple- or medium-tier run the criteria are emitted, obeyed, and the
+resulting marks reach nothing.
+
+**At complex tier the question is open and no instrument exists.** There the annotations block does render,
+and the criteria plausibly improve what it says. Whether they improve it enough to be worth their cost on
+every run at every tier is unmeasured, and nothing currently emitted answers it: no marker records a plan's
+marks at all, so there is no way to relate mark quality to anything downstream.
+
+**The instrument that would settle it, named because an open question without one is a wish.** A per-run
+mark census — how many steps carried a mark, how many conformed to the criteria, how many were `explore` —
+emitted on a marker that already carries both the run identifier and the tier, then joined on that
+identifier to the per-run cost record. No new key is needed and no new join is invented; the two logs
+already share the identifier's name and value shape. Item 165's caveat applies unchanged, since an
+identifier names a dispatch rather than a loop.
+
+**Bucket: Blocked on data.** Closing requires an observation that does not exist yet — the complex-tier
+value of the criteria against their per-run cost. **Against Actionable now:** the obvious fix, deleting the
+copy that has no consumer, cannot be chosen without the measurement, because the same text serves the tier
+where the consumer does exist. **Against Neither:** this is a live cost with a named instrument, not a
+structural fact with nothing to do about it.
+
+**Where the code lives:** one rule line and two schema lines in the plan-investigation prompt's rules
+section; the criteria and their examples in the plan-generation prompt's own instructions. See item 175 for
+why one of the two marking patterns is never produced, item 177 for the consumer that renders them, and
+item 176 for why that consumer is absent below complex tier.
+
+## 179. A mechanism that ships without a marker cannot be evaluated retroactively
+
+**What it is.** Asked what retiring the marks channel gave up — how many runs would have been affected had
+it worked — the artefacts could not answer, and the reason is not schema. **The newest record in the marker
+corpus is 2026-08-09. The channel landed 2026-08-15 and was retired 2026-08-16.** The entire corpus predates
+the mechanism by six days. No field, no key, no join, and no amount of care in the query could have
+recovered a counterfactual about a mechanism that did not exist while any of the data was being written.
+
+**Why this is worth an entry rather than a shrug.** The instinct on being asked such a question is to go
+looking for a schema gap — a missing tier field, a missing plan census — and both were in fact missing here,
+which makes the schema explanation available and wrong. It is wrong because fixing it changes nothing
+retroactively: a marker added today still produces its first row today. **The binding constraint is
+temporal, not structural**, and the two are easy to confuse precisely because the structural one is real
+and visible.
+
+**The general lesson, stated as a rule about when instruments land rather than about what they contain.** A
+mechanism and its marker must ship together. A marker added afterwards can measure the mechanism's future
+and can never bound its past, so every question of the form "what did this cost, or save, before now"
+becomes permanently unanswerable at the moment the mechanism ships without one. This is a stronger claim
+than the familiar one about instrumenting before optimizing: the loss is not that measurement is delayed,
+it is that a specific class of question is destroyed and cannot be recovered by later work.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed, because none exists for the
+instance — the window is gone. **Against Actionable now:** there is nothing to do about the past; the
+forward-looking practice is the lesson itself rather than a specified change. **Against Blocked on data:**
+this is not waiting on an observation, it is a statement about why one particular observation can never be
+made.
+
+**Where the code lives:** the marker corpus and the per-run cost record are the two user-level logs; the
+retired channel's own marker was in the loop telemetry module and never fired. See item 166 for the channel,
+item 178 for a live question whose instrument does not exist yet either, and item 170 for a prediction
+registered before its data specifically to avoid this shape.
 
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 175 to find out which ones still need something. No index of
+reader the trouble of reading all 179 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (64): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 111, 117, 120, 121, 126, 128, 134, 135, 137, 144, 149, 150, 153, 156, 161, 162, 171
+**Closed** (65): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 111, 117, 120, 121, 126, 128, 134, 135, 137, 144, 149, 150, 153, 156, 161, 162, 167, 171
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (11): 108, 113, 116, 129, 130, 138, 142, 148, 167, 169, 172
+first (11): 108, 113, 116, 129, 130, 138, 142, 148, 169, 172, 176
 
-**Blocked on data** — closing requires an observation that doesn't exist yet (14): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143, 157, 166, 170, 175
+**Blocked on data** — closing requires an observation that doesn't exist yet (15): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143, 157, 166, 170, 175, 178
 
-**Neither — a structural fact recorded, with no fix proposed** (86): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (88): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152, 154, 155, 158,
-159, 160, 163, 164, 165, 168, 173, 174
+159, 160, 163, 164, 165, 168, 173, 174, 177, 179
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
@@ -15745,3 +15957,44 @@ same divergence between what a staleness signal reports and what the artefact co
 file, a generated fixture — or a case where a timestamp misleads for some reason other than not being a
 content hash. Either would make this a claim about staleness signals generally rather than about build
 discipline in one directory, and at that point it stops being a corollary.
+
+## A thirty-second pattern: one judgment enforced at several unlinked points, where lifting any single one is strictly worse than lifting none
+
+**The mechanism, and it is an asymmetry rather than a redundancy.** A policy decision gets enforced at more
+than one place. The places do not reference each other, were added at different times for different local
+reasons, and each looks individually complete from where it sits. What makes this a defect shape rather
+than defence in depth is that the enforcement points are **not interchangeable**: typically one of them is
+the one that actually refuses, and the others merely keep the capability out of sight. Lifting a
+keep-it-out-of-sight point while a refusing point remains does not half-open the door — it produces a
+capability that is advertised, attempted, and rejected. The cost is paid in full and the benefit is zero,
+which is worse than the state before the change, not partway to the state after it.
+
+**The instance, and it is this document's own.** Subagent dispatch is withheld below complex tier by three
+mechanisms recorded in item 176 — a tier tool subset that omits the name, a budget gate that strips it from
+the array actually sent to the provider, and a runtime cap that refuses the call. Only the third refuses.
+An earlier pass in this arc reached the reasonable conclusion that the obvious next fix was to lift the
+budget gate so a plan-derived request could bind, and that change would have offered the model a tool every
+dispatch then rejected with a budget-exhausted message. It was not made, and the only reason it was not is
+that a read-only pass enumerated the other two points before anything was edited.
+
+**Why this is decided on mechanism rather than on resemblance to the entries it sits near.** The nearest
+essays by appearance are the ones about code that turns out to be unused, and the resemblance is misleading
+in the direction that matters. There, the finding is that a mechanism does nothing and can go. Here every
+one of the three enforcement points is live, correct, and doing exactly what it was written to do; nothing
+is dead and nothing should be deleted. The two shapes share only the surface feature that a reader
+encounters more machinery than expected, and they prescribe opposite actions — remove it, versus do not
+remove any of it individually.
+
+**The rule, written as the check to run before lifting any constraint.** Enumerate every enforcement point
+for the judgment, not only the one the change happens to touch. Then, for each remaining point, ask a
+single question: after lifting only this one, is the resulting state better or worse than the state before?
+**If any remaining point converts "not offered" into "offered and then refused", the lift is not
+partial-safe** and either all of them move together or none does. The enumeration is the whole of the work —
+once the points are listed the answer is usually immediate, and the failure mode is never reasoning wrongly
+about a known list, it is confidently changing the first mechanism found.
+
+**What the check costs, stated because a rule nobody runs is decoration.** Finding the other enforcement
+points is a search for the capability's name across the layers between the policy and its use, and in the
+instance it took one read-only pass. That is not free, and the rule is not that every constraint deserves
+that pass. It is that a constraint whose removal is being *proposed* deserves it, because the proposal is
+exactly the moment the cost is justified and the last moment the enumeration is cheaper than the regression.
