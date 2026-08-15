@@ -8753,6 +8753,28 @@ at, with no command output and no answer text. That is a change to the instrumen
 because this pass registered and applied a criterion and adding an unrelated output path to the same
 instrument in the same arc is how a measurement pass turns into a feature pass.
 
+**A boundary on this item's own n=1 sentence, which is true and stays.** One run per cell is an honest
+description of what was measured and the entry never presents a count as a rate. What it was written before
+is any evidence that a cell *varies*: on the only post-fix evidence, the one task that falls short of the
+revised criterion issued shell calls in one of three cells and none in the other two. A one-run-per-cell
+design cannot settle a cell that flips — a single arm would score that task by whichever way one sample
+fell, and a rerun after a failure would be indistinguishable from persistence. Six of the seven tasks are
+unaffected; this is a problem about one cell, and it is this item's because the criterion is.
+
+**The scoring rule for a stochastic cell is deferred to its own pass, and the reason is the reason this arc
+registers anything.** A rule written now would be written in the light of a result already recorded in this
+entry, which is exactly what registering in advance exists to prevent, and what item 149's own decline
+paragraph refused for a neighbouring case. It gets a pass of its own, recorded first and applied second.
+What that pass must decide, named here so it cannot be narrowed later: how many runs a cell gets, what
+aggregate over those runs the criterion reads, and whether the rule is per-cell or arm-wide.
+
+**What nothing has measured, recorded as an absence rather than assumed benign.** Every capture made since
+the directive fix is the same single task — established by listing every capture file with the task ids and
+model it carries. **No post-fix cell exists for the other six.** The fix changed the assembled prompt for
+all seven, and scoping a restriction should widen behaviour rather than narrow it, but that is an
+expectation and not a measurement. Whether the fix disturbed the six that were already clearing this item's
+criterion is unknown, and it is the arm's own price to find out.
+
 **A second prediction was registered against this item's mechanism, from a different surface — and it has
 moved to item 143.** That sentence is true and is kept rather than deleted, because the prediction's
 provenance is this item: the regression recorded here is a naming effect, and item 93's refusal-example
@@ -11896,7 +11918,8 @@ rather than sampling variance**. The registered prediction — all four at zero 
 
 **That stability held the prompt fixed, and it does not survive the prompt changing.** Item 156 altered the
 directive this task's answers were complying with, and item 157's cells on the new prompt broke the run of
-zeros: one of three issued shell calls and answered correctly. **This entry's finding is unaffected and its
+zeros: one of three issued shell calls and produced a sourced answer — exact, but about a helper the
+registered task does not name, and item 157 carries that correction. **This entry's finding is unaffected and its
 scope is now explicit** — it established that the zero was a property of the task under *that* prompt rather
 than sampling noise, which is exactly what a prompt-caused behaviour looks like. It never claimed the zero
 would survive a prompt change, and it did not.
@@ -12115,6 +12138,12 @@ directive's own vocabulary — its terms for the artefacts it names, and its ins
 paste. The block was then located in the assembled prompt by running the assembler, and its bullets read
 individually. Nothing about this needed a paid call.
 
+**A boundary, added later, and this entry is true and complete for the scope it declared.** Its sentence on
+what the fix does not settle flags the surviving bullets as a risk and is correct; what it did not do, and
+did not claim to, is diagnose them. Item 159 records that the first bullet carries a defect of its own — a precondition, not a
+scope — and that the risk this entry named is what that defect produces. Nothing here is weakened by it: the
+fix was to the third bullet, it was minimal, and it was right.
+
 **Bucket: Closed.** The defect is identified, the fix has landed with tests and mutation coverage, and what
 remains open is a behavioural question that is item 157's, not this entry's. Against: Actionable now needs
 an unmade fix; Blocked on data needs a missing observation, and the defect itself was established by
@@ -12125,7 +12154,7 @@ reading.
 function's archetype ternary. See item 149 for the judgment this displaces, item 151 for the foreclosure
 that pointed at the task-prompt interaction, and item 157 for the measurement.
 
-## 157. Whether scoping that bullet restores searching — one cell of three searched and answered correctly, which the registered rule reads as mixed and not separable from variance
+## 157. Whether scoping that bullet restores searching — one cell of three searched and cited exactly, but about a helper the registered task does not name, and the rule reads the result as mixed and not separable from variance
 
 **The question.** One task in item 90's arm issued no shell calls, five times out of five on the pinned
 model — the original cell plus item 153's four reproductions. Item 156 identifies a prompt contradiction as
@@ -12189,13 +12218,39 @@ thirty-six — still not separable. Only three or four of four would have been, 
 reach once the second and third cells declined. The bound bit on cost and not on information, and that is
 worth recording because a spend rule that truncates a design usually does cost something.
 
-**What the one searching cell did, because the binary the rule keys on understates it.** It issued two
-recursive searches for masking vocabulary, read two files, ran to its iteration ceiling, and produced a
-correct sourced answer: it located the masking helper, gave its file and line range, described the
-behaviour for long and short inputs, and named the test that covers it. That is not a marginal difference
-from the control's zero — it is the task being answered rather than declined, and no control cell ever did
-it. **The metric records one bit of that and the entry records the rest**, because a rule keyed on whether
-a shell call happened cannot distinguish a token search from a complete answer.
+**What the one searching cell did, because the binary the rule keys on understates it — and one clause of
+this description was false when written and is corrected rather than softened.** It issued two recursive
+searches for masking vocabulary, read two files, and ran to its iteration ceiling, which is why its record
+carries a failed completion rather than a clean one. **What it produced is an exact sourced answer to a
+neighbouring question, not a correct answer to the registered one.** Every citation in it holds: it located
+the masking helper, gave its file and line range, described the behaviour for long and short inputs, and
+named the test that covers it — each clause re-read against the files it cites, and each one true. **What
+it never named is the component file this task's frozen ground truth records as its correct one**, where
+that helper is called and where a key is actually displayed masked. Item 94's bar for this same task on the
+other model names both the component file and the helper, and scores that cell incorrect for reaching
+neither; this cell reaches one of the two. Closer, and not the registered answer. **The earlier reading of
+this as the task being answered rather than declined was wrong and is withdrawn.** What survives unchanged:
+no control cell ever searched at all, so the distance from the control's zero is still not marginal.
+
+**Why it missed, which is mechanical rather than a matter of degree.** Its first command restricted a
+recursive grep to one source extension, and the ground-truth file carries the other. Replayed verbatim, that
+command's own result does not contain the file; replayed with the second extension added, it does. **The
+agent filtered the answer out of its own search.** That is item 118's shape — a search whose scope silently
+decides its answer, whose corrective is to name what a search counts rather than to search harder — and the
+twentieth pattern's rule governs it. **The twenty-fifth does not**, and the exclusion is recorded so a later
+reader does not re-litigate it: that pattern defines itself against the recoverable case where the scope is
+visible in what the author typed, and here it is visible in the agent's own command text. What is new beside
+item 118 is only the domain — there the exclusions were typed by a pass author, here by the agent under
+measurement — and nothing in this arm inspects either.
+
+**The metric records one bit of that, this entry records the rest, and nothing at all checked the part that
+was wrong.** A rule keyed on whether a shell call happened cannot distinguish a token search from a complete
+answer, which is why this entry describes what the cell did instead of letting the binary stand. But the
+frozen ground truth's own correct-file field is copied into every result record and read by no scoring
+function — one occurrence in the probe's source under both search instruments, in the line that records it,
+and the scorer's own body reads the shell-call list and nothing else. **Answer correctness on this arm has
+always been a hand judgment with no instrument behind it**, which is how a wrong one reached a committed
+entry and its heading.
 
 **The directive's own vocabulary persists in the cells that declined.** Two of the three cite absent prior
 content — a report, an earlier session, content not carried forward — and both ask the user to paste it,
@@ -12278,11 +12333,70 @@ the tests workflow. See item 156 for the change that exposed this, item 155 for 
 item 157 for the measurement pass whose own first phase checked the build's freshness explicitly and found
 it stale — the same precondition, verified rather than violated.
 
+## 159. The same directive's first bullet gates on the user referring to prior content and enumerates six kinds of it, none of them a code artefact — yet every declining cell asserts the condition is met
+
+**What it is, and why it is a different defect from the one already fixed.** The block tells the agent what
+to do when the user refers to prior content not present in its context. Its first bullet forbids searching
+the filesystem, naming three verbs. That prohibition is **conditional**: the header fires only when the
+reference is to prior content, and it enumerates what counts — a report, a document, findings, a section, a
+summary, or earlier output. Item 156's defect was the third bullet's **scope**, a restriction phrased as
+though it governed all repository search; it is fixed. This is the **precondition**, and it is untouched. A
+task whose text names an unspecified code artefact satisfies none of the six enumerated kinds, so on the
+directive's own terms the bullet should not fire at all.
+
+**It fires anyway, on every cell that declined.** Read from the committed constant rather than from a prompt
+dump, the six kinds are exactly as stated. Read from the recorded answers, all five pre-fix cells and both
+post-fix decliners assert the condition is met, in the block's own vocabulary — absent prior run context,
+absent session memory, a referenced report or document, content not carried forward, and a request to paste
+it. The one cell that searched asserts none of it.
+
+**The evidence, with each measure's provenance stated because none of them was registered in advance.** A
+lexeme list drawn from the directive's own text scores every declining cell non-zero and the searching cell
+zero. A token-set similarity places both post-fix decliners inside the band the five pre-fix cells form
+among themselves, and the searching cell an order of magnitude outside it. **All three of the measures used
+here — that list, the similarity, and a structural marker for a numbered request that the user supply
+information — were constructed after their author had read the answers.** What they support is the negative:
+the declining text did not change across the fix. They do not support a rate, and the direction one of them
+happens to run is recorded as not evidence.
+
+**The second instance, which is what lifts this above a reading of one task.** Item 149 already records that
+the arm's authored no-answer control produced the identical output form — three numbered clarifying
+questions — with two shell commands in front of them. That observation is not restated here and was verified
+rather than copied. What is new is why the two commands existed: they are a test run and a typecheck, and
+**neither is among the three verbs the first bullet enumerates**. The control shares the shape and clears
+item 90's criterion anyway, insulated by vocabulary rather than by behaviour. **The conditional that
+follows:** if that task ever lacks a non-enumerated action to reach for — a suite that fails, a tree where
+the obvious command is one of the three — item 90 has two cells that flip rather than one.
+
+**Folded into one entry rather than split, and the reason is stated so the choice is auditable.** The
+control task is evidence for this mechanism, not a finding beside it. Two headings would put one mechanism
+in two places and force a cross-reference at every reading, and the ledger's own precedent is that a
+mechanism appearing in a new domain is an instance, filed in an item.
+
+**What a fix would have to do, and this entry deliberately does not do it.** The precondition needs to
+separate a reference to absent conversational content from a reference to an unnamed code artefact — the
+first is not discoverable and the bullet is right about it, the second is exactly what the archetype
+preamble prescribes one shell command for. Choosing that wording, establishing it does not weaken the
+carve-out the block exists for, and pinning it, is a fix pass. Naming the shape here and stopping is the
+whole of what this entry claims.
+
+**Bucket: Neither**, two-way check. For: a structural fact recorded with no fix proposed — items 151, 152,
+154, 155 and 158 sit there on that shape, and the fix is named as a requirement rather than specified.
+Against: Actionable now requires a fix specified in the entry itself, and this specifies none; Blocked on
+data requires an observation that does not exist yet, and the defect was established from committed source
+and captures already on disk.
+
+**Where the code lives:** the directive is a module-level constant in `llm/agentLoop.ts`, spliced once into
+`assembleAgentSystemPrompt`'s unconditional shared tail — the same constant item 156 edited, a different
+bullet of it. See item 156 for the scope defect and its fix, item 157 for the measurement that exposed the
+surviving behaviour, item 149 for the control this entry cites, and item 90 for the criterion the
+conditional bears on.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 158 to find out which ones still need something. No index of
+reader the trouble of reading all 159 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -12295,10 +12409,11 @@ first (8): 108, 113, 116, 129, 130, 138, 142, 148
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (11): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143, 157
 
-**Neither — a structural fact recorded, with no fix proposed** (78): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (79): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
-119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152, 154, 155, 158
+119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152, 154, 155, 158,
+159
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
