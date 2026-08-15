@@ -35,6 +35,13 @@ export const MEDIUM_TIER_TOOLS: ReadonlySet<string> = new Set([
  * via the full toolset (undefined return). See AUDIT-subagent-adoption.md §B.#1 for the
  * cost rationale: a fresh-context worker re-reads files and returns a lossy summary,
  * making dispatch cost-negative on typical single/medium tasks.
+ *
+ * Two more enforcement points key off the same judgment without sharing this
+ * source: agentLoop.ts's taskBlockedByBudget strips Task from the array
+ * actually sent to the provider regardless of this filter, and
+ * toolExecutor.ts's effectiveSubagentCap independently refuses the call at
+ * runtime. Lifting only this filter does not make Task usable below complex
+ * tier.
  */
 export function tierToolFilter(tier: TaskTier): CapabilityFilter | undefined {
   if (tier === "simple") return { allowToolNames: SIMPLE_TIER_TOOLS };

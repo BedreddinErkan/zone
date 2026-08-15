@@ -1,7 +1,6 @@
 import type { TaskArchetype } from "./taskClassifier.js";
 import { READ_ONLY_CAPABILITIES, type CapabilityFilter } from "../tools/capabilities.js";
 import { resolveToolList } from "../tools/toolRegistry.js";
-import type { ExecutionPlan } from "./executionPlan.js";
 
 export interface PipelineConfig {
   skipPlan: boolean;
@@ -320,56 +319,4 @@ export function applyRequestedToolsGrant(
   };
 
   return { filter: newFilter, grantedNames: eligible, dropped };
-}
-
-/**
- * Item 166 stage two. Derives an implicit Task request from a plan's own
- * per-step delegation marks, so a plan that follows the (now-ported)
- * subagent-eligibility criteria doesn't need a SEPARATE explicit
- * `requestedTools: ["Task"]` entry to have that intent honoured — it can
- * simply mark the step, the way `generateExecutionPlan`'s prompt already
- * asked for.
- *
- * The rule is criterion CONFORMANCE, not mark density. An earlier design
- * ("grant when 0 < marked < total") was rejected on review: it reads the
- * *proportion* of marked steps, not their *content*, so a plan that marks
- * every step correctly (a real all-fanout plan) is refused identically to
- * one that marks reflexively — and it can never grant on a single-step
- * plan, however well-founded that one mark is. This version re-checks each
- * marked step against the same criterion the ported prompt text now states
- * (worker needs >=3 files; explore has no file-count condition) and grants
- * when at least one mark holds up factually, regardless of how many other
- * steps exist or whether they're also marked.
- *
- * Scored against every on-disk plan recoverable at implementation time (8
- * distinct, `.zone/item166/subagent-marks-preport-baseline.json`): this
- * rule grants on 4/8, the rejected proportion rule on 1/8. The three plans
- * where they diverge are "reflexively" all-marked by the proportion
- * reading, but each contains at least one step whose mark is factually
- * correct (a multi-file verification step, or a genuine `explore` step)
- * alongside others that aren't — so on this data, conformance does NOT
- * cleanly separate reflexive from selective marking; it separates "at
- * least one mark holds up" from "none do." Four non-empty plans, one of
- * them partial, is a hypothesis-sized sample, not a settled finding — what
- * would settle it is the post-port distribution, measured after this
- * lands, joined against the same baseline file on plan/step identity.
- */
-export interface PlanMarksSignal {
-  taskRequested: boolean;
-  reason?: "no_steps_marked" | "no_qualifying_marks";
-}
-
-export function deriveTaskRequestFromPlanMarks(
-  steps: ExecutionPlan["steps"] | undefined
-): PlanMarksSignal {
-  const marked = (steps ?? []).filter((s) => s.subagentEligible === true && !!s.subagentType);
-  if (marked.length === 0) {
-    return { taskRequested: false, reason: "no_steps_marked" };
-  }
-  const qualifies = (s: (typeof marked)[number]): boolean =>
-    (s.subagentType === "worker" && s.filesLikely.length >= 3) || s.subagentType === "explore";
-  if (!marked.some(qualifies)) {
-    return { taskRequested: false, reason: "no_qualifying_marks" };
-  }
-  return { taskRequested: true };
 }

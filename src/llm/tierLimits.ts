@@ -11,6 +11,12 @@ export interface TierLimits {
   softIterWarn: number;
 }
 
+// simple/medium's maxSubagentCalls: 0 is one of three independent locks
+// withholding Task below complex tier — see tierToolSubsets.ts's
+// tierToolFilter doc for the cost rationale and toolExecutor.ts's
+// effectiveSubagentCap for the third. Changing this value alone does not
+// make Task usable; the tier tool subset and the runtime cap enforce the
+// same policy independently.
 export const TIER_LIMITS: Record<TaskTier, TierLimits> = {
   simple: {
     maxSubagentCalls: 0,

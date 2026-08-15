@@ -1062,6 +1062,11 @@ export async function executeTool(
       } = await import("../llm/subagents.js");
       const { resolveSubagentCapabilityFilter } = await import("../llm/subagentDispatch.js");
 
+      // Third of three independent locks withholding Task below complex tier
+      // (cost rationale in tierToolSubsets.ts's tierToolFilter doc; quota
+      // source in tierLimits.ts's TIER_LIMITS) — this is the one that
+      // actually refuses the call; the other two only keep Task out of the
+      // tool array offered to the model.
       const effectiveSubagentCap =
         typeof input?.maxSubagentCallsOverride === "number"
           ? input.maxSubagentCallsOverride

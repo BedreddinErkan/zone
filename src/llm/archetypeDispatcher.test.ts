@@ -8,10 +8,8 @@ import {
   applyRequestedToolsGrant,
   buildDispatcherCapabilityFilter,
   buildPipelineConfig,
-  deriveTaskRequestFromPlanMarks,
   readArchetypeFlagsFromEnv,
 } from "./archetypeDispatcher.js";
-import type { ExecutionPlan } from "./executionPlan.js";
 import { resolveToolList } from "../tools/toolRegistry.js";
 import { READ_ONLY_CAPABILITIES, type CapabilityFilter } from "../tools/capabilities.js";
 import { tierToolFilter } from "../tools/tierToolSubsets.js";
@@ -422,75 +420,6 @@ describe("applyRequestedToolsGrant — eligibility, cap, and the one-shot guard"
   });
 });
 
-function step(
-  filesLikely: string[],
-  mark?: { subagentEligible: boolean; subagentType?: "worker" | "explore" }
-): ExecutionPlan["steps"][number] {
-  return {
-    title: "step",
-    description: "d",
-    filesLikely,
-    ...(mark
-      ? { subagentEligible: mark.subagentEligible, ...(mark.subagentType ? { subagentType: mark.subagentType } : {}) }
-      : {}),
-  };
-}
-
-describe("deriveTaskRequestFromPlanMarks — criterion conformance, not mark density (item 166 stage two)", () => {
-  it("no steps marked at all -> refused, reason no_steps_marked", () => {
-    const steps = [step(["a.ts"]), step(["b.ts"])];
-    expect(deriveTaskRequestFromPlanMarks(steps)).toEqual({ taskRequested: false, reason: "no_steps_marked" });
-  });
-
-  it("undefined steps -> refused, reason no_steps_marked (defensive — the call site passes executionPlan?.steps)", () => {
-    expect(deriveTaskRequestFromPlanMarks(undefined)).toEqual({ taskRequested: false, reason: "no_steps_marked" });
-  });
-
-  it("marked worker step under 3 files does not qualify -> refused, reason no_qualifying_marks", () => {
-    const steps = [
-      step(["a.ts"], { subagentEligible: true, subagentType: "worker" }),
-      step(["b.ts"], { subagentEligible: true, subagentType: "worker" }),
-      step(["c.ts"]),
-    ];
-    expect(deriveTaskRequestFromPlanMarks(steps)).toEqual({ taskRequested: false, reason: "no_qualifying_marks" });
-  });
-
-  it("E3-mirroring shape: 2 single-file worker marks + 1 four-file worker mark -> qualifies via the 4-file step", () => {
-    const steps = [
-      step(["a.ts"], { subagentEligible: true, subagentType: "worker" }),
-      step(["b.ts"], { subagentEligible: true, subagentType: "worker" }),
-      step(["c.ts", "d.ts", "e.ts", "f.ts"], { subagentEligible: true, subagentType: "worker" }),
-    ];
-    expect(deriveTaskRequestFromPlanMarks(steps)).toEqual({ taskRequested: true });
-  });
-
-  it("marked explore step qualifies regardless of file count — the ported criteria set no file-count condition for explore", () => {
-    const steps = [
-      step(["src/**/*.ts"], { subagentEligible: true, subagentType: "explore" }),
-      step(["b.ts"]),
-    ];
-    expect(deriveTaskRequestFromPlanMarks(steps)).toEqual({ taskRequested: true });
-  });
-
-  it("every step marked but only one qualifies -> granted (the rejected proportion rule would have refused this as all_steps_marked)", () => {
-    const steps = [
-      step(["a.ts"], { subagentEligible: true, subagentType: "worker" }),
-      step(["b.ts", "c.ts", "d.ts"], { subagentEligible: true, subagentType: "worker" }),
-    ];
-    expect(deriveTaskRequestFromPlanMarks(steps)).toEqual({ taskRequested: true });
-  });
-
-  it("single-step plan with a qualifying mark grants — the proportion rule's blind spot (marked===total never < total) is gone by construction", () => {
-    const steps = [step(["a.ts", "b.ts", "c.ts", "d.ts"], { subagentEligible: true, subagentType: "worker" })];
-    expect(deriveTaskRequestFromPlanMarks(steps)).toEqual({ taskRequested: true });
-  });
-
-  it("subagentEligible:true with no subagentType is excluded from consideration entirely — matches normalizeExecutionPlanSteps' own drop rule", () => {
-    const malformed = { title: "t", description: "d", filesLikely: ["a.ts", "b.ts", "c.ts"], subagentEligible: true } as ExecutionPlan["steps"][number];
-    const steps = [malformed, step(["b.ts"])];
-    expect(deriveTaskRequestFromPlanMarks(steps)).toEqual({ taskRequested: false, reason: "no_steps_marked" });
-  });
-});
 
 describe("applyRequestedToolsGrant — the pure-name-whitelist eligibility branch (item 167)", () => {
   // Item 167's own establish pass found this branch was MISSING: the function's
@@ -513,6 +442,17 @@ describe("applyRequestedToolsGrant — the pure-name-whitelist eligibility branc
     const afterNames = names(result.filter);
     expect([...beforeNames].every((n) => afterNames.has(n))).toBe(true); // strict superset
     expect([...afterNames].filter((n) => !beforeNames.has(n))).toEqual(["Task"]); // only new name
+  });
+
+  it("the same branch grants at medium tier too — the prior coverage above was simple-only, this closes that gap", () => {
+    const before = tierToolFilter("medium"); // {allowToolNames: MEDIUM_TIER_TOOLS}, no exclude, no allow
+    const beforeNames = names(before);
+    const result = applyRequestedToolsGrant(before, ["ask_user"], false); // outside MEDIUM_TIER_TOOLS
+    expect(result.grantedNames).toEqual(["ask_user"]);
+    expect(result.dropped).toEqual([]);
+    const afterNames = names(result.filter);
+    expect([...beforeNames].every((n) => afterNames.has(n))).toBe(true); // strict superset
+    expect([...afterNames].filter((n) => !beforeNames.has(n))).toEqual(["ask_user"]); // only new name
   });
 
   it("a name already present in the whitelist is refused as not_dispatcher_excluded — it was never withheld", () => {

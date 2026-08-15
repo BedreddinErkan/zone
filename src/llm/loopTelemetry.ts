@@ -65,10 +65,16 @@ export function emitArchetypePromoted(data: ArchetypePromotedData): void {
 
 // ---------------------------------------------------------------------------
 // emitRequestedToolsGranted — [zone-requested-tools-granted]
-// Item 166 stage one/two, relocated by item 167. Emitted once in agentLoop.ts,
-// at loop entry — before the first provider call — when a plan carries an
-// explicit requestedTools entry, a qualifying per-step delegation mark, or
-// both. NOT a new trigger value on ArchetypePromotedData above: that shape's
+// Item 166 stage one, relocated by item 167; stage two's plan-marks channel
+// (deriveTaskRequestFromPlanMarks) was retired in a later pass — it could
+// only ever request "Task", and Task is withheld below complex tier by two
+// OTHER independent locks (agentLoop.ts's taskBlockedByBudget and
+// toolExecutor.ts's runtime subagent cap; rationale in tierToolSubsets.ts's
+// tierToolFilter doc), so the marks channel could never actually grant
+// anything a caller could use. Emitted once in agentLoop.ts, at loop entry —
+// before the first provider call — when a plan carries an explicit
+// requestedTools entry. NOT a new trigger value on ArchetypePromotedData
+// above: that shape's
 // toArchetype is hardcoded to the single literal "complex_multi_file" and its
 // trigger union is duplicated verbatim across four sites — neither fits a
 // tool-grant event, whose subject is a capability change, not an archetype
@@ -82,11 +88,13 @@ export function emitArchetypePromoted(data: ArchetypePromotedData): void {
 // own iteration counter starts; recorded rather than omitted so a consumer
 // never has to assume that fact from the marker's absence of one.
 //
-// `source` on `requested`/`dropped` distinguishes an explicit plan field
-// entry from one derived purely from the plan's own subagentEligible marks
-// (item 166 stage two) — the two channels are merged into ONE grant call and
-// ONE marker line per run (never two), so without this field a mark-derived
-// grant/refusal would be indistinguishable from an explicit one in the sink.
+// `source` on `requested`/`dropped` is always "explicit" now that the
+// plan-marks channel is retired (RequestedToolSource is a single-member type
+// rather than a bare string field for that reason: it still names what the
+// value means at its two use sites, even with one legal value). Kept on the
+// shape rather than removed — narrowing to a bare string would be a
+// telemetry-shape change with no benefit, since nothing reads this field for
+// its own sake outside this file.
 //
 // toolArrayLengthBefore/After and toolDescriptionCharsAdded (item 167,
 // addition 2) make the cache consequence of a grant recoverable from this
@@ -98,7 +106,7 @@ export function emitArchetypePromoted(data: ArchetypePromotedData): void {
 // the runId to join on, not the cache figures themselves.
 // ---------------------------------------------------------------------------
 
-export type RequestedToolSource = "explicit" | "plan_marks";
+export type RequestedToolSource = "explicit";
 
 export interface RequestedToolsGrantedData {
   runId: string | null | undefined;

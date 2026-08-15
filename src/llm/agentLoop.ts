@@ -40,7 +40,7 @@ import {
   emitRequestedToolsGranted,
   type PromptBranch,
 } from "./loopTelemetry.js";
-import { applyRequestedToolsGrant, deriveTaskRequestFromPlanMarks } from "./archetypeDispatcher.js";
+import { applyRequestedToolsGrant } from "./archetypeDispatcher.js";
 import { getAndClearToolResultSummary } from "./toolResultSizeTracker.js";
 import type { TaskArchetype, TaskClassification, TaskTier } from "./taskClassifier.js";
 import { resolveTierLimits } from "./tierLimits.js";
@@ -1401,6 +1401,11 @@ export { extractDispatchReason } from "./subagentDispatch.js";
  * SUBAGENTS. Without this block, the system prompt's "the current plan
  * step is marked subagentEligible: true" instruction is dead-letter — the
  * agent has no per-step visibility.
+ *
+ * Takes no tier argument — correctness depends entirely on the caller gating
+ * on isOffered("Task") before splicing this block in (agentLoop.ts's
+ * system-prompt assembly). A caller that skipped that gate would instruct
+ * the model to prefer a tool it doesn't have.
  */
 export function buildPlanAnnotationsBlock(
   plan: import("./executionPlan.js").ExecutionPlan | null | undefined
@@ -2445,34 +2450,7 @@ async function runAgentLoopScoped(input: AgentLoopInput, stats: LoopRunStats): P
   let _planGrantApplied = false;
   {
     const explicitRequested = input.executionPlan?.requestedTools ?? [];
-    const anyStepMarked = (input.executionPlan?.steps ?? []).some((s) => s.subagentEligible === true);
-    if (explicitRequested.length > 0 || anyStepMarked) {
-      const sourceByName = new Map<string, "explicit" | "plan_marks">();
-      for (const name of explicitRequested) sourceByName.set(name, "explicit");
-
-      const combined = [...explicitRequested];
-      // Only reachable when anyStepMarked but the marks-derived request never
-      // qualified (or there were no marks after all — anyStepMarked already
-      // rules that out here) — recorded at THIS call site, before
-      // applyRequestedToolsGrant is ever reached, which is why the reason
-      // vocabulary here ("no_qualifying_marks"/"no_steps_marked") is disjoint
-      // from that function's own ("not_dispatcher_excluded" etc.): a name that
-      // never entered the grant function was never evaluated against it.
-      const preGrantDropped: { name: string; reason: string; source: "plan_marks" }[] = [];
-      if (anyStepMarked) {
-        const marksSignal = deriveTaskRequestFromPlanMarks(input.executionPlan?.steps);
-        if (marksSignal.taskRequested) {
-          if (!sourceByName.has("Task")) sourceByName.set("Task", "plan_marks");
-          if (!combined.includes("Task")) combined.push("Task");
-        } else {
-          preGrantDropped.push({
-            name: "Task",
-            reason: marksSignal.reason ?? "no_qualifying_marks",
-            source: "plan_marks",
-          });
-        }
-      }
-
+    if (explicitRequested.length > 0) {
       // Reports the array as it will actually reach the provider, not the
       // filter's own resolution — the two diverge for "Task" specifically at
       // simple/medium tier, where taskBlockedByBudget (computed above, hoisted
@@ -2482,73 +2460,52 @@ async function runAgentLoopScoped(input: AgentLoopInput, stats: LoopRunStats): P
       const asSentToProvider = (tools: ReturnType<typeof resolveToolList>) =>
         tools.filter((t) => !(taskBlockedByBudget && t.name === "Task"));
 
-      if (combined.length > 0) {
-        const preGrantFilter = effectiveFilter;
-        const preGrantToolCount = asSentToProvider(resolveToolList(preGrantFilter)).length;
-        const grantResult = applyRequestedToolsGrant(effectiveFilter, combined, _planGrantApplied);
-        effectiveFilter = grantResult.filter;
-        _planGrantApplied = true;
+      const preGrantFilter = effectiveFilter;
+      const preGrantToolCount = asSentToProvider(resolveToolList(preGrantFilter)).length;
+      const grantResult = applyRequestedToolsGrant(effectiveFilter, explicitRequested, _planGrantApplied);
+      effectiveFilter = grantResult.filter;
+      _planGrantApplied = true;
 
-        const postGrantTools = resolveToolList(effectiveFilter);
-        // Never-exceed-complex-tier invariant: a grant may only narrow the gap
-        // to the full toolset, never exceed it. Mathematically guaranteed by
-        // applyRequestedToolsGrant only re-admitting names the filter itself
-        // already withheld by name — checked here as defensive insurance at a
-        // layer whose ceiling (up to 15 names) is large enough that a silent
-        // violation would be expensive to miss, mirroring this function's own
-        // zero-tools throw a few lines below rather than tolerating an
-        // impossible resolved state. Checked against the FILTER's own
-        // resolution, deliberately not asSentToProvider's narrower count —
-        // this invariant is about applyRequestedToolsGrant never manufacturing
-        // a name the registry doesn't have, which is a property of the filter
-        // step, not of the separate budget gate that runs after it.
-        const fullUniverseSize = resolveToolList(undefined).length;
-        if (postGrantTools.length > fullUniverseSize) {
-          throw new Error(
-            `[zone] applyRequestedToolsGrant resolved to ${postGrantTools.length} tools, exceeding the full registry (${fullUniverseSize}) — aborting.`
-          );
-        }
-
-        const postGrantAsSent = asSentToProvider(postGrantTools);
-        // Cost, recoverable from the sink alone (item 167 addition 2): the
-        // size of the change, in characters of tool-description JSON actually
-        // added to the request the provider sees — zero for a granted name the
-        // budget gate strips back out, since it never reaches that request.
-        const toolDescriptionCharsAdded = grantResult.grantedNames.reduce((sum, name) => {
-          const tool = postGrantAsSent.find((t) => t.name === name);
-          return sum + (tool ? JSON.stringify(tool.definition).length : 0);
-        }, 0);
-
-        emitRequestedToolsGranted({
-          runId: input.runId ?? null,
-          iter: 0,
-          requested: combined.map((name) => ({ name, source: sourceByName.get(name) ?? "explicit" })),
-          granted: grantResult.grantedNames,
-          dropped: [
-            ...grantResult.dropped.map((d) => ({ ...d, source: sourceByName.get(d.name) ?? "explicit" as const })),
-            ...preGrantDropped,
-          ],
-          toolArrayLengthBefore: preGrantToolCount,
-          toolArrayLengthAfter: postGrantAsSent.length,
-          toolDescriptionCharsAdded,
-        });
-      } else {
-        // combined.length === 0 here means: no explicit request, and marks
-        // were present but refused by the conformance rule. Nothing to grant,
-        // but the refusal must still be recorded — this is the discard a
-        // read-only pass found nothing observing before this marker existed.
-        const currentToolCount = asSentToProvider(resolveToolList(effectiveFilter)).length;
-        emitRequestedToolsGranted({
-          runId: input.runId ?? null,
-          iter: 0,
-          requested: [],
-          granted: [],
-          dropped: preGrantDropped,
-          toolArrayLengthBefore: currentToolCount,
-          toolArrayLengthAfter: currentToolCount,
-          toolDescriptionCharsAdded: 0,
-        });
+      const postGrantTools = resolveToolList(effectiveFilter);
+      // Never-exceed-complex-tier invariant: a grant may only narrow the gap
+      // to the full toolset, never exceed it. Mathematically guaranteed by
+      // applyRequestedToolsGrant only re-admitting names the filter itself
+      // already withheld by name — checked here as defensive insurance at a
+      // layer whose ceiling (up to 15 names) is large enough that a silent
+      // violation would be expensive to miss, mirroring this function's own
+      // zero-tools throw a few lines below rather than tolerating an
+      // impossible resolved state. Checked against the FILTER's own
+      // resolution, deliberately not asSentToProvider's narrower count —
+      // this invariant is about applyRequestedToolsGrant never manufacturing
+      // a name the registry doesn't have, which is a property of the filter
+      // step, not of the separate budget gate that runs after it.
+      const fullUniverseSize = resolveToolList(undefined).length;
+      if (postGrantTools.length > fullUniverseSize) {
+        throw new Error(
+          `[zone] applyRequestedToolsGrant resolved to ${postGrantTools.length} tools, exceeding the full registry (${fullUniverseSize}) — aborting.`
+        );
       }
+
+      const postGrantAsSent = asSentToProvider(postGrantTools);
+      // Cost, recoverable from the sink alone (item 167 addition 2): the
+      // size of the change, in characters of tool-description JSON actually
+      // added to the request the provider sees — zero for a granted name the
+      // budget gate strips back out, since it never reaches that request.
+      const toolDescriptionCharsAdded = grantResult.grantedNames.reduce((sum, name) => {
+        const tool = postGrantAsSent.find((t) => t.name === name);
+        return sum + (tool ? JSON.stringify(tool.definition).length : 0);
+      }, 0);
+
+      emitRequestedToolsGranted({
+        runId: input.runId ?? null,
+        iter: 0,
+        requested: explicitRequested.map((name) => ({ name, source: "explicit" as const })),
+        granted: grantResult.grantedNames,
+        dropped: grantResult.dropped.map((d) => ({ ...d, source: "explicit" as const })),
+        toolArrayLengthBefore: preGrantToolCount,
+        toolArrayLengthAfter: postGrantAsSent.length,
+        toolDescriptionCharsAdded,
+      });
     }
   }
 

@@ -18,6 +18,18 @@
  * separate, pre-existing, always-on gate one step later. "Task granted, 5→6
  * in the array" was this pass's own first design for a scenario that is
  * architecturally impossible — corrected here, not silently absorbed.
+ *
+ * RETIREMENT (later pass): the plan-marks channel (deriveTaskRequestFromPlanMarks)
+ * was removed — it could only ever request "Task", and Task is architecturally
+ * ungrantable below complex tier regardless of channel (see the finding above).
+ * Three tests that originally exercised marks were rewritten onto the explicit
+ * requestedTools channel instead, keeping every assertion — each pins a property
+ * of the grant mechanism, not of the channel that triggered it. One test whose
+ * whole point was two channels merging into one grant was deleted, since there
+ * is now only one channel. `markedStep`/`planWithMarkedSteps` survive with a
+ * single remaining caller: the "retirement" describe block's own pin, proving
+ * marks are inert by construction (no grant, no marker) now that nothing reads
+ * them.
  */
 import fs from "node:fs";
 import os from "node:os";
@@ -245,14 +257,14 @@ describe("item 167 — byte-identity and ordering on the ARRAY sent to the provi
 });
 
 describe("item 167 — the Task/subagent-budget-gate interaction (finding, not a defect)", () => {
-  it("qualifying plan mark grants Task at the FILTER level, but Task never reaches the array at simple tier — a separate, pre-existing, always-on gate", async () => {
+  it("an explicit Task request grants Task at the FILTER level, but Task never reaches the array at simple tier — a separate, pre-existing, always-on gate", async () => {
     const cap = captureToolsAndSystem();
     await runAgentLoop({
       task: "fix the failing test",
       repoPath,
       runId: "run-tf-simple-task-budget-gated",
       taskClassification: makeClassification({ archetype: "targeted_fix", tier: "simple" }),
-      executionPlan: planWithMarkedSteps([markedStep(["a.ts", "b.ts", "c.ts", "d.ts"])]),
+      executionPlan: planWithRequestedTools(["Task"]),
     });
 
     // Filter-level: the grant genuinely fired and "succeeded" — this is the
@@ -323,13 +335,13 @@ describe("item 167 — grant scenarios migrated from runLlmPatchFlow.readOnlySup
       repoPath,
       runId: "run-tf-complex-empty",
       taskClassification: makeClassification({ archetype: "targeted_fix", tier: "complex" }),
-      executionPlan: planWithMarkedSteps([markedStep(["a.ts", "b.ts", "c.ts", "d.ts"])]),
+      executionPlan: planWithRequestedTools(["Task"]),
     });
     const call = grantLogs()[0];
     expect(call).toBeDefined();
     const payload = payloadOf(call!);
     expect(payload.granted).toEqual([]);
-    expect(payload.dropped).toEqual([{ name: "Task", reason: "not_dispatcher_excluded", source: "plan_marks" }]);
+    expect(payload.dropped).toEqual([{ name: "Task", reason: "not_dispatcher_excluded", source: "explicit" }]);
     expect(payload.toolArrayLengthBefore).toBe(payload.toolArrayLengthAfter); // unchanged
   });
 
@@ -360,21 +372,6 @@ describe("item 167 — grant scenarios migrated from runLlmPatchFlow.readOnlySup
     const payload = payloadOf(grantLogs()[0]!);
     expect((payload.granted as string[]).length).toBe(3);
     expect(payload.dropped).toContainEqual({ name: "fetch_url", reason: "over_cap_truncated", source: "explicit" });
-  });
-
-  it("both channels naming Task → exactly one grant, one telemetry line, flag transitions once", async () => {
-    await runAgentLoop({
-      task: "fix the failing test",
-      repoPath,
-      runId: "run-both-channels",
-      taskClassification: makeClassification({ archetype: "targeted_fix", tier: "simple" }),
-      executionPlan: planWithMarkedSteps([markedStep(["a.ts", "b.ts", "c.ts"])], ["Task"]),
-    });
-    const calls = grantLogs();
-    expect(calls.length).toBe(1); // one grant, not two, regardless of Task's own array fate
-    const payload = payloadOf(calls[0]!);
-    expect(payload.granted).toEqual(["Task"]);
-    expect(payload.requested).toEqual([{ name: "Task", source: "explicit" }]);
   });
 });
 
@@ -415,7 +412,7 @@ describe("item 167 — mutation 4's own test: a grant and a later forced_tier_bl
       runId: "run-grant-then-promotion",
       forceTier: "simple",
       taskClassification: makeClassification({ archetype: "targeted_fix", tier: "simple" }),
-      executionPlan: planWithMarkedSteps([markedStep(["a.ts", "b.ts", "c.ts"])]),
+      executionPlan: planWithRequestedTools(["Task"]),
     });
 
     // The plan-derived grant fires (filter-level — Task's array fate is
@@ -429,5 +426,18 @@ describe("item 167 — mutation 4's own test: a grant and a later forced_tier_bl
     const promoPayload = payloadOf(promo[0]!);
     expect(promoPayload.trigger).toBe("forced_tier_blocking");
     expect(promoPayload.fromArchetype).toBe("targeted_fix");
+  });
+});
+
+describe("retirement — the plan-marks channel is inert by construction", () => {
+  it("a plan carrying a qualifying subagentEligible mark and NO requestedTools → no grant, no marker", async () => {
+    await runAgentLoop({
+      task: "fix the failing test",
+      repoPath,
+      runId: "run-marks-inert",
+      taskClassification: makeClassification({ archetype: "targeted_fix", tier: "simple" }),
+      executionPlan: planWithMarkedSteps([markedStep(["a.ts", "b.ts", "c.ts", "d.ts"])]),
+    });
+    expect(grantLogs().length).toBe(0);
   });
 });
