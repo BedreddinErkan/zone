@@ -12954,7 +12954,7 @@ markers are emitted from the token-breakdown module. See item 163 for the instru
 decision whose pricing surfaced this, and the twenty-ninth pattern for the sweep disagreement recorded
 above.
 
-## 166. The path for an agent to request a tool it was not offered is three-quarters built, and the missing quarter costs more than the run it would fire inside
+## 166. The path for an agent to request a tool it was not offered is built, routed to the phase boundary rather than mid-loop — and the ceiling it lands on is empty for every archetype that carries substantial work
 
 **What it is.** An agent under a restrictive tool set cannot ask for a tool it lacks. Establishing what
 building that would take found most of it already shipped. The path has four stages — the agent emits
@@ -12986,8 +12986,19 @@ properly rather than as a mere precedent.** The scope-change tool is a **working
 path**: it assembles the agent's stated mismatch type, its reason and its revised plan summary, marks
 already-modified files immutable and already-completed steps do-not-redo, and calls the replanner under
 its own trigger name; the agent gets the revised plan back as its tool reply. **It is env-gated off on the
-patch path** — the flag must equal exactly one and defaults empty — while in investigation mode it
-validates and records with no gate at all. **A carried figure of eleven wiring sites is wrong and is
+patch path** — the flag must equal exactly one and defaults empty — and that half stands as written, true
+when written and true now. **The clause that followed it was false and is rewritten in place.** It said
+the investigation-mode branch runs ungated — described here rather than reproduced, so a later sweep for
+the defect does not match the sentence describing it, which is item 126's mention-and-use distinction
+applied to a refutation. The handler does carry no gate, and that is true and is not the point: **the
+branch is unreachable**, because neither of the two
+callers setting investigation mode ever offers the tool. The plan-investigation wrapper allows five tool
+names and this is not among them; the investigation flow allows `fs.read` alone, which every meta-tool
+declaring `agent.control` fails by declaration. Resolved through the real registry against both callers'
+own filters, each offers zero of the four tools declaring that capability — the three request-carrying
+ones and the todo writer alike. So the ungated branch cannot execute, and the patch path's own no-op
+reply, which tells the agent the tool is only active in investigation mode, names a mode that never
+offers it. **A carried figure of eleven wiring sites is wrong and is
 corrected here: ten non-test files and twenty-five occurrences, twenty-two files including tests**, both
 instruments reconciling once the pathspec matches. **It has no module of its own** — a test file bears its
 name, but the implementation lives entirely inside the agent loop, as the executor's own comment states.
@@ -13025,25 +13036,217 @@ whether honouring a request pays for itself; how to stop it becoming an uncondit
 full toolset; and the cold-start cost, which this entry prices without resolving. **This entry does not
 propose building it.** The record is the point; the decision is not this entry's.
 
-**Bucket: Neither**, two-way check, **with Actionable now considered and declined on the bar rather than
-on how close the work looks.** For Actionable now: a fix shape is nameable, and three of four stages
-exist. Against, and decisive: that bucket requires nothing new to be learned first, and four things are —
-the three unprovens above, plus the design question this entry's own pricing opens, which is whether a
-mid-loop trigger is the right shape at all. For Neither: a structural fact recorded with no fix proposed,
-the shape items 87, 107, 154, 155, 158, 160, 163, 164 and 165 sit under. Against Blocked on data: closing
-needs no observation that does not exist, since what is recorded is what ships today.
+**What shipped, and the boundary on this entry's own refusal to propose it.** That refusal was true when
+written and is left standing as the state of this entry at the time. The decision went the other way in a
+later pass, and stage one is now built — routed to the phase boundary this entry's own pricing pointed at
+rather than mid-loop, so it pays nothing the dispatch was not already paying. **Four pieces, and none of
+them is a new tool.** The plan artefact carries the request: the execution plan gains an optional
+`requestedTools` list of names, so the investigation phase asks by emitting the plan it already emits, and
+no interception site changes. The grant runs once at the execution-phase capability filter's own
+construction site, before the loop that filter configures is entered, and is bounded to that filter's own
+`excludeToolNames` — a name the dispatcher never excluded by name cannot be granted, which is what keeps a
+request from reaching anything withheld by capability class instead. The tool-absence notice gains a
+redirection offered in investigation mode only, so the block that already names every withheld tool now
+says where to put a request, and every execution-mode run renders it byte-identical to before. And
+`[zone-requested-tools-granted]` records each grant's requested, granted and dropped names against the run
+identifier, which the usage log carries under the same key name and value shape.
+
+**The ceiling that grant lands on, measured against the real registry rather than reasoned from the
+dispatcher's general logic — and it is this pass's finding.** The notice names fifteen withheld tools to
+the investigation phase, because that phase's own offered set is a fixed five regardless of what the
+execution phase will later be. Against that vocabulary, the grantable set per archetype is: **two** for
+`simple_add`, the subagent-dispatch and scope-revision tools; **five** for the question archetype and five
+again for the investigation pipeline reached by the answer-only override, those two plus three background
+tools already documented as inert without the background runner, which stays denied by capability; and
+**zero** for targeted-fix, refactor, debug and complex-multi-file alike. The two write-capable archetypes
+that carry substantial multi-step work get nothing, and not by accident: both set subagent dispatch and
+scope revision to true already, so their dispatcher filter is undefined and there is nothing excluded by
+name for a request to lift. Debug and complex-multi-file have no pipeline config at all, which reaches the
+same undefined by a different route. **So the channel ships and, on the archetypes where a request would
+most plausibly be worth honouring, no request can be.** The reading a first draft of this work reached —
+that targeted-fix and refactor were the realistic targets — was inferred from the general shape of the
+filter builder without reading what those two pipelines set, and it was wrong; the numbers here come from
+resolving each pipeline's own literal against the registry.
+
+**What a grant overturns, named rather than shipped quietly.** The two names that matter are exactly the
+two capabilities the simple-add pipeline deliberately disables. So a plan can now reverse an explicit
+dispatcher policy decision. **That is the intent of this entry's own subject and not a side effect, and it
+is a real escalation rather than a cosmetic one:** granting the subagent tool turns on fresh-context worker
+dispatch for an archetype configured without it, which is a spend multiplier rather than a permission
+nicety, since every dispatched worker is a further model call against a cold context.
+`[zone-requested-tools-granted]` is what makes that measurable later, joining to the per-run cost record
+on the identifier the two share —
+though item 165's finding applies to that join unchanged, since an identifier names a dispatch rather than
+a loop.
+
+**Bucket: Blocked on data**, moved from Neither, and decided by this entry's own stated closing condition
+rather than by the fact that code shipped. Four things were named as needing to be learned before it
+closes. Three are observations that do not exist yet — whether a model asks accurately, whether honouring
+a request pays for itself, and the cold-start cost — and item 170 registers the first of those with its
+instrument named. The fourth, how to stop a request becoming an unconditional escalation, is the one the
+shipped work answers, and it answers it by construction rather than by measurement: a cap of three names
+and a ceiling that is the dispatcher's own name-level exclusions. **Against Neither, which is what this
+entry carried until now:** that bucket is a structural fact recorded with no fix proposed, and a fix has
+now been proposed and built, so the description stopped fitting. **Against Actionable now:** it requires
+nothing new to be learned first, and three things still are. **Against Closed:** none of the three has been
+measured, and the entry's own bar was never that the code exist.
 
 **Where the code lives:** the interception block, the three gates and the sole recompute are all in the
 agent loop; the scope-change handler is two branches of that same block with no module of its own; the
-ask-user park is the question-approvals registry. See item 99 for the evidence bearing on stage one, item
-161 for what the first breakpoint caches, item 163 for the instruments that priced this, and item 165 for
-the phase boundary that already pays the cost once.
+ask-user park is the question-approvals registry. **What shipped sits in four more places:** the plan
+field and its schema entry are in the execution-plan module, whose two manual result reconstructions each
+needed the field added by hand or it would have validated and then been dropped before any caller saw it;
+the grant function is beside `buildDispatcherCapabilityFilter` in the archetype dispatcher, and its call
+site is the patch-flow driver where the execution filter is assembled; the redirection is a conditional in
+the tool-absence notice, wired from the agent loop's own investigation-mode flag; the marker is in the loop
+telemetry module. See item 99 for the evidence bearing on stage one, item 161 for what the first breakpoint
+caches, item 163 for the instruments that priced this, item 165 for the phase boundary that already pays
+the cost once, and items 167 through 170 for what the shipped version leaves open.
+
+## 167. The grant's ceiling is empty at the layer it was built into, and one layer down is where a request could bind
+
+**What it is.** Item 166's grant runs where the execution capability filter is assembled and is bounded to
+that filter's own name-level exclusions. Measured against every pipeline, that ceiling is two names on
+`simple_add`, five on the two read-only shapes, and **zero on targeted-fix, refactor, debug and
+complex-multi-file** — the four archetypes that carry substantial multi-step work. This is not a tuning
+problem. The two write-capable pipelines already allow subagent dispatch and scope revision, so their
+filter is undefined and nothing is excluded by name for a request to lift; the other two have no pipeline
+config at all and reach undefined by a different route. **A request routed through this layer cannot be
+honoured on any archetype where honouring it would plausibly matter.**
+
+**Where the ceiling is not empty, and why that is the destination.** One layer down, the agent loop
+resolves its own filter from a five-arm decision into a mutable local, and the tier-derived subset is
+visible at that point — which the dispatch layer never sees, because tier restriction is applied inside the
+loop rather than handed to it. A run classified simple carries five tools whatever its archetype, and that
+is a real restriction a request could lift.
+
+**The two costs, both established rather than estimated.** Either the patch-flow driver duplicates the
+loop's precedence chain so it can compute what the loop will actually offer — two implementations of one
+decision, agreeing until one of them moves, which is drift of the kind this document already records — or
+the grant moves into the loop, which is the larger change and puts a plan-derived input into a function
+that currently receives its filter as a parameter. **This entry names the second**, on the ground that the
+first duplicates a decision rather than reusing one.
+
+**The reuse candidate at that layer already exists.** The forced-tier promotion holds a mutable
+archetype-promotion marker initialised to null and consulted as a one-shot, sitting beside the sole
+recompute of the offered list, the allowed-name set and the filter. A grant arriving there would reuse both
+the guard and the recompute rather than adding either. **Item 166's pricing applies unchanged and
+constrains how:** a mid-loop recompute rewrites the tools array and invalidates the whole cached prefix,
+costing more than the median run it fires inside — so the grant must still be applied before the loop's
+first call rather than during it. The destination is the layer, not the middle of the loop.
+
+**Bucket: Actionable now.** The fix is specified — apply the grant against the loop's own resolved filter,
+before its first call, reusing the one-shot guard that is already there — and nothing new needs to be
+learned first: the ceiling is measured, both costs are named, and the cache constraint is priced. **Against
+Neither:** a fix is proposed rather than a fact recorded. **Against Blocked on data:** choosing between the
+two costs is a design preference, not a missing observation.
+
+**Where the code lives:** the current grant sits beside the dispatcher's filter builder with its call site
+in the patch-flow driver; the destination is the agent loop's own filter local and the forced-tier
+promotion block that already recomputes beside it. See item 166 for what shipped, item 110 for what tier
+still reaches, and item 165 for the identifier caveat on any measurement of this.
+
+## 168. The tool-request redirection names fifteen tools, at most two of which can ever be granted, and narrowing it needs a classification that does not exist yet at that point
+
+**What it is.** The tool-absence notice, in investigation mode, names every tool withheld from that phase
+and now tells the model to request what it needs. **The investigation phase's offered set is a fixed five,
+so the notice names fifteen** — a property of that phase alone, identical on every run. What can actually
+be granted is a property of the *execution* phase's archetype, and is at most two meaningful names, on one
+archetype. **So the redirection invites a request that will usually be dropped**, and the drop is recorded
+against the ceiling rather than against the model: the reason is that the dispatcher never excluded the
+name, not that the model asked wrongly.
+
+**Why it is not simply narrowed, established by reading rather than assumed.** Narrowing the list to what
+is grantable requires the archetype at the moment the investigation prompt is assembled. The classifier has
+**exactly one production call site**, in the patch-flow driver, and it runs after the investigation phase
+has already completed; the investigation module's own input interface carries ten fields and no
+classification among them. The gate deciding whether to investigate at all uses a separate lexical test on
+the task's lead verb, never the classifier. **The prerequisite is therefore a reordering** — classification
+before investigation — rather than a change to the notice.
+
+**What the reordering would cost, named and not priced.** Classification is a model call, and moving it
+earlier moves that cost onto every run that investigates, including runs that would not otherwise have
+reached it. Whether a narrower list is worth that is the open question, and this entry does not answer it.
+
+**Bucket: Neither.** A structural fact recorded with its prerequisite named and no fix proposed — the shape
+items 87, 107, 154, 155, 158, 160, 163, 164 and 165 sit under. **Against Actionable now:** the fix is a
+reordering whose cost is unpriced, so something does need to be learned first. **Against Blocked on data:**
+nothing here waits on an observation; both facts were established by reading source.
+
+**Where the code lives:** the notice and its investigation-only branch are in the tool-absence module; the
+classifier's sole call site is in the patch-flow driver; the investigation module's input interface sits
+beside its prompt builder. See item 166 for the channel and item 88 for what the notice already says.
+
+## 169. Prompt-assembly coverage splits between the helper and the assembled output, and a mutation found the split that no coverage report would
+
+**What it is.** A mutation hardcoding the notice's investigation-mode flag to always-on survived every
+existing test. Not because the notice is untested — it carries byte-exact tests — but because those tests
+call the notice builder directly with explicit arguments, exercising the helper and never the decision that
+supplies its argument. **The wiring between the two had no test at all**, and only a mutation could show
+it: a helper's tests pass identically whether its caller passes the right value or a constant.
+
+**The population, measured rather than asserted, and it corrects the framing this entry was opened
+with.** The claim that no test captured a real assembled system prompt from a live loop call before this
+one is **false**. Thirteen test files call the system-prompt assembler directly; **five** call the loop and
+capture the system message it actually sends, and four of the five predate the new one, the earliest added
+2026-07-30. Live capture is an established technique in this repository rather than a new one — what was
+missing was its application to this particular surface. **The general question is what this entry opens:**
+which prompt-assembly decisions are covered only at helper level, where a wiring mutation would survive
+exactly as this one did.
+
+**Why the answer is not readable off the two counts.** A file appearing in both lists says nothing about
+which of its own assertions is which, and a surface covered by a live capture in one test may still have a
+conditional supplied by an untested caller. The audit is per decision rather than per file: for each input
+the assembler takes from a caller, does any test run the caller and read the assembled output. That is a
+bounded enumeration against a fixed assembler signature, which is what makes it actionable.
+
+**Bucket: Actionable now.** The work is specified — enumerate the assembler's caller-supplied inputs and
+ask of each whether a live-capture test reads the result — and nothing needs to be learned first, since
+both instruments and both populations are established here. **Against Neither:** work is specified, not
+merely a fact recorded. **Against Blocked on data:** the enumeration reads source and existing tests, and
+needs no new observation.
+
+**Where the code lives:** the assembler and its caller are in the agent loop; the notice builder is its own
+module; the wiring test added for this sits beside the loop's other prompt tests. See item 166 for the
+mutation that found it, and the twenty-fourth pattern for why a surviving mutation is the only thing that
+reports this class.
+
+## 170. Whether a model asks for a tool when told it may, and whether it asks for one that can be granted — registered before the first run
+
+**What it is.** The redirection ships and the grant ships, and **no run has yet produced a request**. Two
+quantities are unmeasured, and are registered here before any data exists so that a later reading cannot be
+reconciled to a number chosen afterwards. First, whether an investigation model given the redirection
+populates the plan field at all, and at what rate. Second, of the names it chooses, what share falls inside
+the grantable set rather than being dropped as never dispatcher-excluded.
+
+**The instrument, named because a registration without one is a wish.** Every grant attempt writes
+`[zone-requested-tools-granted]`, carrying the requested, granted and dropped names with their drop
+reasons, keyed on the run identifier. The first quantity is measurable from that marker's presence or
+absence across runs reaching the plan boundary; the second is a ratio inside its payload. No new instrument
+is needed, and the marker joins to the per-run cost record on the identifier the two share — subject to
+item 165's finding that an identifier names a dispatch rather than a loop, which for this join is the
+useful direction, since a grant is a property of the dispatch.
+
+**What would refute the shipped design rather than adjust a number.** A populated field on most runs with a
+grantable share near zero says item 168's vocabulary mismatch is the binding constraint. A field left empty
+on most runs says the redirection is not read as an invitation, which is a prompt finding rather than a
+ceiling finding. **The two failures point at different fixes**, which is why they are registered as two
+quantities rather than one rate.
+
+**Bucket: Blocked on data.** Closing requires an observation that does not exist yet, and the instrument
+that would produce it is already emitting. **Against Actionable now:** no fix is specified, because which
+fix applies depends on which quantity comes back low. **Against Neither:** this is a registered prediction
+awaiting data rather than a structural fact.
+
+**Where the code lives:** the marker is in the loop telemetry module; the drop reasons are assigned in the
+grant function beside the dispatcher's filter builder. See item 166 for the channel, item 167 for the
+ceiling that bounds the second quantity, and item 168 for the vocabulary that bounds the first.
 
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 166 to find out which ones still need something. No index of
+reader the trouble of reading all 170 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -13052,15 +13255,15 @@ first.
 **Closed** (63): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 111, 117, 120, 121, 126, 128, 134, 135, 137, 144, 149, 150, 153, 156, 161, 162
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (8): 108, 113, 116, 129, 130, 138, 142, 148
+first (10): 108, 113, 116, 129, 130, 138, 142, 148, 167, 169
 
-**Blocked on data** — closing requires an observation that doesn't exist yet (11): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143, 157
+**Blocked on data** — closing requires an observation that doesn't exist yet (13): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143, 157, 166, 170
 
 **Neither — a structural fact recorded, with no fix proposed** (84): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152, 154, 155, 158,
-159, 160, 163, 164, 165, 166
+159, 160, 163, 164, 165, 168
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
@@ -15221,3 +15424,79 @@ on, and does not refresh, was stale — here or in another instrument. The visib
 residue to compare a second sighting against: a stand-in that announces itself belongs to the twenty-third,
 and one that is indistinguishable from the real artefact without checking a timestamp is what this candidate
 would be about.
+
+## A thirtieth pattern: a field whose presence re-scopes its siblings, so a local addition is a global change
+
+**The instance.** A tool-request grant had to widen an execution-phase capability filter by two names. The
+resolver behind that filter takes four fields — two name-level, two capability-level — under a documented
+precedence putting exclusions ahead of allowances. The obvious implementation clones the filter and unions
+the granted names into its name-level allow field. Run against the archetype the grant actually targets,
+that implementation **collapsed the offered set from eighteen tools to one**. The allow field is not
+additive: its mere presence flips the resolver from "everything not excluded" to "only what is named," so
+writing two names into a filter that carried none does not add two tools, it removes sixteen.
+
+**Why reading the resolver correctly was not enough.** The precedence rule was read right and is stated
+right, and nothing in it is violated by the buggy version. What the rule cannot say, because a precedence
+ordering is not the kind of statement that can say it, is that one of the fields it orders is also a mode
+switch for the others. **The defect lives in the interaction between a field's presence and its siblings'
+scope**, and a precedence list describes only which field wins when two disagree. A reader can hold the
+whole rule in mind, apply it correctly to the field being changed, and still be wrong about every field
+being left alone.
+
+**What separates it from an ordinary mistake in a filter.** The change was local by construction — one
+field, two names, in a cloned object — and its effect was global. Every tool that had been resolving
+through the no-allow-filter path silently stopped, and not one of them is named anywhere in the change.
+**No reading of the diff shows this**, because the sixteen tools that disappear appear neither in the old
+filter nor in the new one.
+
+**Checked against the fourth, which is nearest and is a different thing.** That pattern is a default on an
+injected seam standing in for a missing value: the failure is a value quietly supplied. Here nothing
+defaults and nothing is supplied — a field is written exactly as intended, and its being written at all is
+the event. **Checked against the fourteenth too**, which is a test deriving its own scope and narrowing it
+silently: that is a measurement narrowing, this is the subject narrowing, and the fourteenth's corrective
+speaks to what a test pins rather than to a production field.
+
+**Novel. Recorded as the thirtieth pattern.**
+
+**The rule: before adding a field to a filter, resolve the filter both ways against the real resolver and
+diff the two outputs, rather than checking that the intended change appears.** The intended change did
+appear — the granted name was offered under both the correct and the buggy version. What separated them was
+everything else. **The assertion that catches this is a superset invariant**: the post-change resolved set
+must contain the pre-change set entire and differ only by the names intended, asserted on the resolver's
+output rather than on the filter object, since the filter object is exactly where the two versions look
+equally reasonable.
+
+**Where it stands:** the shipped grant conditions its allow-field write on whether an allow-filter already
+existed, so the field is introduced only where introducing it cannot re-scope anything, and two superset
+tests pin both shapes. A mutation removing that condition kills one or the other in each direction. Item
+166 records the mechanism.
+
+## A candidate pattern considered this pass and not promoted: a mutation surviving because the test measured the wrong surface
+
+**The instance.** Seven mutations were designed against one pass's work and five killed their predicted
+test. The other two survived, and neither survived because the code was right. One hardcoded a caller's
+mode flag to a constant and survived because every test of the affected text calls the text builder
+directly rather than through the caller. The other made a conditional call unconditional and survived
+because the assertion compared the produced value for content, and the content is identical either way —
+what differed was a marker firing that nothing was watching. Both were real coverage gaps, both were
+closed, and both were found only by the mutation.
+
+**Compared against the twenty-fourth, which already carries this exactly.** That pattern's own rule is that
+a mutation failing to kill a test is not evidence the code is correct and can equally be evidence the test
+was never checking that code — with two recorded instances, an assertion scoped to a whole prompt rather
+than the region a fix touched, and an assertion checking a string's type and length rather than its
+content. **The distinction proposed for promotion was that these two survived because the test measured the
+wrong surface rather than the wrong region.** It does not hold. An assertion reading a builder's direct
+output instead of the assembled prompt is scoped to the wrong region of the same pipeline, and an assertion
+reading content while the change is a side effect is the second recorded instance's shape carrying a
+different payload. **Same mechanism, third and fourth instances.**
+
+**Not promoted.** Two further instances of a pattern that already has two is population confirming it
+rather than a new mechanism, and the twenty-fourth's rule needs no amendment to cover them — read what the
+surviving assertion actually matches against, which is what happened here and is what produced both fixes.
+
+**The condition under which it reopens.** A surviving mutation whose cause is neither a mis-scoped
+assertion nor a broken mutation: a test reading the right surface at the right scope that still cannot
+discriminate, because two production paths collapse to one observable. That would be a fact about the
+code's observability rather than about the test's aim, and the twenty-fourth's corrective would not reach
+it.
