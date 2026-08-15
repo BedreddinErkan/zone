@@ -12541,20 +12541,23 @@ parameter conversion; the fixed literal that anticipated the concern is in the c
 item 161 for the boundary this entry's cost reasoning depends on, item 151 for the classification that came
 closest, and item 147 for the pattern this line's per-machine variation supplied a third instance of.
 
-## 161. Closed — the first cache breakpoint covers tools alone, settled from artefacts already on disk; twelve places state otherwise and the correction is owed elsewhere
+## 161. Closed — the first cache breakpoint covers tools alone, settled from artefacts already on disk; the places stating otherwise are corrected elsewhere
 
 **What it is, and it is separable from item 160 rather than a detail inside it.** That entry is about a
 path in the prompt. This is about a documented cache boundary, and it would matter identically if the
 location line did not exist — every claim about what survives a prefix bust rests on it. Its evidence, its
 blast radius and the observation that would settle it are all its own.
 
-**The claim, counted precisely rather than estimated.** Twelve tracked lines across ten files state that the
-last-tool breakpoint covers system plus tools: the project guidance file, three design documents, the
-adapter's own comment, the loop's cache-probe protocol, the cache-stability bench, the compactor, and two
-test files. That count comes from reading all fifteen tracked mentions of the phrase individually and
-classifying each, not from a pattern — **the other three are cache-*eligibility* uses**, which correctly sum
-system and tools against a per-model minimum and are unaffected by anything here. Eleven further lines sit
-in untracked audit files.
+**The claim, counted precisely rather than estimated — and the count was a subset, corrected in item 162.**
+This entry recorded twelve tracked lines across ten files stating that the last-tool breakpoint covers
+system plus tools, from reading all fifteen tracked mentions of one phrase individually and classifying
+each. **That figure was a lower bound, not a total.** Fifteen was every hit of a single bigram; the claim is
+also stated as a spaced variant, as a verb phrase naming a bust with no noun in common, and as a bare
+ordinal reference, none of which that pattern reaches. The union of every phrasing gives thirty-five lines
+and twenty-nine assertions — item 162 carries the re-derivation and the criterion, and the twenty-ninth
+pattern carries why four successive counts each read as complete. **What survives unchanged:** the three
+cache-eligibility uses, which correctly sum system and tools against a per-model minimum and are unaffected
+by anything here, and the observation that further lines sit in untracked audit files.
 
 **The first evidence against, which is arithmetic — true on re-derivation, and incomplete, so it is
 completed rather than rewritten.** A production run is recorded, in the loop's probe protocol and again as a
@@ -12587,8 +12590,8 @@ is why the conclusion survives; margins of a few percent would not have carried 
 
 **What the strongest counter-evidence turned out to be, reclassified rather than left standing.** The line
 asserting the wire ordering is a comment inside a test whose assertion is only that two prompts differ. It
-restates the proposition under examination rather than observing anything, so it is one of the twelve
-assertions and not independent evidence. The ordering is a property of the provider's interface, not of this
+restates the proposition under examination rather than observing anything, so it is one of the asserting
+sites and not independent evidence. The ordering is a property of the provider's interface, not of this
 repository, and **no reading of this source could have settled it** — which is precisely why the artefacts
 had to.
 
@@ -12616,20 +12619,56 @@ route. The arithmetic reaching its limit was read as the question being unanswer
 exhausted was one instrument. The twenty-eighth pattern records that shape, with this entry as one of its
 two instances.
 
+**A boundary, added later: this entry is true and complete for the scope it declared, and the question it
+deliberately left open is now answered from the same data.** It settled what the first breakpoint covers
+and said nothing about where system content is cached instead — correctly, since that was outside what it
+measured. Joined per run and iteration, the same instruments show the maximum cached read exceeding the
+tools floor by more than the whole system prompt in **thirty-one of thirty-one runs, none contradicting**.
+A cached read is a prefix, so content above the tools floor is cached; the adapter carries exactly two
+marker sites, one on the last tool and one on the system block only when no tools are present; so the only
+span that can hold system is the second breakpoint's. **System is cached, inside breakpoint two.** Recorded
+here so a reader does not take this entry's silence for an open question. Item 164 carries what that means
+for the decisions built on the older reading.
+
 **Where the code lives:** the breakpoint placement and its comment are in the Anthropic adapter's parameter
 conversion; the measured floor and its analysis protocol are in the agent loop's cache-probe block; the
 artefacts that settled it are item 163's. See item 160 for the entry whose cost reasoning surfaced this,
-item 162 for the correction now owed across twelve places, and item 147 for the discipline of naming what a
-figure was measured under, which the floor's own provenance is recorded as lacking in the project guidance
-file that cites it.
+item 162 for the correction, its re-derived site count and the criterion behind it, item 164 for the
+decisions that rested on the refuted premise, and item 147 for the discipline of naming what a figure was
+measured under, which the floor's own provenance is recorded as lacking in the project guidance file that
+cites it.
 
-## 162. Twelve tracked assertions name a cache boundary that measurement has now refuted, and correcting them is specified work nothing has done
+## 162. Closed — the refuted cache boundary is corrected everywhere it was asserted, and this entry's own count and prescription were both wrong
 
-**What it is.** Item 161 settles that the first cache breakpoint covers tools alone. Twelve tracked lines
-across ten files say it covers system plus tools — the project guidance file, three design documents, the
-adapter's own comment, the loop's cache-probe protocol, the cache-stability bench, the compactor, and two
-test files — and a thirteenth sits in an untracked audit that decomposes a run's cached read on the same
+**What it is.** Item 161 settles that the first cache breakpoint covers tools alone. Tracked lines across
+the project guidance file, four design documents, the adapter's own comment, the loop's cache-probe
+protocol, the cache-stability bench, the compactor, the plan formatter and four test files say it covers
+system plus tools, and further lines sit in untracked audits that decompose a run's cached read on the same
 assumption. Every one of them is now known to be wrong.
+
+**The count of twelve across ten files was false and is rewritten, with the criterion stated so a later
+reader re-derives it rather than inherits it.** Taking the union of every phrasing that has turned up —
+the bare bigram, a spaced variant, the verb phrase naming a bust, a bare breakpoint reference, and the
+co-occurrence of a system mention with a caching one — against the tree as it stood before the correction,
+and excluding this document, gives **thirty-five matching lines under both instruments**. Classified by
+hand against a criterion fixed before counting — does the line *assert* that the first breakpoint covers
+system, or system and tools — they split **twenty-nine asserting, three cache-eligibility, three true as
+written**. The correcting pass reworded nineteen directly and covered ten with an adjacent or
+section-level note; every file holding an asserting site now carries at least one correction, and the two
+files carrying none are exactly the two with no asserting site in them.
+
+**The three true-as-written lines are named because leaving them alone was a decision, not an oversight.**
+A slash-commands line whose claim holds because those commands touch neither the system prompt nor the
+tool definitions; the web-search table's own tool-entry row, since the tools array genuinely is the first
+breakpoint; and a helper comment describing marker placement with no system claim attached to it.
+
+**What made four successive undercounts possible, which is the part worth keeping.** This entry said
+twelve. The correcting pass's own establish said fifteen, then twenty-four. This re-derivation says
+twenty-nine. Each figure came from a competent sweep that returned exactly what it was asked for. **The
+claim is stated in wording that shares no common substring** — a bigram, a spaced variant, a verb phrase
+with no noun in common with either, a bare ordinal reference — so no single pattern reaches all of it,
+every pattern returns a subset, and a subset reads as a total. The twenty-ninth pattern records the
+general shape.
 
 **Nothing depends on them beyond documentation, and that was verified rather than inherited.** Under both
 instruments there are zero non-comment occurrences of the boundary claim or its figure anywhere in source
@@ -12640,27 +12679,37 @@ body asserts only marker placement and the eligibility threshold. All thirty-sev
 pass, and none could depend on the claim in any case: it concerns a provider's own behaviour, and no test in
 this repository calls that provider.
 
-**What the correcting pass has to do, stated because nothing is left to learn first.** Change each assertion
-to name tools rather than system and tools. **Leave the three cache-eligibility uses untouched** — summing
-system and tools against a per-model minimum is a different computation, it is correct, and it is unaffected.
-Treat the guidance file's own note that the figure's basis was unrecorded as discharged, by naming the
-measurement that now supplies it. Re-run the four affected test files, which should stay green precisely
-because no assertion reads the claim; a failure there would mean the correction had changed behaviour rather
-than prose.
+**The single correction shape was false and is rewritten.** This entry prescribed one: change each
+assertion to name tools rather than system and tools. **It fit seven of the sites.** For the rest a word
+swap would have left the wrong mechanism standing in different words, and for the compaction cluster it
+would have produced a new and more obviously false claim — a system-content edit cannot invalidate a cache
+entry keyed on an unchanged tools array, so "busts the cached tools prefix" is worse than what it replaces.
+The correcting pass declined the swap on those and left a note beside the original text instead, which was
+the right call and is recorded as such rather than as a deviation from this entry's instruction.
 
-**Why it is not done here.** Twelve edits spanning source comments, a guidance file, design documents and
-test headers is a pass with its own verification and its own blast-radius sweep. A ledger pass that also
-rewrote them would be doing two jobs and checking neither properly.
+**Leave the three cache-eligibility uses untouched — true, and it stands.** Summing system and tools
+against a per-model minimum is a different computation, it is correct, and it is unaffected. Re-verified
+from the function body this pass; all three were left alone.
 
-**Bucket: Actionable now**, two-way check. For: the fix is specified in this entry and nothing new needs
-establishing — the boundary is settled, the sites are enumerated and counted, the exclusions are named, and
-the verification is stated. Against: Neither would require no fix proposed, and one is fully specified;
-Blocked on data would require a missing observation, and none is outstanding.
+**Re-run the affected test files — true, and completed rather than rewritten.** This entry said four. The
+fuller site list reached two further test files, so six ran, a hundred and six tests, all passing
+unmodified. The instruction's own reasoning held exactly: a failure would have meant the correction changed
+behaviour rather than prose, and none did.
+
+**Nothing depends on them beyond documentation — true, and it stands**, re-verified against the wider list
+rather than carried from the narrower one.
+
+**Bucket: Actionable now → Closed**, two-way check. For: the fix this entry specified has landed at the
+correcting commit, across every asserting site. Against: Actionable now requires an unmade fix, and it is
+made; Blocked on data requires a missing observation, and none is outstanding; Neither requires no fix
+proposed, and one was both proposed and executed.
 
 **Where the code lives:** the assertions are spread across the Anthropic adapter's parameter conversion, the
-agent loop's cache-probe block, the compaction orchestrator, the cache-stability bench, two compaction and
-adapter test files, the project guidance file and three design documents. See item 161 for what settled the
-boundary and item 163 for the artefacts that settled it.
+agent loop's cache-probe block and its plan-prompt placement test, the compaction orchestrator and two of
+its test files, the cache-stability bench, the plan formatter, the project guidance file and four design
+documents. See item 161 for what settled the boundary, item 163 for the artefacts that settled it, item 164
+for the decisions that rested on the refuted premise and are not closed by the correction, and the
+twenty-ninth pattern for why the count moved four times.
 
 ## 163. Two untracked instruments hold per-call cost and per-iteration cache detail, and this arc never opened either
 
@@ -12688,6 +12737,15 @@ cover. **And they do not dissolve item 108's limit**, because the token breakdow
 characters-over-four proxy that entry names — the sink holds no tokenizer, only the same estimate applied
 per bucket.
 
+**A second question settled, and this entry's reach paragraph was true and incomplete rather than wrong.** The
+correcting pass at item 162 left one thing explicitly unconfirmed: where system content is cached, if not
+in the first breakpoint. The same join — cache-usage against token-breakdown, per run and iteration —
+answers it in **thirty-one of thirty-one runs with none contradicting**, and item 161 now carries the
+result. That is two cache questions settled free by instruments nobody had opened, on the same method both
+times. **The honest bound above is unchanged** — the blocked bucket is still not generally reachable from
+here — but the demonstrated reach on cache questions specifically is now two for two, which is worth
+recording before a later pass reaches for a billed call on a third.
+
 **A counting error of this pass, recorded because catching it is the method rather than an aside.** An
 unfiltered median over every call on the classifier's model gave a figure a third above item 112's and read
 briefly as that entry understating. Restricting to classifier-shaped calls — output inside the configured
@@ -12713,28 +12771,90 @@ directory, beside the sessions and cost-log directories. See item 161 for what t
 the figure they confirmed, item 108 for the limit they do not dissolve, and item 147 for the class of
 machine-local state they belong to.
 
+## 164. Five decisions were made on the refuted cache boundary; four survive on other grounds and the fifth ruled out an optimization that is now unruled-out
+
+**What it is, and why the correction did not close it.** Item 162's commit annotated every place the wrong
+boundary was asserted, so a reader is warned. It deliberately did not re-examine the decisions those
+assertions justified, and it was right not to — rewording prose and re-deciding architecture are different
+jobs. This entry enumerates the decisions rather than the sites, because several sites justify one decision
+and the count of sites says nothing about how many choices rest on them. **Premise-survival was settled by
+reading in all five cases**; none needed a measurement.
+
+**One — compaction emits its summary as a user turn rather than a system turn.** The premise was that a
+mid-array system message, hoisted into the top-level system prompt, rewrites the first breakpoint's span at
+a cost of roughly forty-five hundred token-equivalents per compaction. **The decision is a no-op.** The
+hoisting half is a code fact and still true. The cost half is not: the tools array is untouched under either
+routing, so the first breakpoint holds either way; and the second busts either way, which the original
+reasoning already concedes compaction does by design. There is no avoidable half. **Right conclusion,
+wrong reason, and the attached figure is not a real saving.** No revert is proposed — the code is harmless,
+already written, and reverting it would spend a change on nothing.
+
+**Two — session memory and approved-plan content go in the first user message, never the system prompt.**
+The premise was the same, and the decision **splits cleanly**. The placement half is a no-op for the same
+reason as the first decision. **The unconditional half survives, and on firmer ground than it was given:** a
+presence-keyed toggle changes system bytes *within* a run, system sits inside the second breakpoint's span,
+and that span is re-read every iteration — so a mid-run system change busts a large cumulative entry
+repeatedly, which is a real and recurring cost rather than a one-time one. The rule against presence-keyed
+system content is correct and its actual justification is stronger than the one recorded for it.
+
+**Three — the web-search directive and tool declaration are cache-safe.** The tool-declaration half was
+always right; the tools array is the first breakpoint. The directive half named the wrong breakpoint, but
+what carries the conclusion is per-run stability, which holds wherever the directive is cached.
+**Conclusion survives, mechanism corrected.**
+
+**Four — the plan-progress tool schema and directive cost about nothing per run.** Same shape as the third:
+schema half correct, directive half misattributed, amortization conclusion surviving through the second
+breakpoint instead of the first. **Survives.**
+
+**Five — the adapter needs no separate marker on the system block. This is the one that may be a live
+defect rather than stale wording.** Its stated reason was that the last-tool marker already covers system.
+It does not. System is therefore cached only inside the second breakpoint, which advances every iteration
+and is re-written whenever the conversation prefix changes — and item 161's own floor observations show
+exactly that, cached reads collapsing to the tools floor with system not retained. **A third marker on the
+system block would give system its own stable entry, surviving conversation churn.** The system prompt runs
+between roughly two thousand and forty-six hundred tokens in the observed runs, so the quantity at stake is
+not trivial. **This entry does not decide whether to add it** — that is a cost question with its own
+measurement, and the point recorded here is narrower: the reasoning that ruled the option out is now known
+to be false, so the option is unruled-out rather than rejected.
+
+**What is not claimed.** No decision is asserted to be wrong in its outcome. Four are right on other
+grounds and the fifth concerns an option never taken. Nothing here proposes a code change.
+
+**Bucket: Neither**, two-way check. For: a structural fact recorded with no fix proposed — the shape items
+87, 107, 154, 155, 158, 160 and 163 sit under. Decisions one through four require no action, and the fifth
+names an option without choosing it. Against: Actionable now requires a fix specified in the entry, and
+whether to add a third marker is precisely what is left open; Blocked on data requires a missing
+observation, and the premise-survival of all five was settled by reading in this pass.
+
+**Where the code lives:** the compaction routing is in the compaction orchestrator and its two test files;
+the memory and plan placement rules are in two design documents, the plan formatter and the plan-prompt
+placement test; the web-search and plan-progress claims are in their own design documents; and the
+no-separate-marker reasoning is in the Anthropic adapter's parameter conversion, beside the two marker
+sites themselves. See item 161 for the boundary and for where system is cached, item 162 for the
+correction that warned readers without re-deciding anything, and item 163 for the instruments.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 163 to find out which ones still need something. No index of
+reader the trouble of reading all 164 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (62): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 111, 117, 120, 121, 126, 128, 134, 135, 137, 144, 149, 150, 153, 156, 161
+**Closed** (63): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 111, 117, 120, 121, 126, 128, 134, 135, 137, 144, 149, 150, 153, 156, 161, 162
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (9): 108, 113, 116, 129, 130, 138, 142, 148, 162
+first (8): 108, 113, 116, 129, 130, 138, 142, 148
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (11): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143, 157
 
-**Neither — a structural fact recorded, with no fix proposed** (81): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (82): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152, 154, 155, 158,
-159, 160, 163
+159, 160, 163, 164
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
@@ -14639,6 +14759,47 @@ what else could answer the same question. "Blocked on data" and "undetermined" a
 observation exists anywhere, and neither instance here could have survived that question being asked once.
 **Both instances are from this arc and are already recorded in it**, which is weighed and not treated as
 decisive on the fifth candidate's own precedent; two instances is the count the twenty-seventh was
+promoted on.
+
+## A twenty-ninth pattern: a claim stated in prose has no canonical form, so every pattern returns a subset and the subset reads as the total
+
+A symbol has a spelling. A claim has a paraphrase. When the thing being counted is an assertion rather
+than a token, no single search reaches all of it, and the number a search returns is a lower bound
+wearing the clothes of a total.
+
+**The first instance.** Item 150 counted the blocks present in a diagnostic prompt and absent from the
+executed one. A first count of three came from probing a handful of chosen needles. The real figure was
+eight, and the entry records the corrective in its own words: **a set difference rather than a sample**.
+
+**The second, and it repeated four times inside one investigation.** The claim that the first cache
+breakpoint covers system plus tools was counted at twelve by item 162, at fifteen and then twenty-four by
+the correcting pass's own establish step, and at twenty-nine by the ledger pass that closed it. Every
+figure came from a competent sweep that returned exactly what it was asked for. The claim is stated as a
+bigram, as a spaced variant, as a verb phrase sharing no noun with either, and as a bare ordinal
+reference — **four wordings with no common substring**, so each pattern found a subset and each subset
+read as complete. Four passes, four confident numbers, one claim.
+
+**Why this is not the thirteenth pattern**, which is the nearest recorded relative and which item 87
+already describes as covering searches that undercount by missing a valid syntactic form. That one governs
+code, where a *parser* defines the set of valid forms — so the corrective it prescribes, enumerate the real
+callers by symbol and by module and by re-export, terminates and is checkable. Prose has no parser. The set
+of ways to assert something is open, and no enumeration over it finishes.
+
+**Why it is not the twenty-eighth**, which is closer than it looks and needs the argument rather than an
+assertion. That one governs concluding a question is *unanswerable* after one instrument fails — an
+unauthenticated client, an arithmetic reaching its limit. **Here every instrument succeeded.** Each sweep
+ran, returned results, and the results were correct as far as they went. What failed was not the tool but
+the inference from a complete-looking result to a complete set.
+
+**And not the twenty-sixth**, which requires a claim propagating by citation. Nothing propagated: each pass
+ran its own sweep from scratch and each got a different answer, which is the opposite of inheritance.
+
+The rule: when counting occurrences of a *claim* rather than a *token*, treat any single-pattern figure as
+a lower bound and say so. Close it the way item 150 closed its own — by set difference against the whole
+corpus, or by hand-classifying the union of every phrasing anyone has yet found, with the classification
+criterion stated before the counting starts so a later reader can re-derive the number instead of
+inheriting it. **Both instances here are from one arc**, which is weighed and not treated as decisive on
+the fifth candidate's own precedent; two is the count the twenty-seventh and twenty-eighth were each
 promoted on.
 
 ## A candidate pattern considered this pass and not promoted: an instrument that enforces the front half of a discipline and leaves the back half to memory
