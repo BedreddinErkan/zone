@@ -215,6 +215,19 @@ describe("E3/S4: buildPrompt — reproduce-first + noChangeReason + cannotVerify
     expect(prompt).toContain("name tools you were not offered but genuinely need");
   });
 
+  it("buildPrompt carries the subagent-eligibility criteria: both patterns, both negatives, one worked contrast (item 166 stage two)", () => {
+    const prompt = buildPrompt("fix the build error", ["src/index.ts"], true);
+    // worker pattern + its negative
+    expect(prompt).toContain('subagentType: "worker" ONLY for independent multi-file edits');
+    expect(prompt).toContain("NOT for a single-file edit, even if complex");
+    // explore pattern + its negative
+    expect(prompt).toContain('subagentType: "explore" ONLY for pure read-only investigation');
+    expect(prompt).toContain("NOT for a trivial lookup you can do in one read");
+    // one worked contrast: fanout marks, trivial omits
+    expect(prompt).toContain("renaming an identifier across 5 files");
+    expect(prompt).toContain("omit the annotation entirely");
+  });
+
   it("buildPrompt contains reproduce-first instruction (step 0)", () => {
     const prompt = buildPrompt("fix the build error", ["src/index.ts"], true);
     expect(prompt).toContain("exit_code=0");
