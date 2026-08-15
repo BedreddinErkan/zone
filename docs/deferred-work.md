@@ -10211,6 +10211,16 @@ cannot drift the way an unlabelled approximation does. The correct value is alre
 nothing further needs to be established first. The same entry records why the call is uncached, which is
 the reason the real cost is what it is.
 
+**Both figures are now measured rather than estimated, and the entry was true as written.** They were
+derived from a characters-over-four proxy and from a rate card. Restricted to classifier-shaped calls in the
+per-call usage log — output inside the configured ceiling, no cached portion, seven hundred and fifteen of
+them — the median input is one thousand six hundred and eleven tokens against this entry's one thousand five
+hundred and fifty-seven, and the median cost is twenty-one ten-thousandths of a dollar against its own
+figure of exactly that. **The proxy is confirmed within four percent and the cost to the cent.** Nothing
+here changes; what changes is that the fix can now name a measurement over real calls instead of an
+approximation, which is what its own instruction about naming the basis was asking for. See item 163 for the
+instrument.
+
 **Where the code lives:** the comment sits directly above the model-selection function in
 `taskClassifier.ts`. This entry is the fix; item 112 is the finding that produced it.
 
@@ -12513,7 +12523,11 @@ thereby trade against the coaching the line exists to serve. **This entry does n
 weighing it names is the work, not the wording.
 
 **Deliberately out of scope here.** The related boundary question — what the first breakpoint actually
-covers — is item 161's, and correcting the places that assert it is a separate pass.
+covers — is item 161's, and correcting the places that assert it is a separate pass. **That question is now
+settled and this entry's cost reasoning rests on the answer rather than on an assumption:** this entry's
+own cost paragraph holds that the tools prefix still matches across machines while the system prompt does
+not, which is true only if the first breakpoint covers tools alone. Item 161 establishes exactly that, so the sentence
+stands unchanged and its premise is no longer open.
 
 **Bucket: Neither**, two-way check. For: a structural fact recorded with no fix proposed — the shape items
 87, 107, 154, 155 and 158 sit under, and the three candidate fixes are named as a decision to be made
@@ -12527,7 +12541,7 @@ parameter conversion; the fixed literal that anticipated the concern is in the c
 item 161 for the boundary this entry's cost reasoning depends on, item 151 for the classification that came
 closest, and item 147 for the pattern this line's per-machine variation supplied a third instance of.
 
-## 161. Twelve places state that the first cache breakpoint covers system plus tools; the one measured figure in this repository is consistent only with tools alone
+## 161. Closed — the first cache breakpoint covers tools alone, settled from artefacts already on disk; twelve places state otherwise and the correction is owed elsewhere
 
 **What it is, and it is separable from item 160 rather than a detail inside it.** That entry is about a
 path in the prompt. This is about a documented cache boundary, and it would matter identically if the
@@ -12542,25 +12556,46 @@ classifying each, not from a pattern — **the other three are cache-*eligibilit
 system and tools against a per-model minimum and are unaffected by anything here. Eleven further lines sit
 in untracked audit files.
 
-**The evidence against, which is arithmetic on this repository's own measured figure.** A production run is
-recorded, in the loop's probe protocol and again as a classifier fixture, dropping to a floor of three
-thousand eight hundred and seventy-nine cached tokens on a full prefix bust. The tool schemas serialize to
-sixteen thousand one hundred and fifty-one characters; the patch-branch system prompt is fourteen thousand
-one hundred and one with memory empty. So that floor implies **four point one six characters per token if it
-is tools alone, and seven point eight if it is system and tools together**. The first is an ordinary rate for
-JSON schemas; the second is roughly double any realistic tokenization. **The floor is consistent only with
-tools alone.**
+**The first evidence against, which is arithmetic — true on re-derivation, and incomplete, so it is
+completed rather than rewritten.** A production run is recorded, in the loop's probe protocol and again as a
+classifier fixture, dropping to a floor of three thousand eight hundred and seventy-nine cached tokens on a
+full prefix bust. The tool schemas serialize to sixteen thousand one hundred and fifty-one characters; the
+patch-branch system prompt is fourteen thousand one hundred and one with memory empty. So that floor implies
+**four point one six characters per token if it is tools alone, and seven point eight if it is system and
+tools together**. Re-derived across the whole per-call usage log rather than one figure, the picture widens
+and holds: **seven values are the per-run minimum in every run containing them**, across a hundred and
+fifty-six runs, and each finds a tier between three and five characters per token under a tools-only reading
+while requiring between ten and sixteen under the other. What this argument could never do is rule out that
+a given floor belonged to a different tier, or to a schema that had since drifted — which is why it was
+recorded as evidence and not as proof, and why it is not what settles this.
 
-**The limit, stated here rather than discovered by a later reader.** The run behind that floor may not have
-offered all twenty tools, and a smaller offered set would change the ratio — so this is strong evidence and
-not proof. **The strongest counter-evidence is recorded rather than omitted:** one of the twelve lines
-asserts the wire ordering directly, placing system and tools together at position zero of the prefix, which
-is the very proposition in question.
+**What settles it, and it dissolves both limits the arithmetic carried.** The marker sink records,
+per iteration, a cache-usage event carrying read and write and a token-breakdown event carrying each prompt
+bucket's own character and token count. Joined on run and iteration, **eleven runs report a first non-zero
+cached read strictly below their own recorded system-prompt token count** — a read of three thousand five
+hundred and forty-six against a system prompt of four thousand six hundred and forty-six, and repeatedly one
+thousand eight hundred and seventy-two against four thousand one hundred and thirty-five and against four
+thousand three hundred and fourteen. A cached read is a prefix, and a prefix smaller than the system prompt
+cannot contain the system prompt. **Twenty-three further runs are indeterminate** — their first read arrived
+after conversation had accumulated, so it may include message content — and **none contradicts**. Because
+each of the eleven uses its own recorded sizes, the tier of the run and any schema drift stop mattering.
 
-**What would settle it outright, named so a later pass can run it cheaply.** Two runs differing only in
-system-prompt bytes against an identical tool set. If the first breakpoint is tools alone, the second run's
-first iteration still reads the tools floor; if it covers system too, that read is zero. One billed call
-decides it.
+**That measurement's own limit, named rather than left for a later reader.** The breakdown's token figures
+are a characters-over-four proxy, not a tokenizer, so the comparison sets a real count from the provider
+against an estimated one. The margins run from a quarter to well over half, far outside proxy error, which
+is why the conclusion survives; margins of a few percent would not have carried it.
+
+**What the strongest counter-evidence turned out to be, reclassified rather than left standing.** The line
+asserting the wire ordering is a comment inside a test whose assertion is only that two prompts differ. It
+restates the proposition under examination rather than observing anything, so it is one of the twelve
+assertions and not independent evidence. The ordering is a property of the provider's interface, not of this
+repository, and **no reading of this source could have settled it** — which is precisely why the artefacts
+had to.
+
+**No billed call was needed, and the sentence that said one was is false and is withdrawn.** It read: two
+runs differing only in system-prompt bytes against an identical tool set would decide it. The design was
+sound and priced at about three cents by this arm's own per-cell figures, and it **was not run**, because
+the observation it would have produced was already on disk in two instruments — see item 163.
 
 **What depends on it, swept under both instruments, and the answer is narrower than the question suggests.**
 Three lines in this document mention a cached prefix. All three were read: they concern byte-stability
@@ -12570,40 +12605,136 @@ floor. **No cost figure in this document rests on the wrong boundary.** The disc
 "system is cached", because system sits inside a cached span under either reading; it changes only **what is
 retained when the later prefix busts**, which is a quantity nothing here has yet had occasion to use.
 
-**Bucket: Blocked on data**, two-way check. For: closing requires an observation that does not exist yet,
-and this entry names the run that would produce it — the shape items 90 and 157 sit under. Against: Neither
-would require no missing observation, and a specific cheap run is specified; Actionable now would require
-the fix specified in the entry, and correcting twelve assertion sites cannot be specified before the
-boundary is settled.
+**Bucket: Blocked on data → Closed**, two-way check. For: the question this entry registered has an answer,
+established from artefacts that were already on disk when it was opened. Against: Blocked on data requires
+an observation that does not exist, and it existed; Neither requires no fix and no answer, and the answer is
+the entry; Actionable now requires the fix specified here, and the fix is item 162's.
+
+**What this entry got wrong about itself, recorded because it is the more useful half.** It was bucketed
+Blocked on data on the strength of a limit that a log on disk dissolves, and it named a billed call as the
+route. The arithmetic reaching its limit was read as the question being unanswerable, when what had been
+exhausted was one instrument. The twenty-eighth pattern records that shape, with this entry as one of its
+two instances.
 
 **Where the code lives:** the breakpoint placement and its comment are in the Anthropic adapter's parameter
-conversion; the measured floor and its analysis protocol are in the agent loop's cache-probe block. See item
-160 for the entry whose cost reasoning surfaced this, and item 147 for the discipline of naming what a
+conversion; the measured floor and its analysis protocol are in the agent loop's cache-probe block; the
+artefacts that settled it are item 163's. See item 160 for the entry whose cost reasoning surfaced this,
+item 162 for the correction now owed across twelve places, and item 147 for the discipline of naming what a
 figure was measured under, which the floor's own provenance is recorded as lacking in the project guidance
 file that cites it.
+
+## 162. Twelve tracked assertions name a cache boundary that measurement has now refuted, and correcting them is specified work nothing has done
+
+**What it is.** Item 161 settles that the first cache breakpoint covers tools alone. Twelve tracked lines
+across ten files say it covers system plus tools — the project guidance file, three design documents, the
+adapter's own comment, the loop's cache-probe protocol, the cache-stability bench, the compactor, and two
+test files — and a thirteenth sits in an untracked audit that decomposes a run's cached read on the same
+assumption. Every one of them is now known to be wrong.
+
+**Nothing depends on them beyond documentation, and that was verified rather than inherited.** Under both
+instruments there are zero non-comment occurrences of the boundary claim or its figure anywhere in source
+outside tests; the only matches are two lines of the probe protocol's own commentary. Cost accounting reads
+the uncached, cached-read and cached-write fields the provider itself reports, so no computation derives
+from the boundary. Of the four test-file matches, three are comments and the fourth is a test name whose
+body asserts only marker placement and the eligibility threshold. All thirty-seven tests across those files
+pass, and none could depend on the claim in any case: it concerns a provider's own behaviour, and no test in
+this repository calls that provider.
+
+**What the correcting pass has to do, stated because nothing is left to learn first.** Change each assertion
+to name tools rather than system and tools. **Leave the three cache-eligibility uses untouched** — summing
+system and tools against a per-model minimum is a different computation, it is correct, and it is unaffected.
+Treat the guidance file's own note that the figure's basis was unrecorded as discharged, by naming the
+measurement that now supplies it. Re-run the four affected test files, which should stay green precisely
+because no assertion reads the claim; a failure there would mean the correction had changed behaviour rather
+than prose.
+
+**Why it is not done here.** Twelve edits spanning source comments, a guidance file, design documents and
+test headers is a pass with its own verification and its own blast-radius sweep. A ledger pass that also
+rewrote them would be doing two jobs and checking neither properly.
+
+**Bucket: Actionable now**, two-way check. For: the fix is specified in this entry and nothing new needs
+establishing — the boundary is settled, the sites are enumerated and counted, the exclusions are named, and
+the verification is stated. Against: Neither would require no fix proposed, and one is fully specified;
+Blocked on data would require a missing observation, and none is outstanding.
+
+**Where the code lives:** the assertions are spread across the Anthropic adapter's parameter conversion, the
+agent loop's cache-probe block, the compaction orchestrator, the cache-stability bench, two compaction and
+adapter test files, the project guidance file and three design documents. See item 161 for what settled the
+boundary and item 163 for the artefacts that settled it.
+
+## 163. Two untracked instruments hold per-call cost and per-iteration cache detail, and this arc never opened either
+
+**What it is.** A per-call usage log and a marker sink both sit under the user-level directory. Neither is
+in the repository, neither is in any checkout, and between them they hold the observations several entries
+in this document have treated as unmeasured or as needing a paid run. **An audit already in this repository
+names the usage log as the source of truth for per-call figures**, and this arc read that audit while
+citing it for other things.
+
+**What they hold, established by reading them.** The usage log carries seven thousand five hundred and
+sixty-two records spanning one date in May to one in August, each with uncached input, cached write, cached
+read, output, latency and estimated cost, alongside run, parent-run and subagent identifiers; eight hundred
+and eighty-five of those are per-run summaries carrying a termination reason. The marker sink carries three
+thousand seven hundred and ninety-two records across ninety-six distinct marker names over about eleven
+days, including three hundred and fifty-six cache-usage events and three hundred and fifty-nine
+token-breakdown events, the latter giving each prompt bucket's own character and estimated token count per
+iteration.
+
+**What they reach, and the bound stated honestly rather than left implied.** They settle item 161 outright,
+which had been bucketed as needing an observation that did not exist. They confirm item 112's per-call
+classifier figures to the cent, over seven hundred and fifteen real calls — a measurement replacing a proxy
+at no cost. **They do not unblock the blocked bucket generally:** the other nine entries in it were read
+individually and none turns on a cache, token or per-call cost figure, which is the class these instruments
+cover. **And they do not dissolve item 108's limit**, because the token breakdown's own figures are the same
+characters-over-four proxy that entry names — the sink holds no tokenizer, only the same estimate applied
+per bucket.
+
+**A counting error of this pass, recorded because catching it is the method rather than an aside.** An
+unfiltered median over every call on the classifier's model gave a figure a third above item 112's and read
+briefly as that entry understating. Restricting to classifier-shaped calls — output inside the configured
+ceiling, no cached portion — gives its figure exactly. The unfiltered sample had mixed in manual probe
+scripts and cached calls. The two-method cross-check is what caught it, and the wrong number was this pass's
+own.
+
+**Where they live and why it matters that they are untracked.** Both are outside the repository, so they are
+invisible to a fresh clone and to continuous integration, and they are the same class of machine-local state
+item 147 records as making a figure conditional on where it was taken. A later pass cannot find them by
+searching the tree; it has to know they exist, which is what this entry is for.
+
+**No fix proposed.** Tracking either would put per-call cost and run identifiers into version control, which
+is a decision with its own consequences and is not this entry's to make.
+
+**Bucket: Neither**, two-way check. For: a structural fact recorded with no fix proposed — the shape items
+87, 107, 154, 155, 158 and 160 sit under. Against: Actionable now requires a fix specified in the entry, and
+this deliberately proposes none; Blocked on data requires a missing observation, and this entry is itself
+the observation.
+
+**Where the artefacts live:** the usage log and the marker sink are both directly under the user-level Zone
+directory, beside the sessions and cost-log directories. See item 161 for what they settled, item 113 for
+the figure they confirmed, item 108 for the limit they do not dissolve, and item 147 for the class of
+machine-local state they belong to.
 
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 161 to find out which ones still need something. No index of
+reader the trouble of reading all 163 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (61): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 111, 117, 120, 121, 126, 128, 134, 135, 137, 144, 149, 150, 153, 156
+**Closed** (62): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 111, 117, 120, 121, 126, 128, 134, 135, 137, 144, 149, 150, 153, 156, 161
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (8): 108, 113, 116, 129, 130, 138, 142, 148
+first (9): 108, 113, 116, 129, 130, 138, 142, 148, 162
 
-**Blocked on data** — closing requires an observation that doesn't exist yet (12): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143, 157, 161
+**Blocked on data** — closing requires an observation that doesn't exist yet (11): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143, 157
 
-**Neither — a structural fact recorded, with no fix proposed** (80): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (81): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152, 154, 155, 158,
-159, 160
+159, 160, 163
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
@@ -14466,6 +14597,49 @@ is a different one: name the context the figure was measured in, or state that i
 The rule: a figure's context is part of the figure. Record the scope and the environment beside a count, or
 say explicitly that they were not captured — an unqualified number is a claim about the subject alone, and
 these two instances are cases where that claim was wrong while every individual measurement was right.
+
+## A twenty-eighth pattern: the instrument reached for first bounds what gets recorded as knowable, so a question is filed unanswerable while another instrument holds the answer
+
+A pass reaches for one way of finding something out. It fails, or it reaches its limit. What gets written
+down is not "this instrument could not answer it" but "this cannot be answered yet" — and the second is a
+claim about the world made from a fact about a tool.
+
+**The first instance.** Item 158 asked whether continuous integration had actually run red. The
+command-line client on that machine was unauthenticated, so the run history could not be read, and the
+question was recorded as undetermined rather than assumed either way. That was careful about the evidence
+and wrong about the boundary: the same history was one browser page away, and had been throughout. The
+entry treated an unauthenticated client as bounding what was knowable when it bounded only what was
+scriptable.
+
+**The second, on a different instrument and a different pass.** Item 161 asked what the first cache
+breakpoint covers. An arithmetic argument from one recorded figure gave a strong answer and could not rule
+out two confounds, so the entry was bucketed as needing an observation that did not exist, and it named a
+billed run as the route. A per-call log on the same disk answered it outright, with a margin the confounds
+could not touch — and an audit in the same repository already named that log as the source of truth for
+exactly this class of figure.
+
+**Why this is not the ninth pattern**, which is the nearest relative and the reason this needs arguing.
+That one holds that a ledger entry prescribing a check does not cause the check to happen; its gap sits
+between reading an instruction and executing it. Here nothing was prescribed. The artefact named is *data*,
+not a step, and the failure is not skipping an instructed action — it is concluding that an observation
+does not exist while holding a document that says where it is kept.
+
+**Why it is not the twenty-first**, which governs attributing a measured outcome without first reading the
+instrument that produced it, its own instance being a captured file left unread at the moment an outcome
+was being attributed. In both instances here **no outcome was attributed to anything**. What was produced
+was a status — undetermined, or blocked pending data — and a status is a claim about availability rather
+than about a subject.
+
+**And why it is not the twenty-sixth.** Nothing was copied and nothing false propagated. The audit naming
+the log is true, was read by this arc, and was cited for other purposes. A true pointer simply did not
+cause anyone to follow it, which is the opposite of a claim travelling further than it was checked.
+
+The rule: before recording that something cannot be established, name the instrument that failed and ask
+what else could answer the same question. "Blocked on data" and "undetermined" are claims that no
+observation exists anywhere, and neither instance here could have survived that question being asked once.
+**Both instances are from this arc and are already recorded in it**, which is weighed and not treated as
+decisive on the fifth candidate's own precedent; two instances is the count the twenty-seventh was
+promoted on.
 
 ## A candidate pattern considered this pass and not promoted: an instrument that enforces the front half of a discipline and leaves the back half to memory
 
