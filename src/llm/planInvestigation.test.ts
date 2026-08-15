@@ -220,8 +220,15 @@ describe("E3/S4: buildPrompt — reproduce-first + noChangeReason + cannotVerify
     // per-step framing: decomposition is already decided, marking is a per-step label
     // decision — restored after a measurement pass found its absence changed how the
     // model decomposes a fanout into steps, not just how it labels them.
-    expect(prompt).toContain("decide this per step, after the plan's steps are already decided");
-    expect(prompt).toContain("do not restructure steps around the marking decision");
+    //
+    // Scoped to the Rules section (item 172): a prior mutation moved this clause into
+    // the JSON-shape block — where it reads as a field description, not a binding rule
+    // — and an unscoped toContain kept passing. "Rules:" is unique in the rendered
+    // prompt and the section it opens runs to the end of the string (confirmed by
+    // running, both allowAnswerOnly values), so slicing from there is unambiguous.
+    const rulesSection = prompt.slice(prompt.indexOf("Rules:"));
+    expect(rulesSection).toContain("decide this per step, after the plan's steps are already decided");
+    expect(rulesSection).toContain("do not restructure steps around the marking decision");
     // worker pattern + its negative
     expect(prompt).toContain('subagentType: "worker" ONLY for independent multi-file edits');
     expect(prompt).toContain("NOT for a single-file edit, even if complex");
