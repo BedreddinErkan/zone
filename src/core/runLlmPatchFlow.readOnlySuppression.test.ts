@@ -346,12 +346,26 @@ describe("item 166 stage one — requestedTools grant, live through runLlmPatchF
     delete process.env["ZONE_ARCHETYPE_ENABLE_SIMPLE_ADD"];
   });
 
-  it("byte-identity regression pin: no requestedTools on the plan → filter shape completely unaffected", async () => {
+  it("byte-identity regression pin: no requestedTools on the plan → filter shape unaffected AND the grant block does not run at all", async () => {
+    // Content-equality on the filter alone is not sufficient here: applyRequestedToolsGrant
+    // already no-ops gracefully on an empty array (same reference, same content) regardless
+    // of whether the CALLER'S guard fires — a mutation that removes that guard changes real,
+    // observable behaviour (the grant call happens, telemetry fires with an empty payload)
+    // without changing the filter's content. Caught only by asserting the marker's absence,
+    // not by asserting the filter's shape alone (found by actually running this mutation
+    // before finalizing this test, not assumed).
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
     const call = await runWith({ archetype: "simple_add", preGeneratedPlan: APPROVED_PLAN, runId: "run-sa-noreq" });
 
     const filter = call?.capabilityFilter as { excludeToolNames?: Set<string>; allowToolNames?: Set<string> } | undefined;
     expect(filter?.excludeToolNames).toEqual(new Set(["Task", "suggest_scope_change"]));
     expect(filter?.allowToolNames).toBeUndefined(); // never introduced when nothing was requested
+
+    const markerCall = logSpy.mock.calls.find((args) => String(args[0]).includes("[zone-requested-tools-granted]"));
+    expect(markerCall).toBeUndefined(); // the grant block must not run when requestedTools is absent
+
+    logSpy.mockRestore();
   });
 
   // The required live-path test (approval addition #2): requestedTools:["run_command"]
