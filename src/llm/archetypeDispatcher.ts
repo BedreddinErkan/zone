@@ -216,13 +216,35 @@ export interface RequestedToolsGrantResult {
 
 /**
  * Widens `currentFilter` to include specific plan-requested tool names, bounded
- * to what the dispatcher pipeline itself excluded by name — never the broader
- * "not currently offered" (which would include tools excluded purely by
- * capability class, e.g. `write_file` under a read-only-capability filter, and
- * would require the `allowToolNames` escape hatch to reach names the pipeline
- * never named at all). Pure; runId/telemetry is the caller's job.
+ * to what the current filter itself withholds BY NAME — never the broader "not
+ * currently offered" (which would include tools excluded purely by capability
+ * class, e.g. `write_file` under a read-only-capability filter, and would
+ * require the `allowToolNames` escape hatch to reach names never named at
+ * all). Pure; runId/telemetry is the caller's job.
  *
- * The `allowToolNames` escape hatch is used, but ONLY when `currentFilter`
+ * TWO name-level withholding shapes are recognised, because item 167's own
+ * establish pass found `resolveToolList` is fed two structurally different
+ * filters depending on the caller: a dispatcher-pipeline filter names what it
+ * excludes (`excludeToolNames`), while `tierToolFilter` names what it allows
+ * (`allowToolNames`) and excludes nothing explicitly. A request against the
+ * second shape was silently dropped as `not_dispatcher_excluded` until this
+ * pass — reproduced live before fixing it, not assumed: `tierToolFilter` never
+ * fired the `excludeToolNames.has(name)` branch because it never populates
+ * that field, so a run governed entirely by tier (every archetype without a
+ * dispatcher `PipelineConfig`) could never be granted anything, silently.
+ *
+ * The second branch — "absent from a PURE name-whitelist" — is only eligible
+ * when `currentFilter.allow` is undefined. Read directly off `resolveToolList`:
+ * its allow-gate is `allowToolNames.has(name) OR capability-allow`, so when
+ * `allow` is also set, absence from `allowToolNames` does not by itself mean
+ * withheld — the tool may already resolve via the capability route, and
+ * "eligible" would be the wrong read. No production filter combines `allow`
+ * and `allowToolNames` before this function ever sees it, so the scoping
+ * costs nothing live and closes the one case that would make the branch
+ * unsound.
+ *
+ * The `allowToolNames` escape hatch — writing the granted names into it, not
+ * just relaxing `excludeToolNames` — is used, but ONLY when `currentFilter`
  * already had an active allow-filter (`allow` or non-empty `allowToolNames`)
  * before this function touched anything. Introducing `allowToolNames` where
  * NEITHER existed flips `resolveToolList`'s internal `hasAllowFilter` from
@@ -256,6 +278,12 @@ export function applyRequestedToolsGrant(
 
   const universe = new Set(resolveToolList(undefined).map((t) => t.name));
   const preGrantExclude = currentFilter?.excludeToolNames ?? new Set<string>();
+  const preGrantAllowToolNames = currentFilter?.allowToolNames ?? new Set<string>();
+  // See the function doc comment: absence from a pure name-whitelist is only a
+  // valid withholding signal when there is no capability `allow` alongside it —
+  // otherwise resolveToolList's OR could already be admitting the tool by
+  // capability, and "absent from the list" would not mean "withheld".
+  const isPureNameWhitelist = currentFilter?.allow === undefined && preGrantAllowToolNames.size > 0;
 
   const eligible: string[] = [];
   for (const name of capped) {
@@ -263,7 +291,9 @@ export function applyRequestedToolsGrant(
       dropped.push({ name, reason: "unknown_tool_name" });
       continue;
     }
-    if (!preGrantExclude.has(name)) {
+    const eligibleViaExclude = preGrantExclude.has(name);
+    const eligibleViaAllowlistAbsence = isPureNameWhitelist && !preGrantAllowToolNames.has(name);
+    if (!eligibleViaExclude && !eligibleViaAllowlistAbsence) {
       // Covers both "already offered" and "excluded by capability class, not by
       // name" — undefined currentFilter (nothing dispatcher-excluded at all)
       // falls here for every requested name, making the grant a no-op by

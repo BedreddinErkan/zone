@@ -37,8 +37,10 @@ import {
   emitReadOnlyPipelineSuppressed,
   emitReadOnlySuppressionMismatch,
   emitPromptBranch,
+  emitRequestedToolsGranted,
   type PromptBranch,
 } from "./loopTelemetry.js";
+import { applyRequestedToolsGrant, deriveTaskRequestFromPlanMarks } from "./archetypeDispatcher.js";
 import { getAndClearToolResultSummary } from "./toolResultSizeTracker.js";
 import type { TaskArchetype, TaskClassification, TaskTier } from "./taskClassifier.js";
 import { resolveTierLimits } from "./tierLimits.js";
@@ -2375,16 +2377,59 @@ async function runAgentLoopScoped(input: AgentLoopInput, stats: LoopRunStats): P
     effectiveFilter = undefined;
     filterSource = "none";
   }
-  // Phase 6.A Branch B: detect forceTier="simple" applied to archetypes that
-  // need search/navigation tools (targeted_fix, refactor, debug, complex_multi_file).
-  const ARCHETYPES_NEEDING_EXPLORATION = new Set<string>([
-    "targeted_fix", "refactor", "complex_multi_file", "debug",
-  ]);
-  const tierArchetypeMismatch =
-    !isSubagentLoop &&
-    input.forceTier === "simple" &&
-    !!input.taskClassification?.archetype &&
-    ARCHETYPES_NEEDING_EXPLORATION.has(input.taskClassification.archetype);
+
+  // Item 167: the plan-derived tool grant (item 166 stage one/two), relocated
+  // here from the dispatch-time _dispatcherCapabilityFilter construction site.
+  // Landed at LOOP ENTRY, immediately after effectiveFilter is resolved and
+  // before resolveToolList(effectiveFilter) is first called two blocks below —
+  // the one point that propagates a mutation into every downstream consumer
+  // (toolsForLLM, effectiveAllowedSet, toolAbsenceBlock, offeredToolNames,
+  // baseSystemContent) through the single existing chain, with no separate
+  // recomputation needed at any of them. The taskBlockedByBudget filter that
+  // strips Task from toolsForLLM (below) still applies uniformly afterward —
+  // a granted Task is not a bypass of that gate, it goes through it exactly
+  // like a tier-offered Task would.
+  //
+  // Establish-pass finding, not assumed: the dispatch-layer ceiling is empty
+  // for targeted_fix/refactor at every tier and for debug/complex_multi_file
+  // entirely, because none of the four carry a dispatcher-layer filter and
+  // all four fall through to THIS function's own tier-derived filter instead.
+  // At loop entry the same four archetypes have a real, liftable ceiling — 15
+  // names at simple tier, 11 at medium — because tierToolFilter is a pure
+  // name-whitelist with no capability field, so a grant against it is a
+  // provable superset (see applyRequestedToolsGrant's own doc comment for the
+  // eligibility-branch fix this pass made to reach that shape at all: the
+  // function's ORIGINAL eligibility check only recognised excludeToolNames
+  // membership, which a pure allowlist never populates — reproduced live
+  // before fixing it, every grant against a tier filter was silently dropped
+  // as not_dispatcher_excluded until now).
+  //
+  // A SEPARATE one-shot flag from promotedFromArchetype (declared and read
+  // much further below, inside the iteration loop) — reusing that flag would
+  // silently disable BOTH existing promotion triggers (soft promotion and
+  // forced_tier_blocking) for the remainder of any run whose plan happened to
+  // carry a mark, since all three would share one guard. A plan-derived grant
+  // firing here at iteration 0 and a promotion firing later from observed
+  // mid-loop failure are legitimately independent events.
+  //
+  // Moved up from where toolsForLLM is built (a few lines below in source
+  // order, unchanged in effect) so the grant's OWN telemetry can report the
+  // real end-to-end outcome rather than the filter-level one. Found live
+  // while writing this pass's own tests, not assumed: TIER_LIMITS.simple and
+  // .medium both fix maxSubagentCalls at 0 UNCONDITIONALLY (confirmed by
+  // running resolveTierLimits across a range of estimatedFiles/
+  // estimatedIterations — taskBlockedByBudget never once came back false at
+  // either tier), so Task specifically can never survive into toolsForLLM at
+  // simple or medium tier — REGARDLESS of any grant, explicit or plan-mark-
+  // derived. The filter is still correctly widened (resolveToolList(effectiveFilter)
+  // does include Task after a grant — this is real and tested directly), but
+  // the array actually sent to the provider strips it right back out one step
+  // later. Emitting toolArrayLengthAfter/toolDescriptionCharsAdded from the
+  // filter alone, as an earlier draft of this block did, would have reported
+  // an outcome that never reaches the provider — the exact "telemetry reports
+  // intent, not the outcome" failure this codebase has hit before. Computed
+  // here, applied inside the grant block below, so what the marker reports is
+  // what the request actually receives.
   const tierLimits = isSubagentLoop
     ? null
     : resolveTierLimits(input.taskClassification, { forceTierOverride: input.forceTier });
@@ -2396,6 +2441,127 @@ async function runAgentLoopScoped(input: AgentLoopInput, stats: LoopRunStats): P
     (input.taskClassification?.estimatedIterations ?? Infinity) < 15 ||
     (input.taskClassification?.estimatedFiles ?? Infinity) <= 3;
   const taskBlockedByBudget = (tierLimits?.maxSubagentCalls ?? Infinity) === 0 || taskIsSmall;
+
+  let _planGrantApplied = false;
+  {
+    const explicitRequested = input.executionPlan?.requestedTools ?? [];
+    const anyStepMarked = (input.executionPlan?.steps ?? []).some((s) => s.subagentEligible === true);
+    if (explicitRequested.length > 0 || anyStepMarked) {
+      const sourceByName = new Map<string, "explicit" | "plan_marks">();
+      for (const name of explicitRequested) sourceByName.set(name, "explicit");
+
+      const combined = [...explicitRequested];
+      // Only reachable when anyStepMarked but the marks-derived request never
+      // qualified (or there were no marks after all — anyStepMarked already
+      // rules that out here) — recorded at THIS call site, before
+      // applyRequestedToolsGrant is ever reached, which is why the reason
+      // vocabulary here ("no_qualifying_marks"/"no_steps_marked") is disjoint
+      // from that function's own ("not_dispatcher_excluded" etc.): a name that
+      // never entered the grant function was never evaluated against it.
+      const preGrantDropped: { name: string; reason: string; source: "plan_marks" }[] = [];
+      if (anyStepMarked) {
+        const marksSignal = deriveTaskRequestFromPlanMarks(input.executionPlan?.steps);
+        if (marksSignal.taskRequested) {
+          if (!sourceByName.has("Task")) sourceByName.set("Task", "plan_marks");
+          if (!combined.includes("Task")) combined.push("Task");
+        } else {
+          preGrantDropped.push({
+            name: "Task",
+            reason: marksSignal.reason ?? "no_qualifying_marks",
+            source: "plan_marks",
+          });
+        }
+      }
+
+      // Reports the array as it will actually reach the provider, not the
+      // filter's own resolution — the two diverge for "Task" specifically at
+      // simple/medium tier, where taskBlockedByBudget (computed above, hoisted
+      // for exactly this reason) strips it back out unconditionally a few
+      // lines below regardless of any grant. Mirrors that filter's own
+      // predicate exactly rather than approximating it.
+      const asSentToProvider = (tools: ReturnType<typeof resolveToolList>) =>
+        tools.filter((t) => !(taskBlockedByBudget && t.name === "Task"));
+
+      if (combined.length > 0) {
+        const preGrantFilter = effectiveFilter;
+        const preGrantToolCount = asSentToProvider(resolveToolList(preGrantFilter)).length;
+        const grantResult = applyRequestedToolsGrant(effectiveFilter, combined, _planGrantApplied);
+        effectiveFilter = grantResult.filter;
+        _planGrantApplied = true;
+
+        const postGrantTools = resolveToolList(effectiveFilter);
+        // Never-exceed-complex-tier invariant: a grant may only narrow the gap
+        // to the full toolset, never exceed it. Mathematically guaranteed by
+        // applyRequestedToolsGrant only re-admitting names the filter itself
+        // already withheld by name — checked here as defensive insurance at a
+        // layer whose ceiling (up to 15 names) is large enough that a silent
+        // violation would be expensive to miss, mirroring this function's own
+        // zero-tools throw a few lines below rather than tolerating an
+        // impossible resolved state. Checked against the FILTER's own
+        // resolution, deliberately not asSentToProvider's narrower count —
+        // this invariant is about applyRequestedToolsGrant never manufacturing
+        // a name the registry doesn't have, which is a property of the filter
+        // step, not of the separate budget gate that runs after it.
+        const fullUniverseSize = resolveToolList(undefined).length;
+        if (postGrantTools.length > fullUniverseSize) {
+          throw new Error(
+            `[zone] applyRequestedToolsGrant resolved to ${postGrantTools.length} tools, exceeding the full registry (${fullUniverseSize}) — aborting.`
+          );
+        }
+
+        const postGrantAsSent = asSentToProvider(postGrantTools);
+        // Cost, recoverable from the sink alone (item 167 addition 2): the
+        // size of the change, in characters of tool-description JSON actually
+        // added to the request the provider sees — zero for a granted name the
+        // budget gate strips back out, since it never reaches that request.
+        const toolDescriptionCharsAdded = grantResult.grantedNames.reduce((sum, name) => {
+          const tool = postGrantAsSent.find((t) => t.name === name);
+          return sum + (tool ? JSON.stringify(tool.definition).length : 0);
+        }, 0);
+
+        emitRequestedToolsGranted({
+          runId: input.runId ?? null,
+          iter: 0,
+          requested: combined.map((name) => ({ name, source: sourceByName.get(name) ?? "explicit" })),
+          granted: grantResult.grantedNames,
+          dropped: [
+            ...grantResult.dropped.map((d) => ({ ...d, source: sourceByName.get(d.name) ?? "explicit" as const })),
+            ...preGrantDropped,
+          ],
+          toolArrayLengthBefore: preGrantToolCount,
+          toolArrayLengthAfter: postGrantAsSent.length,
+          toolDescriptionCharsAdded,
+        });
+      } else {
+        // combined.length === 0 here means: no explicit request, and marks
+        // were present but refused by the conformance rule. Nothing to grant,
+        // but the refusal must still be recorded — this is the discard a
+        // read-only pass found nothing observing before this marker existed.
+        const currentToolCount = asSentToProvider(resolveToolList(effectiveFilter)).length;
+        emitRequestedToolsGranted({
+          runId: input.runId ?? null,
+          iter: 0,
+          requested: [],
+          granted: [],
+          dropped: preGrantDropped,
+          toolArrayLengthBefore: currentToolCount,
+          toolArrayLengthAfter: currentToolCount,
+          toolDescriptionCharsAdded: 0,
+        });
+      }
+    }
+  }
+
+  // Phase 6.A Branch B: detect forceTier="simple" applied to archetypes that
+  // need search/navigation tools (targeted_fix, refactor, debug, complex_multi_file).
+  const ARCHETYPES_NEEDING_EXPLORATION = new Set<string>([
+    "targeted_fix", "refactor", "complex_multi_file", "debug",
+  ]);
+  const tierArchetypeMismatch =
+    !isSubagentLoop &&
+    input.forceTier === "simple" &&
+    !!input.taskClassification?.archetype &&
+    ARCHETYPES_NEEDING_EXPLORATION.has(input.taskClassification.archetype);
   // Phase X.0 / Gap 6: resolveToolList applies the capability filter; the
   // excludeTools and taskBlockedByBudget gates are applied on top.
   const resolvedTools = resolveToolList(effectiveFilter);

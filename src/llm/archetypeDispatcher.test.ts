@@ -14,6 +14,7 @@ import {
 import type { ExecutionPlan } from "./executionPlan.js";
 import { resolveToolList } from "../tools/toolRegistry.js";
 import { READ_ONLY_CAPABILITIES, type CapabilityFilter } from "../tools/capabilities.js";
+import { tierToolFilter } from "../tools/tierToolSubsets.js";
 
 const names = (filter: CapabilityFilter | undefined) =>
   new Set(resolveToolList(filter).map((t) => t.name));
@@ -397,10 +398,11 @@ describe("applyRequestedToolsGrant — eligibility, cap, and the one-shot guard"
 
   it("second grant in one run is refused — direct unit test on the pure function", () => {
     // Defensive-only: applyRequestedToolsGrant runs once, straight-line, inside
-    // runLlmPatchFlow.ts, which is never re-entered mid-flight — there is no live
-    // path today that reaches a second grant through one real run. This proves
-    // the function's own correctness under a hypothetical double-call, not that
-    // the scenario is reachable in production.
+    // agentLoop.ts's own loop entry (item 167 relocated the call site from
+    // runLlmPatchFlow.ts), which is never re-entered mid-flight — there is no
+    // live path today that reaches a second grant through one real run. This
+    // proves the function's own correctness under a hypothetical double-call,
+    // not that the scenario is reachable in production.
     const before = buildDispatcherCapabilityFilter(SIMPLE_ADD_PIPELINE);
     const result = applyRequestedToolsGrant(before, ["Task"], true);
     expect(result.filter).toBe(before); // same reference, untouched
@@ -408,10 +410,11 @@ describe("applyRequestedToolsGrant — eligibility, cap, and the one-shot guard"
     expect(result.dropped).toEqual([{ name: "Task", reason: "already_granted_this_run" }]);
   });
 
-  it("absent/empty requestedTools upstream never reaches this function — byte-identity is the caller's job (runLlmPatchFlow.ts), covered there", () => {
+  it("absent/empty requestedTools upstream never reaches this function — byte-identity is the caller's job (agentLoop.ts), covered there", () => {
     // Documented here so the split of responsibility is explicit: this function
     // assumes requestedTools is non-empty by the time it's called; the guard
-    // that skips calling it entirely lives in runLlmPatchFlow.ts.
+    // that skips calling it entirely lives in agentLoop.ts (item 167 relocated
+    // it from runLlmPatchFlow.ts).
     const before = buildDispatcherCapabilityFilter(SIMPLE_ADD_PIPELINE);
     const result = applyRequestedToolsGrant(before, [], false);
     expect(result.filter).toBe(before);
@@ -486,5 +489,55 @@ describe("deriveTaskRequestFromPlanMarks — criterion conformance, not mark den
     const malformed = { title: "t", description: "d", filesLikely: ["a.ts", "b.ts", "c.ts"], subagentEligible: true } as ExecutionPlan["steps"][number];
     const steps = [malformed, step(["b.ts"])];
     expect(deriveTaskRequestFromPlanMarks(steps)).toEqual({ taskRequested: false, reason: "no_steps_marked" });
+  });
+});
+
+describe("applyRequestedToolsGrant — the pure-name-whitelist eligibility branch (item 167)", () => {
+  // Item 167's own establish pass found this branch was MISSING: the function's
+  // original eligibility check only recognised excludeToolNames membership,
+  // which tierToolFilter (a pure {allowToolNames} whitelist, no excludeToolNames,
+  // no capability `allow` field) never populates — so every grant against a
+  // tier-derived filter was silently dropped as not_dispatcher_excluded before
+  // this fix, for every archetype without a dispatcher PipelineConfig
+  // (targeted_fix, refactor, debug, complex_multi_file). Reproduced live before
+  // fixing it (agentLoop.grantAtLoopEntry.test.ts's own file-level doc comment
+  // records the same finding from the caller's side); these are the direct,
+  // isolated unit tests on the pure function itself.
+
+  it("a name absent from a pure allowToolNames whitelist is eligible and granted — strict superset, resolved via resolveToolList", () => {
+    const before = tierToolFilter("simple"); // {allowToolNames: SIMPLE_TIER_TOOLS}, no exclude, no allow
+    const beforeNames = names(before);
+    const result = applyRequestedToolsGrant(before, ["Task"], false);
+    expect(result.grantedNames).toEqual(["Task"]);
+    expect(result.dropped).toEqual([]);
+    const afterNames = names(result.filter);
+    expect([...beforeNames].every((n) => afterNames.has(n))).toBe(true); // strict superset
+    expect([...afterNames].filter((n) => !beforeNames.has(n))).toEqual(["Task"]); // only new name
+  });
+
+  it("a name already present in the whitelist is refused as not_dispatcher_excluded — it was never withheld", () => {
+    const before = tierToolFilter("simple");
+    const result = applyRequestedToolsGrant(before, ["read_file"], false); // already in SIMPLE_TIER_TOOLS
+    expect(result.grantedNames).toEqual([]);
+    expect(result.dropped).toEqual([{ name: "read_file", reason: "not_dispatcher_excluded" }]);
+    expect(result.filter).toBe(before); // untouched — same reference
+  });
+
+  it("the new branch does NOT fire when a capability `allow` field is also set — absence from allowToolNames does not mean withheld when allow could still admit the tool", () => {
+    // No production filter combines allow + allowToolNames before this function
+    // sees it (item 167's own doc comment on applyRequestedToolsGrant), but the
+    // function must still be sound if one ever did: absence from allowToolNames
+    // alone is not evidence of withholding once a capability route also exists.
+    const before: CapabilityFilter = { allow: READ_ONLY_CAPABILITIES, allowToolNames: new Set(["read_file"]) };
+    const result = applyRequestedToolsGrant(before, ["Task"], false); // Task is absent from allowToolNames
+    expect(result.grantedNames).toEqual([]);
+    expect(result.dropped).toEqual([{ name: "Task", reason: "not_dispatcher_excluded" }]);
+  });
+
+  it("mutation check: an exclude-only filter still grants ONLY via the exclude branch — the new branch is additive, not a replacement", () => {
+    const before = buildDispatcherCapabilityFilter(SIMPLE_ADD_PIPELINE); // {excludeToolNames: {Task, suggest_scope_change}}, no allowToolNames
+    const result = applyRequestedToolsGrant(before, ["Task"], false);
+    expect(result.grantedNames).toEqual(["Task"]); // still works, via the ORIGINAL exclude-based path
+    expect(result.filter?.allowToolNames).toBeUndefined(); // hadAllowFilter stays false — unaffected by the new branch
   });
 });

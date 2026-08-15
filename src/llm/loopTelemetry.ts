@@ -65,34 +65,50 @@ export function emitArchetypePromoted(data: ArchetypePromotedData): void {
 
 // ---------------------------------------------------------------------------
 // emitRequestedToolsGranted — [zone-requested-tools-granted]
-// Item 166 stage one/two. Emitted once in runLlmPatchFlow.ts, before any
-// agentLoop call, when a plan carries an explicit requestedTools entry, a
-// qualifying per-step delegation mark, or both. NOT a new trigger value on
-// ArchetypePromotedData above: that shape's toArchetype is hardcoded to the
-// single literal "complex_multi_file" and its trigger union is duplicated
-// verbatim across four sites — neither fits a tool-grant event, whose subject
-// is a capability change, not an archetype promotion. Joinable by runId
-// against toolSubsetSize-bearing markers already in ~/.zone/markers.jsonl
-// (e.g. [zone-write-capability-absent]) and against ~/.zone/usage/*.jsonl —
-// both use the identical top-level runId key/shape, re-confirmed by an actual
-// join immediately before this stage-two widening (20/20 toolSubsetSize-
-// carrying marker runIds found in local-dev.jsonl's runId set, re-run fresh
-// rather than adopted from the stage-one figure).
+// Item 166 stage one/two, relocated by item 167. Emitted once in agentLoop.ts,
+// at loop entry — before the first provider call — when a plan carries an
+// explicit requestedTools entry, a qualifying per-step delegation mark, or
+// both. NOT a new trigger value on ArchetypePromotedData above: that shape's
+// toArchetype is hardcoded to the single literal "complex_multi_file" and its
+// trigger union is duplicated verbatim across four sites — neither fits a
+// tool-grant event, whose subject is a capability change, not an archetype
+// promotion. Joinable by runId against toolSubsetSize-bearing markers already
+// in ~/.zone/markers.jsonl (e.g. [zone-write-capability-absent]) and against
+// ~/.zone/usage/*.jsonl — both use the identical top-level runId key/shape,
+// re-confirmed by an actual join immediately before this stage-two widening
+// (20/20 toolSubsetSize-carrying marker runIds found in local-dev.jsonl's
+// runId set, re-run fresh rather than adopted from the stage-one figure).
+// `iter` is always 0 — the grant fires once, at loop entry, before the loop's
+// own iteration counter starts; recorded rather than omitted so a consumer
+// never has to assume that fact from the marker's absence of one.
 //
 // `source` on `requested`/`dropped` distinguishes an explicit plan field
 // entry from one derived purely from the plan's own subagentEligible marks
 // (item 166 stage two) — the two channels are merged into ONE grant call and
 // ONE marker line per run (never two), so without this field a mark-derived
 // grant/refusal would be indistinguishable from an explicit one in the sink.
+//
+// toolArrayLengthBefore/After and toolDescriptionCharsAdded (item 167,
+// addition 2) make the cache consequence of a grant recoverable from this
+// sink alone, without re-deriving it from the tool registry: the size of the
+// change (how many tool descriptions, how many characters) versus its actual
+// cost (whether the run's tools prefix was warm and got invalidated) are two
+// different questions, and only the usage log's own cache_read/cache_write
+// fields on the SAME runId can answer the second one — this marker supplies
+// the runId to join on, not the cache figures themselves.
 // ---------------------------------------------------------------------------
 
 export type RequestedToolSource = "explicit" | "plan_marks";
 
 export interface RequestedToolsGrantedData {
   runId: string | null | undefined;
+  iter: number;
   requested: { name: string; source: RequestedToolSource }[];
   granted: string[];
   dropped: { name: string; reason: string; source: RequestedToolSource }[];
+  toolArrayLengthBefore: number;
+  toolArrayLengthAfter: number;
+  toolDescriptionCharsAdded: number;
 }
 
 export function emitRequestedToolsGranted(data: RequestedToolsGrantedData): void {
