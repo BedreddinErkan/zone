@@ -22,7 +22,7 @@ export function deriveVerdict(input: VerdictInput): VerdictResult {
     : trigger === "max_iterations"
       ? inferVerificationFromLog(toolCallLog, fwNorm)
       : "no_verification_attempted";
-  let inferredFrom: "tag" | "heuristic" = tagged ? "tag" : "heuristic";
+  let inferredFrom: "tag" | "heuristic" | "validated" = tagged ? "tag" : "heuristic";
   const strippedText = tagged ? stripVerificationTag(finalText) : finalText;
 
   if (reason === "tests_passed") {
@@ -37,6 +37,7 @@ export function deriveVerdict(input: VerdictInput): VerdictResult {
         reason: validation.reason,
       }));
       reason = overriddenTo;
+      inferredFrom = "validated";
     }
   }
 
@@ -48,21 +49,27 @@ export function deriveVerdict(input: VerdictInput): VerdictResult {
     });
     if (!validation.accept) {
       reason = validation.demoteTo ?? "tests_inconclusive";
+      inferredFrom = "validated";
     } else if (
       validation.reason &&
       /resolved by a later successful run_command/i.test(validation.reason)
     ) {
       // Bug 44b: failure demonstrably resolved by a later successful run_command.
       reason = "tests_passed";
+      inferredFrom = "validated";
     }
   }
 
+  const reasonBeforeNoInfraOverride = reason;
   reason = applyNoInfraVerificationOverride({
     verificationReason: reason,
     framework: fwNorm,
     patchApplied,
     triggeredBy: trigger,
   });
+  if (reason !== reasonBeforeNoInfraOverride) {
+    inferredFrom = "validated";
+  }
 
   const patchValidatedByAgent =
     reason === "tests_passed" ||

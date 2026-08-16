@@ -68,7 +68,11 @@ export interface VerdictInput {
 export interface VerdictResult {
   reason: VerificationReason;
   patchValidatedByAgent: boolean;
-  inferredFrom: "tag" | "heuristic";
+  /** Where the returned reason actually came from — not where the computation started.
+   *  "tag"/"heuristic" describe an unreplaced initial value; "validated" means one of the
+   *  three post-derivation overrides (validatePassedClaim, validateUnrelatedClaim,
+   *  applyNoInfraVerificationOverride) replaced it with the system's own determination. */
+  inferredFrom: "tag" | "heuristic" | "validated";
   /** finalText with the [ZONE_VERIFICATION:...] tag removed. */
   strippedText: string;
 }

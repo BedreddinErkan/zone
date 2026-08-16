@@ -92,6 +92,24 @@ describe("deriveVerdict", () => {
       const result = deriveVerdict(input);
       // validatePassedClaim: no runCommands → demote
       expect(result.reason).not.toBe("tests_passed");
+      // Item 203: the system, not the model, produced the surviving reason.
+      expect(result.inferredFrom).toBe("validated");
+    });
+
+    // Item 203's negative pin: the validator ran and CONFIRMED the tag rather than
+    // replacing it. The reason is still genuinely tag-sourced — flattening this into
+    // "validated" would erase the distinction the field exists to carry.
+    it("leaves inferredFrom as tag when validatePassedClaim accepts (log supports the claim)", () => {
+      const input: VerdictInput = {
+        finalText: "Done [ZONE_VERIFICATION: tests_passed]",
+        trigger: "natural_completion",
+        toolCallLog: patchThenTestPass,
+        filesModified: [],
+        patchApplied: true,
+      };
+      const result = deriveVerdict(input);
+      expect(result.reason).toBe("tests_passed");
+      expect(result.inferredFrom).toBe("tag");
     });
   });
 
@@ -110,6 +128,8 @@ describe("deriveVerdict", () => {
       // "resolved by a later successful run_command" → promote to tests_passed
       expect(result.reason).toBe("tests_passed");
       expect(result.patchValidatedByAgent).toBe(true);
+      // Item 203: the promotion is the system's own determination, not the model's tag.
+      expect(result.inferredFrom).toBe("validated");
     });
 
     it("demotes tests_failed_unrelated when validateUnrelatedClaim rejects", () => {
@@ -126,6 +146,8 @@ describe("deriveVerdict", () => {
       const result = deriveVerdict(input);
       expect(result.reason).not.toBe("tests_failed_unrelated");
       expect(result.reason).not.toBe("tests_passed");
+      // Item 203: demoted by the system, not left as the model's tag.
+      expect(result.inferredFrom).toBe("validated");
     });
   });
 
@@ -180,6 +202,8 @@ describe("deriveVerdict", () => {
       };
       const result = deriveVerdict(input);
       expect(result.reason).toBe("tests_skipped_no_infra");
+      // Item 203: the reclassification is the system's own determination, not the tag.
+      expect(result.inferredFrom).toBe("validated");
     });
   });
 

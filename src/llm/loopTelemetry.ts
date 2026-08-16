@@ -503,7 +503,7 @@ export type AgentFinalAssessmentData =
       triggeredBy: "natural_completion";
       verificationReason: string;
       patchValidatedByAgent: boolean;
-      inferredFrom: "tag" | "heuristic";
+      inferredFrom: "tag" | "heuristic" | "validated";
       summaryPreview: string;
     }
   | {
