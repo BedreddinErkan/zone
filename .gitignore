@@ -19,6 +19,12 @@ zone-debug.log.*
 
 # Sweep output (append-only CSV, not versioned)
 data/sweep-results.csv
+
+# Stray compiled output under scripts/ — no build step produces this; origin unknown,
+# established during cleanup (see docs/deferred-work.md item 183).
+scripts/*.js
+scripts/*.js.map
+scripts/*.d.ts
 CLAUDE.md
 err.txt
 out.txt
