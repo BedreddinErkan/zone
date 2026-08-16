@@ -14152,14 +14152,26 @@ plan path. On the default plan path there is no handler, the helper is never cal
 never produced. The one place the product says plainly that nothing was verified is the one place a user
 was already being shown the diffs and asked to decide.
 
-**Bucket: Neither.** A structural fact is recorded and no fix is proposed. **Against Actionable now:** the
-obvious fix — an appendix on the skipped branch — is a change to what every skipped run reports, and the
-right wording depends on which of the three skip reasons is being reported; that is a design decision this
-entry does not make. **Against Blocked on data:** the grouping, the empty appendix, the override condition
-and the string's single call site were all read directly. **Where the code lives:** the shared switch case
-in the run-completion module's result-fields file; the override and the reason vocabulary in the
-verification module's classifier; the string in the verification composer. See item 187 for the defect that
-was making runs reach this state on whole ecosystems, and item 188 for what actually runs the command.
+**The first paragraph was retired on 2026-08-16; the second and third stand, so this entry does not
+close.** The shared switch case is split and the skipped branch now supplies an appendix — which is
+precisely the fix the bucket note below declined to specify, wording and all, one text per skip reason. So
+the grouping this entry opens with is gone, and the validated flag no longer comes from the model on a run
+where nothing executed. What did not change is what a reader of the second paragraph is told: the
+verification **reason** is still carried through from the model's claim on a skipped run, deliberately, so
+the summary a user reads still reports whatever the model said happened. Nor did the third paragraph
+change: the one place the product says plainly that nothing was verified is still the staged-diff
+checkpoint header, still reachable only on the strict plan path. Two of the three facts recorded here
+survive the fix intact.
+
+**Bucket: Neither**, unchanged. A structural fact is recorded and the remaining half proposes no fix.
+**Against Closed:** the grouping is fixed, but the reason a user reads and the missing plain-language
+string on the default path are both still as described. **Against Actionable now:** what remains is a
+question of what a user should be told, not a specified change. **Against Blocked on data:** the grouping,
+the empty appendix, the override condition and the string's single call site were all read directly.
+**Where the code lives:** the formerly shared switch case in the run-completion module's result-fields
+file; the override and the reason vocabulary in the verification module's classifier; the string in the
+verification composer. See item 187 for the defect that was making runs reach this state on whole
+ecosystems, item 188 for what actually runs the command, and item 198 for the pass that split the branch.
 
 ## 190. A third command gate exists for plan-mode investigation, and this arc widened what it admits without touching it
 
@@ -14545,7 +14557,7 @@ logger and its gate in the logging utility; the unconditional emitters in the to
 run-completion path and the shell-exit classifier. See item 193 for the result and item 201 for the gap the
 fixtures had to fill.
 
-## 198. Every run reported success from the model's own tag, including the forty where the suite really ran and passed
+## 198. Closed — the branch that let a skipped verification pass the model's claim through is split, and this entry's own central inference was wrong
 
 **What it is.** Across forty measured runs in two arms, the final assessment recorded its verification
 reason as inferred from the model's own tag — in every single one. That includes forty runs in which a real
@@ -14565,13 +14577,46 @@ mode is unobserved here, and forty runs on four fixtures is a thin base for a cl
 the sample does establish is structural rather than statistical: the two values were never compared, so
 agreement between them carries no information.
 
-**Bucket: Neither.** A structural fact is recorded and no fix is proposed. **Against Actionable now:** the
-obvious change — cross-check the tag against the recorded exit code and downgrade on disagreement — needs a
-decision about what to do when they disagree, which is the same decision item 189 leaves open. **Against
-Blocked on data:** the structure was read and forty runs were observed; what is missing is a disagreement
-case, which this entry does not need. **Where the code lives:** the verdict derivation and the result-field
-derivation in the run-completion module; the shell emitter in the tool executor. See item 189 for the
-skipped-verification half of the same seam.
+**This entry's own inference was wrong, and the error is in the evidence rather than the arithmetic.** The
+figure re-derives exactly — forty of forty, under two instruments — but it was read from the marker the
+final assessment emits, and that marker is written **before** verification runs. The source labels the
+boundary itself: the verdict is derived, the assessment is emitted, and only then does the verification
+step begin. So the figure records the pre-verification claim and can say nothing whatever about what the
+run reported afterwards. The number is sound; its evidentiary value for the conclusion drawn from it is
+nil. This is the same shape as the thirteenth pattern, arriving through a marker rather than a string.
+
+**The stronger correction: the claim was never unbound from the result in general.** A negative result
+wins, and always did. Of the six outcome kinds reaching the result-field derivation, four override the
+verdict outright — they replace the reason, force the validated flag false, and supply their own appendix —
+and the warned outcome additionally flips the run's success flag. Since the rollback mode is opt-in by
+environment variable, a real verification failure lands in that warned outcome by default, so a failing
+suite did override a passing claim. **The unbound case was two outcome kinds sharing one branch**, not the
+general independence this entry asserted.
+
+**What shipped on 2026-08-16.** That branch is split. A verified run is unchanged. A skipped run now
+carries the model's reason through — the claim stays visible rather than being overwritten — but marks the
+validated flag false unconditionally and appends a line naming which of the three skip reasons applied:
+nothing staged, no verification command for the framework, or a subagent whose parent owns verification.
+Each reason has its own text, so the summary states why the claim was not independently confirmed.
+
+**The live instance the probe caught, re-derived.** Of forty runs, **twenty reported a passing verification
+with no verification command executed at all**, and the split is perfectly by ecosystem: every Rust run had
+no verification after the assessment, every Python run had one, exit zero. Under the shipped fix those
+twenty would now carry the validated flag false and a named appendix instead of an unqualified pass.
+
+**One question the fix makes answerable that was not.** Which outcome kind those twenty runs actually took
+— a skip for want of staged files, or a no-change — is still unestablished, because the marker that would
+name it is written through the debug logger and is silent in a normal run. The appendix the fix adds now
+distinguishes those two in the run's own summary, so the next occurrence answers itself without needing the
+verbose flag.
+
+**Bucket: Closed**, decided on this entry's own condition rather than on the fix: the structural fact it
+recorded is retired, half of it corrected as false and the surviving half now built. **Against Neither:**
+the fact no longer holds. **Against Actionable now:** the change this entry declined to specify has been
+made. **Where the code lives:** the verdict derivation and the result-field derivation in the
+run-completion module; the shell emitter in the tool executor. See item 189 for the half of this seam that
+remains open, item 202 for what the tag can carry, and item 203 for the provenance field this entry's
+figure was read from.
 
 ## 199. The strong no-substitution line renders only when test files are detected, and Rust never satisfies that test
 
@@ -14650,28 +14695,133 @@ building the probe. **Where the code lives:** the five fixes are recorded in ite
 the fixtures the probe built are outside the tracked tree. See item 197 for the probe and item 200 for a
 defect this blindness kept out of view.
 
+## 202. The verification tag is one enum token and carries no free text, so the model cannot say what it checked
+
+**What it is.** The final assessment's tag is parsed by a single expression matching a bracketed keyword
+and one word-characters group. Whatever follows is discarded, and the extracted token is accepted only if
+it appears in a fixed list of eight. Verified by parsing four probes: a bare tag returns its token; the
+same tag followed by an explanatory clause returns the token alone, the clause dropped; a derived value
+that only the system can produce returns nothing; an invented value returns nothing.
+
+**What that forecloses.** A prior brief supposed the tag might be worth keeping as one input among several
+because a self-report can carry information an exit code cannot — which tests the model considered
+relevant, whether it believes the fix reaches the root cause. **It cannot.** There is no channel: the
+grammar admits one token and the parser throws the rest away. The tag is a claim about a category, not a
+statement about the work, and the model has no way to qualify it even if it wanted to. Any design that
+wants that information has to add a field, not read this one more carefully.
+
+**A narrower consequence, worth separating.** Two of the ten vocabulary values are system-derived — the
+regressed and warned outcomes — and the parser deliberately refuses them, so a model cannot claim either.
+That refusal is correct and should survive any change here: those two are conclusions the verification step
+owns.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed. **Against Actionable now:**
+adding a free-text field to the tag is a prompt change inside the cached prefix and a parser change
+together, and whether the information would be worth the tokens is not decided here. **Against Blocked on
+data:** nothing is missing; the grammar was read and exercised. **Where the code lives:** the tag parser
+and the reason vocabulary in the verification module's classifier. See item 198 for the pass that
+established it and item 193 for what a prompt-prefix change costs.
+
+## 203. The provenance field records where the reason started, never where it ended, so it names the wrong source whenever an override fires
+
+**What it is.** The verdict derivation sets a field recording whether the reason came from the model's tag
+or from a log heuristic. It is assigned once, at the point the initial reason is chosen, and then three
+override blocks may replace the reason itself — an unsupported passing claim demoted, an unrelated-failure
+claim demoted or promoted, a no-infrastructure downgrade applied. **None of the three updates the field.**
+It is declared mutable, as though updating it were intended, and never reassigned before it is emitted and
+returned.
+
+**What that means for anything reading it.** A reason that began as the model's tag and was then replaced
+by the system still reports the tag as its source. So the field answers "what did the model say" rather
+than "where did this value come from", while being named and used as the latter. Item 198's own figure was
+read from this field, which is part of why that entry drew a conclusion its evidence could not support.
+
+**What it would have to do to be accurate.** Either update at each override site to a third value naming
+the system as the source — the overrides already know they fired, so the information is in hand — or keep
+the field as-is and rename it to say it describes the initial parse, leaving a separate field for the
+final provenance. The first is the more useful and costs three assignments; the second is honest and costs
+nothing but does not give a reader the value they actually want.
+
+**Bucket: Actionable now.** The change is specified and small, at three sites that already have the
+information. **Against Neither:** work is specified. **Against Blocked on data:** no observation is
+missing; the assignment and its non-reassignment were read directly. **Where the code lives:** the verdict
+derivation in the run-completion module, and the assessment emitter it feeds. See item 198 for the
+conclusion this field's shape helped mislead.
+
+## 204. The validator that would demote an unsupported passing claim has never fired in any recorded run
+
+**What it is.** When a run's reason arrives as a passing claim, a validator checks it against the tool log
+and demotes it when the log does not support the claim. That is the one check standing between a model
+asserting success and the run reporting it. Across **sixty-five** final assessments recorded locally — the
+complete set in the marker sink, both generations — the override event that fires on demotion appears
+**zero** times, under two instruments.
+
+**What that does and does not establish.** It does not establish the validator is broken; the runs
+recorded here may simply all have been honest, which is the benign reading and the likely one. What it
+establishes is that its coverage is **unmeasured rather than demonstrated**: no recorded run has ever
+exercised the demotion path, so nothing local distinguishes a validator that works from one that would
+accept anything. A check that has never rejected is a check whose rejection behaviour is untested outside
+its unit tests.
+
+**What would exercise it.** A run where the model emits a passing tag while the tool log contains no test
+invocation that supports it — constructible as a fixture with a task whose obvious completion involves no
+test run, paired with a prompt that elicits the tag. That is a probe, not an observation: the case has to
+be built, because sixty-five natural runs did not produce one.
+
+**Bucket: Blocked on data.** Closing requires an observation that does not exist and cannot be recovered
+from what is recorded. **Against Neither:** a specific reading is named that would settle it. **Against
+Actionable now:** nothing is specified to change — the validator may well be correct. **Where the code
+lives:** the passing-claim validator in the verification module and its call site in the verdict
+derivation. See item 198 for the seam it sits in.
+
+## 205. Three tests bundle three assertions in one case, so a mutation cannot say which of the three broke
+
+**What it is.** The three cases pinning the skipped branch's behaviour each assert three things at once:
+the reason passes through, the validated flag is false, and the appendix names the skip reason. A mutation
+that removes only the appendix while leaving the flag correct kills all three cases — which was run, and
+did. So the mutation cannot distinguish a broken appendix from a broken flag, and the kill it produces
+carries less information than its count suggests.
+
+**Recorded as a test-design finding, not a defect.** Every case in that file bundles between three and six
+assertions, so this is the file's established convention rather than a lapse in the three new ones; the
+mutation simply made the cost legible for the first time. The cost is specific: a mutation's kill set is
+the evidence that a test guards what it claims, and a bundled case converts three independent guarantees
+into one indivisible signal. Where a pass predicts a kill set in advance — the discipline these passes run
+under — bundling makes the prediction unfalsifiable at the granularity it was stated.
+
+**What the alternative costs.** Splitting yields three times the cases for the same coverage and a
+noisier file, which is presumably why the convention exists. The trade is legible either way; what should
+not happen is predicting a per-assertion kill set against bundled cases and reading the result as
+confirmation.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed. **Against Actionable now:**
+splitting is mechanical but the trade against file size is a judgement this entry does not make.
+**Against Blocked on data:** nothing is missing; the bundling was counted and the mutation was run.
+**Where the code lives:** the result-fields test file in the run-completion module. See item 198 for the
+pass that added the three cases and the twenty-fourth pattern for the mutation discipline this qualifies.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 201 to find out which ones still need something. No index of
+reader the trouble of reading all 205 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (75): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 117, 120, 121, 126, 128, 134, 135, 137, 144, 149, 150, 153, 156, 161, 162, 167, 171, 172, 176, 183, 185, 186, 187, 192, 193, 194
+**Closed** (76): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 117, 120, 121, 126, 128, 134, 135, 137, 144, 149, 150, 153, 156, 161, 162, 167, 171, 172, 176, 183, 185, 186, 187, 192, 193, 194, 198
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (10): 113, 116, 129, 130, 138, 142, 148, 169, 182, 184
+first (11): 113, 116, 129, 130, 138, 142, 148, 169, 182, 184, 203
 
-**Blocked on data** — closing requires an observation that doesn't exist yet (16): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196
+**Blocked on data** — closing requires an observation that doesn't exist yet (17): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 204
 
-**Neither — a structural fact recorded, with no fix proposed** (100): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (101): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152, 154, 155, 158,
-159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 198, 199, 200, 201
+159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199, 200, 201, 202, 205
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
@@ -17143,3 +17293,52 @@ which each instance instantiates.
 fully enumerated and the artefact read correctly — a case where neither the thirteenth's check nor the
 thirty-second's would have prevented it. That would be a mechanism of its own rather than these three,
 which are the recorded mechanisms not applied.
+
+## A thirty-fourth pattern: a test written from observed behaviour pins the defect as the specification, and every signal available says it is healthy
+
+**The mechanism, and it inverts the usual relationship between a test and a bug.** A test is written by
+running the code and asserting what it did. That is the standard way to characterize existing behaviour and
+it is usually right. When the behaviour is wrong, the assertion becomes a specification of the wrongness —
+and from that moment the test's job is to prevent the bug from being fixed. It will fail the day someone
+corrects the code, and that failure will read as a regression.
+
+**Why every available signal reports health.** The test is not skipped, not mis-scoped, not vacuous. It
+names a real function, passes real inputs, and asserts on real returned fields. It passes because the code
+does exactly what it says — a faithful description. Coverage counts it. Review reads it as intent, because
+an assertion is the only place intent is written down. **And mutation testing actively certifies it:**
+mutate the code and the test dies, which is precisely the evidence that a test is live and load-bearing. The
+stronger the test, the more firmly the defect is pinned. There is no signal inside the suite that
+distinguishes this from a good test, because by every internal measure it is one.
+
+**The instance, dated.** A case in this repository asserted that a run whose verification was skipped
+returns the model's own claim with the validated flag true and no appendix. That is what the code did. It
+was introduced on 2026-05-22 and passed continuously until 2026-08-16 — **eighty-six days** — while
+describing the exact defect items 189 and 198 were opened for. Fixing the code required editing the test
+that guarded it, and the edit looks, in isolation, like weakening a passing test.
+
+**Distinguished from the twenty-fourth, which is its opposite and the nearest by appearance.** There, an
+assertion is mis-scoped and inert, and the prescription is that only a mutation can tell a silently passing
+test from a genuinely guarding one. Here the assertion guards perfectly; a mutation confirms it; and the
+confirmation is what conceals the problem. The twenty-fourth's diagnostic is this one's camouflage — the
+same tool returns the same reassuring answer in both cases, and in one of them the answer is misleading.
+Applying the twenty-fourth here would strengthen confidence in exactly the wrong direction.
+
+**Distinguished from the thirteenth, which is about evidence and not about specification.** That one says a
+string's presence is evidence about the text rather than the behaviour. This is the reverse situation: the
+evidence about behaviour is accurate and complete, and the error is in treating an accurate description as a
+warrant. Nothing is mis-measured; the measurement is promoted to a requirement without anyone deciding to.
+
+**The rule, written as the check to run.** When an assertion is written by running the code and recording
+what came back, mark it: state in the test whether the asserted value is **intended** or merely
+**observed**. For anything observed, name where the intent is written down — a specification, an entry in
+this document, a comment stating the contract — and if nowhere, that is the finding, not a formality.
+**The question is never "does the code do this", which the test already answers; it is "should it", which
+the test cannot answer and quietly appears to.**
+
+**How such a test is actually caught, stated because the intent-marking rule will not always be applied.** Not from
+inside the suite, which is structurally blind to it. The instance here surfaced from an unrelated
+investigation looking at production behaviour and finding a reported pass surprising against what had
+actually run. The general form is an outside-in observation — telemetry, a probe, a user's report —
+compared against what the suite claims is correct. That is expensive, which is the argument for the cheap
+version: deciding intent at the moment the assertion is written, while the author still knows which of the
+two they are recording.
