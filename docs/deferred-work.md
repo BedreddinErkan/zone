@@ -9891,6 +9891,17 @@ assembled prompt, with the entry noting that `tsc --noEmit` never caught it for 
 recorded inside the item it was found in. This one is repo-wide and carries the first count, so it is filed
 on its own rather than appended there.
 
+**A later boundary, which narrows this entry's reach without touching its count.** Seven test files under
+`scripts/` are now type-checked in continuous integration by a second config, so this entry's claim that no
+type error in an unchecked test file can fail a build, a typecheck, or CI **no longer holds for those
+seven**.
+**The 593-across-144 figure is unaffected and stands as written**, because the two absences are different in
+kind rather than different in degree: this entry measures files inside a directory the main config includes
+and its `exclude` array then removes, whereas `scripts/` was never inside that config's `include` at all —
+absent from the program rather than excluded from it, so it was never among the files this entry counted.
+What remains scoped to this entry is `src/`. Item 181 records the second config and why it had to be
+separate.
+
 **Where the code lives:** the `exclude` array in `tsconfig.json`. No fix is proposed, and the number is the
 reason: 593 errors across 144 files is not a change that needs nothing learned first — it needs a triage of
 593. What would close it is a decision about which of the three excluded globs to reclaim and in what order,
@@ -13369,9 +13380,9 @@ validated.
 artefacts under the per-repo bookkeeping directory, not in the repository. See the thirty-first pattern for
 what the lost cells cost the measurement, and item 166 for the arc that surfaced it.
 
-## 172. The render test guarding a restored prompt clause pins its presence anywhere in the prompt, not its placement in the section that gives it meaning
+## 172. Closed — the assertion is scoped to the rules-section slice, and the sweep found no second instance of this defect but a broader category it could not justify touching
 
-**What it is.** A clause was restored to the investigation prompt's rules section because its absence had
+**What it was.** A clause was restored to the investigation prompt's rules section because its absence had
 been traced to a measurable behavioural difference. The test written to guard it asserts that the rendered
 prompt contains the clause's text. A mutation moved that same text out of the rules section and into the
 JSON-shape block — a different position with a different reading — and **the test still passed**.
@@ -13386,14 +13397,43 @@ relocating the clause while staying green.
 the whole string — the section boundary is already locatable by shape, since the sweep instruments used
 throughout this arc locate it that way. Nothing needs to be learned first.
 
-**Bucket: Actionable now.** For: a fix is specified and nothing new must be learned. Against Neither: work
-is specified, not merely recorded. Against Blocked on data: the change and its verification are both local
-to the test.
+**What shipped, and the finding that outlived the fix.** The assertion now slices the rendered prompt from
+the rules marker onward and checks the clause inside that slice. The boundary was established by running
+rather than read: the marker occurs exactly once for both values of the answer-only flag, and the section it
+opens runs to the end of the string, so a single slice needs no closing marker. Both halves of the restored
+bullet were scoped, since one restoration event produced them and they are two substring checks on one
+sentence. **The finding that generalises past the fix is that presence and placement are different
+properties, and one containment check cannot separate them** — the clause was never missing under the
+mutation, only relocated into a block where the same words read as a field description rather than a binding
+rule, and a check written against the whole string is satisfied by both readings equally.
+
+**The sweep for other instances, stated as measured rather than rounded.** Every containment assertion in
+the same test file was enumerated under both instruments, and four sibling prompt tests were searched for the
+same shape. **Zero carry this defect** — meaning an established placement-sensitivity finding, traced to a
+measured behavioural difference, guarded only by a presence check. A **broader and weaker category is common
+in that file**: presence-only checks on other rules-section instructions, which the same reasoning would
+touch structurally. Those were deliberately left alone, because no traced measurement ties any of their
+clauses' placement to behaviour, and scoping an assertion on resemblance to this one would pin a property
+nothing has shown to matter. The sibling test that pins a block to the user message rather than the system
+prompt was read in full and is a precedent for the shape of the fix, not another instance of the defect.
+
+**One mutation was inert as specified, and is recorded rather than substituted.** Degrading the slice so it
+returned the whole prompt killed nothing — the clause's real position already lies inside the whole prompt,
+so the weakened check still finds it. A sharper form, the slice returning empty, killed both assertions and
+established that the scoped value is genuinely read. Both outcomes stand; neither replaced the other in the
+record.
+
+**Bucket: Closed**, decided on this entry's own stated closing condition — the fix it named was to scope the
+assertion to the rules-section slice rather than the whole string, and that is what shipped. **Against
+Actionable now**, which is what this entry carried until now: nothing is outstanding, and the one part of the
+sweep that did not produce work was declined on stated evidence rather than deferred. **Against Blocked on
+data:** nothing waited on an observation; the mutation was reproduced before the fix and re-run after it.
+**Against Neither:** a fix was proposed and built.
 
 **Where the code lives:** the assertion is in the plan-investigation prompt test beside the other
-buildPrompt render assertions; the clause it guards is in that module's rules section. See item 175 for the
-placement question this blindness prevents settling, and the twenty-fourth pattern for why only a mutation
-surfaced it.
+buildPrompt render assertions, carrying a comment naming this item and the boundary it relies on; the clause
+it guards is in that module's rules section. See item 175 for the placement question this entry once bounded,
+and the twenty-fourth pattern for why only a mutation surfaced it.
 
 ## 173. The investigation-phase tool-absence notice always names the archetype as unknown, because no classification exists at that call site
 
@@ -13470,9 +13510,11 @@ were single-file, so a threshold carried across would suppress them, but so woul
 
 **What would separate it.** A render variant that states explore's independence from file count explicitly,
 measured against the current text on fixtures containing mapping-shaped work at more than one file count.
-Until that exists this entry stays a hypothesis, and item 172 records why the current test suite cannot
-help: it pins the clause's presence anywhere in the prompt, not its placement, so it cannot detect a
-placement effect either way.
+Until that exists this entry stays a hypothesis. **The test blindness this entry used to cite is gone and
+did not help**: item 172's assertion is now scoped to the rules section, so relocating that clause fails the
+test — but a placement assertion pins where text sits in a rendered string, and what is unestablished here is
+what the model does with a threshold stated before a branch. Only the paired render comparison separates
+those, and a green or red assertion says nothing either way.
 
 **Bucket: Blocked on data.** Closing requires an observation that does not exist yet — the paired render
 comparison above. Against Neither: this is a registered candidate explanation awaiting a discriminating
@@ -13488,9 +13530,9 @@ quality is being paid for and names the instrument that would measure it.
 
 **Where the code lives:** the marking rule is one bullet in the plan-investigation prompt's rules section.
 See item 166 for the observation that prompted this, item 178 for the criteria's per-run cost, and item 172
-for the test blindness that bounds it.
+for the placement blindness that once bounded this entry and has since closed without settling it.
 
-## 176. One policy, three enforcement points, no shared source of truth — and the guidance file describes it as one
+## 176. Closed — the guidance file now names three enforcement points and the disjunction, and the equality it had stated was a wrong prediction rather than a partial description
 
 **What it is.** Subagent dispatch is withheld below complex tier, deliberately, on a cost argument: a
 fresh-context worker re-reads files and returns a lossy summary, which makes dispatch cost-negative on
@@ -13519,11 +13561,30 @@ stated condition is sufficient but not necessary. The gate's real predicate is a
 **or** the task judged small — and the second disjunct fires at complex tier, where the quota is four. So
 the tool is withheld in cases the guidance's condition does not cover.
 
-**Bucket: Actionable now.** The fix is specified — correct the guidance file to describe three enforcement
-points rather than one, and correct the exclusion condition from an equality to the disjunction it actually
-is — and nothing new needs to be learned first: all three points are named, and both inaccuracies were
-established by reading the file against the code. **Against Neither:** a fix is proposed, not just a fact
-recorded. **Against Blocked on data:** no observation is missing; this was settled from source.
+**What shipped, and why the narrower inaccuracy was the more serious of the two.** The guidance file now
+names all three enforcement points, names the file each lives in, states which one actually refuses as
+opposed to merely withholding, and quotes the gate's real predicate. **The equality was not an incomplete
+description but a wrong prediction.** A description that named one lock among three would still have
+predicted correctly when the tool is withheld; an equality on the quota constant predicts that a complex-tier
+run, where the quota is four, offers the tool — and the second disjunct fires there whenever the task is
+judged small, which is an ordinary rather than an exotic case. So a reader reasoning from the stated
+condition would have expected the tool present and found it absent, with nothing in the file to explain the
+gap. The correction states the disjunction and names the arm that fires at complex tier.
+
+**A defect in the correction itself, caught before it was committed.** The first draft of the replacement
+sentence pointed at "the three locks below" while the explanation followed inside the same sentence rather
+than below anything — a positional referent with no antecedent, the exact shape this document's own anaphor
+convention exists to catch, produced while fixing a different documentation defect. Rewritten to name the
+three files directly.
+
+**Bucket: Closed**, decided on this entry's own stated closing condition — the fix it specified was to
+correct the guidance file to three enforcement points and the exclusion condition from an equality to the
+disjunction, and both landed in one commit. **Against Actionable now**, which is what this entry carried
+until now: nothing is outstanding. **Against Blocked on data:** no observation was missing; both inaccuracies
+were settled from source before the fix and the predicate was compared byte for byte against the source line
+after it. **Against Neither:** a fix was proposed and built. **What did not ship, and is not a remainder of
+this entry:** the three enforcement points still share no source of truth in code — item 184 records that
+nothing checks the corrected file against the source it now quotes.
 
 **Where the code lives:** the tier subset and its citation are in the tier-subset module; the budget gate is
 a predicate in the agent loop, applied where the offered array is built and again where a promotion
@@ -13632,28 +13693,220 @@ retired channel's own marker was in the loop telemetry module and never fired. S
 item 178 for a live question whose instrument does not exist yet either, and item 170 for a prediction
 registered before its data specifically to avoid this shape.
 
+## 180. The anaphor sweep is an artefact rather than a reconstruction, which ends a circularity — and its second instrument is now provable only against a fixture
+
+**What it is.** The convention guarding this document against positional referents was, until now, a pattern
+each pass rebuilt from prose before running it. That arrangement inverted which of the two things is the
+authority. A rebuilt pattern was accepted when the number it produced matched the recorded absolute, so **the
+count validated the pattern rather than the pattern producing the count** — and a reconstruction that
+happened to be wrong in a way that still returned the recorded figure had nothing standing against it. The
+pattern, the six locked verbs, the absolute, the required agreement between instruments, and both counting
+functions now live in one module beside the test that runs them, so a deliberate change to any of them is a
+diff and an accidental one is a failing test.
+
+**What that also ends: reconstructions were negative-result-hostile.** Rebuilding by hand produced findings
+that were never durable. One reconstruction widened the verb set to thirteen and returned one more than the
+recorded figure, which was correctly read as the widening being wrong rather than the document having
+changed — but that judgement lived in a conversation and was gone by the next pass, so the same widening was
+available to be attempted again. Storing the six verbs with a note that a miss is answered by asking whether
+the instrument could see the text, never by adding a verb, is what makes that negative result survive.
+
+**The limit, found by mutating the artefact rather than reasoning about it.** The line-based and
+paragraph-join instruments currently agree exactly, and that agreement is the problem for proving the second
+one works: with no referent in this document hidden by a soft wrap, a degenerate paragraph-join — one that
+simply returned the line-based count — would satisfy every assertion made against the real file. Only a
+constructed fixture holding a deliberately wrap-broken referent separates a working instrument from a
+degenerate one, and that fixture is therefore load-bearing rather than illustrative. **The real document
+cannot corroborate its own second instrument, and will not be able to until it next contains the defect the
+instrument exists to find.** The gap arc recorded in item 126 is the evidence that the instrument found real
+instances when instances existed; it is history, not a live check.
+
+**A mutation that changed nothing, recorded because it is the sharper finding.** Adding a seventh verb to the
+locked set killed no test, since the verb chosen occurs nowhere in this document followed by the position
+word. That is a fact about the corpus rather than a weakness in the tests: a verb the document never uses
+cannot change a count. Re-running with a verb the document does use killed two assertions and named the
+figures it moved between.
+
+**Bucket: Neither.** A structural fact about an instrument is recorded and no fix is proposed. **Against
+Actionable now:** the artefact already shipped and nothing about the limit is repairable by choosing to
+repair it — the missing corroboration requires the document to acquire a defect, which is not work anyone
+should do. **Against Blocked on data:** nothing is being awaited either, because the fixture already
+establishes the mechanism; what the real file cannot do is confirm it independently, which is a property of
+the file rather than a missing observation.
+
+**Where the code lives:** the pattern, the verb list, the absolute, the agreement requirement and both
+counting functions are in one module under the scripts directory, with its test beside it. See item 126 for
+the wrap blindness that produced the second instrument and the gap arc that validated it, and the
+twenty-eighth pattern for an instrument bounding what gets recorded as knowable.
+
+## 181. The scripts directory is type-checked by a second config, because the main one's rootDir makes its sibling unbuildable
+
+**What it is.** Everything under the scripts directory — the sweep runner, three probes, and seven test
+files — was outside every type check this repository runs. The main config's `include` names the source
+directory alone, and the suite's transform strips types without checking them, so nothing anywhere read those
+files for type errors. A second config now checks them, and continuous integration runs it.
+
+**Why a second config rather than widening the first, established by building rather than by reading.** The
+main config sets `rootDir` to the source directory, and the scripts directory is its sibling rather than its
+child. Adding the scripts glob to that config's `include` produces hard errors on every file that is not
+under the declared root — and the instructive part is what happens next: **the build exits non-zero while
+still emitting**, so the failure is not a clean refusal that leaves the previous output intact. That was
+measured by building into a scratch location and reading the resulting tree, never against the real one. The
+published output was then proved unchanged by building it twice, before and after, and comparing both trees
+by file listing and by checksum.
+
+**The ordering constraint, which is not obvious from the config and cost a wrong first placement.** Three
+imports in one of those test files resolve against the built output rather than the source tree. The check
+therefore has to run after the build, not beside the existing typecheck, and the first plan for the work
+placed it beside the existing typecheck exactly as one would expect for a typecheck. The suite has always had
+this same dependency on the same file, which is why it already sat after the build in the same pipeline; the
+new check inherited a constraint that was visible in the pipeline's existing order and was still missed by
+reasoning about what kind of command it is.
+
+**Ten errors stood, and every one came from three untyped siblings.** Three imports of adjacent
+plain-JavaScript modules were implicitly untyped; the six implicit-parameter errors were all inferred through
+those same imports; and one stale expect-error directive was stale precisely because the untyped import made
+the wrong-typed call it guarded legal. Hand-written declarations scoped to what the tests actually use fixed
+all ten without editing any source or test file. Letting the compiler read the JavaScript directly was tried
+first and rejected: it more than doubled the error count, because shapes inferred from destructuring are
+narrower than the heterogeneous calls those functions really receive.
+
+**Bucket: Neither.** The work shipped and the entry records why the shape is what it is. **Against Actionable
+now:** nothing is specified that has not been done. **Against Blocked on data:** no observation is missing;
+the error count, the emitted tree and the published-output identity were each measured.
+
+**Where the code lives:** the second config is at the repository root beside the main one; the three
+declaration files sit next to the modules they describe; the script that runs the check is in the package
+manifest and the pipeline step follows the build. See item 107 for the source-directory exclusion this does
+not address and the distinction between being excluded from a program and never being in one.
+
+## 182. A typecheck script duplicating another has no caller anywhere in the repository
+
+**What it is.** The package manifest carries two scripts that do the same thing. One runs the compiler in
+no-emit mode and finds its config implicitly; the other runs it in no-emit mode naming that same config
+explicitly. They resolve to the same program over the same files. **Nothing invokes the second one** —
+not the pipeline, which names the first; not a git hook, since this repository has no hook directory at all;
+not any script, test or document that runs commands.
+
+**The zero, established with both instruments before being recorded.** The tracked-file instrument returns
+two occurrences: the manifest entry that defines it, and one line of this document describing it as one of
+four scripts that invoke the compiler binary. Neither is a caller. **The unfiltered instrument returns more,
+and the difference is the finding**: a project-memory file and six generated prompt captures also name it,
+all of them under an ignored directory that holds no tracked file.
+
+**The boundary that makes deletion less trivial than the count suggests.** That project-memory file is read
+into the system prompt of every run in this repository. It lists this script by name as one of two ways to
+typecheck. Deleting the script from the manifest without touching that file leaves the model being told, on
+every run, to use a command that no longer exists — and because the file is ignored rather than tracked, the
+deletion's own diff would not show it, and no check would fail. The same file on any other machine seeded the
+same way carries the same sentence. So the fix is two edits in different trust domains, one of which is not
+version-controlled, rather than one line removed from a manifest.
+
+**Bucket: Actionable now.** The fix is specified — delete the duplicate and correct the memory file that
+advertises it, or give the second script a job the first does not do — and nothing new needs to be learned:
+the absence of callers was established under both instruments and the one non-caller mention was located.
+**Against Neither:** work is specified rather than a fact recorded. **Against Blocked on data:** no
+observation is missing.
+
+**Where the code lives:** the two scripts are adjacent entries in the package manifest; the sentence naming
+the duplicate is in the ignored project-memory file at the repository root's dot-directory. See item 181 for
+the third typecheck script added beside them, which is not a duplicate.
+
+## 183. Compiled output sits untracked beside every module in the scripts directory, and both checks that read that directory ignore it
+
+**What it is.** The scripts directory holds twenty-seven untracked files that no one appears to have put
+there deliberately: for each of its nine TypeScript files, a compiled JavaScript file, a source map, and a
+declaration file. They predate this session, they are not ignored by the version-control configuration —
+they show as untracked rather than being hidden — and their origin is unknown. No command in the package
+manifest emits into that directory.
+
+**Whether they are inputs to anything, answered by running both checks rather than by reading their configs.**
+Against the type check that now covers the directory, the program is exactly twelve files: the nine
+TypeScript sources and the three committed declaration files added for the adjacent plain-JavaScript modules.
+**All nine stray declaration files are absent from it**, even though their names match the include pattern's
+shape. Against the test suite, the include pattern names the TypeScript extension specifically, and listing
+the collected files returns exactly the seven TypeScript test files and none of the compiled ones. **So they
+are inert against both.**
+
+**The mechanism, and the part of it that was not tested.** The nine stray declaration files each sit beside a
+TypeScript file of the same stem, and a declaration file loses to a same-named source file when the compiler
+builds its file list — which is consistent with the three committed declaration files, whose stems have no
+same-named source sibling, all being present. That explanation accounts for every observation. **It was not
+tested against the case that would distinguish it**, a declaration file whose source sibling had been
+deleted or renamed, because no such file exists in the current tree and creating one to find out was outside
+what this pass was doing. If that case ever arises, a stray file becomes a real input.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed. **Against Actionable now:**
+nothing is broken — both checks ignore the files — and prescribing deletion for artefacts whose origin is
+unknown risks removing something intentional. **Against Blocked on data:** the question this entry was
+opened to answer, input or inert, was answered by running both checks; what stays untested is a counterfactual
+rather than a missing observation about the current tree.
+
+**Where the code lives:** the artefacts are in the scripts directory; the two configurations that decide
+whether anything reads them are the second type-check config and the suite's own include list. See item 181
+for the check that now covers that directory.
+
+## 184. The guidance file quotes a predicate verbatim from source, and nothing checks that the two still agree
+
+**What it is.** The project's top-level guidance file has no mechanical protection of any kind. This session
+found three defects in it: two false statements about how subagent dispatch is withheld, and a positional
+referent with no antecedent introduced while correcting them. Every one was caught by a person reading it
+against the code, and nothing would have caught any of them otherwise.
+
+**Why one of its claims is now different in kind from the rest.** Most of that file is prose that describes
+code, and prose has no canonical form to check against. But the correction that closed item 176 put a
+**verbatim quotation of a source expression** into it — the budget gate's real predicate, copied character
+for character from the line that defines it. Both instruments confirm that exact string currently occurs in
+precisely two files, the guidance file and the source file the guidance file names. A quotation is
+checkable in a way a paraphrase is not: it either still occurs in the file it claims to come from or it does
+not.
+
+**The check's shape, which already exists in this repository for a different file.** Store the quoted
+predicate and the source path it is attributed to, then assert the source file still contains that string —
+failing with both the expected and the actual when it does not. That is the same shape as the module now
+holding this document's anaphor convention: an expectation stored as an artefact beside a test, so drift in
+the thing being described fails a check rather than waiting to be noticed. It does not verify the surrounding
+prose, and it should not be described as protecting the file; it protects one quotation, which is the one
+claim in the file with a form precise enough to protect.
+
+**What it would and would not have caught, stated so the value is not overstated.** It would not have caught
+either of the two false statements this session fixed — both were wrong about which mechanisms exist, not
+misquotations, and the file quoted nothing at the time. It would catch the failure mode the correction
+newly created: the predicate being edited in source while the file keeps quoting the old form, which is the
+more likely future error precisely because the file now looks authoritative on that line.
+
+**Bucket: Actionable now.** The fix is specified and its scope is named, the two strings were confirmed
+identical at the time of writing, and the pattern to copy already exists in this repository. **Against
+Neither:** work is specified. **Against Blocked on data:** no observation is missing; both occurrences were
+located under both instruments.
+
+**Where the code lives:** the quotation is in the subagent-dispatch paragraph of the guidance file at the
+repository root; the expression it quotes is the budget-gate assignment in the agent loop. See item 176 for
+the correction that introduced the quotation, item 180 for the artefact whose shape this would copy, and the
+twenty-sixth pattern for citation copying a claim more reliably than checking one.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 179 to find out which ones still need something. No index of
+reader the trouble of reading all 184 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (65): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 111, 117, 120, 121, 126, 128, 134, 135, 137, 144, 149, 150, 153, 156, 161, 162, 167, 171
+**Closed** (67): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 111, 117, 120, 121, 126, 128, 134, 135, 137, 144, 149, 150, 153, 156, 161, 162, 167, 171, 172, 176
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (11): 108, 113, 116, 129, 130, 138, 142, 148, 169, 172, 176
+first (11): 108, 113, 116, 129, 130, 138, 142, 148, 169, 182, 184
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (15): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143, 157, 166, 170, 175, 178
 
-**Neither — a structural fact recorded, with no fix proposed** (88): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (91): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152, 154, 155, 158,
-159, 160, 163, 164, 165, 168, 173, 174, 177, 179
+159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 183
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
