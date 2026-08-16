@@ -11,6 +11,7 @@ Zone is a self-hosted AI coding agent: a TypeScript Node CLI with BYOK access to
 ```bash
 npm run build         # tsc -p tsconfig.json
 npm run typecheck     # tsc --noEmit
+npm run typecheck:scripts  # tsc --noEmit -p tsconfig.scripts.json — scripts/ only, requires dist/ built first (3 imports)
 npm test              # vitest run
 npx vitest run src/llm/agentLoop.dispatch.test.ts   # single file
 npx vitest run -t "tier override"                    # pattern
@@ -18,7 +19,7 @@ npm run sweep         # scripts/sweep.ts — vestigial (HTTP server removed; tar
 npm run sweep:dry     # config validation only
 ```
 
-ESLint configured (`eslint.config.mjs`) but neither `eslint` nor `typescript-eslint` is installed — `npx eslint <path>` fetches ESLint from the network and then fails loading the config (`Cannot find package 'typescript-eslint'`); see `docs/deferred-work.md` item 13. The CLI runs from the *built* dist/ — rebuild after editing `src/`. `tsconfig.json` excludes `dist`, `node_modules`, `*.test.ts`, `*.test.tsx`, `**/__tests__/**`, `src/extension.ts` (vestigial VS Code shell) — `*.test.tsx` was missing from this list before this pass, the same gap `docs/deferred-work.md` item 107 counts repo-wide (593 type errors across 144 excluded files); `src/test/**` is included so fixtures type-check.
+ESLint configured (`eslint.config.mjs`) but neither `eslint` nor `typescript-eslint` is installed — `npx eslint <path>` fetches ESLint from the network and then fails loading the config (`Cannot find package 'typescript-eslint'`); see `docs/deferred-work.md` item 13. The CLI runs from the *built* dist/ — rebuild after editing `src/`. `tsconfig.json` excludes `dist`, `node_modules`, `*.test.ts`, `*.test.tsx`, `**/__tests__/**`, `src/extension.ts` (vestigial VS Code shell) — `*.test.tsx` was missing from this list before this pass, the same gap `docs/deferred-work.md` item 107 counts repo-wide (593 type errors across 144 excluded files); `src/test/**` is included so fixtures type-check. `scripts/` is separately covered by `tsconfig.scripts.json` (`npm run typecheck:scripts`, wired into CI after `npm run build`) — item 107's gap is `src/`-only and unrelated.
 
 ## Big-picture architecture
 

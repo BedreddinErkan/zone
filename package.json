@@ -32,6 +32,7 @@
     "build": "node node_modules/typescript/bin/tsc -p tsconfig.json",
     "postbuild": "chmod +x dist/cli/index.js",
     "typecheck": "tsc --noEmit",
+    "typecheck:scripts": "tsc --noEmit -p tsconfig.scripts.json",
     "check-types": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:l3": "vitest run src/llm/taskClassifier.archetype.test.ts",
