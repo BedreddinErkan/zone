@@ -194,7 +194,7 @@ export function isSafeCommand(command: string): boolean {
 type PendingApproval = {
   runId: string;
   command: string;
-  resolve: (approved: boolean) => void;
+  resolve: (approved: boolean, reason?: CommandDenialReason) => void;
   timeout: NodeJS.Timeout;
 };
 
@@ -275,13 +275,24 @@ export function clearTrustedCommandsForRun(runId: string): number {
 }
 
 /**
- * Cause tag for a denied approval, populated only where a single cause can be named —
- * mirrors runCommandSafe.ts's RejectionClass rather than a bare string compared across
- * files. One member today: the other four `approved:false` sites in this module (timeout,
- * abort before/during pending, run-level rejection) share one cause among four shapes and
- * are left without a reason rather than guessing one.
+ * Cause tag for a denied approval, populated only where a nameable cause exists — mirrors
+ * runCommandSafe.ts's RejectionClass rather than a bare string compared across files.
+ *
+ * "run_ending" deliberately covers three distinct trigger sites (an already-aborted signal,
+ * a signal aborting mid-flight, and rejectPendingApprovalsForRun's run-level sweep) rather
+ * than three separate tags: from the agent's perspective all three mean the same thing —
+ * there is no more run to act in — and nothing downstream consumes a finer distinction.
+ *
+ * Two sites remain deliberately unreasoned: a real person declining a prompt, and a
+ * non-interactive (no-TTY) run auto-denying because nothing can ask a human. Both route
+ * through resolveCommandApproval's own resolve(approved), which passes no reason. Naming
+ * either would mislabel the shared fallback, which those two still share with a genuinely
+ * metacharacter-carrying command — see the fallback branch in toolExecutor.ts.
  */
-export type CommandDenialReason = "investigation_not_diagnostic";
+export type CommandDenialReason =
+  | "investigation_not_diagnostic"
+  | "approval_timeout"
+  | "run_ending";
 
 export function requestCommandApproval(input: {
   runId: string;
@@ -376,7 +387,7 @@ export function requestCommandApproval(input: {
   }
 
   return new Promise((resolve) => {
-    const finish = (approved: boolean) => {
+    const finish = (approved: boolean, reason?: CommandDenialReason) => {
       const entry = pendingApprovals.get(approvalId);
       if (entry) {
         try {
@@ -384,22 +395,46 @@ export function requestCommandApproval(input: {
         } catch {}
         pendingApprovals.delete(approvalId);
       }
-      resolve({ approvalId, approved });
+      resolve({ approvalId, approved, reason });
     };
 
-    const timeout = setTimeout(() => finish(false), timeoutMs);
+    // Item 194 fix: named and, for this one cause, observed — a timeout means someone was
+    // shown the prompt (TUI modal, or an interactive-TTY headless prompt) and did not answer
+    // within the window; a non-interactive (no-TTY) run never reaches this branch at all, it
+    // denies synchronously elsewhere. Worth observing because "is the window too short" is a
+    // real future question, the same shape as item 196's own open question about the
+    // investigation gate.
+    const timeout = setTimeout(() => {
+      try {
+        input.emit({
+          type: "command_denied_timeout",
+          runId,
+          command,
+          approvalId,
+          reason: "approval_timeout",
+        } as any);
+      } catch {}
+      log(
+        "[zone-command-approval-timeout]",
+        JSON.stringify({ runId, command: command.slice(0, 200), reason: "approval_timeout" })
+      );
+      finish(false, "approval_timeout");
+    }, timeoutMs);
     pendingApprovals.set(approvalId, { runId, command, resolve: finish, timeout });
 
     if (input.abortSignal) {
       if (input.abortSignal.aborted) {
-        finish(false);
+        // Item 194 fix: named, not observed — the run's context is already gone by the time
+        // this fires, in every mode, and an ending run's orphaned approvals are normal
+        // operation with no future decision resting on their count (unlike timeout, above).
+        finish(false, "run_ending");
         return;
       }
       const onAbort = () => {
         try {
           input.abortSignal?.removeEventListener("abort", onAbort as any);
         } catch {}
-        finish(false);
+        finish(false, "run_ending");
       };
       try {
         input.abortSignal.addEventListener("abort", onAbort, { once: true });
@@ -438,7 +473,9 @@ export function rejectPendingApprovalsForRun(runIdRaw: string): number {
     if (entry.runId === runId) {
       n += 1;
       try {
-        entry.resolve(false);
+        // Item 194 fix: same cause as an abort firing mid-flight — the run is ending — so it
+        // carries the same reason. Not observed, per the same reasoning as that branch.
+        entry.resolve(false, "run_ending");
       } catch {}
       pendingApprovals.delete(approvalId);
       try {

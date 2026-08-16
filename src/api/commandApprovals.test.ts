@@ -11,6 +11,7 @@ import {
   requestCommandApproval,
   resolveCommandApproval,
   setTrustAllForRun,
+  rejectPendingApprovalsForRun,
 } from "./commandApprovals";
 
 describe("isSafeCommand", () => {
@@ -194,12 +195,22 @@ describe("requestCommandApproval", () => {
     });
 
     expect(result.approved).toBe(false);
+    // Item 194: the 1ms timeout used to keep this test fast now genuinely fires and is
+    // observed, so this test — which awaits full resolution — also exercises that path and
+    // sees both events. The prompt-required event this test targets is still the first one.
     expect(events).toEqual([
       {
         type: "command_approval_required",
         runId: "run_123",
         command: "git push origin main",
         approvalId: result.approvalId,
+      },
+      {
+        type: "command_denied_timeout",
+        runId: "run_123",
+        command: "git push origin main",
+        approvalId: result.approvalId,
+        reason: "approval_timeout",
       },
     ]);
   });
@@ -550,6 +561,81 @@ describe("requestCommandApproval — investigationMode:true", () => {
       expect(result.approved).toBe(true);
       expect(events.find((e: any) => e.type === "command_denied_investigation")).toBeUndefined();
     }
+  });
+});
+
+// Item 194: the four causes beyond investigation-deny — a timeout with its own reason and
+// observability, and three triggers (both abort flavors plus the run-level sweep) collapsing
+// to one shared "run_ending" reason with none of them observed.
+describe("requestCommandApproval — timeout and run-ending reasons (item 194)", () => {
+  it("timeout resolves with reason 'approval_timeout' and emits command_denied_timeout", async () => {
+    const events: unknown[] = [];
+    const result = await requestCommandApproval({
+      runId: "reason-run-1",
+      command: "git push origin main",
+      emit: (e) => events.push(e),
+      timeoutMs: 1,
+    });
+    expect(result.approved).toBe(false);
+    expect(result.reason).toBe("approval_timeout");
+    const denyEvent = events.find((e: any) => e.type === "command_denied_timeout");
+    expect(denyEvent).toEqual({
+      type: "command_denied_timeout",
+      runId: "reason-run-1",
+      command: "git push origin main",
+      approvalId: result.approvalId,
+      reason: "approval_timeout",
+    });
+  });
+
+  it("an already-aborted signal resolves with reason 'run_ending' and emits nothing new", async () => {
+    const events: unknown[] = [];
+    const ac = new AbortController();
+    ac.abort();
+    const result = await requestCommandApproval({
+      runId: "reason-run-2",
+      command: "git push origin main",
+      emit: (e) => events.push(e),
+      abortSignal: ac.signal,
+      timeoutMs: 5000,
+    });
+    expect(result.approved).toBe(false);
+    expect(result.reason).toBe("run_ending");
+    // An already-aborted signal returns before the promise executor's own trailing
+    // command_approval_required emit is ever reached — nothing is emitted at all, pre-existing
+    // control flow this pass's reason parameter doesn't change.
+    expect(events).toEqual([]);
+  });
+
+  it("a signal aborting mid-flight resolves with reason 'run_ending' and emits nothing new", async () => {
+    const events: unknown[] = [];
+    const ac = new AbortController();
+    setTimeout(() => ac.abort(), 5);
+    const result = await requestCommandApproval({
+      runId: "reason-run-3",
+      command: "git push origin main",
+      emit: (e) => events.push(e),
+      abortSignal: ac.signal,
+      timeoutMs: 5000,
+    });
+    expect(result.approved).toBe(false);
+    expect(result.reason).toBe("run_ending");
+    expect(events.find((e: any) => e.type === "command_denied_timeout")).toBeUndefined();
+  });
+
+  it("rejectPendingApprovalsForRun firing mid-flight resolves with reason 'run_ending' and emits nothing new", async () => {
+    const events: unknown[] = [];
+    const promise = requestCommandApproval({
+      runId: "reason-run-4",
+      command: "git push origin main",
+      emit: (e) => events.push(e),
+      timeoutMs: 5000,
+    });
+    setTimeout(() => rejectPendingApprovalsForRun("reason-run-4"), 5);
+    const result = await promise;
+    expect(result.approved).toBe(false);
+    expect(result.reason).toBe("run_ending");
+    expect(events.find((e: any) => e.type === "command_denied_timeout")).toBeUndefined();
   });
 });
 

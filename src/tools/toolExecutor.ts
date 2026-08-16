@@ -1320,14 +1320,18 @@ export async function executeTool(
       if (input?.runId && input?.onApprovalRequired) {
         const { approved, reason } = await input.onApprovalRequired(command, input.runId);
         if (!approved) {
-          // Item 190 fix: a gate-3 (investigation) denial is named by its real cause — not on
-          // the diagnostic allowlist, denied automatically, no metacharacters involved. Every
-          // other approved:false cause (timeout, abort, run-level rejection, a real user
-          // declining a prompt) carries no reason and keeps the prior generic message below.
+          // Item 190/194 fix: three of six approved:false causes are named by their real
+          // cause. Two remain deliberately unreasoned — a real user declining a prompt, and a
+          // non-interactive run auto-denying with nobody to ask — and share the fallback below
+          // with a genuinely metacharacter-carrying command, for which that text is correct.
           const output =
             reason === "investigation_not_diagnostic"
               ? `Command not on the investigation diagnostic allowlist: ${command}. Investigation mode auto-approves only a narrow diagnostic set (typecheck, test runners, prettier --check, git branch) and denies everything else immediately with no prompt — this is not a metacharacter or permission issue. Use read_file / search_in_files instead, or restate the command as one of the diagnostic commands.`
-              : `Command not auto-approved: ${command}. If it contains 2>&1, a pipe (|), or a redirect (>), re-run it BARE — output is captured and truncated automatically. Bare commands like \`npm run build\` and \`npx tsc --noEmit\` auto-approve. Do not retry a command with metachars.`;
+              : reason === "approval_timeout"
+                ? `No one responded to the approval request for "${command}" within the timeout window. Retrying it immediately is unlikely to succeed under the same conditions, but this is not a permanent block — continue with other work, or restate the command as a read-only diagnostic if one is available.`
+                : reason === "run_ending"
+                  ? `The approval request for "${command}" was never answered because this run is ending. There is nothing to retry — do not attempt this command again in this run.`
+                  : `Command not auto-approved: ${command}. If it contains 2>&1, a pipe (|), or a redirect (>), re-run it BARE — output is captured and truncated automatically. Bare commands like \`npm run build\` and \`npx tsc --noEmit\` auto-approve. Do not retry a command with metachars.`;
           return { success: false, output };
         }
       }
