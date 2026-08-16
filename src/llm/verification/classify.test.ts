@@ -201,8 +201,8 @@ describe("validatePassedClaim — false-accept fixed (mixed-result text no longe
   });
 });
 
-describe("validatePassedClaim — false-demote-by-ecosystem fixed (non-JS/Python passing text now accepted)", () => {
-  it("accepts a passing Go test run", () => {
+describe("validatePassedClaim — false-demote-by-output-shape fixed (passing output not matching any retired text pattern is now accepted, independent of ecosystem)", () => {
+  it("accepts a passing Go test run (output shape unmatched by any retired pattern)", () => {
     const log = [
       { tool: "run_command", args: { command: "go test ./..." }, result: "ok  \tmypkg\t0.014s", success: true },
     ];
@@ -212,30 +212,35 @@ describe("validatePassedClaim — false-demote-by-ecosystem fixed (non-JS/Python
     });
   });
 
-  it("accepts a passing Maven (Java) test run", () => {
+  it("accepts a passing Maven test run (output shape unmatched by any retired pattern)", () => {
     const log = [
       { tool: "run_command", args: { command: "mvn test" }, result: "BUILD SUCCESS", success: true },
     ];
     expect(validatePassedClaim(log, { hasTests: true }).accept).toBe(true);
   });
 
-  it("accepts a passing PHPUnit run", () => {
+  it("accepts a passing PHPUnit run (output shape unmatched by any retired pattern)", () => {
     const log = [
       { tool: "run_command", args: { command: "phpunit" }, result: "Time: 00:00.123, Memory: 6.00 MB", success: true },
     ];
     expect(validatePassedClaim(log, { hasTests: true }).accept).toBe(true);
   });
 
-  it("accepts a passing RSpec (Ruby) run", () => {
+  it("accepts a passing RSpec test run (output shape unmatched by any retired pattern)", () => {
     const log = [
       { tool: "run_command", args: { command: "bundle exec rspec" }, result: "Finished in 0.02341 seconds", success: true },
     ];
     expect(validatePassedClaim(log, { hasTests: true }).accept).toBe(true);
   });
 
-  it("accepts a passing dotnet test (.NET) run", () => {
+  // The retired /\bTests:\s+.*passed/i pattern matches "Total tests: 8. Passed: 8." (its own
+  // "Passed" satisfies the tail), so that older dotnet-test summary form would have been
+  // accepted by the pre-fix predicate too and does not discriminate. This modern VSTest
+  // summary line matches none of the six retired patterns — confirmed by running both forms
+  // against a faithful pre-fix reconstruction.
+  it("accepts a passing dotnet-test run using the modern VSTest summary line (the older 'Total tests: N. Passed: N.' form matches a retired pattern and would not discriminate)", () => {
     const log = [
-      { tool: "run_command", args: { command: "dotnet test" }, result: "Total tests: 8. Passed: 8.", success: true },
+      { tool: "run_command", args: { command: "dotnet test" }, result: "Passed!  - Failed: 0, Passed: 8, Skipped: 0, Total: 8", success: true },
     ];
     expect(validatePassedClaim(log, { hasTests: true }).accept).toBe(true);
   });
@@ -250,6 +255,17 @@ describe("validatePassedClaim — false-demote-by-tool-filter fixed (run_command
   });
 });
 
+// The empty-log cases below (and the two "regression guards" cases further down) also pass
+// against a faithful pre-fix reconstruction — established directly, not assumed. That is
+// correct, not a coverage gap: an empty toolCallLog produces an empty candidate set under
+// both implementations by construction, so no input could make these two differ. The clean-fail
+// regression guard is structurally identical for a different reason — its text matches no
+// retired pattern, so the pre-fix predicate falls through to its own `success === false` check,
+// the same signal the current predicate always reads; the two implementations agree because the
+// old one's own fallback path already looked at the exit code, not by luck of the text. The
+// clean-pass regression guard shares the coincidental-match mechanism the dotnet-test case above
+// was replaced for, but its job — confirming the easy case stays easy — doesn't claim to
+// demonstrate a specific defect fix, so it is not a candidate for replacement on that ground.
 describe("validatePassedClaim — no-attempt branch precision", () => {
   it("demotes to no_verification_attempted for a truly empty log when the framework has tests", () => {
     const result = validatePassedClaim([], { hasTests: true });
