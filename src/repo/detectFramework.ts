@@ -247,17 +247,39 @@ function detectJava(dir: string): DetectedFrameworkBase | null {
 }
 
 function detectPhp(dir: string): DetectedFrameworkBase | null {
-  const composer = path.join(dir, "composer.json");
-  if (!exists(composer)) return null;
+  const composerPath = path.join(dir, "composer.json");
+  if (!exists(composerPath)) return null;
+  const composerJson = tryReadJson<Record<string, unknown>>(composerPath) ?? {};
+
+  const requireDev = composerJson["require-dev"];
+  const hasPhpunitDep =
+    !!requireDev &&
+    typeof requireDev === "object" &&
+    Object.prototype.hasOwnProperty.call(requireDev, "phpunit/phpunit");
+
+  const scripts = composerJson.scripts;
+  const hasTestScript =
+    !!scripts &&
+    typeof scripts === "object" &&
+    typeof (scripts as Record<string, unknown>).test === "string" &&
+    ((scripts as Record<string, unknown>).test as string).trim().length > 0;
+
+  // Script signal takes precedence over the dependency signal when both are present — the same
+  // precedence detectNodeFromPackageJson already applies (hasScript("test") wins over every
+  // tool-inferred fallback in every one of its framework branches). A script's own content isn't
+  // consulted: composer.json's "scripts" section is arbitrary, unlike package.json's, so the
+  // command it runs cannot be spot-checked against a known tool name.
+  const testCommand = hasTestScript ? "composer test" : hasPhpunitDep ? "phpunit" : "";
+
   return {
     language: "php",
     framework: "PHP",
-    testCommand: "",
+    testCommand,
     buildCommand: "",
     devCommand: "",
     packageManager: "composer",
-    hasTests: false,
-    testFramework: "unknown",
+    hasTests: testCommand !== "",
+    testFramework: hasPhpunitDep ? "phpunit" : "unknown",
   };
 }
 

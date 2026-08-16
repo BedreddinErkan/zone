@@ -10,6 +10,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { detectFramework } from "./detectFramework.js";
+import { selectVerificationCommand } from "../llm/verification/command.js";
 
 let repoPath: string;
 
@@ -54,6 +55,71 @@ describe("detectFramework — Ruby classification", () => {
     write("README.md", "hello\n");
     const fw = await detectFramework(repoPath);
     expect(fw.language).not.toBe("ruby");
+  });
+});
+
+/**
+ * Item 192: detectPhp checked only that composer.json existed and returned an empty command,
+ * hasTests: false, testFramework: "unknown" unconditionally — the manifest's content was never
+ * read. Unlike requirements.txt/Gemfile, composer.json is structured JSON with its own scripts
+ * section (like package.json), so it carries two independent signals rather than one: a
+ * require-dev dependency entry and a scripts.test entry. Precedence (script wins when both are
+ * present) mirrors detectNodeFromPackageJson's own hasScript("test") precedence one function
+ * above this file's detectPhp.
+ */
+describe("detectFramework — PHP classification (item 192)", () => {
+  it("script signal only: scripts.test present, no require-dev phpunit entry", async () => {
+    write("composer.json", JSON.stringify({ scripts: { test: "phpunit --colors=always" } }));
+    const fw = await detectFramework(repoPath);
+    expect(fw.language).toBe("php");
+    expect(fw.testCommand).toBe("composer test");
+    expect(fw.hasTests).toBe(true);
+    expect(fw.testFramework).toBe("unknown");
+  });
+
+  it("dependency signal only: require-dev names phpunit/phpunit, no scripts.test", async () => {
+    write("composer.json", JSON.stringify({ "require-dev": { "phpunit/phpunit": "^10.0" } }));
+    const fw = await detectFramework(repoPath);
+    expect(fw.language).toBe("php");
+    expect(fw.testCommand).toBe("phpunit");
+    expect(fw.hasTests).toBe(true);
+    expect(fw.testFramework).toBe("phpunit");
+  });
+
+  it("both signals present and disagreeing: script content names a different runner — script still wins", async () => {
+    write(
+      "composer.json",
+      JSON.stringify({
+        "require-dev": { "phpunit/phpunit": "^10.0" },
+        scripts: { test: "pest" },
+      })
+    );
+    const fw = await detectFramework(repoPath);
+    expect(fw.language).toBe("php");
+    expect(fw.testCommand).toBe("composer test");
+    expect(fw.testFramework).toBe("phpunit");
+  });
+
+  it("neither signal: composer.json present but names no runner", async () => {
+    write("composer.json", JSON.stringify({ name: "acme/widget" }));
+    const fw = await detectFramework(repoPath);
+    expect(fw.language).toBe("php");
+    expect(fw.testCommand).toBe("");
+    expect(fw.hasTests).toBe(false);
+    expect(fw.testFramework).toBe("unknown");
+  });
+
+  it("no composer.json at all: not classified php", async () => {
+    write("README.md", "hello\n");
+    const fw = await detectFramework(repoPath);
+    expect(fw.language).not.toBe("php");
+  });
+
+  it("end to end: a real composer.json's detected command is what selectVerificationCommand actually selects", async () => {
+    write("composer.json", JSON.stringify({ "require-dev": { "phpunit/phpunit": "^10.0" } }));
+    const fw = await detectFramework(repoPath);
+    const choice = selectVerificationCommand(fw, { repoPath });
+    expect(choice).toEqual({ command: "phpunit", timeoutMs: 90000, label: "test" });
   });
 });
 
