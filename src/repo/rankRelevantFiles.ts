@@ -981,6 +981,30 @@ async function applyLexicalBoost<
   );
 }
 
+/** Directory-name tokens that mark a path as build output, a dependency cache, or VCS
+ *  internals. Matched against full path SEGMENTS only, never a bare substring — unanchored
+ *  substring matching dropped 52 of 901 tracked src/ files in this repository, every one a
+ *  false positive from "build" inside a camelCase filename like buildEnv.ts. */
+export const SKIP_DIR_TOKENS = [
+  "venv",
+  ".venv",
+  "site-packages",
+  "__pycache__",
+  "node_modules",
+  ".git",
+  "dist",
+  "build",
+  ".next",
+];
+
+/** True when filePath contains one of SKIP_DIR_TOKENS as a full path segment. Splits on
+ *  both `/` and `\` so the check is correct regardless of the host platform's separator; a
+ *  leading or trailing separator produces an empty segment that matches nothing. */
+export function shouldSkipPath(filePath: string): boolean {
+  const segments = (filePath ?? "").toLowerCase().split(/[/\\]+/);
+  return segments.some((segment) => SKIP_DIR_TOKENS.includes(segment));
+}
+
 export async function rankRelevantFiles(args: {
   task: string;
   files: RepoFile[];
@@ -1008,22 +1032,6 @@ export async function rankRelevantFiles(args: {
     maxContextFilesRaw && Number.isFinite(Number(maxContextFilesRaw))
       ? Math.max(1, Math.floor(Number(maxContextFilesRaw)))
       : 5;
-
-  const shouldSkipPath = (filePath: string): boolean => {
-    const p = (filePath ?? "").toLowerCase();
-    return [
-      "venv",
-      ".venv",
-      "site-packages",
-      "__pycache__",
-      "node_modules",
-      "/.git/",
-      "\\.git\\",
-      "dist",
-      "build",
-      ".next",
-    ].some((token) => p.includes(token));
-  };
 
   const candidateFiles = files.filter((f) => !shouldSkipPath(f.path));
   const mentionedFiles = extractMentionedFiles(task, candidateFiles);

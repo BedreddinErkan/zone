@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { rankRelevantFiles, extractEntityTerms } from "./rankRelevantFiles.js";
+import { rankRelevantFiles, extractEntityTerms, shouldSkipPath } from "./rankRelevantFiles.js";
 import type { RepoFile } from "../types/project.js";
 
 function buildRepoFile(
@@ -235,5 +235,50 @@ describe("extractEntityTerms", () => {
     const first = extractEntityTerms(task);
     expect(first).toEqual(["fetchuserdata", "zonemarker", "database_url", "user_session"]);
     expect(extractEntityTerms(task)).toEqual(first);
+  });
+});
+
+// A representative subset of the 52 tracked src/ files this repo's own unanchored substring
+// match silently dropped (measured fresh this pass: two independent instruments, identical
+// 52-file sets, every one a false positive on the token "build" inside a camelCase filename —
+// none is under a directory literally named build/dist/venv/etc.).
+describe("shouldSkipPath — no longer a false positive on a filename that merely contains a token", () => {
+  it.each([
+    "src/core/buildEnv.ts",
+    "src/core/buildDecisionTrace.ts",
+    "src/cli/buildGeneratedPatchPlanPreview.ts",
+  ])("%s is not skipped", (path) => {
+    expect(shouldSkipPath(path)).toBe(false);
+  });
+
+  // Beyond this repo's own 52 — proves the fix generalizes past the one token this repo
+  // happened to expose, not just past the specific files found here.
+  it.each(["src/rebuild.rs", "src/distance.rs", "src/distributor.py"])(
+    "%s (token as a substring of a segment, not a whole segment) is not skipped",
+    (path) => {
+      expect(shouldSkipPath(path)).toBe(false);
+    }
+  );
+});
+
+// No real build/dist/venv/etc. directory exists under this repo's src/ today (established this
+// pass) — these are constructed paths, proving the fix still catches a genuine one rather than
+// having traded false positives for false negatives.
+describe("shouldSkipPath — a genuine skip directory is still caught at every position, both separators", () => {
+  it.each([
+    ["build/src/index.ts", true, "first segment, forward slash"],
+    ["src/build/index.ts", true, "middle segment, forward slash"],
+    ["src/foo/build", true, "last segment, forward slash"],
+    ["build\\src\\index.ts", true, "first segment, backslash"],
+    ["src\\build\\index.ts", true, "middle segment, backslash"],
+    ["src\\foo\\build", true, "last segment, backslash"],
+  ] as const)("%s -> %s (%s)", (path, expected) => {
+    expect(shouldSkipPath(path)).toBe(expected);
+  });
+
+  it("every token in the list is independently reachable as a segment", () => {
+    for (const token of ["venv", ".venv", "site-packages", "__pycache__", "node_modules", ".git", "dist", "build", ".next"]) {
+      expect(shouldSkipPath(`src/${token}/file.ts`), `token "${token}" did not skip`).toBe(true);
+    }
   });
 });
