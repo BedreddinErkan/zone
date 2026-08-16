@@ -8810,7 +8810,10 @@ all — it is the line number on which the array's closing bracket sits in `runC
 were the array's length. The anti-drift pinning below was never at risk: both mutations check the live
 `checkCommandSafe`, not this prose. Swept the rest of this document by shape for either wrong figure, for
 the correct ones, and for any other whitelist or blacklist count: this sentence was the only place either
-error appeared, and neither correct figure existed anywhere else to have been overwritten by it.
+error appeared, and neither correct figure existed anywhere else to have been overwritten by it. **One of
+the two corrected figures has since moved, on 2026-08-16:** commit 8c29d82b extended the whitelist across
+ecosystems and it now holds sixty-one entries, of which the read-only `git` subcommands are still fourteen.
+Forty-five stands as what was counted when this correction was made, and item 186 records the extension.
 
 **Essay decision — declined, one instance, checked directly rather than inherited from item 88's or item
 92's category declination: this candidate sits in the methodology category those two are not, and still
@@ -8938,7 +8941,13 @@ the array by construction — but the array's own order, counted directly from i
 runner first: the eight printed are `npx vitest, vitest, npm test, npm run test, pnpm test, yarn test, jest,
 pytest`. `ls` sits at index thirty-four of forty-five, `find` thirty-nine, `grep` forty, `rg` forty-one, `fd`
 forty-two — all past the slice. An agent refused for `sed` or `tree` is shown eight test runners and an
-ellipsis.
+ellipsis. **The mechanism this entry attributes to that variant — a slice of the live whitelist, described
+in two of its paragraphs — no longer exists anywhere, and the indices have moved twice.**
+Commit 5a0b24c6 replaced the slice with a curated discovery-first sample built at the render site, which is
+item 108's fix; commit 8c29d82b then took the array to sixty-one entries, putting `ls` at index fifty and
+`fd` at fifty-eight. The slice, the eight names it printed and the indices are the reading taken when this
+entry was written, and are kept as that reading rather than rewritten — what a reader should act on is item
+108's closure.
 
 **No apparatus exists for a refusal the way one exists for a scope block.** `consecutiveScopeBlocks` counts
 consecutive scope-blocked writes, with a coaching nudge at three, a circuit breaker at five, a dedicated exit
@@ -9907,7 +9916,7 @@ reason: 593 errors across 144 files is not a change that needs nothing learned f
 593. What would close it is a decision about which of the three excluded globs to reclaim and in what order,
 which is a scoping question this item does not answer.
 
-## 108. Variant B prints eight allowlist prefixes and the TUI title shows none of the five discovery binaries; a curated eight-entry sample puts four of them on screen
+## 108. Closed — the curated sample shipped before this arc and no ledger pass recorded it; the arc then moved every figure this entry measured; a curated eight-entry sample puts four of them on screen
 
 **What it is.** The whitelist-miss refusal prints `WHITELIST_PREFIXES.slice(0, 8).join(", ")`, always in sync
 with the array by construction, and the array's own order puts every test runner first. Indices parsed from
@@ -9937,11 +9946,45 @@ an agent in those two, naming the read-only binaries it does hold is the only pa
 actionable at all. The trailing ellipsis stays either way, so the sample continues to read as a sample rather
 than as the whole allowlist.
 
+**What shipped, and when — which is not this arc.** Commit 5a0b24c6 built the curated sample as its own
+constant at the render site, decoupled from `reason`, with every member asserted against the real whitelist
+array rather than trusted as a second hardcoded list. Its message records the live render matching a
+script-computed prediction byte for byte. That commit predates the language-coupling arc of 2026-08-15 and
+2026-08-16 entirely, and the ledger pass that ran between them recorded other work; **no pass has recorded
+this one until now**, which is why an entry whose fix had shipped sat in Actionable now. The sweep that
+found it was looking for entries the arc closed, and the honest answer to that question is that the arc
+closed none — the condition met here was met by a commit the arc had nothing to do with.
+
+**What the title shows today, measured on both paths.** The fixed lead before the sample is 65 characters,
+not the 53 recorded in this entry, so the hundred-character title carries 35 characters of sample rather
+than 47. On the generic path that is `ls, find, grep, rg, fd` — **all five** discovery binaries, one better
+than the four this entry predicted, because discovery-first ordering was chosen over the entry's own
+proposed order. The arc then added a same-ecosystem sample selected from the rejected command's leading
+token, which displaces the generic one for seven token families. For those, the title carries the
+ecosystem's own allowed prefixes and **no discovery binary at all** — confirmed by rendering the real
+message for cargo, go, mvn, bundle and dotnet commands. That is not a regression of the defect recorded
+here, which was that an agent saw eight irrelevant test runners; an agent refused for `cargo publish` is now
+shown the cargo commands it may run instead. It is a deliberate trade recorded so a later reader does not
+re-derive the old prediction and find it contradicted. Unrecognized leading tokens, including `tree` and
+`pip install`, still take the generic sample and show five of five.
+
+**Four figures in this entry are now wrong, and the entry is kept as written rather than rewritten.** The
+whitelist holds 61 entries, not 45; the discovery binaries sit at indices 50, 55, 56, 57 and 58, not 34
+through 42; the lead is 65 characters, not 53; and the mechanism this entry names — the render interpolating
+a slice of the whitelist — no longer exists at all. The measurements were correct when taken and the
+entry's argument depends on them, so they stay as the historical reading with this paragraph as the
+correction.
+
+**Bucket: Closed**, on this entry's own stated condition: the sample it prescribed is what renders.
+**Against Actionable now:** nothing remains specified and unbuilt here. **Against Neither:** a fix was
+proposed and built.
+
 **Where the code lives:** the whitelist-miss return in `checkCommandSafe` (`runCommandSafe.ts`) and the
-variant B render in `toolExecutor.ts`. The fix is a one-expression change to a pure function with no verdict
-consequence — it alters only the text of a refusal that already happens — and it was measured and
-deliberately not applied at 6f9c9a69, whose scope held variant B byte-identical. See item 93 for the refusal
-family and item 91 for the description fix that made the same omission on a different surface.
+variant B render in `toolExecutor.ts`. The fix was a one-expression change to a pure function with no
+verdict consequence — it alters only the text of a refusal that already happens — measured and deliberately
+not applied at 6f9c9a69, whose scope held variant B byte-identical, then applied at 5a0b24c6. See item 93
+for the refusal family, item 91 for the description fix that made the same omission on a different surface,
+and item 186 for the arc that extended both allowlists and added the ecosystem sample.
 
 ## 109. `forced_tier_blocking` cannot fire on the default path — it gates on a condition only an explicit flag sets, so it cannot recover from the only way a wrong tier actually arises
 
@@ -13812,7 +13855,7 @@ observation is missing.
 the duplicate is in the ignored project-memory file at the repository root's dot-directory. See item 181 for
 the third typecheck script added beside them, which is not a duplicate.
 
-## 183. Compiled output sits untracked beside every module in the scripts directory, and both checks that read that directory ignore it
+## 183. Closed — the untracked compiled output is deleted and ignored, and the reservation that argued against deleting it was answered by a check this entry had not run
 
 **What it is.** The scripts directory holds twenty-seven untracked files that no one appears to have put
 there deliberately: for each of its nine TypeScript files, a compiled JavaScript file, a source map, and a
@@ -13836,15 +13879,38 @@ tested against the case that would distinguish it**, a declaration file whose so
 deleted or renamed, because no such file exists in the current tree and creating one to find out was outside
 what this pass was doing. If that case ever arises, a stray file becomes a real input.
 
-**Bucket: Neither.** A structural fact is recorded and no fix is proposed. **Against Actionable now:**
-nothing is broken — both checks ignore the files — and prescribing deletion for artefacts whose origin is
-unknown risks removing something intentional. **Against Blocked on data:** the question this entry was
-opened to answer, input or inert, was answered by running both checks; what stays untested is a counterfactual
-rather than a missing observation about the current tree.
+**What shipped, and the reservation it answered rather than overrode.** This entry argued against deletion
+on one ground: artefacts whose origin is unknown might be intentional. A cleanup pass on 2026-08-16 ran a
+check this entry had not — every commit in the repository, filtered to additions of those three extensions
+under that directory — and it returns nothing. The files were **never tracked at any point in the
+repository's history**, which rules out the shape the reservation was protecting against, a deliberate
+artefact left behind by a removal from version control. Two other origin checks returned nothing as well:
+no manifest command emits into the directory, and no hook of any kind is configured. The origin stays
+unexplained; what changed is that "unexplained" no longer carries "possibly intentional". The
+twenty-seven files were deleted by explicit path, never by a glob, and three patterns — one per extension,
+scoped to that directory — were added to the ignore file so a return is invisible rather than untracked.
+The patterns were checked against six real cases before the commit: the three stray extensions match, and
+the TypeScript sources, the committed declaration files for the plain-JavaScript modules, and those modules
+themselves do not.
 
-**Where the code lives:** the artefacts are in the scripts directory; the two configurations that decide
-whether anything reads them are the second type-check config and the suite's own include list. See item 181
-for the check that now covers that directory.
+**The inertness claim was re-derived by running, not trusted from this entry.** Both checks were run
+immediately before the first deletion and again after the last, and their file lists compared as bytes:
+identical both times — 616 files in the type-check program, twelve of them under that directory, and the
+same seven test files collected. Had any stray file been an input to either, deleting all twenty-seven
+would have moved one of the two lists. Re-running the type check this pass returns the same 616 and the
+same twelve. The untested counterfactual this entry recorded — a declaration file whose source sibling had
+been deleted — is untested still, and is now unreachable by accident rather than by absence: the ignore
+patterns keep such a file out of the untracked listing where it would be noticed.
+
+**Bucket: Closed**, decided on this entry's own stated condition. What kept it in Neither was not a missing
+fix but an argument that deletion was unsafe while the origin was unknown, and the history check retires
+that argument on its own terms. **Against Neither:** work was specified and built. **Against Blocked on
+data:** the observation the reservation waited on was taken.
+
+**Where the code lives:** the artefacts were in the scripts directory; the two configurations that decide
+whether anything reads them are the second type-check config and the suite's own include list; the ignore
+patterns are in the repository-root ignore file, carrying a comment that points back at this entry. See item
+181 for the check that now covers that directory.
 
 ## 184. The guidance file quotes a predicate verbatim from source, and nothing checks that the two still agree
 
@@ -13885,28 +13951,350 @@ repository root; the expression it quotes is the budget-gate assignment in the a
 the correction that introduced the quotation, item 180 for the artefact whose shape this would copy, and the
 twenty-sixth pattern for citation copying a claim more reliably than checking one.
 
+## 185. Closed — the ranking predicate matched its skip tokens as unanchored substrings and dropped fifty-two of this repository's own tracked files
+
+**What it was.** Plan-context ranking drops paths that look like dependency trees or build output before it
+scores anything, matching a nine-token list against the candidate path. The match was a lowercased
+`includes` against the whole path string, unanchored in both directions, so a token matched anywhere —
+including inside a single word, in the middle of a file name that has no directory of that name anywhere in
+it.
+
+**The measured damage, re-derived on 2026-08-16 by running rather than carried from the fix.** Of 902
+tracked files under the source directory, **52 were dropped by the old predicate and are kept by the
+segment-matching one**; across all 993 tracked files the figure is 62. **All 52 fall to a single token,
+`build`**, matching inside camelCase basenames — a module named for building a plan preview, one for
+building a confidence breakdown, one for building an environment, and their tests. The ranker could not
+propose any of them as a relevant file for any task, and nothing reported that: a dropped candidate is
+indistinguishable from a candidate that scored badly.
+
+**The lens that found it was language, and the defect was not — which is the part worth keeping.** The
+predicate came under scrutiny because its tokens are ecosystem-specific: a virtual-environment directory, a
+bytecode cache, a package directory. The question asked was what such a list does in a repository that
+contains none of them. The answer measured is that **nothing in this repository was ever lost to those
+tokens**. Every one of the 52 losses came from `build`, which belongs to no ecosystem in particular, and
+every file lost was this repository's own TypeScript. A language-shaped question located a
+language-agnostic defect, and the natural mis-reading — that the damage will match the lens that found it —
+would have missed the whole of it.
+
+**What shipped.** The predicate is a named module-level export instead of an inline closure, and it splits
+the path on either separator and compares whole segments, so a token matches a directory or a complete file
+name and never a fragment of one. Its token list is exported beside it. The test file for the ranker now
+runs thirty-two cases, among them the real dropped names as regression pins, constructed genuine skips at
+first, middle and last position under both separators, and a loop asserting every token in the list is still
+independently reachable — the mutation risk being a fix that stops matching anything at all.
+
+**Bucket: Closed.** **Against Neither:** a fix was proposed and built. **Where the code lives:** the
+predicate and its token list in the ranker module. See item 79 for the ranking pipeline it feeds, item 81
+for the labelling defect beside it, and the thirty-third pattern for the shape this shares with items 187
+and 192.
+
+## 186. Closed — both command gates were extended across ecosystems, and the read-only list's real invariant was never "no writes"
+
+**What it was.** Two independent gates decide whether a shell command runs, and both were npm-centric. The
+first, a prefix whitelist checked after a blacklist of mutation patterns, decides whether the read-only
+shell tool executes at all. The second, a category-keyed prefix list, decides whether the approval-gated
+shell tool runs without asking the user. **Neither was purely npm, and the two were npm-centric in
+different amounts** — a distinction worth stating because "both were JavaScript-only" is the natural
+summary and it is wrong in both directions. The first already carried Python's runner and a partial Go and
+Rust presence: the Go test and vet commands, the Rust type check, and the compile-only form of the Rust
+test command — but no Java, Ruby, PHP or .NET, and no way to actually run Rust's tests. The second carried
+npm, yarn and pnpm and nothing else at all: a Python project's test command did not auto-approve there,
+though it passed the first gate. A Java, Ruby, PHP or .NET repository's ordinary verification command
+reached a refusal or a modal at both.
+
+**The two guarantees are different, which is why the lists disagree rather than one being a subset.** The
+first list's guarantee is syntactic: a blacklist of write redirects, file mutations, package mutations,
+privilege escalation and shell substitution is checked **before** the whitelist, so the promise is that no
+mutation vector is present in the text of the command. The second list's guarantee is behavioural, and the
+source states it in its own rationale: test runs are safe diagnostics **because the agent cannot edit
+files**. The first is a property of the string; the second is a property of the configuration the string
+runs in.
+
+**The read-only list's invariant was never "no writes", and members admitted long before this arc violate
+that bar.** Bare `tsc` and bare `npx tsc` are entries. The file that defines the third gate says in its own
+rationale that the no-emit form is preferred over the bare one **because the bare one writes JavaScript
+output when the type-check config does not set no-emit** — so the strictest of the three lists names, as its
+reason for excluding a form, a write vector the loosest list admits by name. The second gate's build
+category likewise admits only the no-emit and project forms. The list whose name says read-only is the one
+that permits the write, and it did so before this arc touched it. Reading its promise as "nothing is
+written" also misreads its treatment of project-defined script bodies, which it admits by name on the
+argument, in its own comment, that a script's name is trusted by convention.
+
+**What shipped, with both counts re-derived on 2026-08-16.** The first list went from 45 entries to 61 —
+seventeen added and one removed, the removal replacing a narrow Rust entry with the broader one that
+subsumes it, and the narrow string still passes by prefix, checked live against the built gate. The second
+list went from 30 entries to 48, none removed, leaving ten build, nineteen test, thirteen read-only and six
+git prefixes. Both now carry Rust, Go, Java, Ruby, PHP, .NET and the remaining Python runners. The
+additions include commands that write build output by design, which is consistent with the real invariant
+stated in this entry and not with the one the list's name suggests. A same-ecosystem sample function was
+added beside the first list and wired into the whitelist-miss refusal text, so an agent refused for a Rust
+command is shown Rust commands; item 108 records what that displaces.
+
+**Bucket: Closed.** **Against Neither:** a fix was proposed and built. **Against Actionable now:** nothing
+here remains specified and unbuilt — item 191 records the different shape that would replace the approach,
+not a remainder of this one. **Where the code lives:** the whitelist and the sample function in the
+read-only command module; the category list in the approvals module; the refusal render in the tool
+executor. See item 190 for the third gate, item 188 for the path that consults neither, and items 93 and
+108 for the refusal texts.
+
+## 187. Closed — the verification consumer discarded a correctly computed test command for every language outside a hardcoded branch, and one language was never classified at all
+
+**What it was.** The framework detector has seven ecosystem branches, several reading more than one
+manifest, and computes a test command per ecosystem:
+Rust, Go, Java under two build systems, Python, JavaScript, TypeScript. The consumer that turns a detected
+framework into the command staging verification will run returned a command only for TypeScript, or for
+JavaScript and Python carrying a test command. For every other language the detector's answer was computed,
+was correct, and was thrown away — the consumer re-derived which languages it supported from a hardcoded
+list of its own instead of asking whether a command had been produced.
+
+**Nothing failed when it happened.** A discarded command yields a skipped verification, and a skipped
+verification is grouped with a verified one at the point where the run's result fields are derived — item
+189 records that grouping and what a user sees. So a Rust or Go repository's run staged its patch,
+verified nothing, and reported the outcome the model claimed for itself.
+
+**The second defect sits one stage earlier and has the same shape.** Ruby's manifest was read into the
+detector's cosmetic list of configuration files and never turned into a language, so no Ruby project was
+ever classified as one. The manifest was opened; its content was discarded.
+
+**What shipped.** The consumer now returns whatever command the detector produced, gated on the command's
+own truthiness rather than on a language name: TypeScript is handled by an earlier branch, and the two
+languages that produce an empty command produce it by construction, so trusting truthiness is sufficient
+and a later detector addition is consumed automatically instead of requiring a matching edit here. A Ruby
+detector was added, mirroring the Python detector's discipline rather than the PHP one's — it reads the
+manifest's text and produces the rspec command only when the manifest names rspec, and an empty command
+otherwise, so a Ruby project without rspec is classified without a guessed command. Rust, Go, both Java
+build systems and Ruby now reach verification. The detector had no test file of its own before this arc,
+under two instruments; it has one now, nine cases, and the consumer's own file gained eight.
+
+**Bucket: Closed.** **Against Neither:** a fix was proposed and built. **Where the code lives:** the
+consumer in the verification module's command file; the detector in the repository-scanning module. See
+item 192 for the ecosystem this fix does not reach, item 188 for how the selected command is actually run,
+and the thirty-third pattern for the shape.
+
+## 188. The verification command runs through a raw exec wrapper and consults neither safety gate — the gates protect the model's tool calls, not commands the system starts itself
+
+**What it is.** Zone's two command gates are frequently discussed as though they governed which commands
+Zone runs. They govern which commands **the model** may cause to run through a tool call. The verification
+command is not one of those: staging verification selects a command from the detected framework and hands
+it to a promisified `exec` directly, twice on a failing run — once against the temp-flushed staging tree
+and once as a baseline — with no gate consulted at either call. The only filtering applied is the
+environment sanitizer that strips API keys and CI tokens from the child process.
+
+**Established by two instruments and a traced path.** Both `command grep` and `git grep` for either gate's
+predicate or either gate's array, scoped to the verification module, return nothing — no file under it
+mentions either gate under any name. The path from selection to execution passes through three functions in
+two files and reaches the exec wrapper without branching through anything that could refuse.
+
+**A prior brief's causal claim to the contrary was false, and is described rather than quoted.** The brief
+that commissioned item 187's widening asserted that the allowlist extension of item 186 was what made
+honouring the detected command newly runnable — that the detected command could not previously have run
+because the gates would have refused it, so the consumer fix had to wait for the gate fix. Tracing the path
+refuted it: the verification command has never passed through a gate, before or after the extension, and
+the two changes are independent. The widening would have behaved identically with both allowlists
+untouched. **Two sweeps, reported separately.** By item reference: no entry in this document names the
+verification command, its runner, or its exec wrapper — zero under both instruments, so no existing entry
+inherits the claim. By claim shape: a search for a gate, allowlist, whitelist or approval within eighty
+characters of a verification or test command returns ten lines, every one of them a different sense of the
+word — a flush gated on a verification result, a prompt block gated on an answer-only flag, a tag list that
+gates a call — and none asserting that a command gate governs what verification runs.
+
+**What follows for the security model, stated as a fact rather than a complaint.** The command a
+verification run executes is derived from a manifest in the repository being worked on. A repository can
+therefore choose the string that runs, and no allowlist stands between that choice and the shell. That is
+the same trust boundary the tool already crosses by reading the repository's code, and it is not obviously
+wrong — but it is a different boundary from the one the gates enforce, and the two are easy to conflate
+precisely because they concern the same shell.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed. **Against Actionable now:**
+whether a system-initiated command should be gated at all is a policy question with a real argument on both
+sides, and no fix can be specified before it is decided. **Against Blocked on data:** nothing is missing —
+the path was traced and the absence checked under both instruments. **Where the code lives:** the selection
+and execution functions in the verification module; the two gates in the read-only command module and the
+approvals module. See item 186 for what the gates do cover and item 190 for the third.
+
+## 189. A run whose verification never ran is grouped with a run that was verified, and the one string that says otherwise appears only on a path the default never takes
+
+**What it is.** When the result fields for a completed run are derived, the skipped outcome and the applied
+outcome share one switch case. Both yield a verification reason and a patch-validated flag taken from the
+verdict, and both yield an **empty summary appendix** — where the rolled-back, warned and pre-existing-error
+outcomes each supply an appendix of their own. The verdict those two fields come from is produced by a
+classifier that parses the model's own verification tag out of its final message, or infers one from the
+tool log when no tag was emitted. So for a run where nothing ran, the claim that the change is good is the
+model's, restated by the classifier, with no field marking that no command was executed against it.
+
+**What a user sees.** The structured run summary narrows its decision mode to two values and reports
+anything that is not an explicit rollback as safe to apply — the source says so in its own comment. The
+verbose reason alongside it does carry a skipped-for-no-infrastructure value, but only through an override
+that fires on one condition: the detected framework reports no runnable tests. A skip for either of the
+other two reasons — no staged files, or no command for the framework in a project that does have tests —
+does not meet that condition, and the reason a user reads is then whatever the model claimed.
+
+**Where the one visible string does and does not appear.** A helper in the verification composer renders
+the string "no verification" for a skipped run. Its single call site builds the header of the staged-diff
+checkpoint modal, which exists only when a checkpoint handler was supplied — that is, only on the strict
+plan path. On the default plan path there is no handler, the helper is never called, and the string is
+never produced. The one place the product says plainly that nothing was verified is the one place a user
+was already being shown the diffs and asked to decide.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed. **Against Actionable now:** the
+obvious fix — an appendix on the skipped branch — is a change to what every skipped run reports, and the
+right wording depends on which of the three skip reasons is being reported; that is a design decision this
+entry does not make. **Against Blocked on data:** the grouping, the empty appendix, the override condition
+and the string's single call site were all read directly. **Where the code lives:** the shared switch case
+in the run-completion module's result-fields file; the override and the reason vocabulary in the
+verification module's classifier; the string in the verification composer. See item 187 for the defect that
+was making runs reach this state on whole ecosystems, and item 188 for what actually runs the command.
+
+## 190. A third command gate exists for plan-mode investigation, and this arc widened what it admits without touching it
+
+**What it is.** Besides the two gates item 186 extended, a third list auto-approves a narrower set of
+commands during plan-mode investigation: eleven prefixes in four categories — four type-check forms, five
+test runners, one formatter check and one git read. Its rationale block explains every category and every
+deliberate exclusion, and it is where the behavioural guarantee item 186 names is actually written down. It
+is npm-centric, and this arc did not touch it.
+
+**It nonetheless admits eighteen more commands than it did before the arc, because it is not consulted
+first.** The approval entry point checks the second gate before it checks the investigation branch, so
+every prefix added to the second gate auto-approves during investigation too. Confirmed live against the
+built predicates for a Rust test, a Go build, a Ruby rspec invocation and a PHP unit-test invocation: all
+four are approved during investigation, none of them by the investigation list. A change scoped to one list
+therefore moved a second list's effective behaviour without appearing in its diff.
+
+**The branch is also a denial gate, not only an approval one.** In investigation mode a command matching
+neither list is refused immediately and the user is never prompted — deliberately, since investigation is a
+background phase and a modal would interrupt planning. The two approving branches each emit a transparency
+event; the denying branch emits nothing and returns.
+
+**What remains unestablished.** How often that silent denial fires in practice, which cannot be recovered
+from logs because the branch emits no event. Whether the eighteen newly reachable commands are ones an
+investigation should be running at all — the mode's whole justification is that the agent holds no write
+tools, and a build command that writes build output is a different proposition from a type check. And what
+the two callers that set the mode actually attempt: both the investigation flow and the plan investigation
+set a mode string the loop normalizes to the value the branch tests, so the branch is reachable from both,
+but nothing here measures what either one asks for.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed. **Against Actionable now:** the
+open questions are about what should be admitted, not about a specified change. **Against Blocked on
+data:** the list, the ordering, the denial behaviour and the cross-gate reach were all established by
+reading and by running; what is missing is usage data for a question this entry does not need answered to
+stand. **Where the code lives:** the third list, its predicate and the approval entry point are all in the
+approvals module; the mode normalization is in the agent loop. See item 186 for the other two gates.
+
+## 191. A project-declared command allowlist fits the problem better than a longer hardcoded one, and three questions have to be answered before one could be written
+
+**What it is.** Item 186 extended two hardcoded lists to seven ecosystems. That is the right fix for the
+repositories those ecosystems describe, and it does not scale: per-repository build systems vary more than
+any fixed list can anticipate — a monorepo task runner, a wrapper script, a Makefile target, a project's
+own convention for invoking its tests. Every such repository needs an entry no cross-ecosystem list will
+ever contain, and the current answer for all of them is an approval modal per command or a refusal.
+
+**The shape that fits is a list the project declares.** A repository states the commands its own
+verification and diagnostics use; Zone reads that declaration and treats those commands as it treats the
+hardcoded prefixes. The nearest existing precedent in this codebase is the per-repository trust file, which
+already persists command prefixes a user approved and seeds them into the session before any modal is
+shown — the difference being that the trust file records what a **user** approved, and this would record
+what a **repository** asserts.
+
+**Three questions, none of which this entry answers.** The trust model: a file inside the repository is
+controlled by whoever controls the repository, which is not necessarily the user running Zone, and the same
+agent may be asked to edit that file during a run — a declaration Zone honours and the agent can write is a
+privilege escalation with extra steps. Where it is read from: inside the repository, where it is shared and
+reviewable but attacker-controlled; under the user's home directory keyed by repository path, where it is
+trusted but invisible to the project; or from an existing manifest, which avoids a new file and inherits
+that manifest's own trust question. Whether it needs review: a first-run prompt showing what the repository
+asks for, a recorded acceptance keyed to the file's hash so a later change re-prompts, or nothing at all.
+
+**Bucket: Neither.** **Against Actionable now:** no fix is specified — three open design questions is the
+entry's content, not a preamble to a specified change. **Against Blocked on data:** the questions are
+decisions, not observations; no measurement would settle the trust model. **Where the code lives:** the two
+hardcoded lists in the read-only command module and the approvals module; the per-repository trust file's
+reader and its session seeding in the approvals and TUI store modules. See item 186 for the extension this
+would replace.
+
+## 192. PHP is classified but its test command is always empty — the same discard shape as item 187, one stage earlier
+
+**What it is.** The detector classifies a repository as PHP on one condition: the composer manifest exists.
+It then returns an empty test command, no runnable tests and an unknown test framework, **unconditionally**
+— it never opens the manifest it just checked for. The Python detector reads its manifest's content to
+decide, and the Ruby detector item 187 added does the same. PHP is the one classified language whose
+detection stops at the file's existence.
+
+**What follows.** The consumer item 187 widened returns nothing for PHP by construction, and will keep
+returning nothing however many ecosystems are added downstream, because the value it now trusts is never
+populated. Meanwhile both gates were extended with the two PHP commands, so the gates permit a command the
+detector cannot produce. The gap is invisible from either end: the consumer looks correct because it
+faithfully forwards what it was given, and the gates look correct because they admit what a PHP project
+would run.
+
+**The fix, specified.** Mirror the Ruby detector: read the composer manifest's text and produce the
+project's own test script when the manifest declares one, the unit-test binary's conventional path when the
+manifest names that dependency, and an empty command otherwise — never a command guessed from the
+manifest's mere existence, which is the discipline the Python and Ruby detectors already hold and the only
+thing that keeps a detected command trustworthy enough for the consumer to run unconditionally.
+
+**Bucket: Actionable now.** The fix is specified, the pattern to copy is in the same file, and both gates
+already admit the resulting commands. **Against Neither:** work is specified. **Against Blocked on data:**
+no observation is missing; the detector's behaviour was read directly and its emptiness is unconditional in
+the source. **Where the code lives:** the PHP detector and the Ruby detector beside it, in the
+repository-scanning module. See item 187 for the consumer defect this precedes and the thirty-third pattern
+for the shape both share.
+
+## 193. The prompt defines a verified fix by one runner's exit code, and outweighs the detected-framework block two to one when a different ecosystem is detected
+
+**What it is.** The assembled system prompt carries a detected-framework block built from the same detector
+items 187 and 192 concern — the framework, its package manager, its build, dev and test commands, and a
+test-execution policy naming the detected command and forbidding substitutes. It also carries static text,
+identical on every run, whose verifier-discipline section states as a priority rule that **if one specific
+JavaScript test runner returned exit zero, the fix is verified**. For a Rust or Ruby repository the model
+is told both that it must use the detected command and nothing else, and that verification means that other
+runner's exit code.
+
+**Measured on 2026-08-16, with a Ruby framework detected.** The assembled prompt is 14,546 characters over
+155 lines. The detected-framework block, including its test-execution policy, is 409 characters over 13
+lines. The static lines naming JavaScript or TypeScript tooling outside that block are 5 lines and 833
+characters — **a ratio of 2.04 to 1 by characters against the block that describes the project actually in
+front of the model**. Four of those five lines are the verifier-discipline section: the priority rule and
+three worked shell examples, all invoking the same runner. The fifth is an illustration in the narration
+directive that names a JavaScript manifest.
+
+**Why this is its own pass and not a line edit.** The static text is inside the cached prompt prefix, so
+changing any of it is a global cold-cache reset for every subsequent run — the cost is paid once by
+everyone, not by the ecosystem being fixed. More constraining: the verifier-discipline section is protected
+until 2026-08-18 by a dated marker in its own leading comment, placed after a post-mortem on pipe-noise
+retries, and the protection exists precisely because its wording is load-bearing for a failure mode that
+does not show up in a render assertion. Rewriting it needs a behavioural sweep over runs that exercise the
+retry path, not a test that checks the new words appear.
+
+**Bucket: Actionable now.** The change is specified — generalize the priority rule and its examples to the
+detected command rather than a named runner — and the constraint on how to verify it is stated. **Against
+Neither:** work is specified. **Against Blocked on data:** no observation is missing; the figures were
+measured by rendering the real prompt. **Where the code lives:** the prompt assembly function and the
+framework-block construction, both in the agent loop; the detector in the repository-scanning module. See
+item 187 for the consumer that was discarding the same detector's output and the protected-zones list in
+the guidance file for the marker.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 184 to find out which ones still need something. No index of
+reader the trouble of reading all 193 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (67): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 111, 117, 120, 121, 126, 128, 134, 135, 137, 144, 149, 150, 153, 156, 161, 162, 167, 171, 172, 176
+**Closed** (72): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 117, 120, 121, 126, 128, 134, 135, 137, 144, 149, 150, 153, 156, 161, 162, 167, 171, 172, 176, 183, 185, 186, 187
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (11): 108, 113, 116, 129, 130, 138, 142, 148, 169, 182, 184
+first (12): 113, 116, 129, 130, 138, 142, 148, 169, 182, 184, 192, 193
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (15): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143, 157, 166, 170, 175, 178
 
-**Neither — a structural fact recorded, with no fix proposed** (91): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (94): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152, 154, 155, 158,
-159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 183
+159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
@@ -16251,3 +16639,60 @@ points is a search for the capability's name across the layers between the polic
 instance it took one read-only pass. That is not free, and the rule is not that every constraint deserves
 that pass. It is that a constraint whose removal is being *proposed* deserves it, because the proposal is
 exactly the moment the cost is justified and the last moment the enumeration is cheaper than the regression.
+
+## A thirty-third pattern: an instrument produces a correct answer and its consumer discards it, so the cost is paid, the answer is right, and nothing uses it
+
+**The mechanism, and it lives at the seam rather than in either component.** A producer computes something
+correctly — a detector reads a repository's manifests and derives the right test command for each of seven
+ecosystems. A consumer then
+decides what it will accept, and decides it from **its own hardcoded enumeration of the domain** rather than
+from the value it was handed. The two enumerations were written at different times by different passes and
+neither references the other, so the consumer's list silently narrows the producer's output. Both components
+are correct in isolation and both pass their own tests in isolation: the producer's tests assert it computes
+the right command, the consumer's assert it handles the languages it lists. Nothing tests the difference
+between the two lists, because a difference between two lists is not a property either component has.
+
+**Why it is invisible rather than merely wrong.** A discarded value's absence is indistinguishable from its
+never having been computed. In the instance, discarding the command produced a skipped verification, a
+skipped verification shared a result branch with a successful one, and the run reported success on the
+model's own claim — three layers each doing exactly what it was written to do, and the composite reporting a
+verified change that nothing verified. No error was raised at any of them. The signature is a **silent
+downgrade that still reports success**, and the cost is paid in full: the manifests were read, the command
+was derived, the correct answer existed in memory and was dropped one call later.
+
+**Three instances in one arc, which is what promoted this over the alternative reading.** A verification
+consumer discarding four languages' commands. A Ruby manifest read into a list of configuration files and
+never turned into a language. A PHP detector confirming its manifest exists and returning an empty command
+without opening it. The three sit at different layers and were found separately; what they share is not a
+subsystem but a shape.
+
+**Distinguished from the entries about unused code, which prescribe the opposite action.** Those findings
+are that a mechanism never runs and can go. Here nothing is unreachable: the producer runs every time, its
+result is correct, and the fix is to *use* it rather than to delete it. The surface resemblance — a reader
+encounters machinery whose effect they cannot find — points in opposite directions, and reading this shape
+as dead code would delete the correct half.
+
+**Distinguished from the thirty-second pattern, the nearest by structure.** There, several live enforcement
+points implement one judgment, and the rule is that they move together or not at all. Here two components
+stand in a producer–consumer chain rather than as peers, and one silently narrows the other rather than
+duplicating it. The checks differ accordingly: enumerate the enforcement points, versus diff the two
+domains.
+
+**Its mirror is the sixteenth pattern.** That one warns that a claimed payoff may already have been banked
+by a downstream override, so a claim must be traced forward to the surface it names. This is the same trace
+with the opposite sign: the payoff was computed and a downstream consumer threw it away. Both are answered
+by the same discipline — follow the value to the surface — which is why the sixteenth is the entry to read
+alongside this one rather than the entry to distinguish it from.
+
+**The rule, written as the check to run.** When one component's output is consumed by another that decides
+what it will accept, write down the producer's actual output domain and the consumer's accepted domain and
+diff them. **The tell is a consumer that names members of the domain — a list of languages, kinds, types or
+statuses — where it could have tested the value it was handed.** Every name on such a list is a claim about
+the producer that the producer does not know is being made, and it goes stale the first time the producer
+gains a member. Where the diff is non-empty, ask what the run does with the discarded value: if the answer
+is a skip, a default, or a fallback that still reports success, the defect is invisible from both ends and
+no test of either component will find it.
+
+**What the check costs, stated because a rule nobody runs is decoration.** Reading two functions and listing
+two sets. In the instance the diff was four languages and took one read of each side, and the fix was to
+delete the consumer's list and test the value instead — smaller than the list it replaced.
