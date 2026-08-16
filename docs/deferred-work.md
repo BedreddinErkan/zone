@@ -13827,6 +13827,20 @@ all ten without editing any source or test file. Letting the compiler read the J
 first and rejected: it more than doubled the error count, because shapes inferred from destructuring are
 narrower than the heterogeneous calls those functions really receive.
 
+**A fourth declaration has since joined the three, and the standing consequence is stated here rather than
+left implicit.** At `8497c4c2` a build-staleness check landed as a plain-JavaScript module with a
+hand-written declaration beside it, on this entry's own precedent. Four such declarations are now tracked.
+The consequence, which this entry's own wording implies without saying: because the second config's
+`include` names only TypeScript files, and because letting the compiler read JavaScript directly was tried
+and deliberately rejected for the reason recorded, **the compiler never reads the implementations at all** —
+confirmed by asking it, not by reading the config: its own `--listFiles` output for the scripts config names
+the declaration and the test file and does not name the module the declaration describes. So a declaration
+is checked against its consumers and never against the thing it declares, and the two can diverge with no
+check failing. What bounds the damage is that the suite exercises the real modules at runtime, so a
+divergence in any shape a test actually calls surfaces as a test failure rather than as a type error; what
+is unbounded is any shape no test calls. This is the trade the rejection of compiler-read JavaScript bought,
+recorded so a later reader does not mistake it for an oversight.
+
 **Bucket: Neither.** The work shipped and the entry records why the shape is what it is. **Against Actionable
 now:** nothing is specified that has not been done. **Against Blocked on data:** no observation is missing;
 the error count, the emitted tree and the published-output identity were each measured.
@@ -14485,7 +14499,9 @@ weeks. That bears directly on this entry's own against-Actionable-now trade, whi
 rebuild against a staleness risk whose **frequency** was never stated: the risk is not occasional, it is
 the default
 state of the tree between a rebuild and the next edit. Recorded here rather than as its own entry, because
-a recurrence predicted by a rule already written is evidence for that rule, not a new mechanism.
+a recurrence predicted by a rule already written is evidence for that rule, not a new mechanism. A check
+answering the recurrence landed at `8497c4c2` and is recorded as item 210; it makes the condition visible
+without preventing it, which is the distinction that entry's own reasoning turns on.
 
 **Bucket: Neither.** A structural fact is recorded and no fix is proposed. **Against Actionable now:** the
 obvious change — a build hook before the suite — trades a silent staleness risk for several seconds on every
@@ -15044,37 +15060,186 @@ first half makes the mutation faithful; the second makes its output interpretabl
 sharpened rule already says to compare failure-set membership rather than cardinality; this is the same
 instruction arriving from the mutation's construction rather than from its reading.
 
+**The counterpart case, from the pass that shipped the staleness check, and it runs the other way.** A
+mutation there was predicted to kill one named test and killed **none**. A zero where one was named is
+alarming rather than reassuring, which is the opposite of the failure recorded here — and the discipline
+that made the zero legible was the same one: a kill set named before the run. Investigating found the
+**fixture** at fault rather than the mutation. Its three timestamps were ordered so that the correct
+implementation and the mutated one returned the same answer, so the test could not have failed whichever
+was in place. Repositioning one timestamp into the window where the two implementations actually differ,
+re-confirming the test still passed against correct code, and re-running the mutation produced the single
+kill originally named. Two lessons hold together: a named expectation catches an unfaithful mutation and an
+inert fixture alike, because both show up as a count that does not match; and a mutation returning nothing
+is evidence about the pair of test and mutation, never about the code alone. The mechanism behind the inert
+fixture is value coincidence, already recorded as the eighth pattern, so it adds an instance rather than a
+mechanism — and it was checked against the reopening condition of the rejected candidate on correct-versus-
+discriminating tests, which requires the two implementations to produce **different** values that a coarse
+assertion cannot see. Both produced the same value, so the condition does not fire and that rejection stands.
+
 **Bucket: Neither.** A structural fact is recorded and no fix is proposed. **Against Actionable now:**
 nothing in the code changes, and the finding governs how a future pass builds and reads a mutation.
 **Against Blocked on data:** nothing is missing; both mutations were run, both kill sets recorded, and the
 survivor lists compared directly. **Where the code lives:** the verification module's classify file and its
 test file. See item 204 for the fix the partial mutation failed to exercise, item 208 for the neighbouring
-finding about predicting a mutation's blast radius, and the eighth pattern for the membership-over-count
-rule this instance arrives at from the other side.
+finding about predicting a mutation's blast radius, item 210 for the pass the counterpart case came from,
+and the eighth pattern for the membership-over-count rule this instance arrives at from the other side.
+
+## 210. Closed — the built tree's drift from source is now reported at every suite run, by a check that warns and never fails
+
+**What shipped.** At `8497c4c2`: a plain-JavaScript module in the scripts directory, a test file beside it,
+a hand-written declaration on item 181's precedent, and a `pretest` entry in the package manifest. The
+manifest lifecycle runs it before the suite; the direct runner invocation does not go through it, which is
+the path most single-file runs take.
+
+**What it compares, and the proxy choice is the whole design.** The newest modification time among
+build-relevant sources against the modification time of **one** built file — the binary named by the
+manifest's own bin field. Build-relevant mirrors the build config's exclusions exactly: TypeScript sources,
+minus test files, minus anything under a tests directory, minus one named file. Taking a single path as the
+build's timestamp is what sidesteps item 211's orphans **by construction rather than by filtering**: no
+directory is scanned, so there is nothing for a stale output to be excluded from. A design that took the
+oldest modification time across the output directory would read a five-year-old orphan as the build time and
+report drift permanently.
+
+**Why it warns and always exits zero, which is the load-bearing decision.** A stale built tree is sometimes
+the correct state. This session re-derived a fixed defect's pre-fix behaviour by importing the built copy
+precisely because the build predated the fix, and was right to — a check that failed the suite would have
+blocked a legitimate probe and taught the next reader to disable it. The failure this remedy answers is not
+that staleness occurs; it is that nobody noticed for an arc. Visibility is the whole of it. Silence on the
+healthy path keeps the one line legible when it appears.
+
+**Cost, with the two circulating figures reconciled because they measure different artefacts.** An earlier
+figure near four hundredths of a second measured a shell pipeline written to price the idea, never this
+module; re-measured at this commit it lands near five hundredths. The shipped module over seven consecutive
+runs spans **six to eight hundredths of a second**, median near seven and a half hundredths — the difference
+from the pipeline is interpreter start-up, which was measured at seventeen thousandths for a trivial module
+against six hundred and eighty-one thousandths for the same trivial module under the TypeScript runner, and
+is why the module is plain JavaScript rather than TypeScript.
+
+**What the suite comparison does and does not support.** One run per arm was taken, at forty-nine and a half
+seconds before and forty-seven and a fifth after. No variance band was established, and the later figure is
+the *faster* one, so the pair cannot support a claim that the added cost sits inside normal variation — it
+shows only that run-to-run noise exceeds whatever was added. The defensible bound comes from the mechanism
+rather than the delta: the lifecycle runs the module exactly once per suite invocation, so the added cost is
+bounded above by its own measured runtime.
+
+**Bucket: Closed.** The remedy the recurrence recorded in item 195 called for is in place. **Where the code
+lives:** the module and its test and declaration are in the scripts directory; the lifecycle entry is in the
+package manifest. See item 195 for the condition, item 211 for the orphans the proxy choice sidesteps, and
+item 181 for the declaration precedent and its standing consequence.
+
+## 211. Sixty-three build artefacts outlive the sources they were compiled from, because the compiler never cleans its output directory
+
+**What it is.** The compiler writes into an output directory and never removes anything from it. When a
+source file is deleted, its compiled output, source map and declaration stay. Two source trees deleted at
+`2efee011` and `ee2443b9` left **twenty-one** orphaned compiled modules behind, and counting every artefact
+kind rather than compiled modules alone gives **sixty-three files totalling three hundred thousand two
+hundred and eighteen bytes**, a little over two hundred and ninety kibibytes. All of them sit under two
+directories of the output tree, and nothing outside those two directories imports any of them — so they are
+unreachable dead weight rather than live risk.
+
+**Two instruments, and a third figure corrected.** The compiled-module count of twenty-one is returned
+identically by a shell walk testing each output against the existence of a corresponding source, and by an
+independent walk in the runtime matching against the version-control system's own tracked-source list. A
+figure near five hundred and twenty kibibytes carried into this pass from an earlier one does **not**
+survive: it came from the disk-usage utility summing the two directories, which reports block allocation and
+counts directory inodes, not the bytes of the files in question. Both numbers were right about what they
+measured; only one of them measures the artefacts.
+
+**Why it matters beyond the disk it occupies.** An output directory that accumulates is an output directory
+whose contents are not a function of the current sources. Anything reading it by directory rather than by
+name inherits that — which is exactly the trap item 210's proxy choice avoids, and the reason to record the
+orphans is less the space than the shape.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed. **Against Actionable now:** the
+obvious remedy — deleting the two directories, or adding a clean step before the build — is a trade this
+entry does not decide: deletion is safe today and silently reintroduces the same state at the next source
+removal, while a clean step lengthens every build to prevent a condition that has so far cost storage
+alone. **Against Blocked on data:** nothing is missing; the counts, the byte total and the unreachability
+were each measured. **Where the code lives:** the output directory named by the build config's outDir. See
+item 183 for the neighbouring case of compiled output that should not have existed at all, and item 210 for
+the check that reads this directory by name rather than by scan.
+
+## 212. The contributor guide names a source file that was deleted two commits apart from its own directory
+
+**What it is.** The repository's contributor guide describes two modules as standalone planning and
+developer prompts. One of the two exists. The other was deleted along with the role-flow entry point it
+served, and the directory that held a sibling of it no longer exists either. A reader following the guide
+looks for a file that has not been present for some time, and the guide gives no signal that one of the two
+names is dead while the other is live.
+
+**Established with two instruments on each half.** For the named file: a filesystem search reports no such
+file, and the version-control system reports the path matches nothing it tracks. For the directory: a
+directory listing reports it absent, and the version-control system returns no tracked file beneath it. For
+the guide's own claim: both a filesystem search and a version-control search return the same single
+sentence naming it. The companion module in that same sentence was checked by the same pair and **does**
+exist, which is what makes the sentence half-true rather than simply stale — the failure mode a reader is
+least likely to catch.
+
+**Not fixed here, deliberately.** This pass is scoped to the engineering ledger, and the guide is a
+different file in a different trust domain — it is read into the system prompt of every run in this
+repository, so an edit to it changes model behaviour rather than documentation alone. Recorded so the
+correction is a decision someone makes rather than a thing that happens as a side effect.
+
+**Bucket: Actionable now.** The fix is specified — remove the dead name from the sentence, keeping the live
+one — and nothing new needs to be learned: both halves were established under two instruments each.
+**Against Neither:** work is specified rather than a fact recorded. **Against Blocked on data:** no
+observation is missing. **Where the code lives:** the contributor guide at the repository root, in its
+paragraph on prompt assembly. See item 82 for the deletion that made the name dead.
+
+## 213. A search pattern that requires an intervening directory silently misses files sitting directly in the named directory
+
+**What it is.** The version-control system's path-matching syntax treats a double-star segment as requiring
+at least one directory between the segments around it. A pattern naming a directory, a double-star, and a
+filename glob therefore matches files in subdirectories and **not** files sitting directly in the named
+directory. The shell search utility's own recursive form has no such requirement. Two searches written to
+mean the same thing return different sets, and the shorter set looks like an absence.
+
+**Why it is recorded, which is the instance rather than the syntax.** The behaviour is documented and
+unsurprising once seen. What makes it an entry is that it produced a real instrument disagreement in a
+recent pass: a sweep for test files importing from the built tree returned one file under the shell utility
+and nothing under the version-control system, and the file in question sits directly in the scripts
+directory. Under the discipline these passes run, an absence confirmed by one instrument and contradicted by
+another is a finding to resolve rather than a result to average — and resolving it took re-running with a
+single-level pattern and with an unanchored one, both of which agree with the shell utility. Had the
+disagreement gone unnoticed, the pass would have recorded that no suite test reads the built tree, which is
+false and was load-bearing for what that pass concluded.
+
+**A second, older instance found while establishing this one.** Item 166 carries a corrected count of
+wiring sites and notes its two instruments reconciling once the pattern matched. The correction is recorded
+there as an incidental step in reaching the right number; the mechanism behind it is not named, and nothing
+in the entry would let a later reader recognise the same trap arriving elsewhere. Recording the mechanism
+once, here, is what makes both instances legible.
+
+**Bucket: Neither.** A structural fact about an instrument is recorded and no fix is proposed. **Against
+Actionable now:** nothing in the repository changes; the finding governs how a sweep is written.
+**Against Blocked on data:** nothing is missing; both patterns were run against the same tree and the
+disagreement resolved. **Where the code lives:** nowhere — it is a property of the search tools these passes
+use. See item 166 for the older instance and the twenty-fifth pattern for the neighbouring case of a search
+filtered by something its author did not write.
 
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 209 to find out which ones still need something. No index of
+reader the trouble of reading all 213 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (78): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 117, 120, 121, 126, 128, 134, 135, 137, 144, 149, 150, 153, 156, 161, 162, 167, 171, 172, 176, 183, 185, 186, 187, 192, 193, 194, 198, 203, 204
+**Closed** (79): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 117, 120, 121, 126, 128, 134, 135, 137, 144, 149, 150, 153, 156, 161, 162, 167, 171, 172, 176, 183, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (10): 113, 116, 129, 130, 138, 142, 148, 169, 182, 184
+first (11): 113, 116, 129, 130, 138, 142, 148, 169, 182, 184, 212
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (16): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196
 
-**Neither — a structural fact recorded, with no fix proposed** (105): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (107): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152, 154, 155, 158,
 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199, 200, 201, 202, 205,
-206, 207, 208, 209
+206, 207, 208, 209, 211, 213
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
