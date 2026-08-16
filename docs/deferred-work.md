@@ -14474,6 +14474,19 @@ produced this finding spans a soft line wrap and therefore exists contiguously i
 build, the same wrap-hiding failure the anaphor sweep's second instrument exists to catch, arriving here
 from an unrelated direction.
 
+**The recurrence, which is the new fact rather than a second instance of the old one.** This entry's
+mechanism and rule already cover a stale build being found; what a later session established is that the
+condition **regenerates**. The built tree went stale again *within a single session*, minutes after a
+deliberate rebuild had verified two fixes into it, because the pass's very next act was to edit source. At
+commit `eb015cc0` the built copy of a just-rewritten validator still contained the retired branch and
+lacked the widened tool set, under two instruments. So the manual rebuild is not a repair that holds — it
+clears the condition only until the next source edit, which during an active arc is minutes rather than
+weeks. That bears directly on this entry's own against-Actionable-now trade, which weighs a per-run
+rebuild against a staleness risk whose **frequency** was never stated: the risk is not occasional, it is
+the default
+state of the tree between a rebuild and the next edit. Recorded here rather than as its own entry, because
+a recurrence predicted by a rule already written is evidence for that rule, not a new mechanism.
+
 **Bucket: Neither.** A structural fact is recorded and no fix is proposed. **Against Actionable now:** the
 obvious change — a build hook before the suite — trades a silent staleness risk for several seconds on every
 test run and a rebuild on every unrelated invocation, and whether that trade is worth making is a decision
@@ -14722,7 +14735,7 @@ data:** nothing is missing; the grammar was read and exercised. **Where the code
 and the reason vocabulary in the verification module's classifier. See item 198 for the pass that
 established it and item 193 for what a prompt-prefix change costs.
 
-## 203. The provenance field records where the reason started, never where it ended, so it names the wrong source whenever an override fires
+## 203. Closed — the provenance field now tracks the value it accompanies, and a fourth case was found that must not change
 
 **What it is.** The verdict derivation sets a field recording whether the reason came from the model's tag
 or from a log heuristic. It is assigned once, at the point the initial reason is chosen, and then three
@@ -14742,13 +14755,40 @@ the field as-is and rename it to say it describes the initial parse, leaving a s
 final provenance. The first is the more useful and costs three assignments; the second is honest and costs
 nothing but does not give a reader the value they actually want.
 
-**Bucket: Actionable now.** The change is specified and small, at three sites that already have the
+**Bucket: was Actionable now.** The change is specified and small, at three sites that already have the
 information. **Against Neither:** work is specified. **Against Blocked on data:** no observation is
 missing; the assignment and its non-reassignment were read directly. **Where the code lives:** the verdict
 derivation in the run-completion module, and the assessment emitter it feeds. See item 198 for the
 conclusion this field's shape helped mislead.
 
-## 204. The validator that would demote an unsupported passing claim has never fired in any recorded run
+**What shipped, and the count this entry got wrong.** The field gained a third value naming the system as
+the source, and all three override blocks now set it. This entry costed the change at three assignments;
+it took **four**. The second override has two branches — a demotion when the unrelated-failure claim fails
+validation, and a promotion when a failure is shown to have been resolved by a later successful command —
+and each needed its own assignment. The third override is a single opaque call whose return either equals
+or replaces its input, so that site compares the reason before and after rather than setting the value
+inline, which is why a mechanical revert of the other three does not reach it. That is not a hypothetical:
+a first mutation attempting to revert all four matched only three, because the fourth sits at a different
+indentation, and the miss was caught by a grep before the mutation ran. Had it not been, the mutation
+would have reported a kill for a mutation it had not actually made.
+
+**The fourth case, which must not change.** An override that examined the claim and let it stand leaves a
+reason that is still genuinely tag-sourced. Flattening that into the new value would erase the one
+distinction the field exists to carry — between a claim nobody checked and a claim that was checked and
+held. A validated-and-upheld claim is stronger evidence than an unexamined one, and collapsing them would
+make the field report the weaker reading for both. It is pinned by its own negative test, asserting the
+value stays at the tag on the accept path.
+
+**Why one new value rather than one per override.** The three overrides differ in their inputs: two read
+the tool call log, the third reads only whether the framework has tests and whether a patch applied. They
+nonetheless return the same epistemic answer, which is the answer the field is for — the system determined
+this value, not the model. Nothing downstream consumes a finer split: the field is read by telemetry alone
+and by no control flow anywhere in the tree, so a per-override value would have been a distinction with no
+reader, made at the point where it is cheapest to add and hardest to remove.
+
+**Bucket: Closed.** The field now names where its reason came from at every terminal exit.
+
+## 204. Closed — not unmeasured coverage but a defect in both directions, and the serious direction was not the one predicted
 
 **What it is.** When a run's reason arrives as a passing claim, a validator checks it against the tool log
 and demotes it when the log does not support the claim. That is the one check standing between a model
@@ -14768,11 +14808,74 @@ invocation that supports it — constructible as a fixture with a task whose obv
 test run, paired with a prompt that elicits the tag. That is a probe, not an observation: the case has to
 be built, because sixty-five natural runs did not produce one.
 
-**Bucket: Blocked on data.** Closing requires an observation that does not exist and cannot be recovered
-from what is recorded. **Against Neither:** a specific reading is named that would settle it. **Against
-Actionable now:** nothing is specified to change — the validator may well be correct. **Where the code
-lives:** the passing-claim validator in the verification module and its call site in the verdict
+**Bucket: was Blocked on data.** Closing requires an observation that does not exist and cannot be
+recovered from what is recorded. **Against Neither:** a specific reading is named that would settle it.
+**Against Actionable now:** nothing is specified to change — the validator may well be correct. **Where
+the code lives:** the passing-claim validator in the verification module and its call site in the verdict
 derivation. See item 198 for the seam it sits in.
+
+**The framing was too generous, and the correction is the point of this close.** This entry's
+benign-reading and what-would-exercise-it paragraphs stand as the record of what was believed, not as
+findings. The benign reading they call likely —
+that the recorded runs were simply all honest — was never the only thing the zero could mean, and the
+question they defer as unanswerable was answerable for free. The validator is a **pure function**. Its
+decision boundary is a property of the code, not of any run, and direct invocation settled it in one
+sitting with no fixture, no elicited tag and no probe. This entry's own "that is a probe, not an
+observation: the case has to be built" was wrong on the point that mattered — a case had to be built only
+to observe the validator *firing in production*, which is a different question from whether it decides
+correctly, and only the first needs a run.
+
+**The generalisable correction, which is why the error is worth keeping visible.** A never-fired marker
+supports "unmeasured" for questions of **frequency** or **composition** — how often does this happen, and
+what is in the stream. It never supports "unmeasured" for a question of **correctness**, because
+correctness is readable directly from the code and does not wait on traffic. This entry conflated the two:
+it observed a frequency of zero and filed a correctness question behind it. A sweep by claim shape across
+this document finds seven other entries using never-fired language; each was inspected and **none inherits
+the error**. The nearest, item 196, is the instructive contrast — it asks which commands are being denied,
+a composition question that genuinely cannot be answered by reading code, and its blocked status is right.
+
+**Both directions, with the serious one named.** The validator computed a success pattern over the output
+**text** of every logged command and, when any matched, returned acceptance **unconditionally** — the exit
+code was never consulted on that path, though it sat on the same record and the function already read it
+in the other branch. So: a run that exited non-zero with output reading `3 passed, 1 failed` was
+**accepted**, re-derived by direct invocation against the pre-fix build. That is the serious direction, it
+is silent, and it is **not** the one this arc predicted. The predicted direction — legitimate passes
+demoted because their output did not match the patterns — was also real, and is the noisy one.
+
+**The predicted direction was real, and the unit this arc stated it in was wrong.** It was carried as
+"five ecosystems" through two documents before anyone re-derived it. Re-derivation refutes the unit
+itself: acceptance depended on the **exact output string**, never on the language. Across twelve
+conventional passing lines spanning six ecosystems, ten were wrongly demoted and two accepted — and the
+split runs *within* a single ecosystem, where one .NET summary form matched and a newer one did not.
+Sharpest of all, a retired pattern evidently written for one ecosystem's canonical line, the
+`OK (N tests, M assertions)` form, did **not** match that line, because it required the closing
+parenthesis immediately after the word. A proxy's coverage was accidental in both directions at once.
+
+**One of the shipped tests is vacuous against the defect, recorded rather than left to be discovered.**
+Of the five ecosystem cases added, the .NET one would have passed against the pre-fix implementation too,
+its chosen output line being one of the two that matched. The mutation meant to catch exactly that did not,
+because it substituted a single one of the six retired patterns rather than all six, and so was not a
+faithful reconstruction of the code it was imitating. A mutation is only evidence about the code it
+actually reproduces.
+
+**What the rewrite keys on.** The exit code, which was **already present** on every log entry and
+**already read** by this same function — just never in the deciding branch. Text now selects which entries
+were test invocations and decides nothing about whether they passed. A collateral imprecision fell out of
+the same design: a single irrelevant command entry used to foreclose the no-attempt outcome permanently,
+so a run whose only logged command was a status check reported an inconclusive verification rather than no
+verification, and now reaches the no-attempt outcome correctly.
+
+**The narrow tool filter, all three sites recorded by shape.** The same tool-name test that excluded the
+read-only shell appears in three functions of the verification module: the passing-claim validator, whose
+single occurrence was widened here; the unrelated-claim validator, which carries three — an existence
+gate, a failure predicate, and the stale-failure resolution check; and the log-inference function, which
+carries two — an infrastructure-error scan and a tests-ran scan. Five occurrences survive across the two
+untouched functions. They were named and left deliberately: a shared narrowness is a different defect from
+the text-versus-exit-code inversion this pass was scoped to, and the unrelated-claim validator was checked
+by direct invocation and does **not** share the inversion — its failure detection is already exit-code
+primary, using text only as a narrow exclusion. Widening all three consistently is a separate change.
+
+**Bucket: Closed.** The defect is fixed in both directions and the decision boundary is pinned by tests.
 
 ## 205. Three tests bundle three assertions in one case, so a mutation cannot say which of the three broke
 
@@ -14800,28 +14903,118 @@ splitting is mechanical but the trade against file size is a judgement this entr
 **Where the code lives:** the result-fields test file in the run-completion module. See item 198 for the
 pass that added the three cases and the twenty-fourth pattern for the mutation discipline this qualifies.
 
+## 206. A fixture carried an argument shape nothing depended on, and its duplicate in a second file survived the search that found the first
+
+**What it is.** A shared test fixture representing a command invocation carried an **empty argument
+object** alongside realistic output text and a realistic exit code. No implementation had ever read that
+field, so nothing failed and nothing flagged it for as long as the fixture existed. A change then made the
+field load-bearing — a validator began selecting entries by their command text — and six tests that had
+passed for the fixture's whole life became dependent on a value that had never been written. The fixture
+was not wrong when it was authored; it was **unconstrained**, and unconstrained fields drift into
+placeholder values that read as deliberate.
+
+**The second half, which is the transferable one.** An independent copy of the same fixture lived in
+another test file, reached through a different entry point. The search that found the first copy was
+**by name**, scoped to the files that referenced the symbol under change — and the second copy was invisible
+to it, because that file exercises the validator transitively through a composer and never names it. It
+surfaced only when the full suite ran. So a name-based or file-scoped search is structurally unable to
+find a duplicated fixture: duplication is what removes the name that the search keys on. The check that
+works is a **value-shaped** sweep — search for the fixture's literal shape, not for the symbol it feeds.
+
+**Why this is not the same as an untested path.** Both copies were covered, thoroughly, and every
+assertion over them was meaningful. What was untested was the fixture's own **realism** — whether the data
+resembled what production constructs. No test asserts that, and no test naturally would, which is why this
+kind of drift is found by a change rather than by a suite.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed. Both instances were corrected
+in passing by the change that exposed them. **Against Actionable now:** the general remedy — asserting
+fixture realism, or deduplicating fixtures across files — is a judgement about test architecture this
+entry does not make. **Against Blocked on data:** nothing is missing; both copies were read and the
+divergence was measured directly. **Where the code lives:** the verdict-derivation and run-completion
+parity test files. See item 205 for the neighbouring finding about that same suite's assertion bundling.
+
+## 207. A module-level read of another module's export broke five unrelated test files, and the top-level read was the defect
+
+**What it is.** A constant was built at **module scope** by spreading a value imported from another
+module. Five unrelated test files partially mock that other module, and a partial mock supplies only the
+exports its own test names. The spread executed at import time, before any test body ran, found the export
+absent from the mock, and failed the entire file at collection — no test in those files ran at all. The
+files had nothing to do with the change; three are terminal-interface tests, one a remote adapter, one a
+dispatch path. They were reachable only because the module under change sits somewhere in their import
+graph.
+
+**Which half is the defect, stated in this direction deliberately because the other reading is
+available and wrong.** The tempting reading is that the mocks are incomplete and should be widened. That
+reading scales badly and blames the wrong component: every future consumer of a partially mocked module
+would have to be found and widened, and the count of files needing that grows with the import graph. The
+actual defect is the **top-level cross-module read** — doing work at import time that could be done on
+first use. Deferring it to a memoised accessor fixed all five files at once, changed no behaviour, and
+removed the import-time dependency entirely. Laziness was the fix; the eager read was the defect.
+
+**The general shape.** A module-scope expression that reads another module's *value* — not merely its
+type — converts an ordinary import into an import-time contract with every mock of that module anywhere
+in the tree. The contract is invisible at the definition site, and it is enforced at collection time,
+where the error names the reading module rather than the mocking one. Cost of avoiding it is one accessor.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed beyond the instance, which is
+fixed. **Against Actionable now:** no other top-level cross-module value read is named here, and sweeping
+for the shape across the tree is work this entry does not specify. **Against Blocked on data:** nothing is
+missing; the failure was reproduced, attributed by reading the collection-time error, and the fix
+confirmed by re-running all five files. **Where the code lives:** the verification module's classify file
+and the command-approvals module it reads.
+
+## 208. A mutation's kill count was underestimated eightfold, because inverting a polarity is not the same size of change as deleting one
+
+**What it is.** A pass predicted that inverting a comparison inside a validator would kill **two** tests.
+It killed **sixteen** — ten in the file under change and six in a file that appeared unrelated. The
+prediction was not merely imprecise; it was wrong about the *kind* of change being made.
+
+**The mechanism, which generalises.** Deleting or narrowing a condition removes one behaviour and leaves
+the rest intact, so its blast radius is roughly the set of tests exercising the removed behaviour.
+**Inverting** a condition does two things at once: every input that took the true branch now takes the
+false one **and** every input that took the false branch now takes the true one. Both of a binary
+decision's outcomes are wrong simultaneously, so the blast radius is every test that exercises the
+decision **at all**, in either direction — including tests whose subject is something else entirely and
+which merely need the decision to come out right in passing. The six surprise kills were of exactly that
+kind: tests about a provenance field, which happen to construct a passing fixture and require it to be
+judged passing.
+
+**Recorded as a finding about prediction shape, not about the mutation.** The mutation was correct and its
+result was reported honestly. What failed was the estimate, and it failed for a reason available in
+advance: the two mutation kinds deserve different predictions, and a pass that predicts a kill set should
+first ask whether it is deleting a behaviour or swapping two. Only the first has a blast radius that can
+be reasoned about from the changed line alone.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed. **Against Actionable now:**
+nothing in the code changes; the finding governs how a future pass states a prediction. **Against Blocked
+on data:** nothing is missing; predicted and actual kill sets were both recorded and the surprise kills
+were traced to their fixture. See the twenty-fourth pattern for the discipline that makes a predicted kill
+set load-bearing in the first place, and item 205 for the neighbouring case where bundling made a
+prediction unfalsifiable at the granularity it was stated.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 205 to find out which ones still need something. No index of
+reader the trouble of reading all 208 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (76): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 117, 120, 121, 126, 128, 134, 135, 137, 144, 149, 150, 153, 156, 161, 162, 167, 171, 172, 176, 183, 185, 186, 187, 192, 193, 194, 198
+**Closed** (78): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 117, 120, 121, 126, 128, 134, 135, 137, 144, 149, 150, 153, 156, 161, 162, 167, 171, 172, 176, 183, 185, 186, 187, 192, 193, 194, 198, 203, 204
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (11): 113, 116, 129, 130, 138, 142, 148, 169, 182, 184, 203
+first (10): 113, 116, 129, 130, 138, 142, 148, 169, 182, 184
 
-**Blocked on data** — closing requires an observation that doesn't exist yet (17): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 204
+**Blocked on data** — closing requires an observation that doesn't exist yet (16): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196
 
-**Neither — a structural fact recorded, with no fix proposed** (101): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (104): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152, 154, 155, 158,
-159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199, 200, 201, 202, 205
+159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199, 200, 201, 202, 205,
+206, 207, 208
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
@@ -17342,3 +17535,69 @@ actually run. The general form is an outside-in observation — telemetry, a pro
 compared against what the suite claims is correct. That is expensive, which is the argument for the cheap
 version: deciding intent at the moment the assertion is written, while the author still knows which of the
 two they are recording.
+
+## A thirty-fifth pattern: a guard deciding on a proxy fails in both directions at once, and the dangerous direction is the silent one
+
+**The mechanism, and it is derivable rather than observed.** A guard needs a fact. The fact is available on
+the record it already holds. The guard instead decides on something the fact tends to produce — a
+correlate, a description, a rendering. Because a correlate is neither **necessary** nor **sufficient** for
+the fact, the guard is wrong in both directions by construction, not by accident: it fires when the fact is
+absent, because the correlate can be produced some other way, and it fails to fire when the fact is
+present, because the fact does not always produce that correlate. Nothing about the code has to be
+inspected to know both directions exist. Deciding on a proxy *is* the prediction.
+
+**The instance.** A validator judged whether a run's tests passed by matching six patterns against the
+**text** the commands printed, and returned acceptance the moment any matched — never reading the exit
+code, which sat on the same log entry and which the same function already read in its other branch. Both
+directions were then confirmed by direct invocation. A run that exited non-zero while printing
+`3 passed, 1 failed` was accepted. Ten of twelve conventional passing summaries across six ecosystems were
+rejected, with the split falling *inside* one ecosystem — two summary formats for the same runner, one
+matched and one not — and with a pattern evidently written for one runner's canonical line failing to match
+that line on a parenthesis. Coverage was accidental in both directions simultaneously.
+
+**The asymmetry, which is the half worth carrying.** The two directions are not equally visible. A
+false **rejection** is noisy: something that worked is reported as unverified, somebody notices, it gets
+filed. A false **acceptance** is silent, and worse than silent — it reports **success**. Nobody files a
+bug against a green result. So the two directions accumulate at different rates and are discovered at
+different rates, and a project's record of a proxy-based guard will be dominated by the harmless direction
+purely because that is the one that generates reports. This is exactly what happened: the arc that found
+this defect predicted the rejection direction, and the acceptance direction — a failing run being reported
+as verified — was not predicted by anyone and was the serious one. **The direction you have heard about is
+evidence about reporting, not about which direction is doing the damage.**
+
+**Why the cost-free availability of the real signal is load-bearing and not incidental.** Substituting a
+weak check for a strong one is often a defensible trade — the strong check may need a subprocess, a
+network call, a parse. None of that applies when the authoritative value is a field on a record already in
+memory, already read by the same function, and free. That removes every legitimate reason for the
+substitution and makes the shape purely a mistake, which is what distinguishes it from an engineering
+compromise and what makes the check below worth running unconditionally.
+
+**Distinguished from the thirty-third, which is nearest by structure.** That pattern needs a
+producer/consumer **seam**: two components, two independently written enumerations of a domain, and a
+consumer that silently narrows its producer. Here there is no seam — one function reads the wrong field of
+a single record it wholly controls, and the exit code and the output text come from the same producer in
+the same breath. The decisive difference is direction count: a narrow enumeration can only **fail to
+match**, so the thirty-third cannot produce a false acceptance at all. It accounts for at most half of
+this shape, and the half it misses is the dangerous one.
+
+**Distinguished from the fifteenth, which is nearest by slogan.** Both say do not decide on the derived
+thing. But its intermediate is an **earlier stage of the same value**, and its argument turns on a
+one-directional failure — under-reporting is silent data loss, over-reporting is a nuisance, so the two
+sides are not symmetric and that asymmetry is its whole case. Here the proxy is not an earlier form of the
+authoritative signal at all; text and exit status are two different artefacts of one process, related by
+correlation rather than by transformation. And the failure is two-directional, which its argument
+explicitly does not cover.
+
+**Distinguished from the thirteenth, which is nearest in substance.** That pattern also concerns a string
+match standing in for a fact. Its subject is an **investigator's method** — grepping a file to establish
+what a system does — and its remedy is to enumerate real callers, which has no analogue in a guard's
+runtime decision. The instance here is production code performing the thirteenth's error as its
+specification rather than as an inquiry. Related in spirit, disjoint in remedy.
+
+**The check, written as something to run.** For each fact a guard decides on, ask two questions in order.
+Does the record the guard already holds carry that fact **authoritatively** — an exit status, a returned
+error, a typed discriminant? And is the guard reading it, or reading something the fact merely tends to
+produce? Where the answers are yes and no, both failure directions already exist and only one of them will
+have been noticed. The tell is a guard matching against **rendered output** — text, messages, formatted
+summaries — since rendering is where authoritative facts get converted into correlates. The cost of the
+check is reading one record's field list beside one predicate.
