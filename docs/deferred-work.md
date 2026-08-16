@@ -14851,12 +14851,37 @@ Sharpest of all, a retired pattern evidently written for one ecosystem's canonic
 `OK (N tests, M assertions)` form, did **not** match that line, because it required the closing
 parenthesis immediately after the word. A proxy's coverage was accidental in both directions at once.
 
-**One of the shipped tests is vacuous against the defect, recorded rather than left to be discovered.**
-Of the five ecosystem cases added, the .NET one would have passed against the pre-fix implementation too,
-its chosen output line being one of the two that matched. The mutation meant to catch exactly that did not,
-because it substituted a single one of the six retired patterns rather than all six, and so was not a
-faithful reconstruction of the code it was imitating. A mutation is only evidence about the code it
-actually reproduces.
+**The vacuous-case finding was larger than this entry first recorded, and the correction is not a bigger
+version of the same defect.** As written it said one shipped test was vacuous. Re-checked against a
+faithful reconstruction of the pre-fix predicate — extracted from the commit before the rewrite and proven
+identical by mechanical diff rather than by transcription — **five of thirteen** cases did not
+discriminate. The original figure was not a miscount but a scoping error: the check was run over the five
+ecosystem cases alone, so four non-discriminating cases outside that group were never examined. See item
+209 for why the mutation that should have caught this did not.
+
+**Three mechanisms, and only one of them was a defect.** The .NET case matched a retired pattern
+coincidentally, on output text that genuinely described a pass, so old and new agreed for that input and
+the case demonstrated nothing about the fix; it was replaced with an output form matching none of the
+retired patterns. Two cases are trivially identical under both implementations because an empty input
+yields an empty candidate set by construction — no discriminating input exists for them, and they are
+correct exactly as they stand. One coincides structurally rather than coincidentally: for its input the
+pre-fix code matched no pattern and fell through to its own exit-code check, which is the signal the
+rewritten code always reads, so the two agree because the old path already consulted the right thing. A
+fourth shares the .NET case's coincidental mechanism but sits under a regression guard rather than a fix
+claim, so nothing about it warranted correction.
+
+**What the correction establishes, and it is the transferable part.** A test can be **correct** and
+**non-discriminating** at the same time, and the two are different properties: one asks whether the
+assertion is true, the other whether it would have noticed the defect. All five were true. Four remain
+unchanged, because being true is the whole of what their position in the file claims. Only the case filed
+as demonstrating a fix owed a demonstration, and only that one was replaced. Reading a green suite as
+evidence that a fix works requires the second property, and nothing inside the suite reports it.
+
+**The ecosystem framing, refuted a second time and independently.** A fresh matrix run against the
+reconstruction reproduced the earlier result without reusing it: acceptance keyed on the exact output
+string, and the split fell **inside one ecosystem**, between an older summary form that matched a retired
+pattern and a newer one that did not. The case names were rewritten to describe output shape rather than
+language, so the refuted unit is not inherited from the names by the next reader.
 
 **What the rewrite keys on.** The exit code, which was **already present** on every log entry and
 **already read** by this same function — just never in the deciding branch. Text now selects which entries
@@ -14992,11 +15017,46 @@ were traced to their fixture. See the twenty-fourth pattern for the discipline t
 set load-bearing in the first place, and item 205 for the neighbouring case where bundling made a
 prediction unfalsifiable at the granularity it was stated.
 
+## 209. A mutation that only partly reconstructs the behaviour it imitates returns a reassuring kill count while leaving whole fixes unexercised
+
+**What it is.** A pass verifying that a rewritten predicate's tests were load-bearing wrote a mutation
+meant to restore the pre-rewrite behaviour. It restored **one** of the six output-text patterns the
+rewrite had retired, and left the rewrite's other two changes — a widened tool filter and a corrected
+no-attempt condition — in place. That mutation killed **seven of thirteen** cases. Seven is a comfortable
+number; it reads as a battery doing its job. The two cases covering the tool-filter fix and the no-attempt
+fix were **among the survivors**, and neither was noticed, because a kill count that large does not invite
+the question of which cases failed to die.
+
+**What the faithful version showed.** The pre-rewrite function was extracted from the commit before the
+change and proven identical to its source by a mechanical diff — not retyped, and not reconstructed from a
+reading of it. Applied as a mutation, it killed **nine of thirteen**: exactly the cases whose own describe
+blocks claim to demonstrate a fix. The four survivors were named in advance and are correct as they stand,
+for reasons item 204 records. The difference between the two mutations is not degree. The partial one
+cannot exercise a fix it never reverted, so for those two cases it was not a weak test of the code — it
+was no test of the code at all, while still producing output shaped exactly like evidence.
+
+**The rule, in two halves because either alone fails.** A mutation that imitates prior behaviour must be
+**extracted from version control and diffed against its source**, since a reconstruction assembled from
+reading is a claim about the old code rather than the old code. And its result must be read against a
+**kill set named before the run** — which cases should die, and which should survive and why — because a
+count alone cannot distinguish a fix that was reverted and caught from a fix that was never reverted. The
+first half makes the mutation faithful; the second makes its output interpretable. The eighth pattern's
+sharpened rule already says to compare failure-set membership rather than cardinality; this is the same
+instruction arriving from the mutation's construction rather than from its reading.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed. **Against Actionable now:**
+nothing in the code changes, and the finding governs how a future pass builds and reads a mutation.
+**Against Blocked on data:** nothing is missing; both mutations were run, both kill sets recorded, and the
+survivor lists compared directly. **Where the code lives:** the verification module's classify file and its
+test file. See item 204 for the fix the partial mutation failed to exercise, item 208 for the neighbouring
+finding about predicting a mutation's blast radius, and the eighth pattern for the membership-over-count
+rule this instance arrives at from the other side.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 208 to find out which ones still need something. No index of
+reader the trouble of reading all 209 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -15009,12 +15069,12 @@ first (10): 113, 116, 129, 130, 138, 142, 148, 169, 182, 184
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (16): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196
 
-**Neither — a structural fact recorded, with no fix proposed** (104): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (105): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152, 154, 155, 158,
 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199, 200, 201, 202, 205,
-206, 207, 208
+206, 207, 208, 209
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
@@ -17601,3 +17661,48 @@ produce? Where the answers are yes and no, both failure directions already exist
 have been noticed. The tell is a guard matching against **rendered output** — text, messages, formatted
 summaries — since rendering is where authoritative facts get converted into correlates. The cost of the
 check is reading one record's field list beside one predicate.
+
+## A candidate pattern considered this pass and not promoted: a test that is correct and a test that discriminates are different properties
+
+**The candidate, as proposed.** A suite can be entirely green, entirely true, and blind to the defect it
+was written for. Correctness asks whether an assertion holds; discrimination asks whether it would have
+noticed the defect. The instance is item 204's five non-discriminating cases, four of which are correct
+exactly as they stand — and the instrument that separates the two properties is a faithful reconstruction
+of the prior behaviour, not a mutation invented for the occasion.
+
+**Compared first against the two entries the proposal named, and it differs from both.** The
+**thirty-fourth** covers a test written from observed behaviour, which pins a defect as the specification.
+That entry states outright that its subject is "not skipped, not mis-scoped, not vacuous" and that
+**mutation testing actively certifies it** — its test discriminates perfectly, and the error is that the
+intent behind the assertion is wrong. The candidate's subject has the intent right and the discrimination
+missing. Different cell, not a rejection ground. The **twenty-fourth** covers an assertion never anchored
+to the region it names, which stays green even with the guarded behaviour deleted outright. The
+candidate's cases are anchored precisely and would fail if the feature were deleted; they stay green only
+against one specific prior implementation. Also different, and also not a rejection ground.
+
+**Rejected against the eighth, which the proposal did not name and which matches.** That entry's
+discriminator is "coincidence between the mutated value and the input's real answer" — a substitution
+invisible to exactly the test built around it, because that test's own correct answer already equals what
+the substitution produces. Item 204's replaced case is that mechanism exactly, with the pre-fix
+implementation in the role of the substitution: the case's own correct answer already equalled what the
+old code returned for that input. The eighth's rule already prescribes the check that found it — confirm
+whether the target's own correct answer happens to equal the alternative's before trusting a green result
+— and its addendum already separates a predicted-vacuous green, which is the check working, from an
+unpredicted one, which is a blind spot. That separation is the candidate's correct-versus-discriminating
+distinction at lower resolution, and it was written down first.
+
+**Rejected a second time, on a ground independent of the eighth: the candidate names a symptom rather
+than a mechanism.** Its own five instances do not share one. The replaced case is the eighth's value
+coincidence. The structurally-identical case is the **sixth**: the pre-fix path matched no pattern and
+fell through to its own exit-code check, so old and new converge on the same output by different routes,
+which is that entry's subject verbatim. The two empty-input cases are neither — they are identical because
+the input admits no distinguishing behaviour at all. Three mechanisms wearing one symptom, and this
+document's own criterion for promotion is the mechanism. A pattern covering all three would have to be
+stated so generally that it prescribes no check.
+
+**Reopening condition.** An instance of non-discrimination whose cause is neither value coincidence nor
+path convergence — specifically, a case where the two implementations genuinely produce different values
+for the input and the assertion is simply too coarse to see the difference. That is a failure of assertion
+granularity rather than of fixture choice, no recorded entry covers it, and one clear instance would
+justify its own entry. The instance would have to show the divergence directly, since a coarse assertion
+and a coincidence are indistinguishable from the green result alone.
