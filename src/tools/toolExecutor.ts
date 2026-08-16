@@ -25,7 +25,7 @@ import { generateFileOutline } from "./fileOutline.js";
 import { findCheckerForFile, trackCheckerUnavailableWarning } from "./syntaxCheckers.js";
 import { classifyShellExit } from "./classifyShellExit.js";
 import { validateRunEnvironment } from "./runEnvironment.js";
-import { checkCommandSafe, WHITELIST_PREFIXES, type CatchAllClass } from "../llm/runCommandSafe.js";
+import { checkCommandSafe, WHITELIST_PREFIXES, ecosystemSampleFor, type CatchAllClass } from "../llm/runCommandSafe.js";
 import { hashStagingState } from "../llm/loopDetector.js";
 import { MEMORY_WARN_THRESHOLD_BYTES } from "../memory/constants.js";
 import { segmentPatchBlocks } from "../utils/patchBlocks.js";
@@ -1223,12 +1223,17 @@ export async function executeTool(
         // runner first (WHITELIST_PREFIXES.slice(0, 8)), so the render now builds its own
         // discovery-first sample from WHITELIST_MISS_SAMPLE instead. `reason` itself is
         // unchanged on every path and still reaches telemetry, just above.
+        // Ecosystem-aware sample: the rejected command's own leading token is the only
+        // zero-cost signal in scope at this site (repoPath is a parameter here too, but using
+        // it would mean new manifest-reading I/O, not something already in scope) — falls back
+        // to the generic JS/TS sample when the command doesn't match a known ecosystem.
+        const ecosystemSample = safety.tag === "whitelist-miss" ? ecosystemSampleFor(command) : null;
         return {
           success: false,
           output: safety.tag === "chain"
             ? `Command blocked: Chained commands aren't supported on the read-only shell — run each command (e.g. \`git status -s\` and \`git diff --stat\`) as a separate call. For file contents or line ranges, use the read_file tool (lineRange:[start,end]) or head/tail/cat.`
             : safety.tag === "whitelist-miss"
-              ? `Command blocked: not in whitelist. Examples of allowed prefixes: ${WHITELIST_MISS_SAMPLE.join(", ")}, and more (${WHITELIST_PREFIXES.length} total). This command isn't on the no-approval read-only allowlist — if it's a safe read, run it via the approval-gated shell (run_command) instead.`
+              ? `Command blocked: not in whitelist. Examples of allowed prefixes: ${(ecosystemSample ?? WHITELIST_MISS_SAMPLE).join(", ")}, and more (${WHITELIST_PREFIXES.length} total). This command isn't on the no-approval read-only allowlist — if it's a safe read, run it via the approval-gated shell (run_command) instead.`
               : `Command blocked: ${CATCH_ALL_TEXT[safety.tag]}`,
         };
       }

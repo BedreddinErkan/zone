@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkCommandSafe } from "./runCommandSafe.js";
+import { checkCommandSafe, ecosystemSampleFor } from "./runCommandSafe.js";
 
 describe("checkCommandSafe", () => {
   describe("whitelist — safe commands pass", () => {
@@ -430,5 +430,95 @@ describe("script aliases for read-only checks", () => {
 
   it("prefix matching does not let a chained mutation through", () => {
     expect(checkCommandSafe("npm run typecheck && rm -rf /").safe).toBe(false);
+  });
+});
+
+// Extended fresh this pass, per the cross-ecosystem coupling inventory: 11 of 45 representative
+// commands were permitted before this change, every one JS/TS or an already-present exception.
+describe("whitelist — cross-ecosystem additions meet the list's own invariant (no shell-mutation syntax, writes confined to a dedicated build/cache dir)", () => {
+  it.each([
+    "cargo test",
+    "cargo build",
+    "cargo clippy",
+    "cargo fmt --check",
+    "gofmt -l .",
+    "mvn test",
+    "gradle test",
+    "./gradlew test",
+    "bundle exec rspec",
+    "rspec",
+    "rake test",
+    "composer test",
+    "phpunit",
+    "dotnet test",
+    "dotnet build",
+    "poetry run pytest",
+    "uv run pytest",
+  ])("%s is permitted", (command) => {
+    expect(checkCommandSafe(command).safe).toBe(true);
+  });
+
+  // cargo test --no-run still resolves — the bare "cargo test" prefix now subsumes it, so the
+  // previously-separate explicit entry was redundant and was folded away, not dropped.
+  it("cargo test --no-run still resolves via the bare cargo test prefix", () => {
+    expect(checkCommandSafe("cargo test --no-run").safe).toBe(true);
+  });
+});
+
+describe("whitelist — deliberately excluded install/sync commands still rejected", () => {
+  it.each([
+    "tox",
+    "bundle install",
+    "composer install",
+    "dotnet restore",
+    "poetry install",
+  ])("%s (primary purpose is installing/syncing dependencies) is not permitted", (command) => {
+    const result = checkCommandSafe(command);
+    expect(result.safe).toBe(false);
+  });
+
+  // go build writes a binary into the working directory itself, not a dedicated build/cache
+  // subdirectory the way cargo build (target/) and dotnet build (bin/obj) do — added to the
+  // auto-approval layer only, not this stricter read-only one.
+  it("go build ./... (writes to the working dir, not a dedicated subdir) is not permitted", () => {
+    expect(checkCommandSafe("go build ./...").safe).toBe(false);
+  });
+
+  it.each(["make", "make test", "make check"])(
+    "%s (a Makefile target has no package-manager-enforced meaning) is not permitted",
+    (command) => {
+      expect(checkCommandSafe(command).safe).toBe(false);
+    }
+  );
+});
+
+describe("whitelist — per-ecosystem destructive commands still rejected after the extension", () => {
+  it.each([
+    "cargo publish",
+    "npm publish",
+    "rm -rf node_modules",
+    "git push origin main",
+    "mvn clean install",
+  ])("%s is not permitted", (command) => {
+    expect(checkCommandSafe(command).safe).toBe(false);
+  });
+});
+
+describe("ecosystemSampleFor", () => {
+  it.each([
+    ["cargo test", ["cargo check", "cargo test --no-run", "cargo fmt --check"]],
+    ["go test", ["go test", "go vet", "gofmt -l"]],
+    ["mvn test", ["mvn test", "gradle test", "./gradlew test"]],
+    ["bundle exec rspec", ["bundle exec rspec", "rspec", "rake test"]],
+    ["composer test", ["composer test", "phpunit"]],
+    ["dotnet test", ["dotnet test", "dotnet build"]],
+    ["pytest", ["pytest", "poetry run pytest", "uv run pytest"]],
+  ] as const)("%s -> %s", (command, expected) => {
+    expect(ecosystemSampleFor(command)).toEqual(expected);
+  });
+
+  it("returns null for a JS/TS command, so the caller falls back to its own generic sample", () => {
+    expect(ecosystemSampleFor("npm test")).toBeNull();
+    expect(ecosystemSampleFor("npx vitest run src/foo.test.ts")).toBeNull();
   });
 });

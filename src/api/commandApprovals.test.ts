@@ -563,3 +563,57 @@ describe("A3: stripTrailingBenignRedirect — isInvestigationSafeCommand", () =>
     expect(isInvestigationSafeCommand("npx tsc --noEmit > errors.txt")).toBe(false);
   });
 });
+
+// Extended fresh this pass: before this change zero non-JS/TS command auto-approved for build
+// or test, confirmed by running getSafeCommandCategory over a cross-ecosystem set.
+describe("getSafeCommandCategory — cross-ecosystem build/test additions", () => {
+  it.each([
+    ["cargo test", "test"],
+    ["go test", "test"],
+    ["mvn test", "test"],
+    ["gradle test", "test"],
+    ["./gradlew test", "test"],
+    ["dotnet test", "test"],
+    ["bundle exec rspec", "test"],
+    ["rspec", "test"],
+    ["rake test", "test"],
+    ["composer test", "test"],
+    ["phpunit", "test"],
+    ["pytest", "test"],
+    ["poetry run pytest", "test"],
+    ["uv run pytest", "test"],
+    ["cargo check", "build"],
+    ["cargo build", "build"],
+    ["go build", "build"],
+    ["dotnet build", "build"],
+  ] as const)("%s -> %s", (command, category) => {
+    expect(getSafeCommandCategory(command)).toBe(category);
+  });
+
+  // go build was deliberately excluded from the stricter read-only whitelist (writes to the
+  // working directory itself, not a dedicated build/cache subdir) but meets this layer's looser
+  // guarantee — the agent cannot use it to hide an edit from review either way.
+  it("go build (excluded from the read-only whitelist) is still auto-approved for build here", () => {
+    expect(getSafeCommandCategory("go build ./...")).toBe("build");
+  });
+
+  it.each([
+    "tox",
+    "bundle install",
+    "composer install",
+    "dotnet restore",
+    "poetry install",
+    "make",
+    "make test",
+    "make check",
+  ])("%s (not extended) still needs human approval", (command) => {
+    expect(getSafeCommandCategory(command)).toBeNull();
+  });
+
+  it.each(["cargo publish", "npm publish", "mvn clean install"])(
+    "%s (destructive) still needs human approval after the extension",
+    (command) => {
+      expect(getSafeCommandCategory(command)).toBeNull();
+    }
+  );
+});

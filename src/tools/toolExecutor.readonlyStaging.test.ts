@@ -262,6 +262,22 @@ describe("run_command_readonly: whitelist-miss curated sample (item 108 fix)", (
     expect(result.output).toContain(`(${WHITELIST_PREFIXES.length} total)`);
   });
 
+  it("a rejected command from a recognized ecosystem gets that ecosystem's own sample, not the generic JS/TS one", async () => {
+    // cargo publish: whitelist-miss (destructive, deliberately not added) — the leading token
+    // is still recognized, so ecosystemSampleFor fires even though the command itself is refused.
+    const result = await executeTool("run_command_readonly", { command: "cargo publish" }, repoPath);
+    expect(result.output).toContain("cargo check");
+    expect(result.output).toContain("cargo fmt --check");
+    expect(result.output).not.toContain("npx vitest");
+  });
+
+  it("a rejected command from an unrecognized ecosystem falls back to the generic sample", async () => {
+    const result = await executeTool("run_command_readonly", { command: "npm run deploy" }, repoPath);
+    for (const p of WHITELIST_MISS_SAMPLE) {
+      expect(result.output).toContain(p);
+    }
+  });
+
   const DISCOVERY_BINARIES = ["ls", "find", "grep", "rg", "fd"];
   for (const bin of DISCOVERY_BINARIES) {
     it(`discovery binary '${bin}' appears inside the 100-char TUI title slice`, async () => {

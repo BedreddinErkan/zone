@@ -24,8 +24,24 @@ export const WHITELIST_PREFIXES = [
   // Builds (report-only flags)
   "go test",
   "go vet",
+  "gofmt -l",
   "cargo check",
-  "cargo test --no-run",
+  "cargo test",
+  "cargo build",
+  "cargo clippy",
+  "cargo fmt --check",
+  "mvn test",
+  "gradle test",
+  "./gradlew test",
+  "bundle exec rspec",
+  "rspec",
+  "rake test",
+  "composer test",
+  "phpunit",
+  "dotnet test",
+  "dotnet build",
+  "poetry run pytest",
+  "uv run pytest",
   // Read-only git / shell inspection
   "git log",
   "git diff",
@@ -54,6 +70,26 @@ export const WHITELIST_PREFIXES = [
   "pwd",
   "which",
 ] as const;
+
+/**
+ * A rejected command's own leading token is the only ecosystem signal available at zero cost
+ * where the whitelist-miss rejection text is rendered (toolExecutor.ts) — repoPath is a
+ * parameter there too, but using it would mean reading manifests to detect a framework, which
+ * is new async I/O in a currently-synchronous rejection path, not a signal already in scope.
+ * Returns null for anything unrecognized (including JS/TS), so the caller can fall back to its
+ * own generic sample untouched.
+ */
+export function ecosystemSampleFor(command: string): string[] | null {
+  const c = command.trim();
+  if (/^cargo\b/.test(c)) return ["cargo check", "cargo test --no-run", "cargo fmt --check"];
+  if (/^(go|gofmt)\b/.test(c)) return ["go test", "go vet", "gofmt -l"];
+  if (/^(mvn|gradle|\.\/gradlew)\b/.test(c)) return ["mvn test", "gradle test", "./gradlew test"];
+  if (/^(bundle|rspec|rake)\b/.test(c)) return ["bundle exec rspec", "rspec", "rake test"];
+  if (/^(composer|phpunit)\b/.test(c)) return ["composer test", "phpunit"];
+  if (/^dotnet\b/.test(c)) return ["dotnet test", "dotnet build"];
+  if (/^(python|pytest|poetry|uv|tox)\b/.test(c)) return ["pytest", "poetry run pytest", "uv run pytest"];
+  return null;
+}
 
 /**
  * Item 93 fix: every rejection reason belongs to one of 19 classes, carried alongside the
