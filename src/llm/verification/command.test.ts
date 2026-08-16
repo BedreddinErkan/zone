@@ -97,6 +97,54 @@ describe("selectVerificationCommand — project-aware tsc", () => {
       selectVerificationCommand({ language: "javascript", testCommand: "npm test" }, { repoPath }),
     ).toEqual({ command: "npm test", timeoutMs: 90000, label: "test" });
   });
+
+  it("python's test-framework command is unchanged (regression pin)", () => {
+    expect(
+      selectVerificationCommand({ language: "python", testCommand: "pytest" }, { repoPath }),
+    ).toEqual({ command: "pytest", timeoutMs: 90000, label: "test" });
+  });
+});
+
+// Widened this pass: derived from the detector's own testCommand rather than a second
+// hardcoded language list, so a future detectFramework addition is consumed automatically.
+describe("selectVerificationCommand — cross-ecosystem, derived from testCommand alone", () => {
+  it("rust: cargo test is selected", () => {
+    expect(
+      selectVerificationCommand({ language: "rust", testCommand: "cargo test" }, { repoPath }),
+    ).toEqual({ command: "cargo test", timeoutMs: 90000, label: "test" });
+  });
+
+  it("go: go test ./... is selected", () => {
+    expect(
+      selectVerificationCommand({ language: "go", testCommand: "go test ./..." }, { repoPath }),
+    ).toEqual({ command: "go test ./...", timeoutMs: 90000, label: "test" });
+  });
+
+  it("java (maven): mvn test is selected", () => {
+    expect(
+      selectVerificationCommand({ language: "java", testCommand: "mvn test" }, { repoPath }),
+    ).toEqual({ command: "mvn test", timeoutMs: 90000, label: "test" });
+  });
+
+  it("java (gradle): gradle test is selected", () => {
+    expect(
+      selectVerificationCommand({ language: "java", testCommand: "gradle test" }, { repoPath }),
+    ).toEqual({ command: "gradle test", timeoutMs: 90000, label: "test" });
+  });
+
+  it("ruby: bundle exec rspec is selected", () => {
+    expect(
+      selectVerificationCommand({ language: "ruby", testCommand: "bundle exec rspec" }, { repoPath }),
+    ).toEqual({ command: "bundle exec rspec", timeoutMs: 90000, label: "test" });
+  });
+
+  it("a language with no testCommand (php's actual shape today) returns null", () => {
+    expect(selectVerificationCommand({ language: "php", testCommand: "" }, { repoPath })).toBeNull();
+  });
+
+  it("no framework at all returns null, unchanged", () => {
+    expect(selectVerificationCommand(undefined, { repoPath })).toBeNull();
+  });
 });
 
 describe("resolveAllTsconfigProjects", () => {

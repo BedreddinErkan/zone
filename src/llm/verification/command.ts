@@ -101,7 +101,11 @@ export function selectVerificationCommand(
     }
     return { command, timeoutMs: 60000, label: "tsc" };
   }
-  if (framework.testCommand && (framework.language === "javascript" || framework.language === "python")) {
+  // Derived from the detector's own output, not a second hardcoded language list: typescript
+  // is already exclusively handled above, and "unknown"/php's testCommand is "" by
+  // construction, so trusting testCommand's truthiness alone is sufficient — a future
+  // detectFramework addition that sets testCommand starts being consumed automatically.
+  if (framework.testCommand) {
     return { command: framework.testCommand, timeoutMs: 90000, label: "test" };
   }
   return null;

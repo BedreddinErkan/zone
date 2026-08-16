@@ -11,6 +11,7 @@ export interface ProjectFramework {
     | "rust"
     | "go"
     | "php"
+    | "ruby"
     | "unknown";
   framework: string;
   testCommand: string;
@@ -260,6 +261,22 @@ function detectPhp(dir: string): DetectedFrameworkBase | null {
   };
 }
 
+function detectRuby(dir: string): DetectedFrameworkBase | null {
+  const gemfile = path.join(dir, "Gemfile");
+  if (!exists(gemfile)) return null;
+  const hasRspec = readText(gemfile).toLowerCase().includes("rspec");
+  return {
+    language: "ruby",
+    framework: "Ruby",
+    testCommand: hasRspec ? "bundle exec rspec" : "",
+    buildCommand: "",
+    devCommand: "",
+    packageManager: "bundler",
+    hasTests: hasRspec,
+    testFramework: hasRspec ? "rspec" : "unknown",
+  };
+}
+
 async function detectTestFiles(dir: string): Promise<boolean> {
   const hits = await fg(
     [
@@ -323,6 +340,7 @@ async function detectInDir(dir: string): Promise<ProjectFramework> {
   const go = detectGo(dir);
   const java = detectJava(dir);
   const php = detectPhp(dir);
+  const ruby = detectRuby(dir);
 
   const base =
     node ??
@@ -330,7 +348,8 @@ async function detectInDir(dir: string): Promise<ProjectFramework> {
     rust ??
     go ??
     java ??
-    php ?? {
+    php ??
+    ruby ?? {
       language: "unknown" as const,
       framework: "Unknown",
       testCommand: "",
