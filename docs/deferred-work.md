@@ -8911,6 +8911,15 @@ described it. Two more exist on the sibling tools: a hard safety block on `run_c
 `run_command_background`, firing on `rm -rf /`, a Windows recursive delete, a bare `format`, or a SQL
 client's `DROP TABLE`/`DROP DATABASE`, naming no remedy at all and not saying which of those four matched;
 and an approval-denial on `run_command`, naming a rephrasing — drop the metacharacters, re-run bare.
+**There are six as of 2026-08-16, not five, and the sixth is a split of the approval-denial.** That branch
+now selects between two texts on a reason field: an investigation denial gets a text naming the diagnostic
+allowlist and pointing at the read tools, and every other cause keeps the rephrasing text described here,
+byte for byte. The rephrasing text is **correct** for what still reaches it — a command carrying
+metacharacters is not consumed by any earlier guard, since the hard safety block tests for destructive
+commands rather than metacharacters, so such commands do arrive here and "re-run bare" is the right advice
+for them. What the split fixed is the one cause the text was wrong for. The new text also names a reachable
+alternative, so this entry's later count of how many texts name one, and item 96's reference to "the other
+four", each move by one; both are corrected here at the source rather than restated.
 
 **The catch-all covers the majority of what the whitelist actually blocks, and rendered the one thing it
 uniquely knows as a raw regex until 6f9c9a69.** Measured directly against the real gate, by source: three of
@@ -14064,7 +14073,10 @@ detector was added, mirroring the Python detector's discipline rather than the P
 manifest's text and produces the rspec command only when the manifest names rspec, and an empty command
 otherwise, so a Ruby project without rspec is classified without a guessed command. Rust, Go, both Java
 build systems and Ruby now reach verification. The detector had no test file of its own before this arc,
-under two instruments; it has one now, nine cases, and the consumer's own file gained eight.
+under two instruments; it has one now, nine cases, and the consumer's own file gained eight. **The contrast
+this paragraph draws against the PHP detector expired on 2026-08-16:** that detector now reads its manifest
+too, on two signals rather than one, so PHP is no longer the counter-example to the discipline described
+here. Item 192 records what shipped and why its manifest needed a different reading rule than this one.
 
 **Bucket: Closed.** **Against Neither:** a fix was proposed and built. **Where the code lives:** the
 consumer in the verification module's command file; the detector in the repository-scanning module. See
@@ -14173,12 +14185,51 @@ the two callers that set the mode actually attempt: both the investigation flow 
 set a mode string the loop normalizes to the value the branch tests, so the branch is reachable from both,
 but nothing here measures what either one asks for.
 
-**Bucket: Neither.** A structural fact is recorded and no fix is proposed. **Against Actionable now:** the
-open questions are about what should be admitted, not about a specified change. **Against Blocked on
-data:** the list, the ordering, the denial behaviour and the cross-gate reach were all established by
-reading and by running; what is missing is usage data for a question this entry does not need answered to
-stand. **Where the code lives:** the third list, its predicate and the approval entry point are all in the
-approvals module; the mode normalization is in the agent loop. See item 186 for the other two gates.
+**The precedence, as it actually resolves, stated once.** The approval entry point checks the second gate
+**first and unconditionally**, before it looks at the investigation flag at all. Only on a miss does the
+flag matter: the third list approves its eleven prefixes, and everything else is denied on the spot. Outside
+investigation the same miss falls through to per-run trust and then to a user prompt. The first gate is not
+in this path — it gates a different tool. So investigation's effective admission set is the union of the
+second and third lists, which is why extending the second widened investigation without the third appearing
+in any diff.
+
+**The third list relaxes; the restriction is the branch.** Read as a security control the list is
+backwards — it *adds* ten prefixes the second gate lacks (one of its eleven is already covered there), so
+it can only widen what investigation admits. What actually restricts is the branch it sits in: a miss
+outside investigation prompts a human, and a miss inside denies outright with no prompt. Anyone reasoning
+about this gate from its list alone will reach the wrong conclusion about which half is the control.
+
+**The exclusions, re-derived on 2026-08-16 and classified against the rationale block's own text.** Of the
+first gate's sixty-one entries, twenty-three are refused during investigation, under two instruments that
+return identical lists. **Seven** have a stated reason that reaches them — five named outright, two more
+covered by a reason the block states for a sibling form. **Three** are explicable from the list's own shape
+with no stated reason: it carries only the explicit `run` forms of the test runners, so the bare forms that
+would enter watch mode and hang are excluded by construction. **Thirteen have no stated rationale at all**,
+and the largest coherent group among them is **seven read-only git subcommands** — language-agnostic, which
+is the opposite of the ecosystem-shaped gap this entry was opened expecting. One of the thirteen is
+contradicted by the rationale block itself, which calls a formatter check safe while the list admits only
+its `npx`-prefixed form.
+
+**The denial is observable as of 2026-08-16, and the join it enables is untested.** The branch now emits a
+structured event and writes a marker, both carrying the run identifier, mirroring the two approving branches
+and the sibling gate's own blocked marker respectively. The run identifier is the same field the usage
+ledger and the investigation-completion marker already carry, so the three join without translation — **but
+that join was verified by tracing the source, and by no test.** The one test that touches the payload
+asserts the emitted object's whole shape, which happens to include the identifier; nothing asserts that this
+identifier is the same one the other two files record. A future change that renamed or re-sourced it would
+break every downstream join and pass the suite. That limitation is the reason this paragraph exists.
+
+**Bucket: Neither**, re-decided on this entry's own stated condition rather than on the work done against
+it. The condition is that a structural fact is recorded and no fix is proposed, and both halves still hold:
+the entry proposes no list change, and the observability work it prompted is recorded here as fact, not as
+this entry's fix. **Against Actionable now:** still no specified change — what to admit remains the open
+question, and item 196 records what would settle it. **Against Blocked on data:** the list, the ordering,
+the denial behaviour, the cross-gate reach and now the exclusion classification were all established by
+reading and by running; the usage data that is still missing belongs to item 196, which is blocked on it,
+and this entry stands without it. **Where the code lives:** the third list, its predicate and the approval
+entry point are all in the approvals module; the mode normalization is in the agent loop. See item 186 for
+the other two gates, item 194 for the messages the denial branch renders, and item 196 for the reading that
+would decide the extension.
 
 ## 191. A project-declared command allowlist fits the problem better than a longer hardcoded one, and three questions have to be answered before one could be written
 
@@ -14211,7 +14262,7 @@ hardcoded lists in the read-only command module and the approvals module; the pe
 reader and its session seeding in the approvals and TUI store modules. See item 186 for the extension this
 would replace.
 
-## 192. PHP is classified but its test command is always empty — the same discard shape as item 187, one stage earlier
+## 192. Closed — the PHP detector reads its manifest, on two signals with a stated precedence, and this entry's own prescribed command form would have been refused by both gates
 
 **What it is.** The detector classifies a repository as PHP on one condition: the composer manifest exists.
 It then returns an empty test command, no runnable tests and an unknown test framework, **unconditionally**
@@ -14232,11 +14283,39 @@ manifest names that dependency, and an empty command otherwise — never a comma
 manifest's mere existence, which is the discipline the Python and Ruby detectors already hold and the only
 thing that keeps a detected command trustworthy enough for the consumer to run unconditionally.
 
-**Bucket: Actionable now.** The fix is specified, the pattern to copy is in the same file, and both gates
-already admit the resulting commands. **Against Neither:** work is specified. **Against Blocked on data:**
-no observation is missing; the detector's behaviour was read directly and its emptiness is unconditional in
-the source. **Where the code lives:** the PHP detector and the Ruby detector beside it, in the
-repository-scanning module. See item 187 for the consumer defect this precedes and the thirty-third pattern
+**What shipped on 2026-08-16.** The detector opens the manifest it had only been testing for. Two signals,
+not one, because this manifest is structured JSON with its own scripts section, unlike the flat text files
+the Python and Ruby detectors read: a dev-dependency entry naming the unit-test package, and a test script
+entry. Precedence is script-wins, which is not a new invention — it mirrors the Node detector's own
+`hasScript("test")` precedence, present in every one of its framework branches, one function above this one
+in the same file. The framework field is set from the dependency signal independently of which signal
+produced the command, since dependency evidence identifies the tool whatever invokes it. A manifest carrying
+neither signal yields an empty command, matching the absent-signal shape the other two detectors already
+hold.
+
+**The finding that generalises: structured parsing was chosen over substring matching on evidence, not on
+taste.** The Python and Ruby detectors lowercase their manifest and test for a substring, which is
+sufficient for a flat requirements list. Applied to this manifest that rule is wrong, demonstrated with a
+fixture rather than argued: a manifest naming the runner only in a *non-dev* dependency and again in its
+description field, with no test script, is correctly inert under a structured read of the two real signals
+— and the same file's raw lowercased text returns a match under the substring rule. The discipline the two
+precedents actually share is "read the real content, never stop at the file's existence"; for a structured
+manifest, honouring that discipline means parsing the structure, and the parser this file already uses for
+the Node manifest was reused rather than a third style introduced.
+
+**This entry's own prescribed fix named a command that would have been refused.** The paragraph above
+prescribed the unit-test binary's conventional path — a vendored-binary form. Every path-qualified form of
+it was run against both gates during implementation and **refused by both**; only the two bare forms clear
+them, and those are exactly what item 186 added. The shipped detector emits the gate-clearing forms. Had the
+prescription been followed literally, the detector would have produced a command the model's own tool call
+could never run — the same producer/consumer seam the thirty-third pattern records, in a new direction: a
+producer outrunning a gate rather than a consumer discarding a producer.
+
+**Bucket: Closed**, on this entry's own stated condition — the detector reads the manifest and produces a
+command only when the manifest supports one. **Against Actionable now:** nothing remains specified and
+unbuilt. **Against Neither:** a fix was proposed and built. **Where the code lives:** the PHP detector and
+the Ruby detector beside it, in the repository-scanning module. See item 187 for the consumer defect this
+precedes, item 186 for the gates whose accepted forms set the design target, and the thirty-third pattern
 for the shape both share.
 
 ## 193. The prompt defines a verified fix by one runner's exit code, and outweighs the detected-framework block two to one when a different ecosystem is detected
@@ -14273,28 +14352,127 @@ framework-block construction, both in the agent loop; the detector in the reposi
 item 187 for the consumer that was discarding the same detector's output and the protected-zones list in
 the guidance file for the marker.
 
+## 194. Four denial causes share one message that names none of them, and the message is right for a fifth
+
+**What it is.** Five sites in the approvals module resolve a command approval to denied, under two
+instruments that agree: an investigation-mode miss, a timeout, an abort that arrived before the prompt was
+pending, an abort that arrived while it was pending, and a run-level rejection that clears every pending
+approval at once. A sixth path — a real person declining the prompt — resolves the same way through the
+parameterized resolver. As of 2026-08-16 the first of those carries a reason field and renders its own text.
+The remaining four carry nothing, so the agent receives one message for four causes that have nothing in
+common: it never waited, it was aborted, its run ended, or a human said no.
+
+**What the shared message says, and the part of it that is correct.** It advises stripping metacharacters
+and re-running bare. **That advice is right for a command that carries metacharacters, and such commands do
+reach it** — verified by running, not by reading: the hard safety block that runs first tests for
+destructive commands, not for metacharacters, so a piped or redirected command passes it, fails the
+approval predicate's metachar guard, and lands here. A prior framing of this held that no
+metacharacter-carrying command could reach the message at all; that framing was false and is corrected
+where it appears. The defect is not that the message is always wrong — it is that four causes which have
+nothing to do with metacharacters are handed advice about them, and none of the four is named.
+
+**Why the fix is scoped rather than obvious.** Naming a cause is cheap; deciding what each should say is
+not. A timeout and an abort are indistinguishable to the agent and arguably should stay so, since neither is
+about the command. A human declining is the one case where retrying a rephrasing is genuinely wrong and the
+agent should stop. A run-level rejection means the run is over and no message matters. The observability
+pass that named the first cause deliberately did not take the other four, on the ground that a single
+nameable cause is what justifies a reason tag, and none of these four had been established as having one.
+
+**Bucket: Actionable now.** The change is specified — extend the reason union, populate it at the four
+remaining sites, and branch the render — and the mechanism to copy is the one already in place for the
+fifth. **Against Neither:** work is specified. **Against Blocked on data:** no observation is missing; all
+five sites were enumerated under two instruments and the reachable causes were exercised. **Where the code
+lives:** the five resolution sites and the reason type are in the approvals module; the render is the
+approval-denial branch in the tool executor. See item 93 for the refusal-text family this belongs to and
+item 190 for the gate whose denial was named first.
+
+## 195. The binary runs from the built tree, the suite does not rebuild it, and an arc shipped five fixes that never reached the build
+
+**What it is.** The published entry point is a file in the built tree, and the test script is the test
+runner alone — no build hook before it, none after. So the suite exercises the sources while anything
+invoking the installed command exercises the last build. On the machine where this project's own dogfood
+runs happen, the built tree carried **none of an arc's five source fixes** for the whole of that arc:
+checked by content across five files, all five absent, then rebuilt and all five confirmed present. Every
+manual run during that window exercised pre-arc behaviour while a green suite reported the fixes working.
+
+**The general rule this establishes.** A green suite is evidence about the sources and about nothing else.
+Where a project ships a compiled artefact and does not rebuild it as part of testing, the artefact's
+contents are a separate fact requiring a separate check, and the gap is silent in both directions — the
+suite cannot see a stale build, and the build cannot report that it is behind. Any pass whose conclusions
+depend on what a manual invocation did must establish which of the two trees that invocation read.
+
+**The corollary, with the reason corrected.** A content check against a build must assert on a **functional
+line**, never on a comment — but not for the reason first offered. Comments are **not** stripped by this
+project's build: the compiler's comment-removal option is unset and therefore false, and the comments in
+question survive verbatim into the built file, checked directly. The real hazards are two, and both point
+the same way. A comment check risks a **false positive**, which is the worse of the two: comments are
+preserved, so a stale build whose comment happens to match passes a check that proved nothing about whether
+the code changed. And a phrase lifted from wrapped prose risks a **false negative** — the phrase that
+produced this finding spans a soft line wrap and therefore exists contiguously in neither the source nor the
+build, the same wrap-hiding failure the anaphor sweep's second instrument exists to catch, arriving here
+from an unrelated direction.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed. **Against Actionable now:** the
+obvious change — a build hook before the suite — trades a silent staleness risk for several seconds on every
+test run and a rebuild on every unrelated invocation, and whether that trade is worth making is a decision
+this entry does not make. **Against Blocked on data:** nothing is missing; the split was read from the
+manifest and the staleness was measured by content before and after a build. **Where the code lives:** the
+entry point and test script are declared in the package manifest; the build config is the root type-check
+config.
+
+## 196. The third gate's extension decision is now measurable and still unmeasured — the marker exists and has never fired
+
+**What it is.** Item 190 records that a command denied during plan-mode investigation left no trace, so the
+question of whether that gate's list should be extended could not be answered from evidence. Since
+2026-08-16 the denial writes a marker. The marker has **never fired**: the sink holds 3792 records under a
+parsed count and zero of them are this one, agreeing with a plain count over the same file. That is
+consistent with two very different worlds — the denial is rare, or the denial is common and simply predates
+the marker — and nothing recorded can separate them yet.
+
+**The reading that would settle it.** Investigation runs are already recorded by their own completion
+marker, twenty-six of them on this machine, and both markers carry the run identifier, so a denial rate per
+investigation is a join of two files with no new instrumentation. The question that decides the extension is
+not the raw count but the composition: which commands are being denied, and whether they fall inside the
+group that has no stated rationale or inside the group whose exclusion is deliberate. A denial stream
+dominated by the deliberately excluded entries argues for leaving the list alone and improving the message;
+one dominated by the unrationalised entries argues for extending it.
+
+**The candidate list it would be read against.** The thirteen first-gate entries refused during
+investigation with no stated rationale, ordered by how coherent a group they form: the seven read-only git
+subcommands first, being language-agnostic and unambiguously read-only; then the four check-only linters;
+then the remaining two, one of which the gate's own rationale block already calls safe in a different
+invocation form.
+
+**Bucket: Blocked on data.** Closing requires an observation that does not exist yet, and the instrument for
+it now exists and has produced nothing. **Against Actionable now:** the change is not specified — which of
+the thirteen to add is exactly what the reading decides. **Against Neither:** a decision is proposed and a
+concrete reading is named to make it. **Where the code lives:** the marker is written on the denial branch
+in the approvals module; the completion marker is in the plan-investigation module; both land in the marker
+sink under the user's home directory. See item 190 for the gate and item 194 for the message the denial
+renders.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 193 to find out which ones still need something. No index of
+reader the trouble of reading all 196 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (72): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 117, 120, 121, 126, 128, 134, 135, 137, 144, 149, 150, 153, 156, 161, 162, 167, 171, 172, 176, 183, 185, 186, 187
+**Closed** (73): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 117, 120, 121, 126, 128, 134, 135, 137, 144, 149, 150, 153, 156, 161, 162, 167, 171, 172, 176, 183, 185, 186, 187, 192
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (12): 113, 116, 129, 130, 138, 142, 148, 169, 182, 184, 192, 193
+first (12): 113, 116, 129, 130, 138, 142, 148, 169, 182, 184, 193, 194
 
-**Blocked on data** — closing requires an observation that doesn't exist yet (15): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143, 157, 166, 170, 175, 178
+**Blocked on data** — closing requires an observation that doesn't exist yet (16): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196
 
-**Neither — a structural fact recorded, with no fix proposed** (94): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (95): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152, 154, 155, 158,
-159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191
+159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
@@ -16696,3 +16874,38 @@ no test of either component will find it.
 **What the check costs, stated because a rule nobody runs is decoration.** Reading two functions and listing
 two sets. In the instance the diff was four languages and took one read of each side, and the fix was to
 delete the consumer's list and test the value instead — smaller than the list it replaced.
+
+## A candidate pattern considered this pass and not promoted: a diagnostic message written for a cause that cannot reach it
+
+**The candidate, as proposed.** A guard consumes every input matching some property and reports its own
+message. A later branch renders a message advising about that same property. Because the earlier guard
+already took those inputs, nothing arriving at the later branch has the property, so its advice is
+structurally unreachable — the code runs, is reached every time, and is wrong every time. The proposal
+argued this is distinct from the entries about code that never runs, since here nothing is unreached and
+deleting it would be the wrong response.
+
+**Rejected on its premise, which is false.** The instance offered was the approval-denial message advising
+that metacharacters be stripped, said to be shadowed by the hard safety block that runs before it. Run
+rather than read, the shadow does not exist: that block tests for destructive commands — recursive delete,
+a SQL drop, a disk format — and not for metacharacters at all. A piped command passes it untouched, fails
+the approval predicate's own metachar guard, and reaches the message, where the advice is exactly right. The
+message was exercised end to end for such a command to confirm it. There is no shadowing here, so there is
+no instance, so there is no pattern. What the arc actually found was narrower and already recorded: one
+cause among five was handed advice belonging to a different cause, which item 194 carries.
+
+**Rejected a second time on this document's own criterion, which would have applied even had the premise
+held.** The criterion is stated in an earlier candidate's rejection: every recorded pattern is a mechanism
+by which an investigation, a test or a measurement produces a wrong or an empty answer. A message that is
+wrong about the software is a defect in the software, not a way a reader or an instrument goes astray. That
+is item-shaped, and it is recorded as an item.
+
+**Compared against the entries on code that turns out to be unused**, which is what the candidate proposed
+itself as an alternative to — specifically the one recording a blacklist entry permanently shadowed by
+another and therefore never exercised. That entry is a genuine shadowing case, established by running both
+patterns over the same inputs, and it is what a real instance of this candidate would have to look like.
+The difference between the two is not the mechanism but the evidence: one was demonstrated, the other was
+asserted.
+
+**Reopening condition.** A diagnostic message whose stated cause is genuinely consumed by an earlier guard,
+with both guards run over the same input set to demonstrate that nothing carrying the cause can arrive —
+the demonstration being the part this candidate skipped, and the part its own instance failed.
