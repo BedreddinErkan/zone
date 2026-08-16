@@ -1,6 +1,7 @@
 import { debugLog } from "../../utils/logger.js";
 import { parseVerificationError } from "../../core/parseVerificationError.js";
 import { didApplyPatch } from "./logUtils.js";
+import { SAFE_COMMAND_PREFIXES } from "../../api/commandApprovals.js";
 import type { VerificationReason } from "./verificationReason.js";
 
 /** Parse a [ZONE_VERIFICATION: <reason>] tag from text. Returns null if absent or unknown. */
@@ -306,6 +307,31 @@ export function validateUnrelatedClaim(input: {
   };
 }
 
+/** SAFE_COMMAND_PREFIXES.test covers most ecosystems but not these JS/Python runner
+ *  forms (vitest/jest run without an npm-script wrapper, pytest via -m); supplemented
+ *  here rather than widening the shared list, which serves command-approval, not
+ *  test-invocation recognition. */
+let testInvocationPrefixes: readonly string[] | null = null;
+
+function getTestInvocationPrefixes(): readonly string[] {
+  if (!testInvocationPrefixes) {
+    testInvocationPrefixes = [
+      ...SAFE_COMMAND_PREFIXES.test,
+      "vitest",
+      "npx vitest",
+      "jest",
+      "npx jest",
+      "python -m pytest",
+    ];
+  }
+  return testInvocationPrefixes;
+}
+
+function looksLikeTestInvocation(command: string): boolean {
+  const trimmed = command.trim();
+  return getTestInvocationPrefixes().some((p) => trimmed === p || trimmed.startsWith(`${p} `));
+}
+
 export function validatePassedClaim(
   toolCallLog: Array<{
     tool: string;
@@ -319,51 +345,35 @@ export function validatePassedClaim(
     framework && !framework.hasTests
       ? "tests_skipped_no_infra"
       : "tests_inconclusive";
-  const runCommands = toolCallLog.filter((entry) => entry.tool === "run_command");
 
-  if (runCommands.length === 0) {
+  const candidates = toolCallLog.filter(
+    (entry) =>
+      (entry.tool === "run_command" || entry.tool === "run_command_readonly") &&
+      looksLikeTestInvocation(String(entry.args.command ?? ""))
+  );
+
+  if (candidates.length === 0) {
     return {
       accept: false,
       demoteTo: framework && !framework.hasTests
         ? "tests_skipped_no_infra"
         : "no_verification_attempted",
-      reason: "agent claimed tests passed without ever running tests",
+      reason: "agent claimed tests passed without ever running a recognizable test command",
     };
   }
 
-  const hasSuccessPattern = runCommands.some((entry) => {
-    const output = String(entry.result || "");
-    return (
-      /\b\d+\s+pass(?:ed|ing)\b/i.test(output) ||
-      /\bTests:\s+.*passed/i.test(output) ||
-      /\bOK\s*\(\d+\s+tests?\)/i.test(output) ||
-      /(?:✓|✔)\s+\d+\s+tests?\s+passed/i.test(output) ||
-      /===\s+\d+\s+passed/i.test(output) ||
-      /All tests passed/i.test(output)
-    );
-  });
-
-  if (!hasSuccessPattern) {
-    const anyFailed = runCommands.some((entry) => entry.success === false);
-    if (anyFailed) {
-      return {
-        accept: false,
-        demoteTo: noInfraDemote,
-        reason:
-          "agent claimed passed but at least one run_command failed and no success pattern matched",
-      };
-    }
-
+  const anyFailed = candidates.some((entry) => entry.success === false);
+  if (anyFailed) {
     return {
       accept: false,
       demoteTo: noInfraDemote,
       reason:
-        "agent claimed passed but no test-success pattern detected in any run_command output",
+        "agent claimed tests passed but at least one test-command invocation exited non-zero",
     };
   }
 
   return {
     accept: true,
-    reason: "test success pattern detected in run_command output",
+    reason: "test command(s) invoked and none exited non-zero",
   };
 }

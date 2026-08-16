@@ -42,7 +42,7 @@ const SKIPPED_OUTCOME: VerifyOutcome = {
 
 const patchThenTestPass = [
   { id: "1", tool: "apply_patch", args: {}, result: "ok", success: true },
-  { id: "2", tool: "run_command", args: {}, result: "10 passed, 0 failed", success: true },
+  { id: "2", tool: "run_command", args: { command: "npx vitest run" }, result: "10 passed, 0 failed", success: true },
 ];
 
 const patchThenTestFail = [

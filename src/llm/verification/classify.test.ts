@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyVerificationResult, deriveFinalizeBranch, type CodedError } from "./classify.js";
+import { classifyVerificationResult, deriveFinalizeBranch, validatePassedClaim, type CodedError } from "./classify.js";
 
 // Helper: build minimal CodedError arrays for tests
 function coded(code: string, file = "src/a.ts", line = 1): CodedError {
@@ -183,5 +183,125 @@ describe("deriveFinalizeBranch", () => {
 
   it('returns "rolled_back" for fail with regressed=undefined in rollback mode', () => {
     expect(deriveFinalizeBranch({ status: "fail" }, "rollback")).toBe("rolled_back");
+  });
+});
+
+// ─── validatePassedClaim ───────────────────────────────────────────────────────
+// Item 204: the predicate decides accept/demote from entry.success (exit code) on a
+// command-text-narrowed candidate set — never from output-text success patterns.
+
+describe("validatePassedClaim — false-accept fixed (mixed-result text no longer overrides exit code)", () => {
+  it("demotes a claim when the matching run_command's own text contains a passing substring but it exited non-zero", () => {
+    const log = [
+      { tool: "run_command", args: { command: "npx vitest run" }, result: "3 passed, 1 failed", success: false },
+    ];
+    const result = validatePassedClaim(log, { hasTests: true });
+    expect(result.accept).toBe(false);
+    expect(result.demoteTo).toBe("tests_inconclusive");
+  });
+});
+
+describe("validatePassedClaim — false-demote-by-ecosystem fixed (non-JS/Python passing text now accepted)", () => {
+  it("accepts a passing Go test run", () => {
+    const log = [
+      { tool: "run_command", args: { command: "go test ./..." }, result: "ok  \tmypkg\t0.014s", success: true },
+    ];
+    expect(validatePassedClaim(log, { hasTests: true })).toEqual({
+      accept: true,
+      reason: "test command(s) invoked and none exited non-zero",
+    });
+  });
+
+  it("accepts a passing Maven (Java) test run", () => {
+    const log = [
+      { tool: "run_command", args: { command: "mvn test" }, result: "BUILD SUCCESS", success: true },
+    ];
+    expect(validatePassedClaim(log, { hasTests: true }).accept).toBe(true);
+  });
+
+  it("accepts a passing PHPUnit run", () => {
+    const log = [
+      { tool: "run_command", args: { command: "phpunit" }, result: "Time: 00:00.123, Memory: 6.00 MB", success: true },
+    ];
+    expect(validatePassedClaim(log, { hasTests: true }).accept).toBe(true);
+  });
+
+  it("accepts a passing RSpec (Ruby) run", () => {
+    const log = [
+      { tool: "run_command", args: { command: "bundle exec rspec" }, result: "Finished in 0.02341 seconds", success: true },
+    ];
+    expect(validatePassedClaim(log, { hasTests: true }).accept).toBe(true);
+  });
+
+  it("accepts a passing dotnet test (.NET) run", () => {
+    const log = [
+      { tool: "run_command", args: { command: "dotnet test" }, result: "Total tests: 8. Passed: 8.", success: true },
+    ];
+    expect(validatePassedClaim(log, { hasTests: true }).accept).toBe(true);
+  });
+});
+
+describe("validatePassedClaim — false-demote-by-tool-filter fixed (run_command_readonly now recognized)", () => {
+  it("accepts a passing test run verified via run_command_readonly", () => {
+    const log = [
+      { tool: "run_command_readonly", args: { command: "npm test" }, result: "10 passed, 0 failed", success: true },
+    ];
+    expect(validatePassedClaim(log, { hasTests: true }).accept).toBe(true);
+  });
+});
+
+describe("validatePassedClaim — no-attempt branch precision", () => {
+  it("demotes to no_verification_attempted for a truly empty log when the framework has tests", () => {
+    const result = validatePassedClaim([], { hasTests: true });
+    expect(result.accept).toBe(false);
+    expect(result.demoteTo).toBe("no_verification_attempted");
+  });
+
+  it("demotes to tests_skipped_no_infra for a truly empty log when the framework has no tests", () => {
+    const result = validatePassedClaim([], { hasTests: false });
+    expect(result.accept).toBe(false);
+    expect(result.demoteTo).toBe("tests_skipped_no_infra");
+  });
+
+  it("treats a log with only irrelevant run_command entries the same as an empty log, not as an inconclusive attempt", () => {
+    // Behavior change beyond the three defects named for this pass: today, any run_command
+    // entry — however irrelevant — forecloses no_verification_attempted. Command-text
+    // narrowing means an irrelevant entry no longer counts as an attempt at all.
+    const log = [
+      { tool: "run_command", args: { command: "git status" }, result: "On branch master, nothing to commit", success: true },
+    ];
+    const result = validatePassedClaim(log, { hasTests: true });
+    expect(result.accept).toBe(false);
+    expect(result.demoteTo).toBe("no_verification_attempted");
+  });
+});
+
+describe("validatePassedClaim — regression guards", () => {
+  it("still accepts a single clean passing invocation", () => {
+    const log = [
+      { tool: "run_command", args: { command: "npm test" }, result: "10 passed, 0 failed", success: true },
+    ];
+    expect(validatePassedClaim(log, { hasTests: true }).accept).toBe(true);
+  });
+
+  it("still demotes a single clean failing invocation", () => {
+    const log = [
+      { tool: "run_command", args: { command: "npx vitest run" }, result: "1 failed", success: false },
+    ];
+    const result = validatePassedClaim(log, { hasTests: true });
+    expect(result.accept).toBe(false);
+    expect(result.demoteTo).toBe("tests_inconclusive");
+  });
+});
+
+describe("validatePassedClaim — mixed candidates", () => {
+  it("isolates the real test invocation from an interspersed irrelevant command when deciding failure", () => {
+    const log = [
+      { tool: "run_command", args: { command: "git status" }, result: "On branch master", success: true },
+      { tool: "run_command", args: { command: "npx vitest run" }, result: "3 passed, 1 failed", success: false },
+    ];
+    const result = validatePassedClaim(log, { hasTests: true });
+    expect(result.accept).toBe(false);
+    expect(result.demoteTo).toBe("tests_inconclusive");
   });
 });
