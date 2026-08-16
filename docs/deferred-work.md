@@ -8919,7 +8919,11 @@ metacharacters is not consumed by any earlier guard, since the hard safety block
 commands rather than metacharacters, so such commands do arrive here and "re-run bare" is the right advice
 for them. What the split fixed is the one cause the text was wrong for. The new text also names a reachable
 alternative, so this entry's later count of how many texts name one, and item 96's reference to "the other
-four", each move by one; both are corrected here at the source rather than restated.
+four", each move by one; both are corrected here at the source rather than restated. **The count moved
+again later the same day: there are eight, not six.** Item 194's work added two more reason-keyed texts on
+that same approval-denial branch — one for an approval nobody answered in time, one for a run that is
+ending — so the branch now carries four texts and the family totals eight. Counted directly from the render
+site, not inferred from the commit.
 
 **The catch-all covers the majority of what the whitelist actually blocks, and rendered the one thing it
 uniquely knows as a raw regex until 6f9c9a69.** Measured directly against the real gate, by source: three of
@@ -14318,7 +14322,7 @@ the Ruby detector beside it, in the repository-scanning module. See item 187 for
 precedes, item 186 for the gates whose accepted forms set the design target, and the thirty-third pattern
 for the shape both share.
 
-## 193. The prompt defines a verified fix by one runner's exit code, and outweighs the detected-framework block two to one when a different ecosystem is detected
+## 193. Closed — on measurement rather than on a fix: the contradiction is real and rendered, and on the two ecosystems measured it changes nothing the agent does
 
 **What it is.** The assembled system prompt carries a detected-framework block built from the same detector
 items 187 and 192 concern — the framework, its package manager, its build, dev and test commands, and a
@@ -14344,15 +14348,45 @@ retries, and the protection exists precisely because its wording is load-bearing
 does not show up in a render assertion. Rewriting it needs a behavioural sweep over runs that exercise the
 retry path, not a test that checks the new words appear.
 
-**Bucket: Actionable now.** The change is specified — generalize the priority rule and its examples to the
-detected command rather than a named runner — and the constraint on how to verify it is stated. **Against
-Neither:** work is specified. **Against Blocked on data:** no observation is missing; the figures were
-measured by rendering the real prompt. **Where the code lives:** the prompt assembly function and the
-framework-block construction, both in the agent loop; the detector in the repository-scanning module. See
-item 187 for the consumer that was discarding the same detector's output and the protected-zones list in
-the guidance file for the marker.
+**What the measurement found, on 2026-08-16 — the entry closes on evidence rather than on a fix.** Forty
+runs, twenty per arm, one model pinned across both arms, five runs per fixture across four fixtures. The
+control arm is the shipped prompt; the rewrite arm is a patched copy of the built tree whose priority rule
+and three worked examples point at the test command named in the framework block instead of a literal, with
+the pipe-semantics prose, the defensive patterns and the five strings its own test pins left unchanged — a
+diff of exactly four lines and 127 characters, gated before any spend. **Every one of the forty runs
+invoked the detected runner, and not one invoked a JavaScript runner.** Agreement was 19 of 20 attempted in
+each arm under exact string match, and 20 of 20 in each arm when a pipe-wrapped invocation of the same
+runner counts — **a delta of zero points on both readings**. The guardrails were unchanged: pipe-heuristic
+firings zero in both arms, repeated identical commands two in both. Total spend was $4.08 against a $12
+cap, with no run reaching its $0.60 per-run cap.
 
-## 194. Four denial causes share one message that names none of them, and the message is right for a fifth
+**What that licenses, and what it does not.** The contradiction this entry records is real and renders on
+every patch run: the framework block names the detected command under a policy forbidding substitutes, and
+the static text four hundred characters later defines verification by a different runner's exit code. **On
+the two ecosystems measured it is cosmetic in effect** — the model follows the framework block and ignores
+the stale literal. **That rate describes two ecosystems, Rust and Python, and not non-JavaScript
+repositories generally**; Go and Ruby were dropped for toolchain absence, so nothing here speaks for them.
+The rewrite was built, gated and **deliberately not shipped**, because the decision rule registered before
+the spend said to keep the current text below a ten-point improvement, and the improvement was zero.
+
+**A premise this entry argued from was not established, and is corrected rather than left standing.** The
+paragraph above defers the change partly because altering the static text was taken to be a global
+cold-cache reset. The cache breakpoint attaches to the last tool and, by item 161's own measurement, covers
+the tools alone; the adapter's own comment then states in as many words that whether the system prompt is
+cached at all when tools are present is unsettled. An attempt to settle it from four hundred fifty-five
+runs of first-call cache-write data did not separate the hypotheses. The cost of a prompt-text change is
+therefore bounded and one-time at worst, not the recurring global reset this entry assumed — the deferral
+was right for a different reason, that the effect is behavioural and needed measuring.
+
+**Bucket: Closed**, on evidence rather than on the fix it specified. **Against Actionable now:** the change
+remains specifiable, but the pre-registered rule says not to make it, so nothing is pending. **Against
+Blocked on data:** the observation that was missing has been taken. **Where the code lives:** the prompt
+assembly function and the framework-block construction, both in the agent loop; the detector in the
+repository-scanning module. See item 187 for the consumer that was discarding the same detector's output,
+item 197 for the probe's design and its instrument surprise, items 198 through 201 for what the runs
+surfaced, and the protected-zones list in the guidance file for the marker.
+
+## 194. Closed — four causes resolved to two reason values, and the fallback stays unnamed because it still carries two
 
 **What it is.** Five sites in the approvals module resolve a command approval to denied, under two
 instruments that agree: an investigation-mode miss, a timeout, an abort that arrived before the prompt was
@@ -14378,13 +14412,29 @@ agent should stop. A run-level rejection means the run is over and no message ma
 pass that named the first cause deliberately did not take the other four, on the ground that a single
 nameable cause is what justifies a reason tag, and none of these four had been established as having one.
 
-**Bucket: Actionable now.** The change is specified — extend the reason union, populate it at the four
-remaining sites, and branch the render — and the mechanism to copy is the one already in place for the
-fifth. **Against Neither:** work is specified. **Against Blocked on data:** no observation is missing; all
-five sites were enumerated under two instruments and the reachable causes were exercised. **Where the code
-lives:** the five resolution sites and the reason type are in the approvals module; the render is the
-approval-denial branch in the tool executor. See item 93 for the refusal-text family this belongs to and
-item 190 for the gate whose denial was named first.
+**What shipped on 2026-08-16 — four causes became two reason values, not four.** Exercising each path
+rather than reading it showed the four are not four independent code paths: a timeout, an abort arriving
+before the request is pending, an abort arriving while it is pending, and the run-level sweep all resolve
+through one shared closure, and only the timeout reaches it from its own timer. Three of them mean the same
+thing to the agent — there is no more run to act in — so they share one value rather than carrying three
+cosmetically different tags that nothing downstream distinguishes. The timeout keeps its own, because it
+means something else: someone was shown the prompt and did not answer, which a non-interactive run never
+reaches at all, since that denies synchronously elsewhere. Only the timeout gained an event and a marker,
+on the ground that a future question rests on its count and none rests on an ending run's orphaned
+approvals.
+
+**The fallback stays unnamed, deliberately.** After naming three causes it is still reached by two more: a
+command genuinely carrying metacharacters, for which its advice to re-run bare is correct, and the pair of
+a person declining the prompt and a non-interactive run auto-denying with nobody to ask — both routed
+through the parameterized resolver, which passes no reason. Naming a bucket that still covers two causes
+would reproduce, one level down, the defect this entry was opened for.
+
+**Bucket: Closed**, on this entry's own stated change. **Against Actionable now:** nothing specified here
+remains unbuilt; the two causes left unnamed are recorded as a decision, not a remainder. **Against
+Neither:** a fix was proposed and built. **Where the code lives:** the resolution sites and the reason type
+are in the approvals module; the render is the approval-denial branch in the tool executor. See item 93 for
+the refusal-text family this belongs to, whose count this work moved again, and item 190 for the gate whose
+denial was named first.
 
 ## 195. The binary runs from the built tree, the suite does not rebuild it, and an arc shipped five fixes that never reached the build
 
@@ -14451,28 +14501,177 @@ in the approvals module; the completion marker is in the plan-investigation modu
 sink under the user's home directory. See item 190 for the gate and item 194 for the message the denial
 renders.
 
+## 197. The probe that closed item 193, its two design decisions, and the join it could not use
+
+**What it is.** Item 193 was answered by measurement, and the shape of that measurement is worth keeping
+separately from its result, because two of its decisions cost coverage on purpose and one of them was
+forced by an instrument that does not exist in a normal run.
+
+**Two ecosystems rather than four, and why the other two were dropped rather than installed.** The design
+called for Rust, Ruby, Go and Python. Checked by running, three of the four toolchains are absent on the
+machine the measurement ran on: the Go toolchain entirely, the Ruby bundler and its runner, and the Python
+runner before a scratch environment supplied it. Installing them was rejected on a specific ground rather
+than on effort: an install performed for the probe becomes a variable the probe does not control, and an
+install that half-succeeds drops cells asymmetrically across arms — which silently selects which cases can
+be observed, the failure this document has recorded more than once. Two ecosystems measured honestly were
+preferred to four measured unevenly, and the result is stated as covering two ecosystems wherever it is
+stated.
+
+**Fixtures whose runner cannot execute were excluded entirely, not run as a separate stratum.** The
+guardrail counters in that measurement hold veto power — any increase in them fails the change outright,
+whatever the primary metric says. A command that cannot be found produces exactly the retry shape the
+guarded block was written after: a non-zero exit, a reinterpretation, another attempt. Running such a
+fixture would have registered an environmental failure as a prompt-caused regression, failing a change that
+caused nothing. **A metric with veto power cannot be allowed a known confound**, so the confound was
+removed rather than annotated.
+
+**The intended join did not exist, and what replaced it.** Four markers were to be joined on the run
+identifier. Three of them — the detected framework, the per-iteration tool calls, and the staging
+verification outcome — are emitted through the debug logger and are silent unless verbose logging is
+switched on; the historical runs that carried them were verbose runs. Enabling verbose was rejected too,
+for a measurable reason: it would have multiplied marker volume enough to force a second rotation of a sink
+that keeps one generation, destroying the first. The query moved to the emitters that fire unconditionally.
+**Observable by default:** every shell command the agent runs, with its working directory and exit code;
+the final assessment with its reason, its validation flag and whether it came from the model's own tag; and
+the pipe-noise heuristic. **Requires verbose:** the detected framework, the per-iteration tool calls, and
+the staging-verification status. Anything designed to be recovered from the second group needs the flag set
+at run time, and cannot be recovered afterwards.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed. **Against Actionable now:**
+promoting three debug emitters to unconditional is a change to log volume on every run, and whether that
+trade is worth making is not decided here. **Against Blocked on data:** nothing is missing — each
+emitter's gating was read directly and the join was rebuilt and run. **Where the code lives:** the debug
+logger and its gate in the logging utility; the unconditional emitters in the tool executor, the
+run-completion path and the shell-exit classifier. See item 193 for the result and item 201 for the gap the
+fixtures had to fill.
+
+## 198. Every run reported success from the model's own tag, including the forty where the suite really ran and passed
+
+**What it is.** Across forty measured runs in two arms, the final assessment recorded its verification
+reason as inferred from the model's own tag — in every single one. That includes forty runs in which a real
+test suite was invoked, executed and passed, with the passing exit code recorded separately by the shell
+emitter. **The success claim and the verification result are produced independently, and the claim is not
+bound to the result even when a result exists.**
+
+**Why that is more than a curiosity.** Item 189 records that a run whose verification never ran shares a
+result branch with one that was verified, so a skipped verification yields no warning and derives its
+success from the same classifier. These runs are the other half of that finding: when verification *does*
+run and *does* pass, the agreement between the tag and the result is a coincidence of two independent
+paths, not a check. Nothing compares them. A model that emitted a passing tag after a failing suite would
+be recorded exactly as these forty were.
+
+**What is not claimed.** No run in this sample showed the tag disagreeing with the result, so the failure
+mode is unobserved here, and forty runs on four fixtures is a thin base for a claim about frequency. What
+the sample does establish is structural rather than statistical: the two values were never compared, so
+agreement between them carries no information.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed. **Against Actionable now:** the
+obvious change — cross-check the tag against the recorded exit code and downgrade on disagreement — needs a
+decision about what to do when they disagree, which is the same decision item 189 leaves open. **Against
+Blocked on data:** the structure was read and forty runs were observed; what is missing is a disagreement
+case, which this entry does not need. **Where the code lives:** the verdict derivation and the result-field
+derivation in the run-completion module; the shell emitter in the tool executor. See item 189 for the
+skipped-verification half of the same seam.
+
+## 199. The strong no-substitution line renders only when test files are detected, and Rust never satisfies that test
+
+**What it is.** The detected-framework block ends in a test-execution policy, and that policy has two
+shapes. When the detector reports both a runnable test setup and detected test files, the model is told to
+use the detected command and **not to substitute alternatives**. When it reports a runnable setup but no
+test files, it is told to use the command **if it needs to verify** and not to invent one. The second is
+materially weaker on exactly the point item 193 concerns.
+
+**Rust always takes the weaker branch, for a reason unrelated to Rust.** The test-file detector is a glob
+list, and its patterns cover test directories, dotted test suffixes, and the file-naming conventions of Go
+and Python. Rust's convention is an inline test module inside the source file, which matches no pattern in
+the list, so a Rust repository with a full test suite reports no test files detected. Confirmed by running
+the detector against two Rust fixtures that each carry four tests: both report a runnable setup and no test
+files.
+
+**Unmeasured in effect.** The probe that closed item 193 ran ten Rust runs per arm under the weaker
+phrasing and every one still invoked the detected command, so the weaker wording did not change the outcome
+there. That is one task shape on two fixtures, and it does not establish that the two phrasings are
+interchangeable in general — only that this difference did not bite in the case measured.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed. **Against Actionable now:**
+adding a Rust pattern to the glob is a one-line change, but the glob feeds more than this policy line and
+the consequences elsewhere were not traced. **Against Blocked on data:** nothing is missing; both branches
+were read and the detector was run. **Where the code lives:** the test-file glob and the policy-branch
+construction, both in the repository-scanning module and the agent loop. See item 193 for the prompt region
+and item 192 for a different detector gap in the same file.
+
+## 200. A verification command is produced for an ecosystem whose toolchain is absent, and nothing checks
+
+**What it is.** The detector produces a test command from a manifest's presence and content, and the
+consumer forwards whatever it produced. Neither asks whether the binary that command names exists on the
+machine. A repository carrying a Go manifest yields the Go test command on a machine with no Go toolchain;
+the same holds for every ecosystem the detector knows. Established while building fixtures for the item 193
+probe, where three of four intended ecosystems produced a correct command that could not run.
+
+**Where the failure surfaces.** Not at detection, where the information is available and cheap — a lookup
+on the executable's name — but at verification time, as a non-zero exit from a command that was never
+runnable. Downstream that is indistinguishable from a test failure until something reads the error text.
+The classifier that catches pipe-noise exits does not cover this case, and the run's own verification
+outcome records a failure rather than an unavailability.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed. **Against Actionable now:** the
+check is easy to describe and its consequence is not — a detector that withholds a command when the binary
+is missing changes what the consumer sees, and the right behaviour then is a decision this entry does not
+make. **Against Blocked on data:** nothing is missing; the behaviour was established by building the case.
+**Where the code lives:** the detector in the repository-scanning module and the selection function in the
+verification module. See item 187 for the consumer and item 201 for why this was found only now.
+
+## 201. Every language fix in this arc was dogfooded on one TypeScript codebase, and the gap is structural
+
+**What it is.** This arc shipped five fixes whose subject is other languages: a ranking predicate that was
+dropping this repository's own files, two command gates extended across seven ecosystems, a verification
+consumer that discarded every non-JavaScript test command, a Ruby detector, and a PHP detector. Every one
+of them was written, tested and dogfooded against a single TypeScript repository — this one. The probe that
+closed item 193 is **the first time any of that work was exercised against a non-TypeScript repository**,
+and it required building the repositories from scratch, because none existed anywhere in the project.
+
+**Why that is structural rather than incidental.** The suite runs against fixtures the project already
+carries, and the project carries none in another language; the dogfood target is the project itself, which
+is TypeScript by construction. So the two mechanisms that would ordinarily catch a cross-language mistake —
+the tests and the daily use — are both blind to it by their own shape, not by neglect. A defect in any of
+those five fixes that only appears on a Rust or Go or PHP repository would have shipped silently, and the
+one measurement now taken covers two ecosystems on four fixtures.
+
+**What would close it, named and not built.** Either a toolchain matrix — images carrying the runners for
+the ecosystems the detector claims to support, with a fixture suite exercised per image — or fixtures that
+vendor their own runner, so the detected command is executable without a system install. Both turn "the
+detector computes a command" into "the command runs", which is the only version of the claim this arc has
+been able to test. Neither is attempted here.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed. **Against Actionable now:**
+both remedies are infrastructure projects whose scope is not specified here. **Against Blocked on data:**
+nothing is missing; the absence of non-TypeScript fixtures was established under two instruments while
+building the probe. **Where the code lives:** the five fixes are recorded in items 185, 186, 187 and 192;
+the fixtures the probe built are outside the tracked tree. See item 197 for the probe and item 200 for a
+defect this blindness kept out of view.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 196 to find out which ones still need something. No index of
+reader the trouble of reading all 201 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (73): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 117, 120, 121, 126, 128, 134, 135, 137, 144, 149, 150, 153, 156, 161, 162, 167, 171, 172, 176, 183, 185, 186, 187, 192
+**Closed** (75): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 117, 120, 121, 126, 128, 134, 135, 137, 144, 149, 150, 153, 156, 161, 162, 167, 171, 172, 176, 183, 185, 186, 187, 192, 193, 194
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (12): 113, 116, 129, 130, 138, 142, 148, 169, 182, 184, 193, 194
+first (10): 113, 116, 129, 130, 138, 142, 148, 169, 182, 184
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (16): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196
 
-**Neither — a structural fact recorded, with no fix proposed** (95): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (100): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152, 154, 155, 158,
-159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195
+159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 198, 199, 200, 201
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
@@ -16909,3 +17108,38 @@ asserted.
 **Reopening condition.** A diagnostic message whose stated cause is genuinely consumed by an earlier guard,
 with both guards run over the same input set to demonstrate that nothing carrying the cause can arrive —
 the demonstration being the part this candidate skipped, and the part its own instance failed.
+
+## A second candidate considered and not promoted: a prediction falsified in the direction of the system already being correct
+
+**The candidate, as proposed.** Three passes in one arc predicted a defect that measurement found absent,
+and in each the reasoning was sound about the artefact and wrong about the behaviour. A gate believed to
+strand non-JavaScript commands turned out never to see them; a message believed to be advice for a case
+that could not arrive turned out to be correct for a case that arrives often; a prompt contradiction
+believed to misdirect the model turned out to change nothing it did. The proposal was that predictions
+skew toward finding the system broken, and that the skew is itself a mechanism worth recording.
+
+**Rejected on mechanism, first because the mechanism is already written down.** All three instances share
+one shape, and it is not a skew: a component was read correctly on its own and the composed behaviour
+differed. The second gate is consulted before the third, so the third's narrowness never bound anything.
+The hard safety block tests for destructive commands rather than for metacharacters, so the text it was
+thought to shadow was reachable all along. The framework block sits four hundred characters from the
+priority rule, and the model followed the block. The **thirteenth** already states that a string's presence
+is evidence about the text and not about the behaviour; the **thirty-second** already prescribes
+enumerating every enforcement point rather than the one a change happens to touch. Between them, the checks
+that would have caught all three are on the page — what failed was running them, not knowing them.
+
+**Rejected a second time because the direction claim does not survive its own counter-instances.** The same
+arc predicted defects that measurement confirmed: a ranking predicate matching skip tokens as unanchored
+substrings, measured at fifty-two dropped files; a consumer discarding a correctly computed command for
+four languages; a detector classifying a language without opening its manifest; a denial branch emitting on
+no channel at all. Each was predicted from an artefact and each was confirmed. Counting only the falsified
+predictions and concluding that prediction skews pessimistic is a selection over outcomes — which is
+precisely the error such a pattern would exist to warn against, committed in the act of proposing it.
+
+**Compared essay:** the thirteenth, on text as evidence about text, which is the closest by mechanism and
+which each instance instantiates.
+
+**Reopening condition.** A prediction about model behaviour falsified *after* the composition has been
+fully enumerated and the artefact read correctly — a case where neither the thirteenth's check nor the
+thirty-second's would have prevented it. That would be a mechanism of its own rather than these three,
+which are the recorded mechanisms not applied.
