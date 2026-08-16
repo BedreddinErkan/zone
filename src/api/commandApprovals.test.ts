@@ -514,6 +514,43 @@ describe("requestCommandApproval — investigationMode:true", () => {
     await new Promise((r) => setTimeout(r, 5));
     expect(events.find((e: any) => e.type === "command_approval_required")).toBeTruthy();
   });
+
+  // Item 190: the denial branch previously emitted on no channel at all. These pin the fix —
+  // an event matching the two approving branches' own shape, plus a reason the message-render
+  // layer (toolExecutor.ts) uses to distinguish this cause from the other four approved:false
+  // sites in this module, none of which carry a reason.
+  it("denied command emits command_denied_investigation with runId, command, approvalId, and reason", async () => {
+    const events: unknown[] = [];
+    const result = await requestCommandApproval({
+      runId: "inv-run-6",
+      command: "git ls-files",
+      investigationMode: true,
+      emit: (e) => events.push(e),
+    });
+    expect(result.approved).toBe(false);
+    expect(result.reason).toBe("investigation_not_diagnostic");
+    expect(events).toEqual([{
+      type: "command_denied_investigation",
+      runId: "inv-run-6",
+      command: "git ls-files",
+      approvalId: result.approvalId,
+      reason: "investigation_not_diagnostic",
+    }]);
+  });
+
+  it("negative pin: an auto-approved command never emits command_denied_investigation", async () => {
+    for (const command of ["npm run typecheck", "ls -la"]) {
+      const events: unknown[] = [];
+      const result = await requestCommandApproval({
+        runId: "inv-run-7",
+        command,
+        investigationMode: true,
+        emit: (e) => events.push(e),
+      });
+      expect(result.approved).toBe(true);
+      expect(events.find((e: any) => e.type === "command_denied_investigation")).toBeUndefined();
+    }
+  });
 });
 
 describe("A3: stripTrailingBenignRedirect — getSafeCommandCategory", () => {

@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { log } from "../utils/logger.js";
 
 /**
  * Additional prefixes auto-approved ONLY during plan-mode investigation
@@ -273,6 +274,15 @@ export function clearTrustedCommandsForRun(runId: string): number {
   return n;
 }
 
+/**
+ * Cause tag for a denied approval, populated only where a single cause can be named —
+ * mirrors runCommandSafe.ts's RejectionClass rather than a bare string compared across
+ * files. One member today: the other four `approved:false` sites in this module (timeout,
+ * abort before/during pending, run-level rejection) share one cause among four shapes and
+ * are left without a reason rather than guessing one.
+ */
+export type CommandDenialReason = "investigation_not_diagnostic";
+
 export function requestCommandApproval(input: {
   runId: string;
   command: string;
@@ -292,7 +302,7 @@ export function requestCommandApproval(input: {
    * and the agent has no write tools, making non-diagnostic commands unnecessary.)
    */
   investigationMode?: boolean;
-}): Promise<{ approvalId: string; approved: boolean }> {
+}): Promise<{ approvalId: string; approved: boolean; reason?: CommandDenialReason }> {
   const runId = String(input.runId || "").trim();
   const command = String(input.command || "");
   const approvalId = crypto.randomUUID();
@@ -327,7 +337,30 @@ export function requestCommandApproval(input: {
     // Non-diagnostic command in investigation: deny immediately, no user prompt.
     // The investigation agent has no write tools — a denied non-diagnostic command
     // should make it fall back to read_file / search_in_files.
-    return Promise.resolve({ approvalId, approved: false });
+    //
+    // Item 190 fix: this branch previously emitted on no channel at all, unlike the two
+    // approving branches three lines above — an emit (matching their shape) plus a marker
+    // (matching run_command_readonly's own [zone-run-command-readonly-blocked], the sibling
+    // gate's blocked marker) make the denial observable on both the live event bus and the
+    // persisted marker sink.
+    try {
+      input.emit({
+        type: "command_denied_investigation",
+        runId,
+        command,
+        approvalId,
+        reason: "investigation_not_diagnostic",
+      } as any);
+    } catch {}
+    log(
+      "[zone-investigation-command-denied]",
+      JSON.stringify({
+        runId,
+        command: command.slice(0, 200),
+        reason: "investigation_not_diagnostic",
+      })
+    );
+    return Promise.resolve({ approvalId, approved: false, reason: "investigation_not_diagnostic" });
   }
 
   if (isCommandTrusted(runId, command)) {

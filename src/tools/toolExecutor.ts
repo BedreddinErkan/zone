@@ -26,6 +26,7 @@ import { findCheckerForFile, trackCheckerUnavailableWarning } from "./syntaxChec
 import { classifyShellExit } from "./classifyShellExit.js";
 import { validateRunEnvironment } from "./runEnvironment.js";
 import { checkCommandSafe, WHITELIST_PREFIXES, ecosystemSampleFor, type CatchAllClass } from "../llm/runCommandSafe.js";
+import type { CommandDenialReason } from "../api/commandApprovals.js";
 import { hashStagingState } from "../llm/loopDetector.js";
 import { MEMORY_WARN_THRESHOLD_BYTES } from "../memory/constants.js";
 import { segmentPatchBlocks } from "../utils/patchBlocks.js";
@@ -958,7 +959,7 @@ export async function executeTool(
       command: string,
       runId: string,
       meta?: { kind?: "blocking" | "background"; label?: string | null }
-    ) => Promise<boolean>;
+    ) => Promise<{ approved: boolean; reason?: CommandDenialReason }>;
     /** Stage 3A: per-edit approval gate for plan-mode [2] "manually approve changes". */
     onEditApprovalRequired?: (filePath: string, runId: string) => Promise<boolean>;
     escalatedFiles?: Set<string>;
@@ -1317,12 +1318,17 @@ export async function executeTool(
       }
 
       if (input?.runId && input?.onApprovalRequired) {
-        const approved = await input.onApprovalRequired(command, input.runId);
+        const { approved, reason } = await input.onApprovalRequired(command, input.runId);
         if (!approved) {
-          return {
-            success: false,
-            output: `Command not auto-approved: ${command}. If it contains 2>&1, a pipe (|), or a redirect (>), re-run it BARE — output is captured and truncated automatically. Bare commands like \`npm run build\` and \`npx tsc --noEmit\` auto-approve. Do not retry a command with metachars.`,
-          };
+          // Item 190 fix: a gate-3 (investigation) denial is named by its real cause — not on
+          // the diagnostic allowlist, denied automatically, no metacharacters involved. Every
+          // other approved:false cause (timeout, abort, run-level rejection, a real user
+          // declining a prompt) carries no reason and keeps the prior generic message below.
+          const output =
+            reason === "investigation_not_diagnostic"
+              ? `Command not on the investigation diagnostic allowlist: ${command}. Investigation mode auto-approves only a narrow diagnostic set (typecheck, test runners, prettier --check, git branch) and denies everything else immediately with no prompt — this is not a metacharacter or permission issue. Use read_file / search_in_files instead, or restate the command as one of the diagnostic commands.`
+              : `Command not auto-approved: ${command}. If it contains 2>&1, a pipe (|), or a redirect (>), re-run it BARE — output is captured and truncated automatically. Bare commands like \`npm run build\` and \`npx tsc --noEmit\` auto-approve. Do not retry a command with metachars.`;
+          return { success: false, output };
         }
       }
 
@@ -1501,7 +1507,7 @@ export async function executeTool(
       }
       const label = typeof args.label === "string" && args.label.length > 0 ? args.label : null;
       if (input?.onApprovalRequired) {
-        const approved = await input.onApprovalRequired(command, runId, {
+        const { approved } = await input.onApprovalRequired(command, runId, {
           kind: "background",
           label,
         });

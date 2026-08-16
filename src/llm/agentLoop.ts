@@ -4966,7 +4966,7 @@ Example:
                   abortSignal: input.abortSignal,
                   investigationMode: isInvestigationMode,
                 });
-                return !!approval.approved;
+                return { approved: !!approval.approved, reason: approval.reason };
               },
               onEditApprovalRequired: input.editApprovalMode === "manual"
                 ? async (filePath: string, runId: string) => {
