@@ -86,14 +86,46 @@ describe("deriveResultFields", () => {
     expect(fields.discardedStaging).toBeUndefined();
   });
 
-  it("skipped → passes verdict through", () => {
+  // Item 198: skipped means no verification command ran — the model's tag is a claim, not a
+  // check, so patchValidatedByAgent must be false regardless of what the tag says. The reason
+  // still passes through (the claim stays visible), and an appendix names why it wasn't
+  // independently confirmed.
+  it("skipped/no_staged_files → reason passes through, patchValidated=false, appendix names it", () => {
     const outcome: VerifyOutcome = {
       kind: "skipped",
       reason: "no_staged_files",
     };
     const fields = deriveResultFields(outcome, baseVerdict);
     expect(fields.verificationReason).toBe("tests_passed");
-    expect(fields.patchValidatedByAgent).toBe(true);
-    expect(fields.summaryAppendix).toBe("");
+    expect(fields.patchValidatedByAgent).toBe(false);
+    expect(fields.summaryAppendix).toBe(
+      "\n[unverified: no files were staged during this run]"
+    );
+  });
+
+  it("skipped/no_command_for_framework → reason passes through, patchValidated=false, appendix names it", () => {
+    const outcome: VerifyOutcome = {
+      kind: "skipped",
+      reason: "no_command_for_framework",
+    };
+    const fields = deriveResultFields(outcome, baseVerdict);
+    expect(fields.verificationReason).toBe("tests_passed");
+    expect(fields.patchValidatedByAgent).toBe(false);
+    expect(fields.summaryAppendix).toBe(
+      "\n[unverified: no verification command is available for this project's framework]"
+    );
+  });
+
+  it("skipped/subagent_deferred → reason passes through, patchValidated=false, appendix names it", () => {
+    const outcome: VerifyOutcome = {
+      kind: "skipped",
+      reason: "subagent_deferred",
+    };
+    const fields = deriveResultFields(outcome, baseVerdict);
+    expect(fields.verificationReason).toBe("tests_passed");
+    expect(fields.patchValidatedByAgent).toBe(false);
+    expect(fields.summaryAppendix).toBe(
+      "\n[unverified: subagent run — the parent run owns final verification]"
+    );
   });
 });
