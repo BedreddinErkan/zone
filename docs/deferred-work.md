@@ -15626,11 +15626,69 @@ paragraphs. See item 217 for the sweep whose stated reason this refutes, item 11
 prompted the second sweep, item 138 for the judgement checked against the refined rule, and the thirteenth
 pattern for the instrument shape that failed twice here.
 
+## 220. A vocabulary the model is told to type and the code reads back was three separate copies, and the field it feeds has produced no records at all
+
+**What it is.** Three sites named the dispatch-reason prefixes a subagent description must begin with,
+each expressing the set differently: the parser as a regular-expression alternation, and two
+system-prompt blocks as inline prose. The parser and one prompt block named three prefixes; the other
+named two. Nothing compared them, and no single place held the vocabulary.
+
+**The failure mode is silent, and it had already fired once.** A fourth prefix was added to the prompt
+block at `f2b852c4`, together with a test asserting the prompt named it, and never to the parser —
+whose matcher has had exactly one version since `c4145085`. Every dispatch using that prefix recorded
+the fallback value instead. No test failed, because the tests pinned each side alone: one asserted the
+parser reads a prefix, another asserted the prompt contains one, and nothing crossed between them.
+`7c4a1a7d` later removed that prefix while compressing the block for size, dropping a second prefix in
+the same edit, which is what left prompt and parser at two versus three.
+
+**What the field is worth, measured rather than argued.** The parsed value has exactly one consumer, a
+log line, and nothing branches on it — so a wrong prefix changes no behaviour, it mislabels the record
+that exists to measure dispatch. Every log location on this machine was searched for that marker at
+`4753adbe`. The marker sink holds **5,715 records** across its live and rotated generations, covering
+eighteen days and **one hundred distinct marker kinds**, and **not one is a subagent dispatch**. Five
+hundred and ninety-three cost-log files and the repository's own run logs hold none either. The sink
+applies no allowlist — it records whatever the output shield classifies as a marker — so the absence
+is a fact about dispatch, not about the instrument. The same data shows why: of **sixty-seven**
+classified tasks in that window, only **two** reached the tier at which the subagent tool is offered
+at all.
+
+**Why the prompt was edited anyway, which is the judgement worth recording.** Cost and benefit scale
+together here, both being proportional to how often the tool is offered, so the ratio does not favour
+leaving the block alone. What decides it is that unifying only the two agreeing sites would repair the
+pair that never broke and leave untouched the one that broke twice. The price is a single cold cache
+prefix over a system prompt of about fourteen thousand characters, on runs that offer the tool — and
+that block already sits behind exactly that condition, so the edit varies text on an axis that existed
+rather than introducing one.
+
+**The shape that makes divergence impossible was already in this repository.** The patch tool's intent
+vocabulary agrees across prompt and code for one reason: its prose and its enumeration live in the same
+literal. This correction copies that — one exported array, the matcher built from it, both prompt
+blocks rendering it — so agreement holds by construction rather than by review. Members are escaped
+where they enter the matcher, so a member carrying a regular-expression metacharacter is matched
+literally; confirmed by adding such a member and observing that it matched itself and not the wider
+pattern it would otherwise denote.
+
+**Two more of the same class, recorded and deliberately not fixed.** The verification-tag vocabulary,
+where the prompt offers five tags and the classifier accepts six. And the subagent-type set, where the
+executor's guard and the tool schema agree on two values while a resolver carries a third arm the guard
+makes unreachable. Neither was established far enough to correct in this pass.
+
+**Bucket: Neither.** The work shipped and the entry records why the shape is what it is — item 181's
+precedent, read rather than adopted, and the same reading item 217 took. **Against Actionable now:**
+nothing is specified that has not been done. **Against Closed:** no earlier entry recorded this
+condition, so there is no entry's own condition being discharged, which is what item 198's and item
+212's closures turn on; item 210's turns on discharging a *different* entry's recorded condition, which
+is also not this case. **Against Blocked on data:** the one observation that could have changed the
+finding was taken, and it is zero. **Where the code lives:** the vocabulary and its matcher in the
+subagent-dispatch module, the two prompt blocks in the agent loop, and the cross-site test beside them.
+See item 116 for the count that surfaced the divergence and item 219 for the restatement mechanism this
+is an instance of.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 219 to find out which ones still need something. No index of
+reader the trouble of reading all 220 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -15643,12 +15701,12 @@ first (8): 113, 130, 138, 142, 148, 169, 182, 184
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (16): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196
 
-**Neither — a structural fact recorded, with no fix proposed** (113): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (114): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152, 154, 155, 158,
 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199, 200, 201, 202, 205,
-206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 218, 219
+206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 218, 219, 220
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.

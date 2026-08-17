@@ -141,6 +141,10 @@ import { TokenBudgetMeter } from "./tokenBudget/TokenBudgetMeter.js";
 import { handleToolResult, type ToolEventContext, type ToolCallLogEntry } from "./toolEventHandler/index.js";
 import { CoachingController, type FailureContext } from "./coaching/index.js";
 import { warnWebSearchDegradationOnce } from "./webSearchWarning.js";
+// The dispatch-reason vocabulary is rendered into two prompt sites below rather
+// than spelled out in either — see subagentDispatch.ts for why the three copies
+// were collapsed.
+import { renderDispatchReasonPrefixes } from "./subagentDispatch.js";
 
 // "plan" kept as accepted input for backward compat — normalizeAgentLoopMode maps it to "patch"
 type AgentLoopMode = Exclude<Mode, "auto"> | "investigation" | "plan";
@@ -871,7 +875,7 @@ export function assembleAgentSystemPrompt(input: {
     `TASK SUBAGENTS (Task) — dispatch cap: 2/run (WORKER_MAX_ITER=6).\n` +
     `GOOD signals: step marked \`subagentEligible: true\` (check plan-annotations block); same change across 5+ files (multi_file_fanout: rename, codemod, Worker); step requiring 10+ parent iterations (long_isolated_step: complex extraction/migration).\n` +
     `BAD signals (stay single-thread): 1-2 file edits, line-edit task, shared mutation state, uncertain scope, patch-then-verify cycles.\n` +
-    `DISPATCH REASON required — prefix Task description: "multi_file_fanout: rename foo→bar in src/api/ (8 files)" or "long_isolated_step: extract auth module".\n\n`
+    `DISPATCH REASON required — prefix Task description with one of: ${renderDispatchReasonPrefixes()}. Example: "multi_file_fanout: rename foo→bar in src/api/ (8 files)".\n\n`
     : "") +
     `NARRATION: before each tool call, write one short sentence in plain English describing what you're about to do and why. ` +
     `Examples: "Reading the README to find the existing structure.", "Patching package.json to add the dev dependency.", "Searching for callers of the renamed function." ` +
@@ -1389,7 +1393,7 @@ export function extractErrorLine(output: string): number | null {
 
 // Re-exported from subagentDispatch.ts (moved in Seq 4) — kept here so existing
 // importers (agentLoop.dispatch.test.ts) don't need path changes.
-export { extractDispatchReason } from "./subagentDispatch.js";
+export { extractDispatchReason, DISPATCH_REASON_PREFIXES } from "./subagentDispatch.js";
 
 /**
  * Phase Q.6: render the plan's per-step subagent annotations into a prompt
@@ -1429,7 +1433,7 @@ export function buildPlanAnnotationsBlock(
   }
   lines.push(
     "",
-    "When you reach a delegatable step, prefer Task dispatch over inline work — that's why the plan marked it. Use the matching subagent_type (worker for multi-file edits, explore for read-only investigation) and start the description with the dispatch reason prefix (multi_file_fanout / exploration / long_isolated_step)."
+    `When you reach a delegatable step, prefer Task dispatch over inline work — that's why the plan marked it. Use the matching subagent_type (worker for multi-file edits, explore for read-only investigation) and start the description with the dispatch reason prefix (${renderDispatchReasonPrefixes()}).`
   );
   return lines.join("\n");
 }

@@ -29,12 +29,77 @@ export function resolveSubagentCapabilityFilter(
   }
 }
 
-export function extractDispatchReason(description: unknown): string {
-  if (typeof description !== "string") return "manual";
+/**
+ * The dispatch-reason vocabulary — the single source of truth for every site
+ * that names these prefixes.
+ *
+ * Three sites used to carry their own copy: this parser, the TASK SUBAGENTS
+ * system-prompt block, and `buildPlanAnnotationsBlock`'s closing directive.
+ * They disagreed, and the failure mode is silent rather than loud: a fourth
+ * prefix, `focused_diagnosis`, was added to the prompt block at `f2b852c4` —
+ * along with a test asserting the prompt named it — and never to this parser,
+ * whose matcher has had one version since `c4145085`. Every dispatch using it
+ * therefore recorded the fallback instead. Nothing failed; the field just lied,
+ * until `7c4a1a7d` removed the prefix again while also dropping `exploration`
+ * from the same block for size, which is what left prompt and parser at two
+ * versus three.
+ *
+ * Both prompt sites now render this array through `renderDispatchReasonPrefixes`,
+ * so prompt and parser cannot drift without editing one literal.
+ * `dispatchReasonAgreement.test.ts` fails if they do.
+ */
+export const DISPATCH_REASON_PREFIXES = [
+  "multi_file_fanout",
+  "exploration",
+  "long_isolated_step",
+] as const;
+
+/** What `extractDispatchReason` reports when no prefix matches. Not a prefix —
+ *  never add it to DISPATCH_REASON_PREFIXES, or the prompt would instruct the
+ *  model to type it. */
+export const DISPATCH_REASON_FALLBACK = "manual";
+
+export type DispatchReason =
+  | (typeof DISPATCH_REASON_PREFIXES)[number]
+  | typeof DISPATCH_REASON_FALLBACK;
+
+/** Same character class as this repo's four other local copies (toolExecutor.ts,
+ *  runLlmPatchFlow.ts, rankRelevantFiles.ts, computeRiskScoreDetails.ts). */
+function escapeRegExpChars(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Builds the matcher from a vocabulary rather than hand-writing it, which is
+ * what makes "parser ≡ constant" true by construction instead of by review.
+ *
+ * Members are escaped even though the vocabulary is `[a-z_]` by convention:
+ * escaping makes the guard structural, so a member carrying a regex
+ * metacharacter is matched literally rather than silently changing what the
+ * matcher does. The convention is pinned by a test as well — the pair is
+ * deliberate, since a test only protects an edit that runs it.
+ *
+ * Exported for that test, which feeds it a metacharacter-bearing vocabulary the
+ * real constant will never contain.
+ */
+export function buildDispatchReasonMatcher(prefixes: readonly string[]): RegExp {
+  return new RegExp(`^(${prefixes.map(escapeRegExpChars).join("|")})\\s*:`, "i");
+}
+
+const DISPATCH_REASON_RE = buildDispatchReasonMatcher(DISPATCH_REASON_PREFIXES);
+
+/** Renders the vocabulary for a prompt string. Both prompt sites call this, so
+ *  neither can name a prefix this module cannot read. */
+export function renderDispatchReasonPrefixes(separator = " / "): string {
+  return DISPATCH_REASON_PREFIXES.join(separator);
+}
+
+export function extractDispatchReason(description: unknown): DispatchReason {
+  if (typeof description !== "string") return DISPATCH_REASON_FALLBACK;
   const firstLine = description.split(/\r?\n/, 1)[0]?.trim() ?? "";
-  const m = firstLine.match(/^(multi_file_fanout|exploration|long_isolated_step)\s*:/i);
-  if (m) return m[1].toLowerCase();
-  return "manual";
+  const m = firstLine.match(DISPATCH_REASON_RE);
+  if (m) return m[1].toLowerCase() as DispatchReason;
+  return DISPATCH_REASON_FALLBACK;
 }
 
 function cleanTokenNumber(value: unknown): number {
