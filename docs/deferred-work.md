@@ -10408,6 +10408,34 @@ emits a single envelope instead. So a non-interactive run retains markers exactl
 and item 134's measurement needs no TUI. The half of the sentence about a directly-importing script stands
 unchanged — that is a different path with no shield on it at all.
 
+**That correction says "the same stdout shield" and is silent on the other channel, which is where the
+remaining gap is.** Re-derived at `a28be730` under two instruments: the stdout shield has three
+installers — the interactive entry point and both headless ones, the latter pair gated off under JSON
+output — while **the error-channel shield has exactly one, the interactive entry point**. So a marker
+written to the error channel is retained interactively and lost in every headless mode. **Thirty-three
+marker kinds have no standard-output emitter at all** and are therefore invisible to the sink whenever
+the run is not interactive; two mechanisms that disagree about the total number of kinds agree on that
+thirty-three exactly. The consequence is not that those markers are unreliable — it is that their
+absence carries no information unless the run is known to have been interactive.
+
+**How much this costs in practice, measured rather than bounded by argument.** The per-call cost log is
+written from the flow driver and so is entry-point independent, and its filename suffix is the run
+identifier's leading eight characters, which makes a join possible. Across the sink's retained window
+**sixty-two of sixty-seven runs left marker records — ninety-two and a half percent** — and the five
+that did not are individually accountable.
+
+**Retention is the standing bound on all of it, and it is not shared by the neighbouring instruments.**
+The sink keeps one rotated generation and overwrites it, so what is observable is whatever rotation has
+spared: 2,408,773 bytes across both generations covering eighteen days, about 130 KB a day, which fills
+a two-megabyte generation in roughly sixteen days. Every marker-derived figure in this document inherits
+that horizon. The cost log does not: its writer contains no rotation, cap, prune or unlink — established
+by reading the whole seventy-line module, with the search instrument shown finding other terms in the
+same file first — and the two subdirectories beside it have no writer anywhere in the source under either
+search. The per-call usage ledger reaches further still, **eighty-eight days and seven hundred and
+thirty-four runs** against the sink's eighteen and ninety-four. **The asymmetry is why a second
+instrument was worth reaching for**, and it means a question the sink answers with silence is often
+answerable somewhere else rather than unanswerable.
+
 **Where the code lives:** the emit functions in `loopTelemetry.ts`; the logging helper in `utils/logger.ts`;
 the stdout shield in the TUI entry point; the appender and its path resolution in the marker-sink module
 under `utils`.
@@ -15648,9 +15676,12 @@ that exists to measure dispatch. Every log location on this machine was searched
 eighteen days and **one hundred distinct marker kinds**, and **not one is a subagent dispatch**. Five
 hundred and ninety-three cost-log files and the repository's own run logs hold none either. The sink
 applies no allowlist — it records whatever the output shield classifies as a marker — so the absence
-is a fact about dispatch, not about the instrument. The same data shows why: of **sixty-seven**
-classified tasks in that window, only **two** reached the tier at which the subagent tool is offered
-at all.
+is a fact about dispatch, not about the instrument. **That cost-log figure is a recursive count, and
+the scope it was taken under went unstated:** the directory holds two hundred and thirty-eight files
+at its top level and five hundred and ninety-three counting the archive and quarantine subdirectories
+beneath it, both re-derived under two mechanisms. The same data shows why dispatch is absent: of
+**sixty-seven** classified tasks in that window, only **two** reached the tier at which the subagent
+tool is offered at all.
 
 **Why the prompt was edited anyway, which is the judgement worth recording.** Cost and benefit scale
 together here, both being proportional to how often the tool is offered, so the ratio does not favour
@@ -18352,3 +18383,50 @@ for the input and the assertion is simply too coarse to see the difference. That
 granularity rather than of fixture choice, no recorded entry covers it, and one clear instance would
 justify its own entry. The instance would have to show the divergence directly, since a coarse assertion
 and a coincidence are indistinguishable from the green result alone.
+
+## A thirty-sixth pattern: an absence becomes determinate when the uncaptured population can be enumerated, and the enumeration's boundary is itself a claim
+
+**The shape.** A zero from an instrument supports two readings — the thing did not happen, or it happened
+where the instrument could not see. The usual response is to call the pair undecidable and stop. It often
+is not. When a second instrument covers the same runs on a different mechanism, the population the first
+one missed can be listed rather than estimated, and each member checked against the property in question.
+If every member is structurally incapable of the behaviour, the two readings collapse and the zero is
+determinate — not by argument, by enumeration.
+
+**Worked through, because the arithmetic is the point.** A marker sink held no record of a subagent
+dispatch across its retained window. The per-call cost log is written from the flow driver rather than an
+entry point, so it observes runs the sink cannot, and its filenames carry the run identifier — which makes
+the two joinable. Sixty-two of sixty-seven runs appear in both. The five that appear only in the cost log
+were read individually: every one was classified at a tier that does not offer the tool, with the budget
+arm recording it withheld as well. None could have dispatched. The residual case — a run leaving
+neither artefact — is closed by construction, since the cost log records per provider call and a dispatch
+is a provider call.
+
+**Where the interesting part is: the boundary moved, and then moved again for a different reason.**
+Widening from the sink's timestamp-precise window to the same calendar days raises the uncaptured count
+from five to eleven, and one of the six added runs was classified at the qualifying tier with the budget
+arm not withholding — a run that could, on the face of it, have dispatched. The boundary had been doing
+work nobody had stated. Pursued with a third instrument the run resolved anyway, and in the direction that
+widens the zero: the per-call ledger holds seventeen records for it, one classifier call and fifteen
+main-loop calls and a summary, with no worker-model call among them; and the pipeline its archetype
+resolved to at that commit withheld the dispatch tool by name, which the run's own record confirms was
+applied. A fourth corroboration sits in the source, where that run's cost and iteration count are quoted
+verbatim in a design comment describing it doing repeated narrow reads in place of one search.
+
+**And the limit that replaced it is a different property entirely.** Across the ledger's much longer
+reach — eighty-eight days against the sink's eighteen — six runs remain undetermined, because the worker
+role and the classifier role resolve to the same model, so their calls are indistinguishable in a
+billing record. That is not a retention limit and no amount of window-widening reaches it. **Each
+instrument's boundary is a claim of its own kind**, and finding the first one does not mean the next is
+the same shape.
+
+**The check.** Before recording a zero as merely provisional, ask whether a second instrument covers the
+same population on a different mechanism, and whether the two can be joined on a shared identifier. If
+they can, enumerate the difference rather than estimating it. Then state which boundary the enumeration
+used, because a figure like "five uncaptured" is a property of the window as much as of the runs — the
+same data gave five and eleven under two defensible definitions.
+
+**Where it came from.** The dispatch-vocabulary work at `a28be730` and the coverage establish that
+followed it. See item 115 for the entry-point and retention properties this relies on, item 220 for the
+zero itself, and item 151 for the neighbouring shape — ruling out a class of explanations from an
+invariant, which forecloses hypotheses without needing an enumeration and is therefore a different move.
