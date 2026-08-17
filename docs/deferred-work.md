@@ -10886,7 +10886,7 @@ with them, which is what makes ordering by specificity the correct rule and not 
 **What is not closed here** is whether the probe's own capture observes a real emission end to end; that
 needs a paid run and is item 135.
 
-## 129. `docs/determinism.md` states that randomness from the model is controlled by temperature zero, without the scoping its own header carries
+## 129. Closed — `docs/determinism.md` stated that randomness from the model is controlled by temperature zero, without the scoping its own header carries
 
 **What it is.** The document's header scopes its claim to determinism "within a single server process
 lifetime", and its first invariant rests on the in-process cache — identical task strings resolve to the same
@@ -10905,9 +10905,26 @@ assume it does.
 **The fix, specified.** Give the sentence the same scoping the header already has: temperature zero removes
 Zone's own contribution to sampling variance and is what makes repeated calls *comparable*, while
 reproducibility across calls comes from the cache rather than from the temperature. Nothing further needs
-establishing — item 127 carries the measurement and the arms carry the data. Not applied here: this pass's
-scope is this document, and the correction belongs to a pass that can also re-read the rest of
-`determinism.md` for the same class of claim.
+establishing — item 127 carries the measurement and the arms carry the data. Not applied in the pass that
+recorded this: that pass's scope was this document, and the correction belonged to a pass that could also
+re-read the rest of `determinism.md` for the same class of claim.
+
+**The fix landed almost immediately, and what failed is that nothing recorded it.** `6041375d` applied
+exactly the scoping specified above — the document now says temperature zero removes Zone's own contribution
+to sampling variance and is what makes repeated calls comparable at all, and that reproducibility for a
+given task string comes from the cache-hit invariant rather than from the temperature. It was committed
+**nine hundred and eighty seconds** after `37a4553c`, the ledger commit that wrote this entry: sixteen and a
+third minutes, derived from the two commit timestamps rather than read off either message. **The entry was
+correct when it was written and stopped being correct within the same hour**, and no pass noticed for
+thirty-eight subsequent ledger commits, because nothing re-reads a bucket once it is assigned. Item 218
+records that mechanism; this entry is its instance.
+
+**Bucket: Closed**, decided on this entry's own condition rather than on the fix — the sentence it was
+written about no longer says what it said, so the fact recorded here no longer holds. **Against Actionable
+now:** the specified work is done, and was done before most of the passes that left it in that bucket.
+**Against Neither:** a fix was specified and has been made. **Where the code lives:** the determinism
+document at the repository root's documentation directory. See item 127 for the measurement the scoping
+rests on, and item 218 for why this sat unnoticed.
 
 ## 130. The shell's `grep` honours ignore files and excludes `CLAUDE.md` from every recursive scan, and the file git reports as not ignored is the one the search tool drops
 
@@ -11232,9 +11249,25 @@ directory already carried. The pure functions sit above that guard and importing
 
 ## 138. Four scripts are one export away from item 137's defect, held back by nothing but the absence of an export
 
-**What it is.** Three of the seven scripts in the scripts directory carry the entry-point guard; four do not,
-by two instruments agreeing on the same split. Of those four, three invoke their main function unconditionally
-at module scope and the fourth runs its work as top-level statements. Three of the four read the API key file.
+**What it is.** Four scripts in the scripts directory execute their work at module scope with no entry-point
+guard and export nothing. Three invoke their main function unconditionally; the fourth runs its work as
+top-level statements. Three of the four read the API key file. **The four, named** — because the framing
+figure below drifted once already and a count nobody has enumerated is the shape that drifts:
+`dedupe-cache-probe.mjs`, `openai-cache-probe.mjs`, `output-composition.mjs`, `thinking-probe.mjs`.
+
+**The surrounding figure this entry first carried was wrong and is rewritten; the four named probes are
+re-derived and unchanged.** It said three of seven scripts carried the guard and four did not. At
+`f2b3034b`, under two agreeing instruments, the directory holds **eleven** executable modules once tests and
+declaration files are excluded, of which **six** carry the guard and **five** do not. The four at risk are
+still exactly those four probes; the fifth unguarded module exports eight symbols and invokes nothing at
+module scope, so it is a pure module rather than a fifth instance. **Every number in the original framing
+moved and the finding did not**, which is worth separating: the count drifted because the directory grew,
+not because anything about the defect changed.
+
+**Why the enumeration and not just the count.** The directory is not a closed literal — its membership grows
+whenever anyone adds a script, and that growth is precisely what made the original figure stale. A count
+whose only holder is this sentence has to be recomputed to be checked; the four names can be checked
+directly.
 
 **What makes them safe today is not a guard.** None of the four exports anything, so nothing can import them,
 so the side effects are unreachable. That is exactly the state the tier-agreement probe was in — and the
@@ -13349,7 +13382,13 @@ with.** The claim that no test captured a real assembled system prompt from a li
 one is **false**. Thirteen test files call the system-prompt assembler directly; **five** call the loop and
 capture the system message it actually sends, and four of the five predate the new one, the earliest added
 2026-07-30. Live capture is an established technique in this repository rather than a new one — what was
-missing was its application to this particular surface. **The general question is what this entry opens:**
+missing was its application to this particular surface. **The scope those counts were measured under,
+supplied here because the sentence did not state it:** thirteen counts the source tree alone. A fourteenth
+direct caller sits in the scripts directory, the notice-regression probe's own test, and the count is
+fourteen when that directory is included — two agreeing instruments at `f2b3034b`. That file is **not** a
+later addition this entry could not have seen: it was committed at `16e479a6`, roughly six hours before
+`fefeb65f`, the ledger commit that wrote this entry. The figure was never stale; it was unbounded, and a
+reader recounting across both directories would have found a disagreement that is not one. **The general question is what this entry opens:**
 which prompt-assembly decisions are covered only at helper level, where a wiring mutation would survive
 exactly as this one did.
 
@@ -13957,7 +13996,13 @@ against the code, and nothing would have caught any of them otherwise.
 code, and prose has no canonical form to check against. But the correction that closed item 176 put a
 **verbatim quotation of a source expression** into it — the budget gate's real predicate, copied character
 for character from the line that defines it. Both instruments confirm that exact string currently occurs in
-precisely two files, the guidance file and the source file the guidance file names. A quotation is
+precisely two files, the guidance file and the source file the guidance file names. **The scope that
+"precisely two" was measured under, supplied here because the sentence did not state it:** two counts
+tracked files. Unfiltered, the same string occurs in **five** at `f2b3034b` — the three additional ones are
+all derived from the source file rather than independent statements of it: the compiled output, a frozen
+copy of that output kept as a measurement arm, and an audit note quoting it. The check proposed below is
+unaffected, since it asserts the string against the source file by name; what changes is that a reader
+running the unfiltered search and getting five has not found a discrepancy. A quotation is
 checkable in a way a paraphrase is not: it either still occurs in the file it claims to come from or it does
 not.
 
@@ -15414,29 +15459,73 @@ instruments. **Where the code lives:** the contributor guide at the repository r
 single instance that prompted the sweep, item 181 for the type-check reach the import miscount ran into,
 and item 216 for the other bound on what that configuration enforces.
 
+## 218. An entry's bucket is an assertion nothing re-reads, and for seventy-six entries it is not written in the entry at all
+
+**What it is.** Item 129's fix landed sixteen minutes after the entry recording it was committed, and the
+entry stayed in the Actionable now bucket through **thirty-eight** subsequent ledger commits — two
+instruments agreeing on the count — until a pass that re-derived the whole bucket's premises found it. No
+single pass was careless. Nothing in the workflow re-reads a classification once written, because a
+classification is the one claim in an entry that describes the entry's own status rather than the code, and
+every discipline this document has is pointed at claims about the code.
+
+**Where the classification actually lives, which is the part that makes it unfalsifiable.** Of the two
+hundred and seventeen entries, **eighty-seven state their bucket in their own text**. Of the hundred and
+thirty that do not, **fifty-four carry it in the heading** — the Closed prefix — and that one is genuinely
+checked, because the snapshot test asserts the Closed headings and the Closed bucket list are the same set.
+That leaves **seventy-six entries whose classification exists only as a number in the index list**. There
+is no sentence inside those entries for a later reading to contradict, so the mechanism by which this
+document normally catches a false claim — someone reads the entry against the thing it describes — has
+nothing to bite on. The gap is not that the classification is wrong; it is that it is not written where
+wrongness would show.
+
+**The convention has a start date, and that is why the gap has the shape it does.** Counting only entries
+that are not Closed-headed, the proportion stating their own bucket runs eleven percent in the first fifty,
+thirty-three in the next fifty, **zero** in the fifty after that, and **one hundred percent from item one
+hundred and fifty-one onward without exception**. The three members of the Actionable now bucket that carry
+a bucket sentence are exactly its three members numbered above that threshold; the seven that do not are
+exactly the seven below it. So this is not a habit some entries follow and others miss — it is a convention
+adopted partway through and never applied backwards.
+
+**A measurement error inside this finding, corrected before it was written down.** The first count of the
+marker searched for one spelling and returned eighty-seven as sixty-eight. Reading a sample of the entries
+it had classed as lacking one turned up an entry stating its bucket with an em-dash rather than a colon; the
+full enumeration of forms then found three separators and a past-tense variant in use, and nineteen entries
+had been miscounted. **The corrected figure was re-validated by reading a second sample of twelve, which
+found none missed** — the one near-miss classifies a different entry rather than itself, and its own status
+is heading-carried. The instrument that failed here is the same shape as the one the thirteenth pattern
+records: a string search standing in for the property it is supposed to measure.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed. **Against Actionable now:** the
+obvious remedy — extend the snapshot test from Closed-heading agreement to every bucket — requires each
+entry to state its bucket first, which is seventy-six edits, and whether that is worth doing is not decided
+here. **Against Blocked on data:** nothing is missing; the counts were taken under two instruments and the
+sampling was done twice. **Where the code lives:** the snapshot section and its test in the scripts
+directory. See item 129 for the instance that produced this, the seventeenth pattern for the neighbouring
+claim about freshly written entries being the least checked, and the thirteenth for the instrument failure.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 217 to find out which ones still need something. No index of
+reader the trouble of reading all 218 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (80): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 117, 120, 121, 126, 128, 134, 135, 137, 144, 149, 150, 153, 156, 161, 162, 167, 171, 172, 176, 183, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212
+**Closed** (81): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 117, 120, 121, 126, 128, 129, 134, 135, 137, 144, 149, 150, 153, 156, 161, 162, 167, 171, 172, 176, 183, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (10): 113, 116, 129, 130, 138, 142, 148, 169, 182, 184
+first (9): 113, 116, 130, 138, 142, 148, 169, 182, 184
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (16): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196
 
-**Neither — a structural fact recorded, with no fix proposed** (111): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (112): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152, 154, 155, 158,
 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199, 200, 201, 202, 205,
-206, 207, 208, 209, 211, 213, 214, 215, 216, 217
+206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 218
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
