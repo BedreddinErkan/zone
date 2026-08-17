@@ -13841,6 +13841,13 @@ divergence in any shape a test actually calls surfaces as a test failure rather 
 is unbounded is any shape no test calls. This is the trade the rejection of compiler-read JavaScript bought,
 recorded so a later reader does not mistake it for an oversight.
 
+**The bound stated here is one of two, and they have different causes — worth separating so a reader does
+not treat this entry as covering both.** What is recorded above is a file the compiler never reads at all,
+because the second configuration's include names only TypeScript files. Item 216 records the other: a file
+that **is** in the program, whose return type was changed outright, and whose break still did not surface —
+the value flows through a standard-library helper permissive enough to accept it structurally. Being inside
+the program is therefore not sufficient either, and the two holes want different remedies.
+
 **Bucket: Neither.** The work shipped and the entry records why the shape is what it is. **Against Actionable
 now:** nothing is specified that has not been done. **Against Blocked on data:** no observation is missing;
 the error count, the emitted tree and the published-output identity were each measured.
@@ -14404,13 +14411,21 @@ runs of first-call cache-write data did not separate the hypotheses. The cost of
 therefore bounded and one-time at worst, not the recurring global reset this entry assumed — the deferral
 was right for a different reason, that the effect is behavioural and needed measuring.
 
+**What the bound recorded against item 198 does not reach, stated so it is not read as reaching further.**
+That entry's forty-of-forty figure comes from the verdict path, which ran a validator retired at
+`eb015cc0`. This entry's own measurement figures do not: they come from the shell emitter, which records
+every command and its exit code upstream of and independently of that validator, and they were re-derived
+from the stored records at `9ef79740` under the reading item 214 describes. The invocation counts, the
+absence of a JavaScript runner and the guardrail counters are therefore untouched by the retirement.
+
 **Bucket: Closed**, on evidence rather than on the fix it specified. **Against Actionable now:** the change
 remains specifiable, but the pre-registered rule says not to make it, so nothing is pending. **Against
 Blocked on data:** the observation that was missing has been taken. **Where the code lives:** the prompt
 assembly function and the framework-block construction, both in the agent loop; the detector in the
 repository-scanning module. See item 187 for the consumer that was discarding the same detector's output,
 item 197 for the probe's design and its instrument surprise, items 198 through 201 for what the runs
-surfaced, and the protected-zones list in the guidance file for the marker.
+surfaced, item 214 for the command that re-derives these figures, item 215 for why the arms can no longer
+be re-run, and the protected-zones list in the guidance file for the marker.
 
 ## 194. Closed — four causes resolved to two reason values, and the fallback stays unnamed because it still carries two
 
@@ -14639,13 +14654,25 @@ name it is written through the debug logger and is silent in a normal run. The a
 distinguishes those two in the run's own summary, so the next occurrence answers itself without needing the
 verbose flag.
 
+**The forty-of-forty figure carries a bound this entry did not state, and it is a bound on the absolute
+claim rather than on the comparison.** Every one of those forty accepts was produced by the predicate
+retired at `eb015cc0` — the one that decided on output text and never consulted the exit code. Two of the
+forty invoked the detected runner only through a pipe wrapper, which is precisely the shape that fix
+changes. So the figure describes a validator that no longer exists, and any restatement of it as a fact
+about current behaviour has to be re-measured rather than cited. **Item 193's comparison survives this
+intact**, for a reason worth stating rather than assuming: both of its arms ran a byte-identical copy of
+that module, one checksum for the two, so the retired predicate was held constant across them and cannot
+have moved the difference between arms. The bound falls on what a single arm's runs establish absolutely,
+not on what the two arms establish relative to each other.
+
 **Bucket: Closed**, decided on this entry's own condition rather than on the fix: the structural fact it
 recorded is retired, half of it corrected as false and the surviving half now built. **Against Neither:**
 the fact no longer holds. **Against Actionable now:** the change this entry declined to specify has been
 made. **Where the code lives:** the verdict derivation and the result-field derivation in the
 run-completion module; the shell emitter in the tool executor. See item 189 for the half of this seam that
-remains open, item 202 for what the tag can carry, and item 203 for the provenance field this entry's
-figure was read from.
+remains open, item 202 for what the tag can carry, item 203 for the provenance field this entry's
+figure was read from, item 214 for the command that makes the underlying figures re-runnable, and item 215
+for why the two arms can no longer be re-run against each other.
 
 ## 199. The strong no-substitution line renders only when test files are detected, and Rust never satisfies that test
 
@@ -15076,13 +15103,26 @@ mechanism — and it was checked against the reopening condition of the rejected
 discriminating tests, which requires the two implementations to produce **different** values that a coarse
 assertion cannot see. Both produced the same value, so the condition does not fire and that rejection stands.
 
+**A third instance, on the quantity a mutation is read through rather than on the mutation itself.** A
+tally of the leading binary of every recorded command was mutated to tally the **last** token instead. The
+two distributions share no shape — the correct one is three binaries with counts of sixty, twenty-four and
+one; the mutated one spreads across nine keys led by a flag — and **their totals are identical at
+eighty-five**, necessarily so, because both implementations increment once per command and only disagree
+about which key receives the increment. An assertion on the total alone could not have discriminated them
+for any input, not merely for this one. This is the eighth pattern's membership-over-count rule applied to
+a distribution rather than to a kill set, and the check it prescribes is the same: read which keys carry
+the counts, not how many counts there are. Stated as a mechanism rather than as an outcome because the
+invariance is a property of the two implementations, testable in advance of running either.
+
 **Bucket: Neither.** A structural fact is recorded and no fix is proposed. **Against Actionable now:**
 nothing in the code changes, and the finding governs how a future pass builds and reads a mutation.
 **Against Blocked on data:** nothing is missing; both mutations were run, both kill sets recorded, and the
 survivor lists compared directly. **Where the code lives:** the verification module's classify file and its
-test file. See item 204 for the fix the partial mutation failed to exercise, item 208 for the neighbouring
-finding about predicting a mutation's blast radius, item 210 for the pass the counterpart case came from,
-and the eighth pattern for the membership-over-count rule this instance arrives at from the other side.
+test file; the tally and its test are in the scripts directory. See item 204 for the fix the partial
+mutation failed to exercise, item 208 for the neighbouring finding about predicting a mutation's blast
+radius, item 210 for the pass the counterpart case came from, item 214 for the module the third instance
+was found on, and the eighth pattern for the membership-over-count rule this instance arrives at from the
+other side.
 
 ## 210. Closed — the built tree's drift from source is now reported at every suite run, by a check that warns and never fails
 
@@ -15217,11 +15257,103 @@ disagreement resolved. **Where the code lives:** nowhere — it is a property of
 use. See item 166 for the older instance and the twenty-fifth pattern for the neighbouring case of a search
 filtered by something its author did not write.
 
+## 214. A measurement file with no producer, and the figures it carries recovered by reproduction rather than read from an emitter
+
+**What it is.** Item 193's headline figures were derived from a results file written during that
+measurement. The script that derived them **does not exist anywhere in this repository** — established
+under two instruments, neither of them the version-control search, since the directory holding the file is
+ignored and a zero from that search there is correct rather than informative. The run scripts beside it
+write a different file. So every figure item 193 states rested on a derivation that could not be re-run,
+only re-performed by hand.
+
+**The field whose meaning had to be recovered, and how it was recovered rather than assumed.** The file
+carries an agreement field whose semantics no live emitter defines. Two readings were implemented as
+separate predicates and each scored against the stored values. The reading that every recorded invocation
+matches the detected command verbatim reproduces the stored field **21 of 40**. The reading that **at least
+one** invocation matches it verbatim reproduces it **40 of 40**, zero mismatches, and its per-arm split of
+twenty and twenty matches what item 193 records for the strict reading. **The reproduction rate is the
+evidence for the recovered reading** — not a prior report's say-so, and not a comment, because there is no
+comment to read. A future reader can re-run both and see the two rates diverge.
+
+**What the recovery separated, which the original prose had merged.** Two figures of the same shape were
+being carried under one description. Whether a run invoked the detected runner at all reads **40 of 40**
+when a longer invocation leading with that command counts, and **38 of 40** when only the bare command
+does. Those are different questions with different answers, and the entry now reports both rather than one.
+The absence of any JavaScript runner is established by tallying the complete alphabet of leading binaries
+across every recorded command — eighty-five commands over three distinct binaries — rather than by a
+pattern searching for runner names, so absence is a measured property of the whole alphabet rather than a
+pattern that failed to match.
+
+**What shipped at `9ef79740`.** A module in the scripts directory with the derivations as pure exported
+functions and a thin command entry, its test file, and a copy of the data itself moved into the
+documentation tree so the command resolves on a fresh clone. The committed copy is pinned by **its own**
+content hash rather than by identity with the ignored original, because that original can be regenerated or
+overwritten by later work with nothing in the repository having changed — a test coupling the two would go
+red for a reason that is not a defect.
+
+**Bucket: Neither.** The work shipped and the entry records why the shape is what it is — item 181's
+precedent rather than item 210's, since no earlier entry recorded a condition this discharges. **Against
+Actionable now:** nothing is specified that has not been done. **Against Blocked on data:** nothing is
+missing; both readings were run against the real file and both rates recorded. **Where the code lives:**
+the module, its test and the committed data are in the scripts and documentation directories. See item 193
+for the figures this makes re-runnable, item 197 for the probe's design and its own instrument surprise,
+and item 198 for the bound on what those runs can be read to establish.
+
+## 215. The item-193 control arm is no longer reproducible from the built tree, and the bytes survive only outside the repository
+
+**What it is.** That measurement ran two arms: a control invoking the repository's own built tree by
+absolute path, and a rewrite arm invoking a frozen copy of it. The two were byte-identical in the
+verification module that classifies a passing claim — one checksum, `6644453c…`, for both — which is what
+made the comparison clean on that dimension. The built tree has since been rebuilt and now carries a
+different module; the frozen copy has not moved. **A re-run today would compare a fixed predicate in one
+arm against a retired one in the other, on a dimension the original design held constant.**
+
+**Where the original bytes are.** Preserved outside the repository before the rebuild, at a path under the
+user's home directory rather than a temporary one, together with content-hash manifests of the whole tree
+taken before and after. Re-checked at this pass: the preserved copy still carries `6644453c…`, matching the
+frozen arm, against a different checksum in the live tree.
+
+**The constraint that bounds how long that is worth relying on.** The filesystem holding it reports **100%
+used with roughly 2.2 gigabytes free**, re-measured at this pass rather than carried from the pass that
+made the copy. A preserved artefact on a full volume is not a durable record, and nothing in the repository
+would notice its loss.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed. **Against Actionable now:** a
+fix would mean either re-freezing both arms or committing a build output, and neither is specified here.
+**Against Blocked on data:** nothing is missing; the checksums were compared directly and the volume
+re-measured. **Where the code lives:** the harness and its frozen arm are under the per-repository state
+directory, which is ignored. See item 193 for the measurement, item 197 for its design, and item 210 for
+the staleness check whose own preservation step produced the copy.
+
+## 216. A return type that flows through a permissive standard-library overload is not enforced by the type checker, so a typed script can still carry an invisible type break
+
+**What it is.** The scripts directory is type-checked by its own configuration, and the reasonable
+inference from that is that a type break there surfaces at type-check time. **It does not, in at least one
+shape.** A mutation changed a function's return type from a keyed record of counts to a boolean. The type
+check passed clean. The value flows into the standard library's own values-extraction helper, whose
+overload is typed on the near-universal empty-object type, and a boolean satisfies that structurally; the
+assertion helper downstream is typed loosely enough to accept the result as well. Nothing along the path
+had a type narrow enough to reject it.
+
+**What caught it instead, and why that matters for what the type check is worth.** The suite did, with
+**exactly the same set of failing cases** as the type-preserving mutation written beside it — so the
+type-breaking variant exercised no coverage the behavioural one did not. The lesson is not that the type
+check is useless but that its reach is narrower than "the directory is typed" suggests, and a mutation
+designed to be caught by it may simply not be.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed. **Against Actionable now:** a
+remedy would mean tightening the annotation at the consumption site or forbidding the permissive helper,
+and whether either is worth doing is not decided here. **Against Blocked on data:** nothing is missing;
+both mutations were run and their failing sets compared directly. **Where the code lives:** the second
+type-check configuration is at the repository root; the module and its test are in the scripts directory.
+See item 181 for the other, differently-caused hole in the same tool's reach, and item 214 for the module
+this was found on.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 213 to find out which ones still need something. No index of
+reader the trouble of reading all 216 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -15234,12 +15366,12 @@ first (11): 113, 116, 129, 130, 138, 142, 148, 169, 182, 184, 212
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (16): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196
 
-**Neither — a structural fact recorded, with no fix proposed** (107): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (110): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152, 154, 155, 158,
 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199, 200, 201, 202, 205,
-206, 207, 208, 209, 211, 213
+206, 207, 208, 209, 211, 213, 214, 215, 216
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
@@ -17538,11 +17670,25 @@ reduce to one sentence — a timestamp is not a content hash — and a rule that
 already written is a corollary of it. Recording it as its own pattern would mean recording the corrective
 alongside the defect and counting them twice.
 
+**The rule as stated above is incomplete, and the missing half arrived from the rebuild rather than from a
+staleness signal.** "Verify by content" does not say content of *what*, and the natural reading — hash the
+one file the question is about — can answer nothing. A compiler that does not clean its output directory
+re-emits every file it is given, so a file whose own source did not change comes out **byte-identical**
+across a genuine rebuild. Checking the entry-point binary that way returned an identical hash before and
+after a real build, which is the correct content answer to the wrong question: its source had not moved, so
+its content could not. **Only a comparison over the whole emitted tree answers whether a build happened**,
+and at that rebuild exactly **two of 1254 files** changed content — the verification module and its source
+map. Its declaration file did not, the exported signature being unchanged, which is the same invariance one
+level down. The completed rule: verify by content, over the set of artefacts the change could have reached,
+never over a single file chosen because it is the one the question names.
+
 **The condition under which it reopens.** A second artefact class outside the compiled tree showing the
 same divergence between what a staleness signal reports and what the artefact contains — a cache, a lock
 file, a generated fixture — or a case where a timestamp misleads for some reason other than not being a
 content hash. Either would make this a claim about staleness signals generally rather than about build
-discipline in one directory, and at that point it stops being a corollary.
+discipline in one directory, and at that point it stops being a corollary. The completion above does not
+meet either condition: it is a bound on the corrective's own scope, not a new way for a staleness signal to
+mislead.
 
 ## A thirty-second pattern: one judgment enforced at several unlinked points, where lifting any single one is strictly worse than lifting none
 
