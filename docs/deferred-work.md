@@ -13861,45 +13861,110 @@ nothing here waits on an observation; both facts were established by reading sou
 classifier's sole call site is in the patch-flow driver; the investigation module's input interface sits
 beside its prompt builder. See item 166 for the channel and item 88 for what the notice already says.
 
-## 169. Prompt-assembly coverage splits between the helper and the assembled output, and a mutation found the split that no coverage report would
+## 169. Closed — the assembler's wiring is enumerated, mutated, and the three real gaps it found now have loop-driven coverage; the guess about which fields were safe was wrong on the one that mattered most
 
-**What it is.** A mutation hardcoding the notice's investigation-mode flag to always-on survived every
-existing test. Not because the notice is untested — it carries byte-exact tests — but because those tests
-call the notice builder directly with explicit arguments, exercising the helper and never the decision that
-supplies its argument. **The wiring between the two had no test at all**, and only a mutation could show
-it: a helper's tests pass identically whether its caller passes the right value or a constant.
+**What it is.** A mutation hardcoding the tool-absence notice's investigation-mode flag to always-on
+survived every existing test — not because the notice is untested, but because its tests call the builder
+directly with explicit arguments, exercising the helper and never the decision that supplies its argument.
+This entry generalised that finding to the system-prompt assembler itself: which of its caller-supplied
+inputs are covered only at helper level, where a wiring mutation would survive the same way.
 
-**The population, measured rather than asserted, and it corrects the framing this entry was opened
-with.** The claim that no test captured a real assembled system prompt from a live loop call before this
-one is **false**. Thirteen test files call the system-prompt assembler directly; **five** call the loop and
-capture the system message it actually sends, and four of the five predate the new one, the earliest added
-2026-07-30. Live capture is an established technique in this repository rather than a new one — what was
-missing was its application to this particular surface. **The scope those counts were measured under,
-supplied here because the sentence did not state it:** thirteen counts the source tree alone. A fourteenth
-direct caller sits in the scripts directory, the notice-regression probe's own test, and the count is
-fourteen when that directory is included — two agreeing instruments at `f2b3034b`. That file is **not** a
-later addition this entry could not have seen: it was committed at `16e479a6`, roughly six hours before
-`fefeb65f`, the ledger commit that wrote this entry. The figure was never stale; it was unbounded, and a
-reader recounting across both directories would have found a disagreement that is not one. **The general question is what this entry opens:**
-which prompt-assembly decisions are covered only at helper level, where a wiring mutation would survive
-exactly as this one did.
+**The re-derivation changed the shape of the question.** `assembleAgentSystemPrompt` takes an
+eighteen-field input, re-enumerated from its type and cross-checked against its own body (every field name
+grepped across the full function range, not assumed from the declaration). It has **exactly one** production
+call site — confirmed under two instruments, tracked and unfiltered — against dozens of test files that
+call the function directly. What "thirteen (fourteen with `scripts/`) test files call the assembler" always
+meant, re-read rather than re-derived wrong: one caller and thirteen bypasses of it, not thirteen callers.
+With one call site, there is no site-to-site divergence to test for; the exposure is whether each field's
+own expression at that one site is correct, and whether anything exercises it for real.
 
-**Why the answer is not readable off the two counts.** A file appearing in both lists says nothing about
-which of its own assertions is which, and a surface covered by a live capture in one test may still have a
-conditional supplied by an untested caller. The audit is per decision rather than per file: for each input
-the assembler takes from a caller, does any test run the caller and read the assembled output. That is a
-bounded enumeration against a fixed assembler signature, which is what makes it actionable.
+**One field is declared, required, and dead.** `baseMaxIterations` has zero use-lines anywhere in the
+assembler's body — its own declaration is the only occurrence. Confirmed a second way, dynamically rather
+than statically: the exported function, called directly against three different values (15, −999, 0) on a
+freshly rebuilt tree, returns byte-identical output every time. Since the assembler's return string is the
+only channel anything downstream could observe, that is proof nothing observable changes anywhere, not
+merely that nothing tests it — a different claim from a coverage gap, and kept separate from the mutation
+table below rather than folded into it. **Left in place, not removed**, on a decision made rather than
+defaulted: removing it touches the type, the one call site, and would ripple into the fourteen-plus direct-
+call test fixtures that still construct it, for a reason unrelated to coverage — larger than this pass's own
+scope, and reversible either way, unlike deletion.
 
-**Bucket: Actionable now.** The work is specified — enumerate the assembler's caller-supplied inputs and
-ask of each whether a live-capture test reads the result — and nothing needs to be learned first, since
-both instruments and both populations are established here. **Against Neither:** work is specified, not
-merely a fact recorded. **Against Blocked on data:** the enumeration reads source and existing tests, and
-needs no new observation.
+**A real historical instance, not a hypothetical one.** Commit `dc744af1` (2026-08-15, tagged item166):
+hardcoding the notice's own investigation-flag wiring survived every existing test, because none of them
+captured a real system prompt from a live loop call — the fix added the loop-driving test this entry's own
+population count already anticipated growing past. It has: a sixth loop-driving file exists now
+(`agentLoop.grantAtLoopEntry.test.ts`, 2026-08-16), one day after that fix and after this entry was written.
 
-**Where the code lives:** the assembler and its caller are in the agent loop; the notice builder is its own
-module; the wiring test added for this sits beside the loop's other prompt tests. See item 166 for the
-mutation that found it, and the twenty-fourth pattern for why a surviving mutation is the only thing that
-reports this class.
+**The coverage question, answered by mutation rather than by what a test happens to mention.** Reading
+which loop-driving files reference which field names near a captured system message produced a guess,
+labelled as one, before any mutation ran: `archetype`, `answerOnly`, `planApproved` and `offeredToolNames`
+predicted covered or partially covered; `hasFramework`, `qaCommandTool` and `summaryFormat` predicted
+gaps. Eight fields — the four highest-branching, the confirmed-dead one as a control, and three lower-
+branching fields with no hypothesised coverage — mutated one at a time at the one call site, each confirmed
+live (compiling, a real diff) before its full-suite result was read, each reverted and reconfirmed clean
+before the next:
+
+| Field | Guess | Mutation result |
+|---|---|---|
+| `archetype` | covered | **killed** — `agentLoop.readOnlySuppressionTelemetry.test.ts`, `agentLoop.steplessAnswerShape.test.ts` |
+| `answerOnly` | gap | **killed** — `agentLoop.readOnlySuppressionTelemetry.test.ts` (a file neither sweep had found) |
+| `planApproved` | covered | **killed** — same two files as `archetype` |
+| `offeredToolNames` | covered | **killed** — `agentLoop.grantAtLoopEntry.test.ts`, `agentLoop.readOnlySuppressionTelemetry.test.ts` |
+| `hasFramework` | gap | **survived** |
+| `qaCommandTool` | gap | **survived** |
+| `summaryFormat` | gap | **survived** |
+
+**The reordering is the main finding, not a footnote to it.** `answerOnly` was guessed a gap on the
+strength of two targeted sweeps of the loop-driving population; it was killed three ways by a file that
+appeared in neither sweep. Reading what a test mentions is not evidence for what it catches — the mutation
+table is what settled the question, in both directions, exactly as it was required to before anything was
+written to close a gap.
+
+**Fixed: `agentLoop.systemPromptWiring.test.ts`**, covering the three confirmed survivors and no others —
+`archetype`/`answerOnly`/`planApproved`/`offeredToolNames` already have real coverage, and duplicating it
+would test nothing new. Each field pinned in both directions (present and absent, or one value and its
+alternative), using the same real-loop-capture harness `readOnlySuppressionTelemetry.test.ts` already
+established. **One of the new tests initially asserted the wrong thing** — `hasFramework`'s own draft
+checked `agentIntro`'s "working on a X project" clause, which is a *different* field's wiring that was never
+mutated; re-running the `hasFramework` mutation against the draft test passed it, which is what caught the
+mistake, the same live-mutation-before-reading discipline applied to the test's own correctness rather than
+only to the source. Rewritten to assert the framework block's own marker; re-run against all three
+mutations, all three now confirmed killed. **`qaCommandTool` needed one more fact established first**:
+calling `runAgentLoop` directly bypasses the archetype dispatcher entirely (that layer runs upstream, in
+`runLlmPatchFlow.ts`), so tier and archetype alone never produced a read-only-only toolset in a direct call
+— the test instead sets `capabilityFilter: { allow: READ_ONLY_CAPABILITIES }` directly, the exact value the
+dispatcher itself would have supplied, not a workaround for it.
+
+**What the fix does not guarantee**, stated rather than implied: it does not isolate each field from every
+other in a single assertion, so a future single-field regression among fields set together in one scenario
+would still need its own specific check to name; it adds no compile-time protection, since most of the
+eighteen fields are plain `string`/`boolean` where the type correctly accepts any value and the risk is
+semantic, not the closed-union shape a narrower type could rule out (`archetype` is typed `string` rather
+than the seven-value union used elsewhere in this codebase — noted, not changed here, since widening a type
+is a source-safety improvement and not what a coverage gap asks for); and it does not cover the ten fields
+outside this pass's sample, or the two sibling assemblers (`assembleChatSystemPrompt`,
+`assembleInvestigationSystemPrompt`) sharing the identical one-call-site shape — named as the same kind of
+latent risk item 138 found real for its own subject, left for a later pass rather than assumed.
+
+**Suite: 456 files / 5,862 tests before this pass's own changes, 457 / 5,868 after** — six new tests, the
+entire delta, nothing else moved.
+
+**Bucket: Closed**, decided on this entry's own condition rather than on the fix, the reading item 198's and
+item 212's closures gave: the work specified — enumerate the assembler's inputs, ask of each whether a
+live-capture test reads the result, settled by mutation rather than inference — is exactly what this pass
+performed. Item 210's reading does not apply (discharges a different entry's condition). Item 181's does
+not apply (this entry had a specified, open condition, not work shipped against none). **Two findings
+beyond the entry's own text, decided on item 217's own two-condition test, both required:** the dead-field
+finding and the grown loop-test population are each a **larger** population or a sharper instrument than
+the entry recorded, but neither is an **unanticipated kind** — a field question E1 was always going to ask,
+and a population this entry's own text already predicts growing. The kind half fails for both, so both
+**extend this entry** rather than warranting a new one. **Against Actionable now:** the fix is done, backed
+by a passing mutation table, not merely specified. **Against Neither:** a fix was proposed, built, and
+verified, not left as a fact on the record. **Where the code lives:** the assembler and its one caller are
+in the agent loop; the notice builder is its own module; the new wiring test sits beside the loop's other
+prompt tests. See item 166 for the historical mutation and its fix, item 138 for the sibling-assembler
+latent-risk framing this entry borrows, and the twenty-fourth pattern for why a surviving mutation is the
+only thing that reports this class.
 
 ## 170. Whether a model asks for a tool when told it may, and whether it asks for one that can be granted — registered before the first run
 
@@ -16264,10 +16329,10 @@ priority ordering" cautions against ranking by importance, which this section do
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (89): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218
+**Closed** (90): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (2): 130, 169
+first (1): 130
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (16): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196
 
