@@ -15199,13 +15199,20 @@ were each measured. **Where the code lives:** the output directory named by the 
 item 183 for the neighbouring case of compiled output that should not have existed at all, and item 210 for
 the check that reads this directory by name rather than by scan.
 
-## 212. The contributor guide names a source file that was deleted two commits apart from its own directory
+## 212. Closed — the contributor guide named a source file that was deleted two commits apart from its own directory
 
 **What it is.** The repository's contributor guide describes two modules as standalone planning and
 developer prompts. One of the two exists. The other was deleted along with the role-flow entry point it
-served, and the directory that held a sibling of it no longer exists either. A reader following the guide
-looks for a file that has not been present for some time, and the guide gives no signal that one of the two
-names is dead while the other is live.
+served. A reader following the guide looks for a file that has not been present for some time, and the
+guide gives no signal that one of the two names is dead while the other is live.
+
+**One half of this entry's original framing was wrong and is rewritten rather than left standing.** It
+recorded the deleted file's former sibling directory as a second finding against the guide. That directory
+is indeed absent from the tree, but **the guide never names it** — zero occurrences under both a filesystem
+search and a version-control search. So its absence was a fact about the repository, not a stale reference,
+and this entry's count of what needed fixing here was one, not two. The error is worth naming because it is
+the same instrument gap the entry warned about in the other direction: a claim about a document was
+established from the tree instead of from the document.
 
 **Established with two instruments on each half.** For the named file: a filesystem search reports no such
 file, and the version-control system reports the path matches nothing it tracks. For the directory: a
@@ -15215,16 +15222,22 @@ sentence naming it. The companion module in that same sentence was checked by th
 exist, which is what makes the sentence half-true rather than simply stale — the failure mode a reader is
 least likely to catch.
 
-**Not fixed here, deliberately.** This pass is scoped to the engineering ledger, and the guide is a
-different file in a different trust domain — it is read into the system prompt of every run in this
+**Not fixed when recorded, deliberately.** That pass was scoped to the engineering ledger, and the guide is
+a different file in a different trust domain — it is read into the system prompt of every run in this
 repository, so an edit to it changes model behaviour rather than documentation alone. Recorded so the
-correction is a decision someone makes rather than a thing that happens as a side effect.
+correction would be a decision someone makes rather than a thing that happens as a side effect.
 
-**Bucket: Actionable now.** The fix is specified — remove the dead name from the sentence, keeping the live
-one — and nothing new needs to be learned: both halves were established under two instruments each.
-**Against Neither:** work is specified rather than a fact recorded. **Against Blocked on data:** no
-observation is missing. **Where the code lives:** the contributor guide at the repository root, in its
-paragraph on prompt assembly. See item 82 for the deletion that made the name dead.
+**Fixed, in a pass that made the decision this entry asked for.** The dead name is removed from the
+sentence and the live one kept, which is the fix specified here and nothing more. The deleted module has no
+successor: it went at `ee2443b9` with no file of that name anywhere in the tree or the index afterwards, so
+the correction drops the name rather than redirecting it.
+
+**Bucket: Closed**, decided on this entry's own condition rather than on the fix — the guide no longer
+carries the dead name, so the fact recorded here no longer holds. **Against Actionable now:** the specified
+work is done. **Against Neither:** a fix was specified and has been made, rather than a fact being left on
+the record. **Where the code lives:** the contributor guide at the repository root, in its paragraph on
+prompt assembly. See item 82 for the deletion that made the name dead, and item 217 for the sweep this fix
+prompted and the further stale assertions it found.
 
 ## 213. A search pattern that requires an intervening directory silently misses files sitting directly in the named directory
 
@@ -15349,29 +15362,81 @@ type-check configuration is at the repository root; the module and its test are 
 See item 181 for the other, differently-caused hole in the same tool's reach, and item 214 for the module
 this was found on.
 
+## 217. A whole-file sweep of the contributor guide found the stale-assertion population larger than the one instance recorded against it, and of kinds that instance did not anticipate
+
+**What it is.** Item 212 recorded one dead name in the guide and specified its removal. Fixing only that
+would have been a sample standing in for a population. A mechanical extraction of every assertion the guide
+makes — every backticked path, every command, every stated quantity — checked each against the tree, and
+found **three more false ones of two further kinds**: a directory still described as holding files after it
+was deleted whole, an exclusion entry in a build configuration naming a file that no longer exists, and a
+count that had drifted by one. None is the shape item 212 describes, which is why enumerating rather than
+following the one recorded instance was what surfaced them.
+
+**Why the extraction had to be mechanical rather than a reading.** The guide asserts one hundred and
+thirty-eight path-like strings, of which sixty-one are full repository-relative paths. Seven of those name
+things absent from the working tree, and **four of the seven are correct** — each is a sentence that says
+in as many words that the thing was removed, or an illustrative example inside a rendering demonstration.
+A reader checking paths against the tree and stopping there would file four false positives; a reader
+spot-checking would likely never reach the count. Separating the two required reading each absent path's
+own sentence, which is a second pass over a set the first pass had to produce exhaustively.
+
+**The one figure that is not like the others, which is the finding worth keeping.** Fifteen of sixteen
+stated quantities re-derived exactly. Every one of those fifteen counts a **closed enumeration living in a
+single literal** — an array of tool definitions, two sets of tier tool names, a union type, a pattern list,
+a switch. Adding a member to any of them means editing the one literal, with the count in view. The
+sixteenth counts test files importing a shared fixture: an **open set with no enumeration anywhere**, which
+grows whenever anyone writes a test. That is why it, alone, drifted, and why correcting it to the new
+number would leave the guide asserting an unverified figure indistinguishable in appearance from the
+fifteen verified ones beside it. It is corrected **and bounded** — stated as a snapshot of a growing set
+rather than as a checked count — because the correction is not terminal the way a deleted path's is.
+
+**A second class the sweep reached that a path check alone would not.** The guide's command block annotates
+each command with what it runs, so an annotation that has fallen behind is a false assertion rather than a
+missing note. One had: the test command acquired a lifecycle hook that runs a build-staleness check ahead
+of the runner, and the annotation still named the runner alone. **What settled it was the block's own
+framing** rather than a judgment about scope — a block that merely listed command names would have been out
+of scope, and one that describes behaviour is not.
+
+**Three instrument errors were made during this sweep and all three were caught before anything was
+written.** Two stated constants read as wrong because the source writes them with numeric separators and
+the pattern truncated at the underscore. A verb count read one high because an extracted span ran past its
+array's closing bracket into a regular-expression character class in the following declaration. An import
+count read twenty-four instead of three because it counted files the type-check configuration does not
+read at all — the same standing consequence item 181 records, arriving as a measurement error rather than
+a type hole. Recorded because the pass's own instruments failed three times as often as the document did,
+and every one was caught by re-deriving under a second instrument rather than by care.
+
+**Bucket: Neither.** The work shipped and the entry records why the shape is what it is — item 181's
+precedent, since no earlier entry recorded this condition. **Against Actionable now:** nothing is specified
+that has not been done; every false assertion the sweep found is corrected. **Against Blocked on data:**
+nothing is missing; the extraction was exhaustive over the file and every figure was re-derived under two
+instruments. **Where the code lives:** the contributor guide at the repository root. See item 212 for the
+single instance that prompted the sweep, item 181 for the type-check reach the import miscount ran into,
+and item 216 for the other bound on what that configuration enforces.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 216 to find out which ones still need something. No index of
+reader the trouble of reading all 217 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (79): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 117, 120, 121, 126, 128, 134, 135, 137, 144, 149, 150, 153, 156, 161, 162, 167, 171, 172, 176, 183, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210
+**Closed** (80): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 117, 120, 121, 126, 128, 134, 135, 137, 144, 149, 150, 153, 156, 161, 162, 167, 171, 172, 176, 183, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (11): 113, 116, 129, 130, 138, 142, 148, 169, 182, 184, 212
+first (10): 113, 116, 129, 130, 138, 142, 148, 169, 182, 184
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (16): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196
 
-**Neither — a structural fact recorded, with no fix proposed** (110): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (111): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152, 154, 155, 158,
 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199, 200, 201, 202, 205,
-206, 207, 208, 209, 211, 213, 214, 215, 216
+206, 207, 208, 209, 211, 213, 214, 215, 216, 217
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
