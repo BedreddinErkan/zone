@@ -48,6 +48,11 @@ Both pairs agree; the record stays indistinguishable from a genuine model format
   against this exact patch shape surfaced item 2 below instead of a clean answer: the parser
   doesn't segment this case cleanly either.
 
+**Bucket: Blocked on data.** Closing requires either data on whether false positives cluster by
+REPLACE-body position or a decision to build one of the two structurally limited discriminators
+already named — the most promising of the three, segmentation membership, was traced against the
+parser and did not produce a clean answer.
+
 **Where the code lives:** the recount and a comment describing this exact split sit directly
 above the `[zone-apply-patch-marker-imbalance]` `log(...)` call, inside `apply_patch`'s
 marker-imbalance rejection branch, in `toolExecutor.ts`.
@@ -140,6 +145,12 @@ The bucket this entry moves to next reflects that no fix is specified, not that 
 minor, and of everything currently in Neither this is the only entry describing a silent,
 incorrect write to a user's files.
 
+**Bucket: Neither.** No change confined to this entry's own subject — the block-splitting walk,
+anchored or not — can distinguish an own-line matched pair that is a genuine second edit from one
+that is accidental example text; the two readings are the same text. The actual resolution lives
+entirely in item 17's structured argument, which sidesteps the ambiguity rather than resolving it,
+so nothing is proposed here.
+
 **Where the code lives:** the block-splitting walk and the comment describing this defect now
 live in `src/utils/patchBlocks.ts` (the shared module item 16's unification extracted them into),
 not `toolExecutor.ts`. The new marker's emission sites stay in `toolExecutor.ts`, just after the
@@ -162,6 +173,8 @@ gone.
 **What would close this:** nothing — these need to be *re-derived*, not decided. A future pass
 revisiting marker-imbalance prevention/recovery options should treat this as starting from zero
 on these three items specifically, not as "already scoped, just blocked on data."
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
 
 **Where the code lives:** nowhere yet — these were option labels for work that was never
 started.
@@ -204,6 +217,8 @@ precisely because this trigger can repeat within a single run. A reader re-check
 against item 73's key will find this one unexplained by it — correctly, because the key was never
 involved.
 
+**Bucket: Blocked on data.** Closing requires an observation that does not exist yet.
+
 **Where the code lives:** nowhere yet — this is unbuilt. If the seven-site trace needs
 redoing, re-derive it starting from `[zone-apply-patch-marker-imbalance]`'s emission site,
 `CoachingController`'s `buildCoachingPrompt` call, and the `FailureContext`/`FailureSignal`
@@ -225,6 +240,8 @@ unreachability as a silent-failure signal. The lesson generalizes past interpret
 design: item 2's telemetry marker was deliberately gated broad (`blocks.length > 1`, not its
 own content-embedded heuristic) specifically to avoid reproducing this same structural-zero
 shape for a different marker — see item 2.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
 
 **Where the code lives:** the ripgrep-availability cache and the fallback's two read loops are
 both in `search_in_files`'s handler in `toolExecutor.ts`; the cache variable is set once in the
@@ -351,6 +368,8 @@ batching, which groups consecutive successful read-only tool calls into one coll
 and is keyed on `success` — a UI-visible behavior change, not just an internal bookkeeping
 one.
 
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
+
 **Where the code lives:** the fallback's returns are in the two count/content-building
 branches of `search_in_files`'s in-process path; the ripgrep-path returns are in the
 `files_with_matches` and `count` branches of the same handler; the JSON-parsing one is in the
@@ -415,6 +434,8 @@ unreachable below an interactive-run cost tier.
 a measured 4.4%-per-run trigger rate — a single forced run is closer to a lottery ticket than
 a measurement at that cost tier. Passive accumulation over ordinary use reaches the same
 records for free.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
 
 ## 12. Closed — the predicate reads structured fields for all three write tools, and a succeeding no-op no longer counts as applied
 
@@ -787,6 +808,9 @@ specific text parses — the same measurement that shows anchoring misses item 2
 here unmodified, since both entries share the identical own-line, matched-pair trigger shape.
 This closes only when item 2 does, by whichever fix item 2 actually gets (item 17's structured
 argument, currently) — there is no fix to seek here independent of item 2's own resolution.
+
+**Bucket: Neither.** This closes only when item 2 does, by whichever fix item 2 actually gets —
+there is no fix to seek here independent of item 2's own resolution.
 
 **Where the code lives:** `diffToFindReplace`, `buildStagedDiffs`, and `buildRestageSeedBlock`
 are all defined in `fileDiff.ts`; `buildRestageSeedBlock` is called from `agentLoop.ts`, where
@@ -1277,6 +1301,12 @@ normalization-class-bearing patches produce a changed hash, and the stale-compar
 at most one comparison per file path (the next failure after a resume makes both compared
 records new-style again).
 
+**Bucket: Blocked on data.** The recipe for the two remaining classes (line endings, the
+read_file prefix) is now fully specified and nothing further needs to be *learned* to build it —
+this entry's own bar for Actionable now — but across the only two calls ever instrumented,
+neither class fired, so what closing it buys is unmeasured rather than unknown. Deferred on
+motivation, not on knowledge, on item 63's precedent.
+
 **Where the code lives:** `normalizeSmartQuotes` is in `src/utils/smartQuotes.ts`, imported by
 both `toolExecutor.ts` (`segmentApplyPatchBlocks`) and `agentLoop.ts` (`parsePatchBlocks`). The
 walk's own EOL-replace chain and `stripReadFilePrefix` are still in `toolExecutor.ts`, inside
@@ -1328,6 +1358,8 @@ begin with — and that handoff is confirmed, not assumed.
 leave the format with three implementations, not one: the shared index-walker, `DiffView`'s
 `.split()` parser (if ever folded in), and this single-pair, four-regex-tolerant one. A "one
 parser" goal that stops at item 16's three is narrower than it sounds.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
 
 **Where the code lives:** `parseFindReplacePatch`/`parseDeveloperPatchText` are in
 `developerPatchParse.ts`; `extractFindReplacePair` and `buildStrictDeveloperPatchText` are both
@@ -1563,6 +1595,8 @@ and it is the thing a later reader deciding whether the threshold is met should 
 - Keys are UUIDs, so an eight-character prefix collision needs two of them agreeing across eight
   hex characters, which at any plausible population is negligible even before the count above.
 
+**Bucket: Blocked on data.** Closing requires an observation that does not exist yet.
+
 **Where the code lives:** `resolveEnvelopeId`, `diskRunEnvelope.ts` — both arbitrary phases: the
 filename-prefix phase (`// Filename prefix match`) and the sessionId content scan below it. The
 reusable comparator is `listResumableEnvelopes`'s trailing `updatedAt` sort, same file. The comment
@@ -1727,6 +1761,8 @@ mutation-discovered confirmation that `filesStaged` (or some other per-file sign
 workable design for Step 9 once `multi_edit` is in scope — and as a caution against reaching for
 "just check `success`" as a simpler alternative anywhere a tool's own arguments don't name a
 single file.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
 
 **Where the code lives:** `multi_edit`'s argument shape (`files: string[]`, no `filePath`) is in
 its handler in `toolExecutor.ts`; the mutation that found this is recorded in the commit history
@@ -2187,6 +2223,9 @@ paths, with no source text.** Three ways to close it, not two:
 `sourceMap: true` itself doesn't need to change under any of the three — local dev keeps full
 maps regardless of what the package ships.
 
+**Bucket: Neither.** The tradeoff is now measured precisely, but which of the three named options
+to take is an unmade decision among stated tradeoffs, not a fix awaiting data or specification.
+
 **Where the code lives:** `tsconfig.json`'s `sourceMap`/`inlineSources` fields; `package.json`'s
 `files` allowlist (no `*.map` exclusion today); the bin shebang in `src/cli/index.ts`, which is
 what actually activates the maps that already ship.
@@ -2358,6 +2397,8 @@ the same pass specifically to close this gap — before it existed, no test anyw
 distinguished `detectLineEnding` returning the right value from returning a wrong one for bare
 CR, in either direction.
 
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
+
 **Where the code lives:** `detectLineEnding` and `analyzeLineEnding` are both in `toolExecutor.ts`;
 the telemetry-observing test is in `toolExecutor.bareCrMatch.test.ts`.
 
@@ -2413,6 +2454,8 @@ file content, in which case this pattern never matches anything and the line-win
 silently degrades to operating on the whole string, or something already escaped, in which case
 it may be correct as written.
 
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
+
 **Where the code lives:** inside `layer1LexicalIntegrity`'s `localizedValidationMode` branch, in
 `patchCorrectnessValidator.ts`, `src/engine/`.
 
@@ -2435,6 +2478,8 @@ in the repo through one shared helper.
 module-boundary change: a public API surface where there was none) and point the sixth copy at
 it, or record explicitly that the two purposes are different enough to justify five copies
 sharing an implementation and a sixth standing alone.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
 
 **Where the code lives:** `normalizeEol` is in `toolExecutor.ts`, not exported. The sixth copy is
 in `src/engine/patchCorrectnessValidator.ts`; see item 22 for the full establish behind this
@@ -2506,6 +2551,8 @@ reconciliation on resume (`RunEnvelope.staging`) in ways not traced here. A narr
 needs the staging map to carry per-entry provenance — which call staged which file, and whether
 that call itself succeeded — rather than one global gate; that's a design question, not a
 drop-in change, which is why no fix is proposed here.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
 
 **Where the code lives:** `finalizeStaging`, `persistStagingOnError` (`agentLoop.ts`),
 `verifyAndFinalize` (`verification/composer.ts`). The `verifyMode` parameter's own JSDoc comment
@@ -2602,6 +2649,8 @@ threshold values aren't specified anywhere, only implied by the comment — meas
 real patch shapes, then decide, the way item 41's establish measured the existing CRLF precedent
 before committing to a direction rather than assuming one.
 
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
+
 **Where the code lives:** the override block, its comment, and the gate are in
 `validatePatchCorrectness`, `patchCorrectnessValidator.ts`, immediately after the four-layer
 `runLayer` sequence.
@@ -2642,6 +2691,8 @@ in before this session cleared them — and none has a fix specified yet, so non
 actionable today. Bundling avoids six near-identical "needs its own pass" entries that would say
 nothing more than this one does per bullet.
 
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
+
 **Where the code lives:** named per finding above; all `void`-marked with an `item 13 follow-up:`
 comment at the point of computation.
 
@@ -2681,6 +2732,8 @@ per-construct exhaustiveness flags like `noFallthroughCasesInSwitch`, not genera
 detection). Whichever is picked up first should measure real findings against this repo before
 deciding to ship, the way item 36's own currency-check establish did before declining to ship it.
 
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
+
 **Where the code lives:** nowhere yet — no tool is selected, no config is written.
 
 ## 54. `markerSink.ts`'s own write path cannot call `log` — a standing constraint, not a defect
@@ -2706,6 +2759,8 @@ The safe alternative — writing the record directly via `fs.appendFileSync`, by
 `console.*` and both patched streams — was confirmed safe empirically, not just by reasoning: a
 warning line that doesn't start with `[tag]` or a result glyph (✓/✗/⚠) passes through the
 patched stderr write untouched, calling `appendMarkerRecord` zero times.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
 
 **Where the code lives:** the constraint and its rationale are in the header comment above
 `appendMarkerRecord`, `src/utils/markerSink.ts`. `trimSink`'s own rotation-marker write
@@ -3142,6 +3197,8 @@ close while this stays open.
 `beforeEach`/`runWith` setup, or a bisection across its dynamic import of the module under test,
 would locate it. Not attempted here.
 
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
+
 **Where the code lives:** `runLlmPatchFlow.readOnlySuppression.test.ts`'s own `beforeEach` and
 `runWith` helper; `detectFramework`/its helper (`src/repo/detectFramework.ts`), checked directly and
 ruled out as the cause this pass.
@@ -3516,6 +3573,9 @@ better basis, and establishes the other two conventions fresh, since no existing
   failures are rare enough in ordinary use that the encoder-risk side of item 17's tradeoff is
   small, which is itself the input item 17's decision needs, not an absence of one.
 
+**Bucket: Blocked on data.** Closing requires an observation that does not exist yet — this entry's
+own review point is explicit that a null result by then is itself the answer, not a stalled entry.
+
 **Where the code lives:** the marker's emission site is in `agentLoop.ts`'s tool-call parsing
 loop; `classifyJsonParseError` is defined just above it. See item 17 for the decision this data
 feeds.
@@ -3714,6 +3774,12 @@ records are `[zone-self-validation]` (whose rule is `read_before_patch`), its ru
 document's thirteenth pattern is the standing warning against reading that silence as a
 behavioural fact.
 
+**Bucket: Neither.** Every candidate this entry surveyed resolves the same way — the two
+remaining fake-optional properties and the stronger out-of-scope candidate all have their bounds
+already stated in their own description prose, so a schema constraint would be a redundant third
+copy of an existing bound. Nothing here proposes a fix; the scope mismatch between what the entry
+asked and what would actually help is the finding itself.
+
 **Where the code lives:** `translateTools` is in `convertParams.ts`; the `strict: null` forcing
 is in `responsesConvertParams.ts`; the fifteen properties and their handler normalization are in
 `toolDefinitions.ts`/`toolExecutor.ts`; `read_background_output`'s clamp is in
@@ -3760,6 +3826,8 @@ both with conflicting values, silently resolved by `??` precedence.
 **What would close it:** decide whether `fileGlob` should be deprecated/removed now that `glob`
 exists, or whether both are meant to stay — not decided here.
 
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
+
 **Where the code lives:** both properties are in `toolDefinitions.ts`; the resolution is in
 `toolExecutor.ts`'s `search_in_files` handler.
 
@@ -3775,6 +3843,8 @@ any) not found in <file>.`
 **What would close it:** special-case an empty/whitespace `symbolName` before the locator call,
 with a message naming the actual problem ("scope.symbolName was empty") instead of rendering
 nothing between quotes.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
 
 **Where the code lives:** the message is in `apply_patch`'s scope-handling branch,
 `toolExecutor.ts`, in the `not_found` case.
@@ -4255,6 +4325,8 @@ uniform across markers, and for the two plan-mode stores a count is an exact fig
 ceiling. Worth stating because the safe reading this entry prescribes — treat every count as
 shrinkable — costs precision wherever it is unnecessary, and which case applies is one dedup away.
 
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
+
 **Where the code lives:** the sink's append path, its size cap, and its rotation are in
 `markerSink.ts`; the interception that routes marker-shaped writes into it is the same shield item
 11 describes. The file itself is `markers.jsonl` under the user-level `.zone` directory.
@@ -4388,6 +4460,8 @@ distinguished at all depends on what anyone would do differently knowing which o
 consumer today branches on the distinction. Adding a discriminating field to the assessment payload
 is the cheapest candidate and is not proposed here, because nothing yet establishes that the
 distinction is worth carrying.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
 
 **Where the code lives:** `inferVerificationFromLog`, `validatePassedClaim`,
 `validateUnrelatedClaim`, and `applyNoInfraVerificationOverride` are in `verification/classify.ts`;
@@ -7684,6 +7758,8 @@ whether a model reading a uniform label is affected by it at all. Both are answe
 asked, so no cost is claimed. Recorded as a structural fact about what the scan produces and where that
 production travels, with no fix proposed.
 
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
+
 **Where the code lives:** the derivation is `detectCategory` in `repo/scanRepo.ts` and the field is
 declared on the scanned-file type in `types/project.ts`; the two prompt-rendering reads are in
 `llm/prompts.ts` and `llm/planFeature.ts`, and the four forwarding reads are in `core/runFeatureAgent.ts`,
@@ -8007,6 +8083,8 @@ revisited since the role system it was built for was designed, is not establishe
 has measured. Recorded as an open question, not a verdict: this item proposes no fix and takes no
 position on whether either live field's values, or the dead field, should change at all.
 
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
+
 **Where the code lives:** `ROLE_MODIFIERS` and `getRoleModifier`, along with the schema-exemption check
 that bypasses `schemaMultiplier`, are in `core/computeRiskScore.ts`. The two live callers are
 `core/runLlmPatchFlow.ts` and `core/runAgent.ts`; the second is reached from `cli/index.ts`'s task-only
@@ -8087,6 +8165,8 @@ value-vs-type graph comparison and the `dist/` confirmation are runs.
 consumed by `core/runAgent.ts`. The ninth is `AUDIT_ALLOWED_TOOLS` in `llm/subagents.ts`, referenced only in
 comments at `llm/agentLoop.ts` and `cli/tui/store-core.ts`.
 
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
+
 ## 85. Six threshold-level decisions across five scoring mechanisms have no recorded reason anywhere, and resolveSafetyLevel's own comment names a mapping that does not exist
 
 **What it is, counted precisely rather than left as "every."** Six threshold-level decision points
@@ -8140,6 +8220,8 @@ four thresholds and its own mapping comment are `engine/safetyLevelResolver.ts`;
 `checkConfidenceGate`'s own history, item 83 for `computeRiskScore`'s `ROLE_MODIFIERS`, and item 86 for
 the one pair of thresholds in this set with a measured environment-dependent split between them.
 
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
+
 ## 86. computeRiskScore's early-return threshold is 95 outside production and 71 inside it; a second, downstream consumer of the same score is fixed at 71 with no such split
 
 **What it is.** `runLlmPatchFlow.ts`'s own risk-score gate — the threshold at which patch generation
@@ -8176,6 +8258,8 @@ site, is the intended one.**
 score is `mapScoreToMode` in `core/runAgent.ts`. See item 85 for the full six-threshold count this pair
 belongs to, and item 83 for the `ROLE_MODIFIERS` divergence the schema-and-destructive probe's own
 developer/absent split is an instance of.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
 
 ## 87. Four sites decide what the agent may do, none of them share state, and mode — which looks like the thing that should differentiate them — controls none of the four fields it appears to
 
@@ -8271,6 +8355,8 @@ Related to the thirteenth in both cases, an instance of it in neither. Declined,
 essay count stays eighteen. Reopening condition, named for both: a second instance of either — another
 type-erased import mistaken for a runtime edge, or another capability correctly attributed to the
 wrong sibling module — reopens the question on two instances rather than one.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
 
 ## 88. Closed — a system-prompt notice names every withheld tool and why, byte-identical for runs where nothing is withheld; whether it is safe in practice is item 90's open question
 
@@ -8376,6 +8462,8 @@ beside `emitWriteCapabilityAbsent`. `forced_tier_blocking`'s trigger, its one-sh
 recomputation of the offered tool set are all in the same file, inside the iteration loop. See item 88
 for the notice this leaves stale, and item 87 for the mode-revisability finding this residue sits
 beside.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
 
 ## 90. The tool-absence notice item 88 shipped suppressed shell use in a measured regression; the fix has now been re-run and re-scored against a revised bar, and one of seven tasks falls short — the one that made no tool calls at all
 
@@ -8897,6 +8985,8 @@ investigates anything. Item 88's own declination set the precedent that a code s
 item rather than an essay; this is independently also a code shape, by the same test, without needing its
 own reopening condition.
 
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
+
 ## 93. Five refusal texts exist for `run_command_readonly` and its siblings, not three; the catch-all's raw regex and the substring classifier behind it are fixed in 6f9c9a69, and the remedy one of them names is still unreachable in two live configurations
 
 **What it is.** Five variants, not the three item 91 left as an open pointer. Three belong to
@@ -9065,6 +9155,11 @@ for the description fix this sits beside, and item 90 for the notice regression 
 unmeasured-behaviour status, and item 96 for the first behavioural data point against this item's own gap.
 Items 103 through 107 record five properties of the gate that the class-tagging work surfaced without
 changing, and item 108 carries the prefix-slice fix this pass measured and did not apply.
+
+**Bucket: Neither.** The remedy the whitelist-miss text names is still unreachable in the two
+configurations this entry's title records, no refusal is counted, no threshold fires, and there is
+still no dedicated exit path — recorded facts about the current state, not a specified fix. The item
+stays out of the closed set for those reasons, not for want of a fix having landed.
 
 ## 94. `gpt-5.6-luna` ran all seven ground tasks — five correct, two wrong on task interpretation, not item 90's verification
 
@@ -9240,6 +9335,8 @@ for its own history, the bug this run first surfaced, and the fix, and item 96 f
 See item 90 for the regression this measures around, and item 91 for the description fix it also concerns,
 and items 97 through 99 for the preamble those two cells ran under.
 
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
+
 ## 95. Closed — the credit probe was the one path every run on either provider passes through, and it was not among the four parts a prior pass called pinned
 
 **What happened, in order.** `08ceb75e` committed a verification instrument specifically so the arm A/B/C
@@ -9353,6 +9450,8 @@ four — the whitelist-miss block, the catch-all, the hard safety block, and the
 as unmeasured as before this run, as is the scope guard's own behavioural effect, item 93's own comparison
 point throughout.
 
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
+
 **Where the code lives:** the chain-operator variant is one of the three `run_command_readonly` texts in
 `toolExecutor.ts`, keyed off `checkCommandSafe`'s `reason` string (`runCommandSafe.ts`); see item 93 for the
 full catalogue of five and item 94 for the run this came from.
@@ -9412,6 +9511,8 @@ which is exactly the failure the first version of this sentence demonstrates.
 conditional that selects the investigation archetype's own block. See item 94 for the two cells this explains,
 item 98 for the three internal contradictions the same preamble carries, and item 99 for the clarification
 path this archetype withholds.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
 
 ## 98. Closed — the question archetype's preamble named tools the run didn't have — one deliberately unlisted as absent, two explicitly listed as absent — and specified two different final-response formats
 
@@ -9555,6 +9656,8 @@ them cells the absence left unable to ask, and that is false**: neither asked, b
 arm asked in prose under the same withholding, so what the absence removes is asking through a tool, not
 asking. See also item 98 for the other defects in the same preamble, and item 149 for the cell that asked
 in prose and searched nothing.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
 
 ## 100. Closed — Nine of nineteen configurations carry a prompt instruction naming a tool that configuration doesn't offer — Task in every one, TodoWrite and revert_patch tied second, search_in_files the case that found it and smaller than all but one of the others
 
@@ -9796,6 +9899,8 @@ distinguish it: any command written to exercise it is decided by the entry ahead
 with the append entry deleted. It follows that a mutation altering only its tag kills nothing. That last
 statement is derived from the unreachability rather than run, because this pass changed no source.
 
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
+
 **Where the code lives:** `BLACKLIST_PATTERNS` in `runCommandSafe.ts`, the two adjacent redirect entries. See
 item 92 for the other shape of the same category — a value plumbed through type signatures with no dispatch
 path reaching it — and item 105 for a consequence of this specific shadow that is not merely cosmetic.
@@ -9822,6 +9927,8 @@ text, which does say exactly that, is unreachable for every command that trips a
 **Where the code lives:** the loop in `checkCommandSafe` and the array order in `runCommandSafe.ts`; the
 class texts in `CATCH_ALL_TEXT` in `toolExecutor.ts`. See item 93 for the texts themselves and item 106 for a
 second case where the first match is the wrong thing to explain.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
 
 ## 105. `ls > /dev/null` passes the gate and `ls >> /dev/null` does not, and the message the second one renders describes both operators as blocked
 
@@ -9850,6 +9957,8 @@ both operators is accurate for a real file and wrong for `/dev/null`, where one 
 does not. The remedy the message gives — drop the redirect, output is captured anyway — does work, so an
 agent following it is not stuck; it is only misinformed about which operator was the problem.
 
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
+
 **Where the code lives:** the two redirect entries in `BLACKLIST_PATTERNS` and the `write-redirect` entry of
 `CATCH_ALL_TEXT`. No fix is proposed here: correcting the verdict widens what a safety gate permits, and
 correcting only the message means explaining a distinction that nothing else in the system explains. See item
@@ -9876,6 +9985,8 @@ pointer to the allowlist, whereas the `file-mutation` and `network-mutation` tex
 read-only shell has no equivalent for what was asked — a confident statement about mutation, delivered to a
 command that only reads, whose equivalent is itself. The chain case is the one the brief for this pass named,
 and its advice — run each command as a separate call — would have the agent split a search string in half.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
 
 **Where the code lives:** the blacklist loop in `checkCommandSafe`, ahead of `hasUnsafeRealPipe`, in
 `runCommandSafe.ts`. No fix is proposed: teaching the blacklist the quoting model that already sits below it
@@ -9923,6 +10034,8 @@ and its `exclude` array then removes, whereas `scripts/` was never inside that c
 absent from the program rather than excluded from it, so it was never among the files this entry counted.
 What remains scoped to this entry is `src/`. Item 181 records the second config and why it had to be
 separate.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
 
 **Where the code lives:** the `exclude` array in `tsconfig.json`. No fix is proposed, and the number is the
 reason: 593 errors across 144 files is not a change that needs nothing learned first — it needs a triage of
@@ -10034,6 +10147,8 @@ exploration-needing archetype set; the promotion body sits inside the per-iterat
 branch B of the forced-tier work. `forceTier` is resolved in `cli/config.ts`. See item 110 for what the
 tier gates when it is right, and item 84 for unreachable mechanisms of a different shape — those have no
 callers at all, whereas this code is entered on every iteration and it is the condition that is never true.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
 
 ## 110. Tier reaches only `tokenBudgetCap` for five of seven archetypes; its iteration cap and tool subset bind only when the archetype pipeline is null
 
@@ -10183,6 +10298,10 @@ agreement measurement ran on OpenAI for well under a cent and the behavioural on
 cost rather than by any credit balance. See item 109 for
 why a wrong tier cannot be recovered from, and item 116 for the CLAUDE.md sentence this item falsifies.
 
+**Bucket: Blocked on data.** This entry's own finding — tier reaches only `tokenBudgetCap` for five
+of seven archetypes — is established; what remains is whether that reach affects outcomes, and that
+is the behavioural measurement, registered but still unrun.
+
 ## 111. Closed — the orphaned scope-audit remainder is removed at `ad7818b8`; two of this entry's own three claims were false, manufactured by an exclusion-scoped grep
 
 **Two sentences in this entry were wrong and are corrected before the closure, so nothing false is closed
@@ -10291,6 +10410,8 @@ minimum, or accept the cost as the price of a 6,001-character prompt — and cho
 argument this entry does not have. See item 113 for the one specified fix this finding did produce, and
 item 114 for the cache that does exist and what it is keyed on.
 
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
+
 ## 113. `pickClassifierModel`'s own cost comment understates the real per-call cost by about 4.2× — correct the comment
 
 **What it is.** The comment above the classifier's model selection asserts the call stays "well below
@@ -10312,6 +10433,9 @@ figure of exactly that. **The proxy is confirmed within four percent and the cos
 here changes; what changes is that the fix can now name a measurement over real calls instead of an
 approximation, which is what its own instruction about naming the basis was asking for. See item 163 for the
 instrument.
+
+**Bucket: Actionable now.** A fix is specified in the entry itself; nothing new needs to be
+learned first.
 
 **Where the code lives:** the comment sits directly above the model-selection function in
 `taskClassifier.ts`. This entry is the fix; item 112 is the finding that produced it.
@@ -10350,6 +10474,8 @@ record to count — the gap is a silent return, not an absent log, and no field 
 would close it. The one marker that does separate the two is the large-file bump, which records its source
 as a cache re-run; it fires only when a bump upgrades a cached tier, and the sink holds none. The conclusion
 stands unchanged; only its basis moves.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
 
 **Where the code lives:** the map, the hash function and the hit path are all in `taskClassifier.ts`.
 
@@ -10435,6 +10561,8 @@ search. The per-call usage ledger reaches further still, **eighty-eight days and
 thirty-four runs** against the sink's eighteen and ninety-four. **The asymmetry is why a second
 instrument was worth reaching for**, and it means a question the sink answers with silence is often
 answerable somewhere else rather than unanswerable.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
 
 **Where the code lives:** the emit functions in `loopTelemetry.ts`; the logging helper in `utils/logger.ts`;
 the stdout shield in the TUI entry point; the appender and its path resolution in the marker-sink module
@@ -10569,6 +10697,8 @@ one asked — but that one's filter was the tool's semantics and this one's was 
 typed. Considered as a twenty-fifth pattern and rejected; see the candidate section following the
 twenty-fourth for the mechanism argument and the condition under which it reopens.
 
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
+
 ## 119. `resumeBlock` is consumed at three sites, and warm resume routes around the one a surgical edit is most likely to touch
 
 **What it is.** In `agentLoop.ts`, `resumeBlock` is built once from `resumeContextBlock` and
@@ -10594,6 +10724,8 @@ makes it the cold branch. Retargeted, the same mutation killed exactly that test
 `planContextBlock` — beside `sessionMemBlock`. The next surgical edit near it faces the identical question,
 and the intuitive test to reach for is the one named after the feature rather than the one that covers the
 branch.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
 
 ## 120. Closed — CLAUDE.md's FINAL SUMMARY bullet described a prompt pointer that no longer exists, and four further claims that had also stopped being true
 
@@ -10739,6 +10871,8 @@ application sites, since the bump runs both after a response and again on a cach
 `parseClassifierResponse`, and the confidence gate they funnel into, both in `taskClassifier.ts`. One
 observation in forty calls; see item 110 for the measurement that produced it.
 
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
+
 ## 123. Breadth vocabulary in a task string halves classifier agreement, and the effect is scope-mediated rather than trigger-driven
 
 **What it is.** On the forty-task measurement at `49aa3615`, tasks whose text carries breadth vocabulary —
@@ -10793,6 +10927,8 @@ It did not: arm B's reasoning was byte-identical to arm A's on 21 of 40 tasks, a
 prompt change at all is identical on **16 of 40**. The unchanged prompt churns *more* than the changed one
 did, so the text movement was sampling.
 
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
+
 ## 124. `rankerBaseline.snapshot.json` embeds frozen copies of sixty-two test files, and the test consuming it never compares them against the live tree
 
 **What it is.** The ranker's frozen measurement ground carries a content map of 136 path-to-content entries,
@@ -10809,6 +10945,8 @@ needs to know that before reasoning about it, because the natural assumption run
 **No fix proposed.** The decoupling is deliberate and stated in the test's own header: running against the
 live tree would inject exactly the instability a frozen ground exists to avoid.
 
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
+
 ## 125. A removed setter had no mocks anywhere while its removed getter had thirteen
 
 **What it is.** `ad7818b8` deleted `readAuditModeSetting` and `writeAuditModeSetting` from the same file in
@@ -10822,6 +10960,8 @@ setter is usually inert in a test, its write going somewhere the test never read
 into existence. The asymmetry is not an oversight repeated in thirteen files; it is the shape stubbing
 pressure has, and it predicts where orphaned mocks collect after any removal: on the read side, in proportion
 to how many test files touch the calling path.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
 
 ## 126. Closed — the locked anaphor sweep is line-based and could not see a referent split across a wrap; both hidden instances are now removed and the convention reports two figures
 
@@ -10899,6 +11039,8 @@ this margin, and to any future arm framed as one run per condition.
 classifier moves against itself between two runs, not an estimate of the distribution, and a second null run
 could return a different figure in either direction. Recorded so the three is used as evidence that variance
 is non-trivial, never as a variance estimate to compute against.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
 
 **Where it can be checked:** the three arms' committed results files under `scripts/`, whose per-task rows
 carry the returned tier, the confidence, the fallback flag and the model's own reasoning for each run.
@@ -11045,6 +11187,9 @@ nothing. Nothing further needs establishing: the mechanism, the excluded set and
 measured before this entry was written. See the twenty-fifth pattern for the general mechanism, and item 118
 for the author-written form of the same failure.
 
+**Bucket: Actionable now.** A fix is specified in the entry itself; nothing new needs to be
+learned first.
+
 ## 131. A failure class that is near-certain in targeted runs and invisible in the full suite, because dilution is temporal rather than structural
 
 **What it is.** Item 121's race is the worked example, and the shape generalises past it. Two test files
@@ -11082,6 +11227,8 @@ occurrence and is not recorded as an entry of its own: a single transient failur
 and filing an inverse mechanism as an instance of this one would blur the very distinction this entry
 exists to draw.
 
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
+
 ## 132. The call-time path-resolution rule is real, load-bearing and mechanically unenforced for this module
 
 **What it is.** CLAUDE.md requires that any writer under the user home resolve `homedir()` at call time
@@ -11107,6 +11254,8 @@ happened to depend on late resolution.
 applied post-load, which is a different check from the one that exists and would need writing per module or
 as a shared harness. Naming what such a check would have to do is not the same as specifying it.
 
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
+
 ## 133. `resolveTierLimits` returns a shared object on one path and a fresh one on another — inert today, and the assertions pinning it are deliberate
 
 **What it is.** With no user override the function returns `TIER_LIMITS[tier]` itself; with one it returns a
@@ -11130,6 +11279,8 @@ the assertions together, not the assertions alone.
 **No fix proposed.** Making the return always fresh is a source change with no present defect motivating it,
 and it would break the fifteen assertions that currently document the behaviour. Whether the consistency is
 worth that is not this entry's call.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
 
 ## 134. Closed — the mismatch marker fires and persists; the zero was an absence of occasions, not of persistence
 
@@ -11297,6 +11448,8 @@ is a production change made for a script's benefit, or a contract test pinning b
 fixed corpus of inputs, which couples a script's test to a production internal. Both are real options with
 real costs and neither is this entry's call — naming what a guard would have to do is not specifying one.
 
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
+
 ## 137. Closed — the probe's side effects ran at module scope, so importing it for any export would have made paid calls
 
 **What it is.** Before `8f4144bf` the tier-agreement probe read the API key file, read the label set, patched
@@ -11343,6 +11496,9 @@ is not obviously doing anything dangerous.
 before any of them acquires an export rather than after. Nothing needs to be measured or decided first, and
 the shape to copy is already in the same directory three times over.
 
+**Bucket: Actionable now.** A fix is specified in the entry itself; nothing new needs to be
+learned first.
+
 ## 139. Both of the probe's console captures restore without a finally, and the consequence is bounded by something incidental
 
 **What it is.** The tier-agreement probe patches the console log channel and the console warn channel, and
@@ -11361,6 +11517,8 @@ introduced after the main function settles, makes it live with no other change.
 **No fix proposed, on those grounds.** Wrapping both restores would be a small and obvious change, and the
 entry declines to prescribe it only because there is no present defect to motivate it and the pair's shared
 discipline is itself the more useful thing on record. A pass that wraps one should wrap both.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
 
 ## 140. The daily spend cap is implemented twice — once inline in the agent loop where it runs, once in a module nothing calls
 
@@ -11389,6 +11547,8 @@ delegates to.
 decisions — one says the inline copy is the design, the other says the module was the design and the inline
 copy is the drift. Nothing here establishes which, and the entry declines to guess.
 
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
+
 ## 141. Two cost-and-length flags are declared on the command line and threaded nowhere
 
 **What it is.** The command-line options type declares a maximum-budget flag and a maximum-turns flag. Both
@@ -11409,6 +11569,8 @@ flags dead should not conclude spending is unbounded.
 **No fix proposed.** Wiring them and removing them are again different decisions, and the entry has no basis
 for choosing.
 
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
+
 ## 142. The architecture documentation names the dead copy of the spend cap as the live one
 
 **What it is.** The spend-caps section of the repository's own architecture file states that the daily cap is
@@ -11427,6 +11589,9 @@ here so the next documentation pass applies it rather than re-deriving it.
 defect from the gate being unwired. The code defect survives whatever the documentation says; the
 documentation defect is what routes a maintainer to the wrong file, and it would remain a defect even if the
 dead module were deleted tomorrow.
+
+**Bucket: Actionable now.** A fix is specified in the entry itself; nothing new needs to be
+learned first.
 
 ## 143. Whether a named refusal example narrows the binaries an agent reaches for, registered against item 90's mechanism and carrying no instrument
 
@@ -11456,6 +11621,10 @@ notice; it does not induce refusals, does not classify what follows one, and has
 varying refusal text. Building one is a prerequisite, and the measurement then needs at least two arms
 rather than one. Naming what would have to be built is not the same as this entry specifying a fix, which is
 why it sits where it does rather than in Actionable now.
+
+**Bucket: Blocked on data.** No instrument exists to induce or classify a refusal, and building one is
+a prerequisite this entry names but does not build — closing requires an observation that does not
+exist yet.
 
 **Where it came from:** item 90, which retains the sentence recording that this prediction was registered
 against its mechanism; item 93 for the refusal texts themselves.
@@ -11537,6 +11706,8 @@ prediction and its refutation coexisted a few directories apart.
 the arc should be re-scored against its own captures is a separate decision with its own cost, and not this
 entry's to make.
 
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
+
 ## 146. A pushed commit message asserts a discovery that item 96 had already made, and the ledger is the only place that can say so
 
 **What it is.** Commit `a430b3da`'s message states that its run "surfaced a real, previously undetected
@@ -11555,6 +11726,8 @@ reader will encounter that says which half of that sentence to trust — which i
 it in a document that can be edited.
 
 **No fix proposed**, because none exists. History is not rewritten for a wrong clause in a message.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
 
 ## 147. A full-suite figure was recorded as a property of the repository when it was a property of the repository and the shell
 
@@ -11598,6 +11771,8 @@ workflow rule rather than repository knowledge: record the environment alongside
 that it was not recorded. Where such rules should live is item 148's subject, and creating a file for a
 single rule on an unverified premise is the failure this arc keeps finding rather than a repair of it.
 
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
+
 ## 148. Actionable now — the CLAUDE.md behaviour-rule inventory is a belief carried across sessions and recorded nowhere
 
 **The claim, as it has been carried.** That an inventory pass ran over CLAUDE.md, found roughly two dozen
@@ -11625,6 +11800,9 @@ be asserting the same unrecorded premise in a new place.
 147's — record the environment alongside a suite figure, or say it was not recorded — and this entry's own,
 that a decision carried between sessions is not a decision the repository has made until something in the
 repository says so.
+
+**Bucket: Actionable now.** A fix is specified in the entry itself; nothing new needs to be
+learned first.
 
 ## 149. Closed — one task in item 90's arm answered with no tool calls at all, and the judgment is residual suppression: three controls in the same arm searched under conditions identical to its own
 
@@ -15531,7 +15709,7 @@ instruments. **Where the code lives:** the contributor guide at the repository r
 single instance that prompted the sweep, item 181 for the type-check reach the import miscount ran into,
 and item 216 for the other bound on what that configuration enforces.
 
-## 218. An entry's bucket is an assertion nothing re-reads, and for seventy-six entries it is not written in the entry at all
+## 218. Closed — an entry's bucket used to be an assertion nothing re-read; every entry now states its own, and a test keeps it that way
 
 **What it is.** Item 129's fix landed sixteen minutes after the entry recording it was committed, and the
 entry stayed in the Actionable now bucket through **thirty-eight** subsequent ledger commits — two
@@ -15567,13 +15745,33 @@ found none missed** — the one near-miss classifies a different entry rather th
 is heading-carried. The instrument that failed here is the same shape as the one the thirteenth pattern
 records: a string search standing in for the property it is supposed to measure.
 
-**Bucket: Neither.** A structural fact is recorded and no fix is proposed. **Against Actionable now:** the
-obvious remedy — extend the snapshot test from Closed-heading agreement to every bucket — requires each
-entry to state its bucket first, which is seventy-six edits, and whether that is worth doing is not decided
-here. **Against Blocked on data:** nothing is missing; the counts were taken under two instruments and the
-sampling was done twice. **Where the code lives:** the snapshot section and its test in the scripts
-directory. See item 129 for the instance that produced this, the seventeenth pattern for the neighbouring
-claim about freshly written entries being the least checked, and the thirteenth for the instrument failure.
+**Re-derived before closing, not carried.** At the commit this closes on, the count of entries lacking any
+in-entry marker was seventy-four, not seventy-six — items 219 and 220 were written after this entry and
+both carried the convention from birth, which is what the gap this entry itself describes predicts: the
+convention is universal from item 151 onward, and both are numbered higher than that threshold. Two instruments — a
+per-entry body scan and an independent line-range accumulation — agreed on the seventy-four exactly, by
+number.
+
+**The remedy this entry named as undecided is applied.** All seventy-four entries now carry an in-entry
+classification sentence, backfilled from the index list that this entry established had zero
+disagreements against every entry already checkable — so the backfill transcribes an already-validated
+record rather than resolving a live question. The snapshot test gained two assertions doing what this
+entry's own "obvious remedy" paragraph specified: every non-Closed-headed entry must carry a marker, and
+every marker must agree with its index-list bucket. Both are form-agnostic, importing the same
+four-separator marker shape this entry's own measurement-error paragraph had to discover by hand.
+
+**Bucket: Closed**, decided on this entry's own condition rather than on the fix — the classification
+gap this entry recorded no longer exists, and the test that would have caught item 129's own thirty-eight-
+commit staleness now runs on every entry, not just the Closed-headed half. Item 212's closure is the
+recent instance of this same reading, itself reading item 198's; item 210's does not apply, since that one
+discharges a *different* entry's recorded condition rather than its own. **Against Actionable now:** the
+specified work — backfill plus invariant — is done, not merely specified. **Against Neither:** a fix was
+proposed and built, not left as a fact on the record. **Where the code lives:** the snapshot section and
+its test, `scripts/deferredWorkSnapshot.test.ts` — `parseInEntryBuckets`, `hasInEntryMarker`, and the two
+assertions under "every entry states its own bucket, and it agrees with the index". See item 129 for the
+instance that produced this, the seventeenth pattern for the neighbouring claim about freshly written
+entries being the least checked, and the thirteenth for the instrument failure this entry's own
+measurement-error paragraph is an instance of.
 
 ## 219. A figure restated in one file whose value lives in another is unprotected whatever the shape of the set behind it
 
@@ -15725,19 +15923,19 @@ priority ordering" cautions against ranking by importance, which this section do
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (82): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 116, 117, 120, 121, 126, 128, 129, 134, 135, 137, 144, 149, 150, 153, 156, 161, 162, 167, 171, 172, 176, 183, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212
+**Closed** (83): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 116, 117, 120, 121, 126, 128, 129, 134, 135, 137, 144, 149, 150, 153, 156, 161, 162, 167, 171, 172, 176, 183, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (8): 113, 130, 138, 142, 148, 169, 182, 184
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (16): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196
 
-**Neither — a structural fact recorded, with no fix proposed** (114): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (113): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152, 154, 155, 158,
 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199, 200, 201, 202, 205,
-206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 218, 219, 220
+206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
