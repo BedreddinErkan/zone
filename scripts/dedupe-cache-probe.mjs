@@ -486,7 +486,9 @@ async function main() {
   console.log(`\nTotal OFF: $${offTotal.toFixed(6)} | Total ON: $${onTotal.toFixed(6)} | Delta: $${totalDelta.toFixed(6)}`);
 }
 
-main().catch((err) => {
-  console.error("Fatal:", err);
-  process.exit(1);
-});
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((err) => {
+    console.error("Fatal:", err);
+    process.exit(1);
+  });
+}

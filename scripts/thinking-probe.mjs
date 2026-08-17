@@ -99,7 +99,7 @@ function loadApiKey() {
   throw new Error("No Anthropic API key found. Set ANTHROPIC_API_KEY or configure via zone /keys.");
 }
 
-const sdk = new Anthropic({ apiKey: loadApiKey(), timeout: 600_000, maxRetries: 0 });
+let sdk;
 
 function thinkingBlocksOf(content) {
   return content.filter((b) => b.type === "thinking" || b.type === "redacted_thinking");
@@ -269,7 +269,10 @@ async function main() {
   );
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+if (import.meta.url === `file://${process.argv[1]}`) {
+  sdk = new Anthropic({ apiKey: loadApiKey(), timeout: 600_000, maxRetries: 0 });
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

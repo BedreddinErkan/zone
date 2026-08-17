@@ -52,7 +52,7 @@ function loadApiKey() {
   throw new Error("No OpenAI API key found. Set OPENAI_API_KEY or configure via zone /keys.");
 }
 
-const sdk = new OpenAI({ apiKey: loadApiKey(), timeout: 180_000, maxRetries: 0 });
+let sdk;
 
 /**
  * Each arm needs its OWN prefix: the cache is prefix-keyed, so two arms sharing a
@@ -125,45 +125,49 @@ function summarize(armName, rows) {
   return { armName, hits, writes, negatives, total: rows.length };
 }
 
-// ── Run ──────────────────────────────────────────────────────────────────────
-const results = [];
+if (import.meta.url === `file://${process.argv[1]}`) {
+  sdk = new OpenAI({ apiKey: loadApiKey(), timeout: 180_000, maxRetries: 0 });
 
-// Baseline: exactly what Zone sends today.
-results.push(summarize("baseline", await runArm("baseline", { cacheKey: "zone-run-probe-baseline" })));
+  // ── Run ────────────────────────────────────────────────────────────────────
+  const results = [];
 
-// Differential arms only matter if the baseline showed nothing — they turn a null
-// result into "no caching, and here is the flag that changes it".
-if (results[0].hits === 0) {
-  console.log("\nbaseline produced no cache reads — running differential arms");
-  results.push(summarize("store-true", await runArm("store-true", { store: true, cacheKey: "zone-run-probe-store" })));
-  results.push(summarize("no-cache-key", await runArm("no-cache-key", { cacheKey: undefined })));
-}
+  // Baseline: exactly what Zone sends today.
+  results.push(summarize("baseline", await runArm("baseline", { cacheKey: "zone-run-probe-baseline" })));
 
-// ── Verdict ──────────────────────────────────────────────────────────────────
-console.log("\n════ verdict ════");
-const anyHit = results.some((r) => r.hits > 0);
-const anyWrite = results.some((r) => r.writes > 0);
-const anyNegative = results.some((r) => r.negatives > 0);
+  // Differential arms only matter if the baseline showed nothing — they turn a null
+  // result into "no caching, and here is the flag that changes it".
+  if (results[0].hits === 0) {
+    console.log("\nbaseline produced no cache reads — running differential arms");
+    results.push(summarize("store-true", await runArm("store-true", { store: true, cacheKey: "zone-run-probe-store" })));
+    results.push(summarize("no-cache-key", await runArm("no-cache-key", { cacheKey: undefined })));
+  }
 
-if (anyHit) {
-  const b = results[0];
-  console.log(`CACHING WORKS — proven by ${results.reduce((n, r) => n + r.hits, 0)} positive observation(s).`);
-  console.log(`Baseline hit rate ${b.hits}/${b.total}. A rate below 100% is normal for this cache, not a defect.`);
-} else {
-  console.log(`NO CACHE READS OBSERVED in ${results.reduce((n, r) => n + r.total, 0)} calls across ${results.length} arm(s).`);
-  console.log("Zero is weaker evidence than a positive: this supports, but does not prove, an absence.");
-}
-console.log(
-  anyWrite
-    ? "cache_write_tokens: reported non-zero — the mapping added in this increment carries real value."
-    : "cache_write_tokens: zero on every run — writes may be piggybacked on uncached input, in which case the gpt-5.6 cache-write RATES are the questionable part, not the mapping."
-);
-if (anyNegative) {
+  // ── Verdict ────────────────────────────────────────────────────────────────
+  console.log("\n════ verdict ════");
+  const anyHit = results.some((r) => r.hits > 0);
+  const anyWrite = results.some((r) => r.writes > 0);
+  const anyNegative = results.some((r) => r.negatives > 0);
+
+  if (anyHit) {
+    const b = results[0];
+    console.log(`CACHING WORKS — proven by ${results.reduce((n, r) => n + r.hits, 0)} positive observation(s).`);
+    console.log(`Baseline hit rate ${b.hits}/${b.total}. A rate below 100% is normal for this cache, not a defect.`);
+  } else {
+    console.log(`NO CACHE READS OBSERVED in ${results.reduce((n, r) => n + r.total, 0)} calls across ${results.length} arm(s).`);
+    console.log("Zero is weaker evidence than a positive: this supports, but does not prove, an absence.");
+  }
   console.log(
-    "PARTITION VIOLATED: input_tokens − cached − write went negative. The cache buckets are " +
-    "reported ADDITIVELY, not as a subset — the input_uncached subtraction in extractUsage is " +
-    "wrong and must be reverted (keep the field mapping, drop the cache_write term)."
+    anyWrite
+      ? "cache_write_tokens: reported non-zero — the mapping added in this increment carries real value."
+      : "cache_write_tokens: zero on every run — writes may be piggybacked on uncached input, in which case the gpt-5.6 cache-write RATES are the questionable part, not the mapping."
   );
-} else {
-  console.log("Partition holds on every run: cached + write never exceeded input_tokens.");
+  if (anyNegative) {
+    console.log(
+      "PARTITION VIOLATED: input_tokens − cached − write went negative. The cache buckets are " +
+      "reported ADDITIVELY, not as a subset — the input_uncached subtraction in extractUsage is " +
+      "wrong and must be reverted (keep the field mapping, drop the cache_write term)."
+    );
+  } else {
+    console.log("Partition holds on every run: cached + write never exceeded input_tokens.");
+  }
 }

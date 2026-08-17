@@ -224,4 +224,6 @@ Bucket           │ chars   │  tokens │    %  │ actual $ (${model.slice(0
   }
 }
 
-main().catch((err) => { console.error("Fatal:", err); process.exit(1); });
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((err) => { console.error("Fatal:", err); process.exit(1); });
+}

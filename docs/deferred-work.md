@@ -11541,40 +11541,96 @@ assertion ran. Under a machine with a key present it would have made forty real 
 invoked only when the module is the process entry point, matching the shape two other scripts in the same
 directory already carried. The pure functions sit above that guard and importing them now runs nothing.
 
-## 138. Four scripts are one export away from item 137's defect, held back by nothing but the absence of an export
+## 138. Closed — the guard is added to all four, and closing it found two gaps a "wrap the final call" reading would have left open
 
 **What it is.** Four scripts in the scripts directory execute their work at module scope with no entry-point
-guard and export nothing. Three invoke their main function unconditionally; the fourth runs its work as
-top-level statements. Three of the four read the API key file. **The four, named** — because the framing
-figure below drifted once already and a count nobody has enumerated is the shape that drifts:
-`dedupe-cache-probe.mjs`, `openai-cache-probe.mjs`, `output-composition.mjs`, `thinking-probe.mjs`.
+guard and export nothing. Re-derived from zero this pass under two instruments — a directory listing and a
+tracked-file listing, both filtered the same way — returning the same **eleven** executable modules, **six**
+guarded and **five** not, unchanged since the prior pass's correction. The fifth unguarded module exports
+eight symbols and was confirmed, by grep, to have zero non-declaration top-level statements — a pure module,
+not a sixth instance. The four named are unchanged: `dedupe-cache-probe.mjs`, `openai-cache-probe.mjs`,
+`output-composition.mjs`, `thinking-probe.mjs`. The guard form was re-derived rather than assumed too: the
+six guarded files split into two forms by extension, and all four `.mjs` precedents agree on one form with
+zero exceptions — the four targets, also `.mjs`, take that form unambiguously.
 
-**The surrounding figure this entry first carried was wrong and is rewritten; the four named probes are
-re-derived and unchanged.** It said three of seven scripts carried the guard and four did not. At
-`f2b3034b`, under two agreeing instruments, the directory holds **eleven** executable modules once tests and
-declaration files are excluded, of which **six** carry the guard and **five** do not. The four at risk are
-still exactly those four probes; the fifth unguarded module exports eight symbols and invokes nothing at
-module scope, so it is a pure module rather than a fifth instance. **Every number in the original framing
-moved and the finding did not**, which is worth separating: the count drifted because the directory grew,
-not because anything about the defect changed.
+**A second instrument on top of reading found what reading alone would have missed.** Each of the four was
+read in full, then checked again with an AST-based scan (an existing dependency, not a new one) of every
+top-level statement, flagging any declaration whose initializer contains a call, a construction, or an await
+anywhere in its own subtree. Two of the four disagree with the plain reading of this entry's own original
+fix — "wrap each of the four in the same entry-point guard." Both `openai-cache-probe.mjs` and
+`thinking-probe.mjs` construct their API client — a real key read, a real SDK instantiation — at module
+scope, *before and outside* the section a guard around only the final call would cover. Wrapping just the
+last statement, which is what a plain reading of the original fix describes, would have left that
+construction firing on every import regardless.
 
-**Why the enumeration and not just the count.** The directory is not a closed literal — its membership grows
-whenever anyone adds a script, and that growth is precisely what made the original figure stale. A count
-whose only holder is this sentence has to be recomputed to be checked; the four names can be checked
-directly.
+**One of the four established safe to execute, and demonstrated rather than argued.**
+`output-composition.mjs` reads only local session and usage files, no network, no key. A throwaway import
+printed its full report — session selection, token buckets, verdict — from the bare `import` statement
+alone, before the demonstrating script's own next line ran. The other three make real provider calls if
+their guard fails and were established unsafe from source, never run. One of the three,
+`dedupe-cache-probe.mjs`, currently cannot even be imported successfully for a second, unrelated reason: its
+static imports name two modules deleted from the source tree at the R.2 pruning removal — verified safe by a
+live import attempt, which throws at module resolution, before any of the file's own code runs, guard or
+not. The guard is still the right fix: repairing that reference alone, with no other change, would make the
+existing defect live again.
 
-**What makes them safe today is not a guard.** None of the four exports anything, so nothing can import them,
-so the side effects are unreachable. That is exactly the state the tier-agreement probe was in — and the
-moment that file gained its first export, the defect became live and fired on the first test run. The
-protection is an absence, and absences end quietly: the person who adds the first export to any of these four
-is not obviously doing anything dangerous.
+**The protection is narrower than assumed, for these four specifically.** `tsconfig.scripts.json`'s include
+is `.ts` only, confirmed by its own resolved file list under execution — none of the four appear in it, since
+they are `.mjs`. The main `tsconfig.json`'s resolved program has zero files under the scripts directory at
+all. So item 181's finding, that the compiler reaches scripts it is never asked to run, does not extend to
+these four — exporting nothing is not one layer of their protection, it is the only layer, with no partial
+type-check exposure underneath it.
 
-**The fix, fully specified.** Wrap each of the four in the same entry-point guard the other three already use,
-before any of them acquires an export rather than after. Nothing needs to be measured or decided first, and
-the shape to copy is already in the same directory three times over.
+**Fixed, matching the form, closing both gaps.** The two straightforward scripts have their final call
+wrapped, unchanged otherwise. The two with a client-construction side effect have that construction changed
+from a module-scope constant to a `let` declared in the same place, assigned inside the guard immediately
+before its first use — same order of operations under direct invocation, zero changed call signatures.
+Confirmed complete by re-running the same AST scan against the fixed files: every remaining top-level
+statement is either inert or the guard itself. Backed by a new, permanent test file that imports each of the
+four and asserts nothing fires, plus a subprocess test confirming the one safe script still produces real
+output under direct invocation.
 
-**Bucket: Actionable now.** A fix is specified in the entry itself; nothing new needs to be
-learned first.
+**Mutation testing found two real gaps in the test's own design, not just in the scripts.** A first draft
+asserted on a distinctive banner substring per file. Live testing against an inverted guard found the
+assertion could pass regardless: a broken guard's `main()` runs as a fire-and-forget chain that can outlive
+the import's own promise, and — separately — under the isolated test environment, one script's own logic
+fails before reaching its banner line at all, producing a different message that the substring check never
+saw. Both are closed the same way: wait for the chain to settle before reading the spies, and assert on zero
+calls rather than the absence of one specific string. Four named mutations then confirmed live and killed
+correctly — guard inverted, guard compared against a path that never matches, guard removed outright, and
+one designed for this entry's own second finding: the client-construction line alone moved back outside the
+guard, main() left guarded. That fourth one is caught on exactly the assertion the third gap could have
+missed, which is the point of writing it. This machine has real provider keys configured for both providers
+that read one, which is why every test and every mutation ran with both provider key environment variables
+explicitly cleared, on top of the suite's own isolated home directory — a live network call was never
+reachable regardless of which mutation was in effect. Full suite before and after: 454 files to 455, 5853
+tests to 5858, zero change to anything else — the new file's own five tests are the entire delta.
+
+**A premise in the brief that prompted this pass was checked against the document rather than assumed
+wrong or assumed right.** The brief carried a claim that a directory-scoped double-star glob cannot match a
+file sitting directly in that directory. Swept by phrase and by shape across the whole document: exactly one
+entry states this mechanism, and its own text scopes it explicitly to the version-control system's own
+path-matching syntax — a different engine from the one the brief's context actually needed. Re-run directly
+against both: the version-control system's default matching behaves exactly as that entry describes, and
+switches the moment its own glob-magic prefix is added, at which point it agrees with the general-purpose
+glob library other tooling in this repository already uses — the same library, run directly, that this
+pass's own regression test's discovery depends on. Both are correct, for different engines, and nothing in
+the document generalises one to the other; a second, older entry that predates this one already states the
+result of the second engine correctly, independently, using a live example that sits in the very directory
+in question. **Nothing here needed correcting** — the unscoped restatement was this pass's own brief, not
+the record it was drawing on.
+
+**Bucket: Closed**, decided on this entry's own condition rather than on the fix, the same reading item
+198's and item 212's closures gave and item 218's gave for itself: the fix this entry specified — add the
+guard, in the form the repository already uses — is exactly what this pass performed, closing the same
+condition the entry opened with. Item 210's reading does not apply, since that one discharges a different
+entry's recorded condition. Item 181's does not apply, since this entry had a specified, open condition
+rather than work shipped against none. **Against Actionable now:** the fix is done, backed by a passing
+mutation table, not merely still specified. **Against Neither:** a fix was proposed, built, and verified, not
+left as a fact on the record. **Where the code lives:** the four scripts, each carrying the guard in the same
+place its own final statement used to sit; the new test file beside them; `tsconfig.scripts.json` and the
+main `tsconfig.json` for the reach question. See item 181 for the `.ts` scripts whose reach this entry's
+finding does not extend to, and item 137 for the defect this entry is one export away from.
 
 ## 139. Both of the probe's console captures restore without a finally, and the consequence is bounded by something incidental
 
@@ -16154,10 +16210,10 @@ priority ordering" cautions against ranking by importance, which this section do
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (87): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 134, 135, 137, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 171, 172, 176, 182, 183, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218
+**Closed** (88): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 171, 172, 176, 182, 183, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (4): 130, 138, 169, 184
+first (3): 130, 169, 184
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (16): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196
 
