@@ -11648,7 +11648,7 @@ for choosing.
 
 **Bucket: Neither.** A structural fact is recorded and no fix is proposed.
 
-## 142. The architecture documentation names the dead copy of the spend cap as the live one
+## 142. Closed — the architecture documentation named the dead copy of the spend cap as the live one; the sweep for that shape found a second instance
 
 **What it is.** The spend-caps section of the repository's own architecture file states that the daily cap is
 checked before each iteration and cites the module described in item 140 — the copy with no caller. The
@@ -11667,8 +11667,57 @@ defect from the gate being unwired. The code defect survives whatever the docume
 documentation defect is what routes a maintainer to the wrong file, and it would remain a defect even if the
 dead module were deleted tomorrow.
 
-**Bucket: Actionable now.** A fix is specified in the entry itself; nothing new needs to be
-learned first.
+**Applied, and the timing half of the same sentence was false too — which this entry noticed without
+flagging.** This entry quotes the sentence as saying the cap is checked before each iteration and then
+calls only the enforcer pointer wrong, leaving the precedence chain and the resolver as the correct
+parts. The precedence chain and resolver are indeed correct, confirmed by running the resolver across
+all four layers. But the timing is not: the gate runs **once per run**, before the iteration loop opens,
+and returns a zero iteration count when it fires. That was established by execution rather than by
+where the code sits — a run driven through nine iterations against a stubbed model emitted the gate's
+own status marker exactly **once**, and a subagent run emitted it **zero** times, which also turns this
+entry's untested subagent clause into a measured one.
+
+**The status of the dead copy is narrower than "no caller", and the difference is what the correction
+had to say.** This entry calls it the copy with no caller. It has one: its own test file imports it, so
+a test exercises a module no production path can reach. The document now says imported only by its own
+test rather than uncalled, because those are different situations and a reader chasing the second would
+conclude the tests are dead too.
+
+**The sweep for this shape found a second instance, and the way it was found is the finding.** Every
+backticked symbol in the guide was extracted — four hundred and seventy-three distinct tokens, ninety-one
+of them module paths, forty written in call form. **The call-form sweep could not have found this
+entry's own subject**, because the guide names the daily-cap module only as a path and never as a call,
+so the sweep was re-run over the module paths, counting production importers each. That pass surfaced
+`llm/prompts.ts`: the file exists and exports two planning-prompt builders, and **neither export is
+referenced anywhere** under both instruments — no importer, no re-export, no dynamic reference, and no
+consumer that is itself dead, so it is a leaf rather than a chain. The guide presented it as a live
+planning prompt.
+
+**That instance is what makes the class claim demonstrated rather than argued.** The pass that closed
+item 212 edited that very sentence: it removed a sibling module name because that file did not exist and
+kept this one because this file does. **An existence check passes a dead module by construction**, so a
+sweep built on paths existing cannot see this shape at all. The two flagged modules both exist; what
+neither does is the job the guide assigns it.
+
+**Three references that are not references, named so a later sweep does not re-adjudicate them.** The
+ranker's frozen snapshot contains the daily-cap module's name, and a frozen build tree under the
+gitignored working directory contains both prompt builders' names. Item 124 establishes the first as
+embedded byte copies its consuming test never compares against the live tree; the second is compiled
+output. A copy is not an importer.
+
+**Bucket: Closed**, decided on this entry's own condition rather than on the fix — the document no
+longer names the unreachable copy as the enforcer, so the fact recorded here no longer holds. Item 212's
+closure is the recent instance of this reading, itself reading item 198's. **Item 210's does not apply**:
+it closes by discharging a *different* entry's recorded condition. **Item 181's does not apply either**:
+that is the shape for work shipped with no prior open condition, and this entry had one. **Against
+Actionable now:** the specified work is done. **Against Neither:** a fix was specified and has been made,
+rather than a fact left on the record.
+
+**Why the second instance stays here instead of becoming its own entry.** Item 217's precedent turns on
+two conditions together — a population larger than the one recorded instance, **and** findings of kinds
+that instance did not anticipate. The first holds; **the second does not**. A module documented as live
+with no production importer is exactly this entry's own kind, so a separate entry would split one class
+across two records.
 
 ## 143. Whether a named refusal example narrows the binaries an agent reaches for, registered against item 90's mechanism and carrying no instrument
 
@@ -16000,10 +16049,10 @@ priority ordering" cautions against ranking by importance, which this section do
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (84): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 134, 135, 137, 144, 149, 150, 153, 156, 161, 162, 167, 171, 172, 176, 183, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218
+**Closed** (85): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 134, 135, 137, 142, 144, 149, 150, 153, 156, 161, 162, 167, 171, 172, 176, 183, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (7): 130, 138, 142, 148, 169, 182, 184
+first (6): 130, 138, 148, 169, 182, 184
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (16): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196
 
