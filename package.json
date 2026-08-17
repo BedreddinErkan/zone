@@ -33,7 +33,6 @@
     "postbuild": "chmod +x dist/cli/index.js",
     "typecheck": "tsc --noEmit",
     "typecheck:scripts": "tsc --noEmit -p tsconfig.scripts.json",
-    "check-types": "tsc --noEmit -p tsconfig.json",
     "pretest": "node scripts/checkBuildStaleness.mjs",
     "test": "vitest run",
     "test:l3": "vitest run src/llm/taskClassifier.archetype.test.ts",

@@ -30,7 +30,7 @@ interface Bucket {
   items: number[];
 }
 
-function parseHeadings(lines: string[]): Heading[] {
+export function parseHeadings(lines: string[]): Heading[] {
   const out: Heading[] = [];
   lines.forEach((line, i) => {
     const m = /^## (\d+)\. (.*)$/.exec(line);
@@ -120,7 +120,7 @@ export function extractBucketFromEntryBody(body: string): string | null {
 
 /** entry number -> its own body text (heading line to next heading, or to the snapshot section
  *  for the last entry). Shared by both per-entry maps below so the boundary logic exists once. */
-function entryBodiesByNumber(lines: string[], headings: Heading[]): Map<number, string> {
+export function entryBodiesByNumber(lines: string[], headings: Heading[]): Map<number, string> {
   const snapshotStart = lines.findIndex((l) => /^## Status snapshot/.test(l));
   const result = new Map<number, string>();
   for (let idx = 0; idx < headings.length; idx++) {

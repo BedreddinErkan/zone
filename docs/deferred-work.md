@@ -14332,37 +14332,56 @@ declaration files sit next to the modules they describe; the script that runs th
 manifest and the pipeline step follows the build. See item 107 for the source-directory exclusion this does
 not address and the distinction between being excluded from a program and never being in one.
 
-## 182. A typecheck script duplicating another has no caller anywhere in the repository
+## 182. Closed — the duplicate typecheck script is deleted, and the memory file that recommended it is corrected
 
-**What it is.** The package manifest carries two scripts that do the same thing. One runs the compiler in
-no-emit mode and finds its config implicitly; the other runs it in no-emit mode naming that same config
-explicitly. They resolve to the same program over the same files. **Nothing invokes the second one** —
-not the pipeline, which names the first; not a git hook, since this repository has no hook directory at all;
-not any script, test or document that runs commands.
+**What it is.** The package manifest carried two scripts running the compiler in no-emit mode — one finding
+its config implicitly, the other naming that same config explicitly. Re-derived this pass under two
+instruments independent in mechanism: a diff of the compiler's own resolved-config output for both
+invocation forms (options, the full file set, include/exclude patterns, all in one JSON) returned zero
+lines; then both scripts were actually run, not compared as strings — same exit code, matching wall time to
+the hundredth of a second, matching output apart from npm's own echo of which command it ran. Genuinely
+redundant, not a pair that merely resembles one another.
 
-**The zero, established with both instruments before being recorded.** The tracked-file instrument returns
-two occurrences: the manifest entry that defines it, and one line of this document describing it as one of
-four scripts that invoke the compiler binary. Neither is a caller. **The unfiltered instrument returns more,
-and the difference is the finding**: a project-memory file and six generated prompt captures also name it,
-all of them under an ignored directory that holds no tracked file.
+**Zero callers, inside and outside the tracked tree.** A tracked-file search returns two hits: the manifest
+entry defining it, and this entry describing it — neither a caller. An unfiltered search of every file,
+ignored or not, adds the project-memory file's own recommendation and six generated system-prompt captures
+from an unrelated experiment, three days old at the time of this pass — direct evidence the recommendation
+had already reached a live prompt, not just a theoretical risk. No CI workflow, git hook, editor task, or
+lint-staged config names it anywhere.
 
-**The boundary that makes deletion less trivial than the count suggests.** That project-memory file is read
-into the system prompt of every run in this repository. It lists this script by name as one of two ways to
-typecheck. Deleting the script from the manifest without touching that file leaves the model being told, on
-every run, to use a command that no longer exists — and because the file is ignored rather than tracked, the
-deletion's own diff would not show it, and no check would fail. The same file on any other machine seeded the
-same way carries the same sentence. So the fix is two edits in different trust domains, one of which is not
-version-controlled, rather than one line removed from a manifest.
+**The memory file's mechanism, executed rather than inferred.** The project-memory file's typecheck line
+sits inside its structured init block, which a dedicated reader function extracts verbatim and threads,
+unconditionally, into every one of this repository's three system-prompt assemblers — chat, investigation,
+and the main agent. Confirmed by calling that reader directly against this repository's real file: it
+returned the stale recommendation before the fix below, and does not after.
 
-**Bucket: Actionable now.** The fix is specified — delete the duplicate and correct the memory file that
-advertises it, or give the second script a job the first does not do — and nothing new needs to be learned:
-the absence of callers was established under both instruments and the one non-caller mention was located.
-**Against Neither:** work is specified rather than a fact recorded. **Against Blocked on data:** no
-observation is missing.
+**The fix, and the asymmetry it has to live with.** The duplicate script is deleted from the manifest. The
+memory file's typecheck line is corrected to match, along with a second, same-shape line this pass's own
+sweep found while checking the rest of the file: it recommended the sweep script with no caveat, while that
+script still defaults to the dead HTTP target this document already records elsewhere. The memory file is
+gitignored — this edit is local to the machine it was made on, does not enter the commit, and does not
+reach any other clone's already-generated copy of the same file. That is not a reason to skip it: the reader
+function proves the line is live-injected into every run on this machine today, so correcting it has an
+immediate, real effect even though it does not travel. The durable half of the fix is the manifest deletion.
+The prompt template that drives a future re-generation of this file was read in full: it is generic across
+any project, names no script belonging to this one, and instructs the model to extract commands only from
+files it reads during that run, under an explicit no-guessing rule — so nothing in the fix's own dependency
+chain could reintroduce this specific recommendation by template. Whether a real future investigation run
+reflects that correctly is a claim about model output on that run, not about this template, and is not
+verified here.
 
-**Where the code lives:** the two scripts are adjacent entries in the package manifest; the sentence naming
-the duplicate is in the ignored project-memory file at the repository root's dot-directory. See item 181 for
-the third typecheck script added beside them, which is not a duplicate.
+**Bucket: Closed**, decided on this entry's own condition rather than on the fix — the same reading a recent
+closure gave its own state and gave item 198's before it: the duplicate's existence, its absence of callers,
+and the memory file's advertisement were all specified as the condition, and all three are resolved together
+in the same pass. Item 210's reading does not apply, since that one discharges a different entry's recorded
+condition rather than its own. Item 181's does not apply, since this entry had a specified, open condition
+rather than work shipped against none. **Against Actionable now:** the fix is done, not merely still
+specified. **Against Neither:** a fix was built and shipped, not left as a fact on the record. **Where the
+code lives:** the two script entries sat adjacent in the package manifest's script list; the corrected lines
+are in the project-memory file's structured init block; the investigation prompt read for the durability
+question lives beside the function that writes that file. See item 181 for the third, non-duplicate
+typecheck script beside these two, and item 218 for the bucket-invariant addendum this entry's own establish
+work produced.
 
 ## 183. Closed — the untracked compiled output is deleted and ignored, and the reservation that argued against deleting it was answered by a check this entry had not run
 
@@ -15967,6 +15986,24 @@ instance that produced this, the seventeenth pattern for the neighbouring claim 
 entries being the least checked, and the thirteenth for the instrument failure this entry's own
 measurement-error paragraph is an instance of.
 
+**Addendum — a gap in this entry's own reasoning, found by the pass that hit it.** This entry's
+heading-based check for the Closed population verifies that the Closed headings and the Closed bucket
+list are the same set. That says nothing about whether a Closed entry's own in-entry sentence survives a
+later edit — and a later pass's edit dropped exactly that sentence while leaving the heading untouched,
+caught only by an out-of-band check outside anything this document runs automatically. Re-counted by
+execution, importing this file's own exported functions directly rather than reproducing them: of the
+eighty-six Closed-headed entries, thirty-two carry an in-entry marker and fifty-four do not — matching
+the count this entry already gave the Closed-heading population, not a larger one. Narrowing the
+exemption so every entry, Closed or not, must carry its own marker would fail immediately against those
+fifty-four, all closed before the convention this entry describes existed; fixing that is a backfill the
+same shape and scale as this entry's own seventy-four, not a narrow change, and is not done here. This
+paragraph extends this entry rather than standing beside it as a new one, on this document's own rule for
+the distinction: the population behind the finding is the one this entry already established, not a
+larger or differently-shaped one. See
+item 148 for the edit that dropped the sentence this gap describes, and item 182 for the pass that
+re-derived the count and established that narrowing the exemption is a future backfill, not a change made
+here.
+
 ## 219. A figure restated in one file whose value lives in another is unprotected whatever the shape of the set behind it
 
 **What it is.** Item 217 swept the contributor guide for stale assertions and explained its near-perfect
@@ -16117,10 +16154,10 @@ priority ordering" cautions against ranking by importance, which this section do
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (86): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 134, 135, 137, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 171, 172, 176, 183, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218
+**Closed** (87): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 134, 135, 137, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 171, 172, 176, 182, 183, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (5): 130, 138, 169, 182, 184
+first (4): 130, 138, 169, 184
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (16): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196
 
