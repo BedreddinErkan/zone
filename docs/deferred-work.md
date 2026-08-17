@@ -10412,7 +10412,7 @@ unchanged — that is a different path with no shield on it at all.
 the stdout shield in the TUI entry point; the appender and its path resolution in the marker-sink module
 under `utils`.
 
-## 116. Three CLAUDE.md claims about the classifier are wrong, found after the repair pass that did not cover this surface
+## 116. Closed — the two contributor-guide sentences recorded here are corrected; the third claim was never a guide sentence and belongs to item 113
 
 **What it is.** CLAUDE.md was repaired at `3ed5bc33`, which corrected one live falsehood, one wrong clause
 and six drifted figures. These three were found afterwards, by an establish pass reading the classifier
@@ -10431,6 +10431,42 @@ together.
 **Where the fix goes:** the first two are sentences in CLAUDE.md, in the adapters section and the
 archetype dispatcher paragraph respectively; the third is item 113. Nothing is applied here — this entry
 exists so the next docs pass has a target it does not have to rediscover.
+
+**Both guide sentences are corrected, and this entry's own characterisation of the first was too mild.**
+It called the completion-cap claim stale, which implies a figure that used to be right and has been
+overtaken. Executing the built model catalog at `53bf7ca1` shows the classifier's budget is not a literal
+at all but the smaller of the model's own ceiling and a clamp of one thousand and twenty-four, and that
+**no input can reach the recorded figure on any path**: the catalog holds seventeen entries, the smallest
+ceiling among them is sixteen thousand three hundred and eighty-four, and an unlisted model resolves to
+that same value as its default, so the clamp binds unconditionally. A second instrument agrees without
+sharing the first's method — the classifier's own output-budget test drives a real classification against
+a mocked client, reads the request body that was actually sent, and asserts the clamped value. The guide
+now names the expression rather than a number, because a budget computed from a catalog has no single
+figure that stays true on its own.
+
+**The iteration claim is confirmed, its mechanism named, and its scope corrected in one respect this entry
+did not state.** The base constant is only the pre-tier initial value; the tier branch then overwrites the
+run's ceiling unconditionally with three times the soft iteration warning, discarding any caller-supplied
+maximum and emitting a marker when it does. Executed against the resolver at `53bf7ca1`: fifteen,
+twenty-five and forty by tier, hence forty-five, seventy-five and one hundred and twenty — and the machine
+this ran on carries no tier override, so those are the defaults rather than a local configuration. Both
+named archetypes return no pipeline configuration, so nothing re-applies a lower ceiling afterwards.
+**What this entry did not say is that the base constant is still live for subagent loops**, where the tier
+resolver is never consulted. So the figure is not simply wrong; it is right for a shape the guide's
+sentence does not cover, and the correction says which shape.
+
+**This entry's heading was itself one of the false claims, and is corrected while closing it.** It counted
+three guide claims where only two are guide sentences. The third is a source comment that this entry's own
+text hands to item 113, which stays open and is untouched here.
+
+**Bucket: Closed**, decided on this entry's own condition rather than on the fix — the guide no longer
+carries either claim, so the fact recorded here no longer holds. **Against Actionable now:** the specified
+work is done. **Against Neither:** a fix was specified and has been made, rather than a fact being left on
+the record. Item 212's closure is the instance of this same reading on this same document; item 210's does
+not apply, since that one discharges a different entry's recorded condition rather than its own. **Where
+the code lives:** the contributor guide's adapters section and its archetype-dispatcher paragraph. See item
+110 for the tier ceiling confirmed here, item 113 for the third claim, and item 219 for the further false
+figures the sweep prompted by this fix found in the same file.
 
 ## 117. Closed — two instances of the twenty-fourth pattern on one surface, the second removed at `41081a0d`
 
@@ -15435,6 +15471,14 @@ number would leave the guide asserting an unverified figure indistinguishable in
 fifteen verified ones beside it. It is corrected **and bounded** — stated as a snapshot of a growing set
 rather than as a checked count — because the correction is not terminal the way a deleted path's is.
 
+**The reason this entry gives for that fifteen-of-sixteen result is falsified, and the real discriminator
+is narrower.** A later sweep of the same guide found two counts of exactly the shape treated as
+self-protecting here — fixed-membership lists each held in one literal — that had drifted anyway. Editing
+a literal puts its length in front of whoever is editing that literal; it does nothing for a figure
+restated in a different file, which is never read at the same moment. Since every count this guide makes
+is such a restatement, the fixed-versus-growing distinction drawn here does not separate the safe from the
+unsafe, and the reasoning is left standing only as the record of a wrong inference. See item 219.
+
 **A second class the sweep reached that a path check alone would not.** The guide's command block annotates
 each command with what it runs, so an annotation that has fallen behind is a false assertion rather than a
 missing note. One had: the test command acquired a lifecycle hook that runs a build-staleness check ahead
@@ -15503,29 +15547,108 @@ sampling was done twice. **Where the code lives:** the snapshot section and its 
 directory. See item 129 for the instance that produced this, the seventeenth pattern for the neighbouring
 claim about freshly written entries being the least checked, and the thirteenth for the instrument failure.
 
+## 219. A figure restated in one file whose value lives in another is unprotected whatever the shape of the set behind it
+
+**What it is.** Item 217 swept the contributor guide for stale assertions and explained its near-perfect
+count result by the shape of the sets being counted: each was a fixed-membership list held in a single
+literal, so adding a member means editing that literal with its length in view. A second sweep of the same
+guide, aimed at a class item 217's instruments could not check, found two counts of precisely that shape
+which had drifted regardless. **The protection is not the shape of the set.** It is whether the figure and
+the value are read at the same moment, and a figure restated in another file never is.
+
+**The class the earlier sweep could not reach, and why that is structural rather than an oversight.** Its
+instruments checked paths, command annotations and counts — each of which has something in the tree to
+compare a string against. A stated *limit* frequently has no such thing, because its value is the output of
+an expression over configuration rather than a literal anyone can look up. Two of the guide's limits were
+wrong for that reason, and no extraction of numerals could have found either without executing the code
+that computes them.
+
+**The sharper of the two: a correct number attached to the wrong mechanism.** The guide described the
+strict plan path's restage-refine loop as bounded at six iterations. Six is a real constant on that path
+and is spelled as an iteration cap, so a search for the figure finds a matching literal and passes. What
+the constant bounds is the agent loop *inside* each restage attempt. The restage loop has no termination
+condition in code at all — it ends when the user decides at the staged-diff modal — and a counter of
+restages is incremented, logged, and never compared against anything. **No numeric extraction can catch
+a defect of this shape**, because the number is right; what is wrong is the thing it is said to bound.
+
+**The other limit: one pipeline's coaching budget, recorded one higher than its frozen literal.** Executing
+the dispatcher across every archetype re-derived the other four pipelines exactly, which is what isolates
+the error to a single value rather than leaving the whole paragraph in doubt.
+
+**The two drifted counts, which are what falsify item 217's stated reason.** A test corpus's size, recorded
+two high, and the number of dispatch-reason prefixes a parser recognises, recorded one high. Both values
+live in one literal each with fixed membership — an array and a regular-expression alternation — so both
+are the shape item 217 treated as self-protecting, and both had moved. The second carries a second defect
+inside it: the guide's own adjacent sentence names two of the three prefixes and omits the third, the
+prompt text upstream names the same two, and only the plan-annotations directive names all three. Nothing
+reconciles the three lists, and the parser is the only one of them that decides anything.
+
+**The population, enumerated rather than sampled.** Every numeric assertion the guide makes about runtime
+behaviour, and every count it makes of something living elsewhere in the tree, was located and re-derived
+at `53bf7ca1` under two instruments each. **Not one of them has its value in the guide itself.** The guide
+is documentation about source, so every figure it states is a restatement by construction, and the
+mechanism this entry records applies to the whole population without exception rather than to the two
+places a sweep happened to look. **Seventy-eight numeric assertions in total.** Forty-eight meet the
+runtime-bound definition — a numeral the code compares against or bounds by at run time — of which
+forty-four held and four did not. The remaining thirty are counts of collections, sizes of literals, and
+measured quantities: twenty-four held, two did not, and four were not re-derived at all. Those four are
+recorded as un-derived rather than assumed — a type-error total over the excluded-file set, a cached-token
+figure needing a live provider call, a static prompt size whose basis the guide itself already records as
+unrecorded, and a per-run amortised cost taken from an instrumented run.
+
+**This entry's own category totals were wrong on their first writing, which is why the split is stated
+this precisely.** Both were restated from memory of the sweep rather than recounted from the enumeration,
+and both were low. Re-running the tally under two instruments produced the figures now
+standing. A figure that has been derived once is not thereby safe to paraphrase; the paraphrase is a new
+claim.
+
+**Item 138's judgement was checked against the refined rule and survives, for a reason its own text already
+gives.** That entry chose to name four scripts rather than trust a count, on the ground that a directory is
+not a closed literal. Under the refined rule the answer is the same and slightly stronger: there is no
+literal anywhere, so no protective mechanism could have existed to lose. The refinement changes which
+entries were wrongly reassured, not that one.
+
+**Two instrument disagreements, both the instrument's fault.** A count of a union type's members read one
+high because the correction for a leading separator was applied to a union that already carried one. A
+corpus size read two high because the pattern matched two interface declarations sharing the field name;
+the corrected reading agrees with the test's own title, which states the size in words. Both are the
+thirteenth pattern's shape — a string search standing in for the property it is meant to measure — and
+both were caught by requiring a second instrument rather than by care.
+
+**Bucket: Neither.** A structural fact is recorded and every defect it names is already corrected.
+**Against Actionable now:** nothing is specified that has not been done; the four false limits and the two
+drifted counts are all fixed in the same pass, and the four un-derived figures are named as un-derived
+rather than left as silent scope. **Against Blocked on data:** nothing is missing that would change the
+finding; the population was enumerated exhaustively and each figure re-derived twice. Item 181's precedent
+governs, as it did for item 217 — a fact recorded, with nothing left specified. **Where the code lives:**
+the contributor guide at the repository root, in its adapters, dispatcher, plan-mode and subagent
+paragraphs. See item 217 for the sweep whose stated reason this refutes, item 116 for the two claims that
+prompted the second sweep, item 138 for the judgement checked against the refined rule, and the thirteenth
+pattern for the instrument shape that failed twice here.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 218 to find out which ones still need something. No index of
+reader the trouble of reading all 219 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (81): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 117, 120, 121, 126, 128, 129, 134, 135, 137, 144, 149, 150, 153, 156, 161, 162, 167, 171, 172, 176, 183, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212
+**Closed** (82): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 116, 117, 120, 121, 126, 128, 129, 134, 135, 137, 144, 149, 150, 153, 156, 161, 162, 167, 171, 172, 176, 183, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (9): 113, 116, 130, 138, 142, 148, 169, 182, 184
+first (8): 113, 130, 138, 142, 148, 169, 182, 184
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (16): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196
 
-**Neither — a structural fact recorded, with no fix proposed** (112): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (113): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152, 154, 155, 158,
 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199, 200, 201, 202, 205,
-206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 218
+206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 218, 219
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
