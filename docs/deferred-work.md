@@ -11899,7 +11899,7 @@ single rule on an unverified premise is the failure this arc keeps finding rathe
 
 **Bucket: Neither.** A structural fact is recorded and no fix is proposed.
 
-## 148. Actionable now — the CLAUDE.md behaviour-rule inventory is a belief carried across sessions and recorded nowhere
+## 148. Closed — the inventory ran: twenty-four behaviour rules, all codebase-specific, and the file the belief named should not be created
 
 **The claim, as it has been carried.** That an inventory pass ran over CLAUDE.md, found roughly two dozen
 cleanly extractable behaviour rules, sized the file, and recorded a decision to put workflow guidance in a
@@ -11927,8 +11927,76 @@ be asserting the same unrecorded premise in a new place.
 that a decision carried between sessions is not a decision the repository has made until something in the
 repository says so.
 
-**Bucket: Actionable now.** A fix is specified in the entry itself; nothing new needs to be
-learned first.
+**The inventory, run.** The checkable half of the belief holds exactly: the guide carries **twenty-four**
+behaviour rules — instructions to whoever works here, as against descriptions of how the system is built —
+which is the "roughly two dozen" the belief claimed, to the unit. The file measures 52,391 bytes under two
+instruments. Two scans found them, disagreeing as differently-built instruments should: a line-level scan
+for directive vocabulary returned twenty-seven candidate lines, a sentence-level scan for sentences whose
+subject is the reader returned sixteen, and the gap is descriptive uses of the same words — a hook that
+"never fails" is not an instruction. Each candidate was read, and each rule kept was then confirmed present
+by a phrase unique to it, against a control phrase shown to return nothing.
+
+**Enumerated rather than counted, on item 138's precedent and for its reason.** That entry named its four
+scripts because a count whose only holder is the sentence asserting it has to be recomputed to be checked,
+while names can be checked directly — and this guide is edited most weeks, so the count is a snapshot of a
+growing set from the moment it is written. At `f200190b` the twenty-four are: rebuild after editing the
+source tree, since the CLI runs from the built output; do not conflate the two senses of "investigate";
+do not trim a protected zone without a commit-recency check and a behavioural sweep; do not re-introduce an
+unconditional empty-REPLACE reject; do not trim the verifier shell discipline before its stated date; do not
+trim the brevity rules until a verbosity sweep confirms the reduction; edit the shared session-memory header
+in one commit; never give that directive a conditional toggle keyed on optional per-run data; do not revert
+the final-summary grouping instruction; do not use the pre-translation hash for cache questions; keep the
+two fallback-flag emitters in sync; do not run the archetype corpus test in local-only continuous
+integration; do not revert the sensitive-path check to a regular expression; do not memoize commands with
+side effects; write per-test mock setup, because the runner resets mocks between tests; resolve the home
+directory at call time in any new user-directory writer; import the filesystem module by default binding in
+those writers rather than by named function; do not build the shared tool-executor mock inside the hoisted
+block; scope the commit path by pathspec and never stage the whole tree; commit anything worth keeping
+before a sweep, which hard-resets its targets; use cache-aware arithmetic for prompt-prefix cost; treat the
+message history as append-only, never rewriting a message already sent; render transcript tests at explicit
+narrow widths rather than the harness default; and take large multi-feature refactors of this repository to
+another agent rather than to this one.
+
+**All twenty-four are about this codebase, and none is about method — which is what decides the question,
+and it is a zero rather than a count.** Every rule in that enumeration only means something against this tree. Not one is
+a reusable rule about how to investigate. That composition, unlike the twenty-four, does not drift with
+ordinary editing: adding codebase rules moves the total and leaves the zero alone, so the decision rests on
+the part of the measurement that accretion cannot disturb.
+
+**The decision: the file should not be created.** The guide is injected into the system prompt, which is
+where its rules take effect; moving them into a separate document would take codebase-specific instructions
+out of the only place they are read. The proposed file has no content to hold — its two candidate rules are
+accounted for elsewhere, and the twenty-four are already where they belong.
+
+**One of the two rules said to be waiting was already recorded, and this entry was wrong to count it.** Item
+147's rule is the closing line of the twenty-seventh pattern, which states it and names that entry. It has
+not been waiting for anything. The count of rules waiting for the file was one, not two.
+
+**The remaining rule is this entry's own, and it is declined against the pattern series' own bar rather
+than excepted from it.** That series states, and applies to its own candidates repeatedly, that one instance
+does not clear the bar for a pattern section. This rule has one instance: this entry. So it stays recorded
+here — which, by the rule's own terms, is a thing in the repository saying so, and therefore satisfies it.
+
+**What would reopen this, examined and found to be nothing.** A negative decision should name what would
+change it, and the honest answer is that no condition does. The two existing homes partition the space with
+nothing left over: a rule is either about this codebase, and belongs in the guide, or it is about method,
+and belongs in the pattern series when it reaches two instances or in its own entry until it does. A third
+document would need a third kind of rule to hold, and there is not one. Methodological rules accumulating
+is the obvious candidate trigger and it fails on inspection, because the series already takes exactly that
+content — accumulation feeds the series rather than creating a gap beside it. What remains is a different
+question this decision does not answer: single-instance methodological rules sit scattered across entries
+with no index, and whether that needs an index is about discoverability, not about placement.
+
+**Bucket: Closed**, decided on this entry's own condition rather than on the fix — the inventory has been
+run and its decision recorded, so the belief this entry describes is no longer unrecorded. Item 212's
+closure is the recent instance of this reading, itself reading item 198's. **Item 210's does not apply**:
+that one closes by discharging a *different* entry's recorded condition. **Item 181's does not apply
+either**: it is the shape for work shipped with no prior open condition, and this entry specified one.
+**Against Actionable now:** the specified work — the inventory, not the file — is done. **Against
+Neither:** a fix was specified and has been made, rather than a fact being left on the record. **Where the
+code lives:** the guide at the repository root holds all twenty-four rules; the twenty-seventh pattern
+holds item 147's. See item 147 for the rule already recorded there and item 152 for the entry that also
+deferred to a file this decides against creating.
 
 ## 149. Closed — one task in item 90's arm answered with no tool calls at all, and the judgment is residual suppression: three controls in the same arm searched under conditions identical to its own
 
@@ -16049,10 +16117,10 @@ priority ordering" cautions against ranking by importance, which this section do
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (85): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 134, 135, 137, 142, 144, 149, 150, 153, 156, 161, 162, 167, 171, 172, 176, 183, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218
+**Closed** (86): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 134, 135, 137, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 171, 172, 176, 183, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (6): 130, 138, 148, 169, 182, 184
+first (5): 130, 138, 169, 182, 184
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (16): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196
 
