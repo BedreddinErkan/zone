@@ -11209,7 +11209,7 @@ now:** the specified work is done, and was done before most of the passes that l
 document at the repository root's documentation directory. See item 127 for the measurement the scoping
 rests on, and item 218 for why this sat unnoticed.
 
-## 130. The shell's `grep` honours ignore files and excludes `CLAUDE.md` from every recursive scan, and the file git reports as not ignored is the one the search tool drops
+## 130. Closed — the ignore line that hid `CLAUDE.md` from every search tool is deleted, and a test keeps it deleted; the discipline it specified is no longer needed here
 
 **What it is, and the first framing of it was incomplete.** `grep` in this environment is a shell function
 execing the tool's own binary with `--ignore-files`. It excludes `CLAUDE.md` from recursive searches. The
@@ -11264,8 +11264,93 @@ nothing. Nothing further needs establishing: the mechanism, the excluded set and
 measured before this entry was written. See the twenty-fifth pattern for the general mechanism, and item 118
 for the author-written form of the same failure.
 
-**Bucket: Actionable now.** A fix is specified in the entry itself; nothing new needs to be
-learned first.
+**Re-derived and demonstrated this pass, not adopted.** `type grep` reports a shell **function**, not
+the binary `which -a grep` names — it ends in an exec of the tool under an ignore-honouring flag, and
+`find` is shimmed the same way. The excluded set, recomputed with git plumbing alone, is still exactly
+two paths, one of them deleted on disk, leaving **one effective exclusion**. The failure was shown
+rather than described: a needle located by a **node filesystem walk** — an instrument that cannot share
+the defect it measures — sits in exactly two files today; the shimmed `grep -rl` returned one of them
+and **exited 0**, while `command grep` and `git grep` returned both. The file it dropped was
+`CLAUDE.md`; the file it found, `docs/deferred-work.md`, is the control inside that same run, tracked
+and not pattern-matched, which isolates the ignore match rather than anything about the needle.
+
+**The diagnostic pair still disagrees exactly as recorded**, checked before anything was changed:
+plain check-ignore reported nothing and exited non-zero, the `--no-index` form named the matching line
+and exited zero. The pair is recorded here by shape and by exit-code direction rather than by line
+number, so nothing in it had gone stale.
+
+**The scope was narrower than this entry stated, and that is established by execution rather than by
+reading the shim.** A clean non-interactive shell — the shape a continuous-integration step gets —
+resolves `grep` to the real binary with no function in the way, and finds `CLAUDE.md` on the same
+needle. No shell startup file defines the shim either. **The trap is session-local: it cannot reach
+CI, and it never could.**
+
+**What made the fix possible is that the cause was one inert line.** Git declines to ignore the file
+because patterns do not apply to tracked files — so the pattern does nothing for git, proven by that
+same disagreeing pair. It does everything for search tools, proven by an A/B on the same binary with the same
+flags where only the ignore-file *name* changed: pointed at the real file, the path vanishes; pointed
+at a name that does not exist, it appears. The line arrived in a work-in-progress commit one day
+before the decision to track the file, and was superseded rather than intended.
+
+**The blast radius was established before deleting it, because "visible to more tools" is a change
+rather than an absence of one.** Three consumers were measured dropping the file and now see it: the
+shell's own search, the ripgrep the search tool wraps — which honours ignore files natively, confirmed
+by running it with and without that behaviour — and the fast-glob path used by the listing and
+reference tools, whose ignore-pattern builder was **executed directly** and observed emitting two
+patterns for this one filename, then observed emitting none. The real listing tool was run through its
+own executor before and after: it did not name the file, then it did, against a tracked sibling
+markdown file as the in-run control both times. Two further mentions of the ignore file in the patch
+flow were read and are about that file being uninteresting context, not about its contents. **Nothing
+in production reads `CLAUDE.md` at all** — zero references across the non-test source — so prompt
+assembly is unchanged in both directions and the change cannot alter what a run begins with, only what
+a search inside one is able to find. **Deliberately wanted, not accepted by default:** the exposure is
+a filename in a listing and matches inside one markdown file, the escape hatch for reaching ignored
+paths is untouched, and the hard denylist of build directories is independent of ignore files and
+unaffected — while the defect being removed is a silent false negative over the project's own guide,
+which is this entry's original complaint aimed at the tools the agent itself uses.
+
+**Whether the specified discipline had taken is not answerable from the artefacts, and two failed
+instruments are why that is worth recording.** A first text-mining pass over this document scored a
+recent entry as unguarded when its own opening sentence names two independent instruments — wrong for
+two sufficient reasons at once, a line wrap splitting the phrase and a vocabulary too narrow, each
+confirmed by isolating it. A second pass, corrected for both, still returned a share built almost
+entirely on false positives: every remaining flagged entry numbered past a recent threshold had matched an
+ordinary prose use of a two-word phrase that means something unrelated to a search result. **The share
+is therefore withheld rather than reported**, because a denominator inflated by a phrase meaning
+something else is not a measurement. What is establishable was measured instead: the convention's
+adoption across entry-number bands rises from none to roughly half, and a scan of every tracked
+executable file finds **no committed artefact that runs an unguarded recursive search** — the handful
+of matches are all fixtures asserting how the agent's own commands get classified, a prompt example,
+or the word used as an adjective in a comment. The trap had no committed surface; it lived only in the
+interactive session, which is exactly why a constructive fix beats a procedural one.
+
+**The premise that nothing could enforce this was wrong.** A test can see it, because both of its
+inputs are committed text: the index and the ignore file. The invariant — no tracked path that exists
+on disk is matched by an ignore pattern — returned exactly one path before the deletion and none
+after, and now fails if anyone reintroduces one. It is deliberately scoped to paths present on disk: a
+tracked path deleted in the working tree is invisible to every tool regardless, so it is not this gap,
+and the repository's one such path is correctly not a failure. Mutation testing confirmed all four
+edges, including that last one as a survivor by design and the no-match exit code as a boundary the
+naive implementation gets backwards.
+
+**What was deliberately not written, on item 148's own bar.** No rule was added to the guidance file:
+it is read into every run, and a standing warning about a condition this repository no longer has
+would cost tokens on every run to describe a trap that has been removed. No new pattern was added
+either — the twenty-fifth already carries this exact mechanism and cites this entry by name for the
+blast radius, and the series' one-instance bar covers what is left. The remaining general risk, a
+future ignore line naming a tracked file in some other repository, is what the test now catches here
+and what the pattern already describes in general.
+
+**Bucket: Closed**, decided on this entry's own condition rather than on the fix — the reading item
+198's closure established and item 212's applied. The condition was that a discipline was specified
+and nothing made it durable; the trap it disciplined against no longer exists in this repository, and
+a committed check keeps it that way. Item 210's reading does not apply, since that one discharges a
+different entry's recorded condition rather than its own. Item 181's does not apply, since this entry
+had a specified, open condition rather than work shipped against none. **Against Actionable now:** the
+fix is done and guarded, not merely specified. **Against Neither:** a fix was proposed, built and
+verified, not left as a fact on the record. **Where the code lives:** the deleted line was in the
+ignore file at the repository root; the guard is `scripts/gitignoreTrackedFiles.test.ts`; the
+fast-glob consumer is `gitignoreGlobs` in `src/tools/searchIgnore.ts`.
 
 ## 131. A failure class that is near-certain in targeted runs and invisible in the full suite, because dilution is temporal rather than structural
 
@@ -16329,10 +16414,10 @@ priority ordering" cautions against ranking by importance, which this section do
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (90): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218
+**Closed** (91): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (1): 130
+first (0):
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (16): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196
 

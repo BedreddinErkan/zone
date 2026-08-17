@@ -25,7 +25,6 @@ data/sweep-results.csv
 scripts/*.js
 scripts/*.js.map
 scripts/*.d.ts
-CLAUDE.md
 err.txt
 out.txt
 *.log
