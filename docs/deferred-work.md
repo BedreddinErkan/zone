@@ -10412,7 +10412,7 @@ item 114 for the cache that does exist and what it is keyed on.
 
 **Bucket: Neither.** A structural fact is recorded and no fix is proposed.
 
-## 113. `pickClassifierModel`'s own cost comment understates the real per-call cost by about 4.2× — correct the comment
+## 113. Closed — the classifier cost comment is rewritten; the bound it claimed was never reachable, not merely stale, and this entry's own measurement of it does not reproduce
 
 **What it is.** The comment above the classifier's model selection asserts the call stays "well below
 $0.0005/classification for prompts under ~500 tokens." Neither half holds. The prompt is about 1,557
@@ -10424,18 +10424,95 @@ cannot drift the way an unlabelled approximation does. The correct value is alre
 nothing further needs to be established first. The same entry records why the call is uncached, which is
 the reason the real cost is what it is.
 
-**Both figures are now measured rather than estimated, and the entry was true as written.** They were
-derived from a characters-over-four proxy and from a rate card. Restricted to classifier-shaped calls in the
-per-call usage log — output inside the configured ceiling, no cached portion, seven hundred and fifteen of
-them — the median input is one thousand six hundred and eleven tokens against this entry's one thousand five
-hundred and fifty-seven, and the median cost is twenty-one ten-thousandths of a dollar against its own
-figure of exactly that. **The proxy is confirmed within four percent and the cost to the cent.** Nothing
-here changes; what changes is that the fix can now name a measurement over real calls instead of an
-approximation, which is what its own instruction about naming the basis was asking for. See item 163 for the
-instrument.
+**This entry's own measurement does not reproduce, and its origin is undetermined.** It recorded seven
+hundred and fifteen classifier-shaped calls, a median input of one thousand six hundred and eleven
+tokens, and a median cost of twenty-one ten-thousandths of a dollar. Nineteen filter readings were swept
+— eleven at the ledger size this entry's measuring pass states it read, eight at the size it has now —
+and the counts they yield are three hundred and forty-two, three hundred and eighty-one, three hundred
+and eighty-three, four hundred and twenty-two, four hundred and ninety-four, five hundred and
+thirty-nine, seven hundred and fifty-two, one thousand and ninety, one thousand and ninety-five, one
+thousand one hundred and nine, one thousand one hundred and fourteen, one thousand one hundred and
+thirty-one, one thousand one hundred and thirty-five, one thousand one hundred and thirty-six, one
+thousand one hundred and fifty, one thousand one hundred and fifty-five, one thousand one hundred and
+seventy-six, one thousand one hundred and seventy-nine, and one thousand six hundred and eighty-five.
+**Seven hundred and fifteen is not among them.** No reconstruction of how the figure arose is offered
+here, because none is established: a filter that would produce it was looked for and not found, and
+naming a cause on that evidence would be a guess wearing a finding's clothes.
 
-**Bucket: Actionable now.** A fix is specified in the entry itself; nothing new needs to be
-learned first.
+**What "does not reproduce" means here is the strong reading, not the weak one, and the difference is
+worth stating.** An absence can mean the records are gone. These are not: the usage ledger's writer
+contains no rotation, cap, prune or unlink — established by reading the whole three-hundred-and-four-line
+module, with the search shown finding its three append sites first — so nothing it has ever written has
+been removed. The count of records dated on or before the day this entry's measurement was written
+reproduces that pass's own stated ledger size **exactly**, at seven thousand five hundred and sixty-two,
+which confirms the window rather than assuming it. The data this entry measured over is still on disk and
+still does not yield its figures.
+
+**Re-derived, with the population named because the population behind the figures it recorded is what
+cannot be recovered.** Restricting to a classifier-capable model, no subagent marker, output inside the configured
+ceiling and no cached portion gives one thousand one hundred and seventy-six calls at `cb00e310`. Seven
+hundred and fifty-four of those carry an empty run identifier — the manual probe scripts item 163 names —
+leaving **four hundred and twenty-two production calls across four hundred and seventeen runs, four
+hundred and twelve of which hold exactly one**, which is the one-classification-per-run signature that
+confirms the discriminator rather than assuming it. Of those, the three hundred and eighty-three on the
+default Anthropic model have a median input of one thousand six hundred and seventy-five tokens and a
+median cost of twenty-three ten-thousandths of a dollar. Two instruments agree on every figure: a
+structured parse and a line-oriented shell pipeline, the second shown first finding the model's own
+record count. See item 163 for the instrument and for the probe contamination it records.
+
+**The bound was never reachable, which is a different defect from the one this entry records.** This
+entry says the comment understates by about four point two times — a magnitude error. Executed against
+the repository's own cost function, holding the response at the hundred and ten tokens the classifier's
+own ceiling comment records as measured: on `claude-haiku-4-5` the **response alone** costs
+fifty-five hundred-thousandths of a dollar at the table's five-dollars-per-million output rate, which is
+already more than the five-ten-thousandths the comment claimed. **No prompt size brings a classification
+under that figure, including a prompt of length zero.** The claim was unsatisfiable on the day
+`e716ab90` wrote it, not a figure that drifted. On the model the comment named it holds only up to six
+input tokens; the arithmetic never worked on either.
+
+**Tested both ways it can be read, and it fails both.** Read as a conditional — a bound holding *for
+prompts under about five hundred tokens* — it is falsified rather than vacuous, because calls meeting
+that condition exist: a hundred and twenty-six of them, of which **a hundred and twenty-two exceed the
+bound**, the smallest a hundred-and-seventy-three-token prompt costing six ten-thousandths of a dollar.
+Read as this entry reads it, a conjunction of two claims, both fail: **none of the four hundred and
+twenty-two production calls is under five hundred tokens**, the smallest being six hundred and
+forty-one, and every one of the three hundred and eighty-three on the default model exceeds the cost
+figure.
+
+**A second defect in the same sentence, with the opposite history.** The comment named a model for the
+OpenAI branch that the function no longer returns. That half was **correct when written** — `e716ab90`
+introduced comment and model together — and drifted at `be1482a6`, which flipped the default without
+touching the comment. Correct-at-writing-and-since-stale and never-true are different failures sharing
+one sentence, and only the first is what a staleness sweep would look for.
+
+**And the sentence is accidentally true for the provider it does not name.** On the model the branch
+actually returns today the bound would hold up to two thousand eight hundred and ninety-three input
+tokens, and the measured median for those calls is three ten-thousandths of a dollar — under the bound.
+So the claim is false for the default provider and correct for the other, which is a scope defect rather
+than an arithmetic one.
+
+**The replacement states no measured figure, and that is a decision against this entry's own prescribed
+fix.** This entry specified naming the measured value so it could not drift. Establishing the figure
+showed why that form is unavailable: the per-call ledger sits outside the repository with no tracked
+copy, so a reader on a fresh checkout cannot check such a number at all — it would rest on the comment's
+own authority. Pinning it by test, the way a committed fixture's count is pinned, would require
+committing per-call billing records, which is a separate decision this pass declines to make alone. What
+went into the comment instead is the structural fact, which is **checkable from two literals already in
+the tree**: the output rate in the pricing table, and the response size in the classifier's own
+output-ceiling comment. The measurement lives here, where a population and an instrument can travel
+with it, rather than in a source comment where neither can.
+
+**Bucket: Closed**, decided on this entry's own condition rather than on the fix — the comment no
+longer carries the claim, so the fact recorded here no longer holds. Item 212's closure is the recent
+instance of this reading, itself reading item 198's. **Item 210's does not apply**: that one closes by
+discharging a *different* entry's recorded condition. **Item 181's does not apply either**: it is the
+shape for work that shipped with no prior open condition, and this entry had one. **Against Actionable
+now:** the specified work is done, in a form the specification did not anticipate and this entry now
+records. **Against Neither:** a fix was specified and has been made, rather than a fact left on the
+record. Everything found beyond what this entry recorded — the bound's unreachability, the stale model
+name, the accidental truth on the unnamed provider, and this entry's own irreproducible figures — stays
+here rather than becoming its own entry, on item 217's test: those findings are all about this one
+sentence or about this entry's record of it, not kinds found elsewhere in a wider sweep.
 
 **Where the code lives:** the comment sits directly above the model-selection function in
 `taskClassifier.ts`. This entry is the fix; item 112 is the finding that produced it.
@@ -15923,10 +16000,10 @@ priority ordering" cautions against ranking by importance, which this section do
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (83): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 116, 117, 120, 121, 126, 128, 129, 134, 135, 137, 144, 149, 150, 153, 156, 161, 162, 167, 171, 172, 176, 183, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218
+**Closed** (84): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 134, 135, 137, 144, 149, 150, 153, 156, 161, 162, 167, 171, 172, 176, 183, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (8): 113, 130, 138, 142, 148, 169, 182, 184
+first (7): 130, 138, 142, 148, 169, 182, 184
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (16): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196
 

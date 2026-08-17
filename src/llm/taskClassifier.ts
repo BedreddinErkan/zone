@@ -288,9 +288,18 @@ function hashTask(taskDescription: string): string {
 }
 
 function pickClassifierModel(provider: LLMProvider): string {
-  // Use the cheapest registered model per provider. claude-haiku-4-5 ~$1/Mtok
-  // input, gpt-5.4-mini ~$0.75/Mtok input — well below $0.0005/classification
-  // for prompts under ~500 tokens.
+  // Cheapest registered model per provider. Rates are not restated here — they
+  // live in PRICING_USD_PER_MTOK (usage/pricing.ts), and a copy in a comment
+  // drifts from the table that actually bills.
+  //
+  // Cost is dominated by the uncached prompt, not by the response:
+  // CLASSIFIER_SYSTEM_PROMPT is ~1.5k tokens by the four-chars-per-token proxy,
+  // while the response is the ~110 tokens CLASSIFIER_OUTPUT_CEILING's own comment
+  // records as measured. This replaces an earlier claim of a sub-$0.0005 ceiling
+  // conditioned on prompts of a few hundred tokens. That ceiling was never
+  // reachable on claude-haiku-4-5: the response alone costs $0.00055 at the
+  // table's $5/Mtok output rate, so no prompt size gets a call under it. See
+  // docs/deferred-work.md items 112 and 113.
   if (provider === "anthropic") {
     return process.env.ZONE_CLASSIFIER_MODEL_ANTHROPIC?.trim() || "claude-haiku-4-5";
   }
