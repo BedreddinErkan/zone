@@ -14496,50 +14496,104 @@ whether anything reads them are the second type-check config and the suite's own
 patterns are in the repository-root ignore file, carrying a comment that points back at this entry. See item
 181 for the check that now covers that directory.
 
-## 184. The guidance file quotes a predicate verbatim from source, and nothing checks that the two still agree
+## 184. Closed — the quotation is checked, the guide now states its own convention, and the sweep for the rest of the class found a second real instance and one false claim
 
-**What it is.** The project's top-level guidance file has no mechanical protection of any kind. This session
-found three defects in it: two false statements about how subagent dispatch is withheld, and a positional
-referent with no antecedent introduced while correcting them. Every one was caught by a person reading it
-against the code, and nothing would have caught any of them otherwise.
+**What it is.** The project's top-level guidance file quotes the budget gate's real predicate — copied
+character for character from the line that defines it — and nothing checked the two still agreed.
+Re-derived from zero this pass rather than adopted: both instruments (programmatic extraction plus a
+fixed-string grep, independent in mechanism) confirm the quotation is still byte-identical to the source line
+it names, not drifted.
 
-**Why one of its claims is now different in kind from the rest.** Most of that file is prose that describes
-code, and prose has no canonical form to check against. But the correction that closed item 176 put a
-**verbatim quotation of a source expression** into it — the budget gate's real predicate, copied character
-for character from the line that defines it. Both instruments confirm that exact string currently occurs in
-precisely two files, the guidance file and the source file the guidance file names. **The scope that
-"precisely two" was measured under, supplied here because the sentence did not state it:** two counts
-tracked files. Unfiltered, the same string occurs in **five** at `f2b3034b` — the three additional ones are
-all derived from the source file rather than independent statements of it: the compiled output, a frozen
-copy of that output kept as a measurement arm, and an audit note quoting it. The check proposed below is
-unaffected, since it asserts the string against the source file by name; what changes is that a reader
-running the unfiltered search and getting five has not found a discrepancy. A quotation is
-checkable in a way a paraphrase is not: it either still occurs in the file it claims to come from or it does
-not.
+**The predicate is an inline expression, not a named export, established by execution rather than assumed.**
+It is declared once, as a local `const` inside the function that resolves the loop's tool set at entry, a
+pure function of two already-computed locals, and nothing imports it — every other occurrence of its name
+elsewhere in the tree is a comment or an unrelated field sharing the name for telemetry-shape reasons. This
+is what rules out pointing the guide at an export instead of quoting: there is nothing to point at without
+first changing production source for a documentation problem.
 
-**The check's shape, which already exists in this repository for a different file.** Store the quoted
-predicate and the source path it is attributed to, then assert the source file still contains that string —
-failing with both the expected and the actual when it does not. That is the same shape as the module now
-holding this document's anaphor convention: an expectation stored as an artefact beside a test, so drift in
-the thing being described fails a check rather than waiting to be noticed. It does not verify the surrounding
-prose, and it should not be described as protecting the file; it protects one quotation, which is the one
-claim in the file with a form precise enough to protect.
+**The three derived copies, each confirmed by its own mechanism rather than assumed to share one.** The
+compiled copy is current — newer than the source it is built from, by direct comparison, and the check below
+is unaffected by its existence since it asserts against the named source file, not against every occurrence.
+The frozen snapshot is older than the live build, referenced by exactly one shell script selecting it as one
+arm of a specific, now-closed measurement, read by no test. **The audit note has already drifted, and it is
+kept as a demonstration rather than corrected**: it quotes an older form of the same predicate, from before
+its second clause existed, at a line number the file has long since moved past. Nothing reads an audit note
+against live source — that is what the genre is for — and its drift is the clearest evidence in this pass
+that an unwatched copy of source text rots exactly the way this entry says it does.
+
+**The population swept by shape, not assumed to be the one instance already named.** Every backtick span in
+the guide (1,014 total, 850 unique) filtered to ones shaped like an expression and checked against the tree
+it describes. Of twenty-one candidates beyond this entry's own: **exactly one is a second genuine
+byte-exact quotation, and it currently agrees** — `isHeadless`'s assignment in the CLI entry point, bare and
+unprefixed the same way this entry's own predicate is. **The other nineteen are not verbatim-quotation
+claims at all** — they are a consistent, previously unnamed house style: real predicates rendered in prose
+with enclosing-object prefixes stripped (`state.`, `input.`, `cfg.`, `env.`) and multi-clause conditions
+compressed to their gist, confirmed by reading each against its current source rather than assumed from
+its code-like appearance. None of the nineteen needed correcting; none is a quotation this entry's check
+applies to. **One candidate was neither** — `result.success === true`, attributed to the
+`[zone-subagent-dispatched]` telemetry gate, matches no source location at all and is corrected below as a
+false claim, the same incidental-discovery shape three earlier passes in this session each closed on its own
+terms.
+
+**The convention itself was unrecorded, which is a defect the sweep's own result exposes.** A reader facing
+twenty-two expression-shaped spans with no stated rule has no way to tell which are checkable claims and
+which are prose by design — exactly the condition under which a later pass either "corrects" a paraphrase
+into a false quotation or adds a test that fires on innocuous rewording. **No section of the guide already
+stated how to read it** — confirmed by sweeping the file for exactly that language before choosing a
+location, not assumed absent. The convention is now stated in the guide's own opening, immediately after its
+one existing sentence about itself and before any section begins: a quoted expression attributed to a named
+file is byte-exact and checked; everything else is paraphrase, by design, checked by nothing and needing
+nothing. **This entry also carries it**, on the same reasoning item 148 gave for what belongs in which of
+this repository's two documents: the guide is what governs a run, so the rule that decides what a run's own
+author can trust lives there; this entry is the historical record of the decision and states the rule so a
+later reader of the ledger does not have to cross-reference the guide to know what shipped and why — it is
+not a second live copy the guide's own copy must stay checked against, which would recreate the exact
+problem this entry closes.
+
+**The check's shape, matching what already exists in this repository for a different file, extended rather
+than narrowed at implementation.** Both genuine quotations are stored as artefacts — the quoted text and the
+source path each is attributed to — and each is asserted present in **both** directions: the guide still
+quotes it, and the named source still contains it. The entry's own original proposal checked the source side
+alone; both directions cost nothing extra and catch a broken artefact the same way a broken source is caught.
+**The test's own file states the scope explicitly, not left to be inferred from a short list**: the two pairs
+are the entire checked set, every other expression span in the guide is paraphrase by the convention the
+guide's own opening now states, and a future pair belongs there only when its prose starts asserting byte-exactness for a new
+expression shaped like these two — not when a paraphrase would be convenient to check.
 
 **What it would and would not have caught, stated so the value is not overstated.** It would not have caught
-either of the two false statements this session fixed — both were wrong about which mechanisms exist, not
-misquotations, and the file quoted nothing at the time. It would catch the failure mode the correction
-newly created: the predicate being edited in source while the file keeps quoting the old form, which is the
-more likely future error precisely because the file now looks authoritative on that line.
+either of the two false statements a prior pass in this session fixed, since neither was a misquotation and
+the guide quoted nothing at the time. It would not have caught `result.success === true`, which names no
+source location a test could point at — that is exactly why it is fixed by correction, not by a check. It
+catches the one failure mode it was built for: the predicate changing in source, or the guide's own copy
+being edited, while the other side is not.
 
-**Bucket: Actionable now.** The fix is specified and its scope is named, the two strings were confirmed
-identical at the time of writing, and the pattern to copy already exists in this repository. **Against
-Neither:** work is specified. **Against Blocked on data:** no observation is missing; both occurrences were
-located under both instruments.
+**`result.success === true` corrected** to state the real gate — the output parsed as a genuine dispatch
+JSON, independent of success or failure, matching the source comment's own stated reason for the design.
 
-**Where the code lives:** the quotation is in the subagent-dispatch paragraph of the guidance file at the
-repository root; the expression it quotes is the budget-gate assignment in the agent loop. See item 176 for
-the correction that introduced the quotation, item 180 for the artefact whose shape this would copy, and the
-twenty-sixth pattern for citation copying a claim more reliably than checking one.
+**Mutation testing confirmed the check and its own boundary.** Mutating the real predicate's source, and
+separately the guide's own copy, each killed exactly the one assertion on that side and no other — both
+confirmed live before being read, both reverted clean. A third mutation weakened the stored artefact to a
+short prefix and then mutated only the *later* part of the real line: all four assertions passed regardless,
+demonstrating live that a short or loose matcher would miss precisely the drift a full-length one catches —
+the reason the two real artefacts are stored at full length rather than trimmed for readability.
+
+**Bucket: Closed**, decided on this entry's own condition rather than on the fix, the reading item 198's and
+item 212's closures gave and item 218 gave its own: the fix this entry specified — protect the quotation
+with a source-backed check — is exactly what this pass performed. Item 210's reading does not apply, since
+that one discharges a different entry's recorded condition. Item 181's does not apply, since this entry had
+a specified, open condition rather than work shipped against none. **The `isHeadless` population question is
+decided on item 217's own two-condition test**, both required: the population is genuinely larger than this
+entry's single named instance, but it is the *same kind*, not an unanticipated one — another bare, unprefixed
+local expression coinciding with byte-exactness exactly like the one already named. The kind half fails, so
+this **extends the entry** rather than warranting a new one, folded into the same closing text and the same
+test file rather than left to a later pass. **Against Actionable now:** the fix is done, backed by a passing
+mutation table, not merely still specified. **Against Neither:** a fix was proposed, built, and verified, not
+left as a fact on the record. **Where the code lives:** the two quotations sit in the guide's subagent-dispatch
+and entry-points paragraphs; the convention sentence is in the guide's own opening; the check is
+`scripts/claudeMdQuotations.test.ts`. See item 176 for the correction that introduced the original quotation,
+item 180 for the artefact shape this copies, item 148 for the two-document division this entry's convention
+placement follows, item 217 for the population test applied to `isHeadless`, and the twenty-sixth pattern for
+citation copying a claim more reliably than checking one.
 
 ## 185. Closed — the ranking predicate matched its skip tokens as unanchored substrings and dropped fifty-two of this repository's own tracked files
 
@@ -16210,10 +16264,10 @@ priority ordering" cautions against ranking by importance, which this section do
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (88): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 171, 172, 176, 182, 183, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218
+**Closed** (89): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (3): 130, 169, 184
+first (2): 130, 169
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (16): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196
 
