@@ -16481,7 +16481,7 @@ subagent-dispatch module, the two prompt blocks in the agent loop, and the cross
 See item 116 for the count that surfaced the divergence and item 219 for the restatement mechanism this
 is an instance of.
 
-## 221. The usage ledger's run-summary records are not what they claim to be, in two independent ways
+## 221. Closed — the usage ledger's run-summary records were not what they claimed to be, in two independent ways, and the entry's own account of the damage was itself wrong
 
 Surfaced while establishing item 57's timeout value, which needed a latency distribution and found
 that the field carrying it is mislabelled at the source.
@@ -16495,13 +16495,40 @@ count with no JSON parser: **926 records carry `latencyMs`, all 926 are `__run_s
 say `openai`, and no sentinel lacks `latencyMs`.** A perfect 1:1, which is what makes the literal
 visible: a genuine provider split could not be that clean.
 
-**What this costs downstream.** The sentinel is read by `metricsAggregator`, which feeds the
-`/metrics` modal and the Prometheus export, so every latency percentile Zone reports about itself is
-attributed to one provider by construction. It also produced a real analytical error before being
-caught: an earlier pass read the resulting split as "latency coverage is 47% on OpenAI and 0% on
-Anthropic" and concluded the default provider was uninstrumented. Neither half was true. The 47% is
-926 sentinels divided by 926 sentinels plus 1,045 real OpenAI inference records, and the 0% is the
-literal rather than a gap — **every** top-level run of either provider is instrumented.
+**A sibling function carries the identical defect, found while locating this one by shape rather
+than assumed to be the only instance.** `recordRunRetry`, same file, same hardcoded `provider:
+"openai"` literal on its own sentinel (`model: "__run_retry__"`, 15 historical records). Fixed
+alongside `recordRunSummary` rather than as its own entry — it fails item 217's two-condition test
+in both directions: same population, same kind.
+
+**What this costs downstream — corrected, not adopted, on re-derivation.** This entry originally
+named `metricsAggregator`, the `/metrics` modal, and the Prometheus export as consumers that
+attribute latency to one provider by construction. **Two of those three claims are false, read
+directly rather than inferred.** `metricsAggregator.ts`'s `RunRecord` type has no `provider`
+field at all; `buildRunRecords` and `aggregateMetrics` never read `.provider` anywhere in the
+file, so the `/metrics` modal's latency percentiles already mix every provider together regardless
+of the sentinel's label. The Prometheus exporter takes the same provider-blind input type and — by
+two independent instruments, a direct call-site grep and a whole-tracked-tree text search — **has
+zero production callers**; it is not merely unaffected, it is not wired to anything.
+
+**The real, previously-unnamed casualty is `getUsage()`'s `byProvider`.** Executed against the
+live ledger (read-only): `byProvider.openai.runs` reported **813**. The true count of runs that
+ever made a real OpenAI call, via the runId-join reference method, is **~99**. The mechanism:
+`byProvider` groups by distinct `runId` per provider, and every sentinel's real, non-empty
+`runId` landed in the `openai` bucket regardless of the run's actual provider — so the field
+counted nearly every run in the dataset, not just genuinely-OpenAI ones. `.tokens`/`.costUsd` were
+unaffected (a zero-cost sentinel adds zero to a sum; the corruption entered through set membership,
+not summation). **But `.byProvider` had zero production readers** — every production caller of
+`getUsage()` uses only `.totalCostUsd`; the sole tracked reader of `.byProvider` is a manual
+probe script, and even that reads only `.tokens`/`.costUsd`, never `.runs`. No tracked doc ever
+cited a `byProvider` figure. Real, measured, and — until this pass's fix — permanently inert: a
+defect nobody had been shown a wrong number by.
+
+**The separate analytical error this entry also records stands as originally written.** An earlier
+pass read the sentinel-driven split as "latency coverage is 47% on OpenAI and 0% on Anthropic" and
+concluded the default provider was uninstrumented. Neither half was true. The 47% is 926 sentinels
+divided by 926 sentinels plus 1,045 real OpenAI inference records, and the 0% is the literal rather
+than a gap — **every** top-level run of either provider is instrumented.
 
 **The attribution is recoverable, which is why this is a defect rather than a loss.** Joining each
 sentinel to the real inference records sharing its `runId` recovers the true provider: 550
@@ -16522,11 +16549,24 @@ that window — an informative zero, not a vacuous one. What is not established 
 guard that was already in place, and the entry does not guess. The records themselves remain on
 disk and will keep contaminating any percentile computed over the whole ledger.
 
-**What would close it:** thread the real provider into `recordRunSummary` rather than hardcoding
-one, or write a neutral sentinel value that consumers must resolve by join instead of silently
-believing. Either is specified; neither needs anything new to be learned first. The historical
-records cannot be relabelled in place without the same join, so a decision about backfill belongs
-with whoever changes the writer.
+**What closed it.** Both writers now take the run's real provider as a required parameter; the
+call sites (`agentLoop.ts`, both) pass `input.provider ?? getRequestContext()?.provider ??
+"anthropic"` — the same three-tier precedence `factory.ts`'s own `resolveProvider` uses, so the
+sentinel always agrees with whatever the run's own top-level client actually resolved to. **No
+backfill**, decided rather than left implicit: existing on-disk records keep their old, wrong label,
+for the same reason the `latencyMs` rename was declined — the corrupted field
+(`getUsage().byProvider`) has zero production readers today, so the cost of leaving stale history
+alone is low, and a join remains available to anyone who needs the true historical attribution.
+
+**The `latencyMs` label — examined and deliberately left.** The field's own doc comment
+(`UsageRecord.latencyMs`) was already accurate before this pass — "total wall-clock duration of the
+run in ms... Set only on the terminal run-summary record." A rename would touch the on-disk JSONL
+field name across ~926 existing records with no migration, plus the type, the param, `RunRecord`,
+`MetricsResponse`, the TUI modal, the Prometheus formatter, and every test asserting on the field
+by name — disproportionate for a name a future code-reader can already resolve correctly at the
+type definition. Left as-is. The one place a real *user*, not a maintainer with source access, saw
+the bare word "Latency" with no qualification was `MetricsModal.tsx`'s two labels — relabelled to
+`"P50 Run Time"`/`"P95 Run Time"`, the only change to that file.
 
 **Why this is its own entry rather than part of item 57.** Item 217's two-condition test, both
 halves required. The population is larger: the mislabelling reaches `metricsAggregator`, the
@@ -16536,38 +16576,128 @@ is a telemetry-labelling defect in a different subsystem that merely happened to
 kind half is the one that has failed on recent applications, so it is stated explicitly rather than
 assumed — item 57 contains no claim about the usage ledger at all, correct or otherwise.
 
-**Bucket: Actionable now.** A fix is specified in this entry and nothing new needs to be learned
-first. Deliberately not Blocked on data: the observation that would motivate it has already been
-taken and is recorded in this entry.
+**Bucket: Closed**, decided on this entry's own condition rather than on the fix — the reading
+items 198 and 212 share. Its condition was that a fix be specified with nothing new to learn; the
+fix shipped, and the establish that preceded it corrected two of the entry's own three named
+downstream consumers along the way. Item 210 does not apply (it discharges a *different* entry's
+condition); item 181 does not apply (this entry had a specified, open condition, where 181 had
+none).
 
 **Where the code lives:** the sentinel writer is in the usage tracker; the field it mislabels is
 written at the single `latencyMs` site in the agent loop, which computes a whole-run wall clock and
 not a request duration. See item 57 for what that second property cost, and item 220 for the
 neighbouring shape — a field whose recorded values cannot answer the question they were added for.
 
+## 222. A dispatched subagent can silently default to the wrong provider, and the gap is reachable, not merely unobserved
+
+Surfaced establishing item 221's own claim that a run's provider is knowable and singular at its
+sentinel-writer call site. It is, for the run's own top-level inference — but subagent dispatch
+resolves its provider independently, through a different mechanism that can disagree.
+
+**The mechanism.** Subagent dispatch (`toolExecutor.ts`, the live `Task`-tool handler) resolves its
+own provider via `getRequestContext()?.provider ?? "openai"`. `runLlmPatchFlow.ts` never calls
+`withRequestContext` itself to set `.provider` — it relies entirely on whichever outer caller
+wrapped it. Two of roughly six production entry points into `runLlmPatchFlow` do not:
+`dispatch.ts`'s `runHeadless` JSON-output branch, and `cli/index.ts`'s `runTaskOnlyFlow` branch.
+
+**Reachability was established for each path, not assumed from the mechanism alone.**
+
+- `dispatch.ts`'s branch fires whenever headless mode (`options.print === true ||
+  !process.stdout.isTTY` — any CI/scripted/piped invocation) combines with `--output-format json`.
+  Provider, `runId`, and `forceTier` are passed normally elsewhere in the same call, but nothing
+  sets the request-context `.provider` a nested subagent dispatch would read. **Reachable under
+  ordinary usage.**
+- `cli/index.ts`'s branch requires the deprecated `--task <text>` flag (commander's own help text:
+  `[deprecated: use positional arg]`) together with `--task-only`, in an interactive TTY, with no
+  positional task argument — the routing code labels the sibling branch `"legacy"` explicitly.
+  Narrow, but not dead: reading `runLlmPatchFlow`'s handling of `dryRun` end to end shows the value
+  reaches exactly one place, a debug-log payload — it gates no branch and disables no tool. Neither
+  `dryRun` nor the absent `runId`/`provider` blocks `Task` from being offered: the quota lock keys
+  on `parentRunId = input?.runId`, and the counting functions are a plain `Map<string,number>` —
+  `undefined` is a valid, non-throwing key. **This path is, in fact, the exact condition under which
+  the divergence fires**: with neither `input.provider` nor request-context `.provider` set, the
+  main loop's own client defaults to `"anthropic"` (via `resolveProvider`'s own fallback) while a
+  dispatched subagent defaults to `"openai"` — nothing overrides either.
+
+**Empirically, 0 of 18 ledger runs with a subagent-bearing record show a provider mismatch** — this
+reflects that subagent dispatch itself is uncommon and that this specific intersection is narrower
+still, not that the mechanism cannot fire.
+
+**Same class of defect as item 221, same underlying cause, and two more instances.** A tree-wide
+sweep for hardcoded `"openai"` provider defaults (two independent forms) found four historical
+introductions, git-blamed precisely against `9fd0f132` ("fix(byom): default provider resolution →
+anthropic", 2026-05-16 02:01, confirmed the project's central default flip via `git
+merge-base --is-ancestor`):
+
+| Site | Date | Relative to the fix |
+|---|---|---|
+| `toolExecutor.ts` (the live subagent dispatch) | 2026-05-14 | 2 days before |
+| `recordRunSummary` (item 221) | 2026-05-16 03:44 | 1h43m after |
+| `recordRunRetry` (item 221) | 2026-05-17 | 1 day after |
+| `subagentDispatch.ts`'s `logSubagentDispatched` — the `[zone-subagent-dispatched]` telemetry emitter, a fourth site, log-only consequence | 2026-05-22 | 6 days after |
+
+**The cause is not one copied line; it is two.** The live dispatch site predates the project's own
+default-provider fix by two days — a legitimate default when written, stranded when the central
+default moved. The other three were all written *after* the fix landed, most plausibly by pattern-
+matching an existing `"openai"`-shaped line forward without re-deriving it from the (by-then-already-
+established) convention.
+
+**Not fixed here.** A fix is not designed or verified across every production entry point in this
+pass — the clean shape (`runLlmPatchFlow.ts` wrapping its own body in `withRequestContext({provider:
+input.provider}, ...)` so no external caller can omit it) is plausible but unverified against every
+one of its ~6 call sites, and mixing an unverified context-propagation change into item 221's
+telemetry-labelling fix would violate this document's own one-subject-per-pass discipline.
+
+**Bucket: Neither** — a structural fact recorded, with no fix proposed. Against Actionable now: the
+fix is not specified with enough confidence to ship. Against Blocked on data: the fact needed to
+close it — whether the gap is reachable — has already been established, and the answer is yes.
+
+**Where the code lives:** the live defect is in `toolExecutor.ts`'s `Task`-tool handler; the
+telemetry-only sibling is in `subagentDispatch.ts`'s `logSubagentDispatched`; the context gap is
+the absence of a `withRequestContext` wrapper in `runLlmPatchFlow.ts` itself. See item 221 for the
+sibling defect this one shares its cause with.
+
+## 223. Gemini's removal left two residual surfaces admitting a provider that no longer exists
+
+Surfaced by the same tree-wide sweep that located item 221's write sites. Not fixed — a different
+subject, filed on its own per that entry's own instruction not to mix it in.
+
+**Two exact spots, both confirmed live, neither previously tracked** (checked against this document
+before filing: no prior entry names `GEMINI_API_KEY` or `RetryContext`). `withExponentialBackoff.ts`'s
+`RetryContext.provider` union type still admits `"gemini"` alongside `"anthropic"`/`"openai"`, though
+every real `LLMProvider`/`ProviderName` type in the codebase (four independent declarations, `factory.ts`,
+`modelRouting.ts`, `usage/pricing.ts`, `api/diskKeys.ts`) has been two-valued since the removal.
+`.env.example` still advertises `GEMINI_API_KEY` with a comment calling it "(experimental)."
+
+**Bucket: Actionable now.** The fix is trivial and fully specified — remove the one union member,
+remove or update the two `.env.example` lines — nothing new needs to be learned first.
+
+**Where the code lives:** `src/llm/withExponentialBackoff.ts`'s `RetryContext` interface;
+`.env.example`.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 221 to find out which ones still need something. No index of
+reader the trouble of reading all 223 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (92): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218
+**Closed** (93): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (1): 221
+first (1): 223
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (15): 1, 4, 18, 23, 63, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196
 
-**Neither — a structural fact recorded, with no fix proposed** (113): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (114): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152, 154, 155, 158,
 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199, 200, 201, 202, 205,
-206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220
+206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.

@@ -2188,6 +2188,10 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       recordRunSummary({
         userId,
         runId: input.runId.trim(),
+        // Same precedence factory.ts's own resolveProvider uses, so this sentinel always
+        // agrees with whatever provider the run's own top-level client actually resolved to
+        // (item 221 — a hardcoded "openai" literal sat here previously).
+        provider: input.provider ?? getRequestContext()?.provider ?? "anthropic",
         // Time spent parked on a human is not latency. This figure persists to
         // ~/.zone/usage/*.jsonl under model "__run_summary__" and is read by
         // metricsAggregator, so a run parked for an hour would record an hour of
@@ -3459,7 +3463,11 @@ Example:
         typeof input.userId === "string" && input.userId.trim()
           ? input.userId.trim()
           : "local-dev";
-      recordRunRetry({ userId, runId: input.runId.trim() }).catch(() => {});
+      recordRunRetry({
+        userId,
+        runId: input.runId.trim(),
+        provider: input.provider ?? getRequestContext()?.provider ?? "anthropic",
+      }).catch(() => {});
     }
   };
 

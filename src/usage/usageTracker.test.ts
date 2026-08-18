@@ -3,7 +3,14 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { extractUsage } from "../llm/recordingClient.js";
-import { getRunCost, getUsage, readRecords, recordExecution, recordRunSummary } from "./usageTracker.js";
+import {
+  getRunCost,
+  getUsage,
+  readRecords,
+  recordExecution,
+  recordRunRetry,
+  recordRunSummary,
+} from "./usageTracker.js";
 
 let storageDir: string;
 
@@ -70,7 +77,7 @@ describe("usageTracker subagent telemetry compatibility", () => {
 
   it("K.3.C3: recordRunSummary round-trips latencyMs + terminationReason through JSONL", async () => {
     await recordRunSummary(
-      { userId: "user-1", runId: "run-99", latencyMs: 4_200, terminationReason: "natural_completion" },
+      { userId: "user-1", runId: "run-99", provider: "anthropic", latencyMs: 4_200, terminationReason: "natural_completion" },
       { storageDir }
     );
 
@@ -92,7 +99,7 @@ describe("usageTracker subagent telemetry compatibility", () => {
     );
     // Terminal summary record for the same run
     await recordRunSummary(
-      { userId: "user-1", runId: "run-99", latencyMs: 3_000, terminationReason: "max_iterations" },
+      { userId: "user-1", runId: "run-99", provider: "openai", latencyMs: 3_000, terminationReason: "max_iterations" },
       { storageDir }
     );
 
@@ -185,5 +192,53 @@ describe("web search cost capture", () => {
       { storageDir }
     );
     expect(rec.est_cost_usd).toBe(0);
+  });
+});
+
+describe("item 221 — sentinel records carry the run's real provider, not a hardcoded literal", () => {
+  it("recordRunSummary round-trips an anthropic provider", async () => {
+    await recordRunSummary(
+      { userId: "user-1", runId: "run-a", provider: "anthropic", latencyMs: 100, terminationReason: "natural_completion" },
+      { storageDir }
+    );
+    const records = readRecords("user-1", { storageDir });
+    expect(records[0]?.provider).toBe("anthropic");
+  });
+
+  it("recordRunSummary round-trips an openai provider — the other direction of the same pin", async () => {
+    await recordRunSummary(
+      { userId: "user-1", runId: "run-b", provider: "openai", latencyMs: 100, terminationReason: "natural_completion" },
+      { storageDir }
+    );
+    const records = readRecords("user-1", { storageDir });
+    expect(records[0]?.provider).toBe("openai");
+  });
+
+  it("recordRunRetry round-trips the passed provider", async () => {
+    await recordRunRetry(
+      { userId: "user-1", runId: "run-c", provider: "anthropic" },
+      { storageDir }
+    );
+    const records = readRecords("user-1", { storageDir });
+    expect(records[0]?.provider).toBe("anthropic");
+  });
+
+  it("getUsage().byProvider no longer phantom-counts an anthropic-only run under openai", async () => {
+    // A real Anthropic-only run: one inference record, plus the terminal sentinel.
+    await recordExecution(
+      { userId: "user-1", runId: "run-d", provider: "anthropic", model: "claude-sonnet-4-6",
+        input_uncached: 100, cache_write: 0, cache_read: 0, output: 10 },
+      { storageDir }
+    );
+    await recordRunSummary(
+      { userId: "user-1", runId: "run-d", provider: "anthropic", latencyMs: 500, terminationReason: "natural_completion" },
+      { storageDir }
+    );
+
+    const usage = await getUsage("user-1", "all", { storageDir });
+    expect(usage.byProvider.anthropic?.runs).toBe(1);
+    // The pre-fix defect: every sentinel's runId landed in the openai bucket regardless
+    // of the run's real provider. This is the assertion that catches its return.
+    expect(usage.byProvider.openai?.runs ?? 0).toBe(0);
   });
 });

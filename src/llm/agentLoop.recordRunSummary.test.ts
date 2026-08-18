@@ -120,3 +120,31 @@ describe("Y.2.3.obs — recordRunSummary failure visibility", () => {
     consoleSpy.mockRestore();
   });
 });
+
+describe("item 221 — the recordRunSummary call site passes the run's real provider, not a hardcoded one", () => {
+  it("an explicit openai run threads provider:\"openai\" into recordRunSummary", async () => {
+    await runAgentLoop({
+      task: "do something",
+      repoPath,
+      userId: "user-1",
+      runId: "test-run-provider-openai",
+      provider: "openai",
+    });
+
+    const call = mocks.recordRunSummary.mock.calls[0]?.[0] as { provider?: string } | undefined;
+    expect(call?.provider).toBe("openai");
+  });
+
+  it("an explicit anthropic run threads provider:\"anthropic\" — the other direction of the same pin", async () => {
+    await runAgentLoop({
+      task: "do something",
+      repoPath,
+      userId: "user-1",
+      runId: "test-run-provider-anthropic",
+      provider: "anthropic",
+    });
+
+    const call = mocks.recordRunSummary.mock.calls[0]?.[0] as { provider?: string } | undefined;
+    expect(call?.provider).toBe("anthropic");
+  });
+});

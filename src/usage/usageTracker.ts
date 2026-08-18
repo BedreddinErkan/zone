@@ -230,6 +230,7 @@ export async function recordRunSummary(
   params: {
     userId: string;
     runId: string;
+    provider: ProviderName;
     latencyMs: number;
     terminationReason: string;
   },
@@ -239,7 +240,7 @@ export async function recordRunSummary(
     timestamp: new Date().toISOString(),
     userId: params.userId,
     runId: params.runId,
-    provider: "openai",
+    provider: params.provider,
     model: "__run_summary__",
     input_uncached: 0,
     cache_write: 0,
@@ -265,6 +266,7 @@ export async function recordRunRetry(
   params: {
     userId: string;
     runId: string;
+    provider: ProviderName;
   },
   options?: { storageDir?: string }
 ): Promise<void> {
@@ -272,7 +274,7 @@ export async function recordRunRetry(
     timestamp: new Date().toISOString(),
     userId: params.userId,
     runId: params.runId,
-    provider: "openai",
+    provider: params.provider,
     model: "__run_retry__",
     input_uncached: 0,
     cache_write: 0,

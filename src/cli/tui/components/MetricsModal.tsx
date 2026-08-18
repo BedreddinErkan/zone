@@ -76,8 +76,8 @@ export function MetricsModal(): React.ReactElement {
     ["Cache Hit",    fmtPct(data.cacheHitRatio)],
     ["Degrade Rate", fmtPct(data.gracefulDegradeRate)],
     ["Resumable",    fmtPct(data.resumableRate)],
-    ["P50 Latency",  fmtMs(data.latencyMs.p50)],
-    ["P95 Latency",  fmtMs(data.latencyMs.p95)],
+    ["P50 Run Time", fmtMs(data.latencyMs.p50)],
+    ["P95 Run Time", fmtMs(data.latencyMs.p95)],
   ] : [];
 
   const termEntries = data
