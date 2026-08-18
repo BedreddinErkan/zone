@@ -67,6 +67,32 @@ describe("isEmittingLine — the shape rule, both directions", () => {
   it("does NOT match a bare mention with no trailing comma or paren", () => {
     expect(isEmittingLine(`See ${NAME} for details.`, NAME)).toBe(false);
   });
+  it("does NOT match a backtick code span in a comment — the actual over-credit shape, not the case above", () => {
+    // The item-196 test above uses NAME inside a template literal for interpolation only; the
+    // resulting string carries no literal backtick character, so it never exercised this bug.
+    // This fixture is built with a real backtick immediately before the marker, matching what
+    // planApprovals.ts / applyRollbackFeedback.ts / taskClassifier.ts actually had in a comment.
+    expect(isEmittingLine("// see `" + NAME + "` (elsewhere.ts)", NAME)).toBe(false);
+  });
+  it("does NOT match a wholeArgument-shaped comment with no backtick at all", () => {
+    // wholeArgument has zero real-tree comment hits today, but the shape is reachable in
+    // principle — a comment listing example values in quotes, ending in a comma or paren.
+    expect(isEmittingLine(`// values are "${NAME}", "[zone-other]"`, NAME)).toBe(false);
+    expect(isEmittingLine(`// e.g. "${NAME}")`, NAME)).toBe(false);
+  });
+  it("still matches a genuine template literal even though it now passes through the comment gate", () => {
+    // Guards against an over-broad comment predicate silently swallowing real code.
+    expect(isEmittingLine("console.log(`" + NAME + " ${label}`);", NAME)).toBe(true);
+  });
+  it("still matches real code carrying an inline trailing comment later on the same line", () => {
+    // Added after a mutation-testing pass found this fixture missing: dropping the ^ anchor from
+    // COMMENT_LINE_RE (so it scans anywhere in the line rather than only the start) survived the
+    // suite as written, because no line in this codebase's actual emission credits happens to mix
+    // real code with a later `//`/`*`/`/*`. This line manufactures that shape directly, so the
+    // anchor's job — only excluding a line that OPENS with a comment marker — has its own pin
+    // rather than relying on the corpus to contain an example of it.
+    expect(isEmittingLine("log(`" + NAME + " ${v}`); // trailing note, not a comment-opened line", NAME)).toBe(true);
+  });
 });
 
 describe("hasSinkWriteShape — the object-literal-then-raw-write shape", () => {
@@ -207,6 +233,52 @@ describe("the real regression case — commandApprovals.ts / toolExecutor.ts", (
 });
 
 /**
+ * THE TEMPLATE-PREFIX REGRESSION CASE, in the same form as the block above. Item 196's own
+ * illustrative example — `[zone-tier-grant-unusable]` (loopTelemetry.ts) — fires ` in
+ * planApprovals.ts — was itself misclassified by the tool: a bare backtick immediately before a
+ * marker inside a JSDoc comment reads identically to a template-literal prefix to a line-based
+ * scan. Picked over the other two over-credited markers for having a single true emitter, the
+ * simplest case to pin exactly.
+ */
+describe("the real regression case — planApprovals.ts / loopTelemetry.ts (template-prefix shape)", () => {
+  const MARKER = "[zone-tier-grant-unusable]";
+  const COMMENTING_FILE = "src/llm/planApprovals.ts";
+  const EMITTING_FILE = "src/llm/loopTelemetry.ts";
+
+  it("both real files are present in the tracked tree (the assertion below is meaningless otherwise)", () => {
+    expect(fs.existsSync(path.join(REPO_ROOT, COMMENTING_FILE))).toBe(true);
+    expect(fs.existsSync(path.join(REPO_ROOT, EMITTING_FILE))).toBe(true);
+  });
+
+  it("credits loopTelemetry.ts as the sole emitter and does not credit planApprovals.ts", () => {
+    const result = scanTree(readTrackedFiles());
+    const attr = result.get(MARKER);
+    expect(attr).toBeDefined();
+    expect(attr!.emittedIn).toEqual([EMITTING_FILE]);
+    expect(attr!.mentionedIn).toContain(COMMENTING_FILE);
+  });
+
+  it("hazards() reports planApprovals.ts for this marker, naming loopTelemetry.ts as the real emitter", () => {
+    // Filtered by file as well as marker: unlike the commandApprovals.ts/toolExecutor.ts case
+    // above, this marker has TWO hazard-worthy mentioning files (agentLoop.ts is the other,
+    // pinned in the next test), so filtering by marker alone returns both rows.
+    const result = scanTree(readTrackedFiles());
+    const hz = hazards(result).filter((h) => h.marker === MARKER && h.file === COMMENTING_FILE);
+    expect(hz).toEqual([{ file: COMMENTING_FILE, marker: MARKER, emitters: [EMITTING_FILE] }]);
+  });
+
+  it("agentLoop.ts's own pre-existing hazard row for this marker no longer lists planApprovals.ts as a co-emitter", () => {
+    // Before this fix, agentLoop.ts was ALREADY correctly flagged as a hazard for this marker
+    // (it mentions it in a comment, correctly does not emit it) — but its reported `emitters`
+    // list wrongly included planApprovals.ts, because that was the same false credit this whole
+    // fix removes. This is not a new hazard row; it is an existing one whose content was wrong.
+    const result = scanTree(readTrackedFiles());
+    const hz = hazards(result).filter((h) => h.marker === MARKER && h.file === "src/llm/agentLoop.ts");
+    expect(hz).toEqual([{ file: "src/llm/agentLoop.ts", marker: MARKER, emitters: [EMITTING_FILE] }]);
+  });
+});
+
+/**
  * The self-exclusion, pinned as its own case rather than left implicit in the drift figure.
  * These two files carry fixture and documentation marker names that this codebase does not
  * emit; counting them makes the inventory an inventory of itself. The concrete failure that
@@ -250,7 +322,7 @@ describe("self-exclusion — the tool does not inventory its own fixtures", () =
  * shifts these numbers should make this test fail and prompt a review, not silently drift.
  */
 describe("drift check — today's figures against the real tree", () => {
-  it("406 marker names; emitter-count distribution zero=42 one=343 several=21; 21 hazards", () => {
+  it("406 marker names; emitter-count distribution zero=42 one=345 several=19; 24 hazards", () => {
     const result = scanTree(readTrackedFiles());
     expect(result.size).toBe(406);
 
@@ -261,7 +333,41 @@ describe("drift check — today's figures against the real tree", () => {
       else if (c === 1) dist.one++;
       else dist.several++;
     }
-    expect(dist).toEqual({ zero: 42, one: 343, several: 21 });
-    expect(hazards(result)).toHaveLength(21);
+    expect(dist).toEqual({ zero: 42, one: 345, several: 19 });
+    expect(hazards(result)).toHaveLength(24);
+  });
+
+  /**
+   * The three hazard rows this pass's fix creates, named exactly rather than left to the length
+   * check alone — a length of 24 reached by a different set of three new rows would be the
+   * interesting result the length check alone cannot distinguish. Measured after the fix, not
+   * hand-derived: the prediction written before the fix landed also claimed zero pre-existing
+   * hazard rows would change, and one did — agentLoop.ts's own row for [zone-tier-grant-unusable]
+   * (pinned separately above) — so this list is deliberately the three ADDED rows only, not a
+   * claim about the full 24.
+   */
+  it("adds exactly these three hazard rows and no others", () => {
+    const result = scanTree(readTrackedFiles());
+    const hz = hazards(result);
+    const added = [
+      {
+        file: "src/llm/applyRollbackFeedback.ts",
+        marker: "[zone-apply-rolled-back-marker]",
+        emitters: ["src/llm/loopTelemetry.ts", "src/tools/toolExecutor.ts"],
+      },
+      {
+        file: "src/llm/planApprovals.ts",
+        marker: "[zone-tier-grant-unusable]",
+        emitters: ["src/llm/loopTelemetry.ts"],
+      },
+      {
+        file: "src/llm/taskClassifier.ts",
+        marker: "[zone-context-window-fallback]",
+        emitters: ["src/llm/models.ts"],
+      },
+    ];
+    for (const row of added) expect(hz).toContainEqual(row);
+    // and nothing else new: exactly these three plus the 21 pre-existing rows this file does
+    // not re-enumerate — enforced by the total-length assertion above rather than repeated here.
   });
 });

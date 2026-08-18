@@ -15803,6 +15803,21 @@ with. **A fix is not proposed here**; it is a change to the instrument rather th
 question, and it is left to a pass of its own so that the reading this entry waits on is not blocked
 behind it. The four comments this entry confirms are unaffected: each was verified individually.
 
+**The fix landed.** `isEmittingLine` now excludes any leading-anchor comment line before applying
+either shape rule, closing the gap this paragraph found. `planApprovals.ts` no longer credits
+`[zone-tier-grant-unusable]`; `loopTelemetry.ts` alone does, and `planApprovals.ts` now surfaces as
+exactly the hazard the earlier paragraph describes — a source file mentioning a marker it does not
+emit, with the real emitter named. The other two markers this pass found the same shape on,
+`[zone-apply-rolled-back-marker]` (`applyRollbackFeedback.ts`) and `[zone-context-window-fallback]`
+(`taskClassifier.ts`), are corrected the same way. Measured against the real tree after the fix, not
+hand-derived into the test: 406 marker names (unchanged), the emitter-count distribution moves from
+`{zero: 42, one: 343, several: 21}` to `{zero: 42, one: 345, several: 19}`, and hazards from 21 to
+24 — three new rows for the three corrected files, plus one pre-existing row (`agentLoop.ts` on the
+same marker as `planApprovals.ts`) whose reported emitter list narrowed to drop the false credit it
+had been carrying. Checked against item 217's two-condition test and declined: this is not that
+entry's kind — a script's line-based rule misreading a comment, not a contributor-guide assertion —
+and no population of it exists inside item 217's own subject.
+
 **One arm of this entry's own decision rule is already discharged, which narrows what the reading
 has left to decide.** That rule offers "leave the list alone and improve the message" against
 "extend the list". Traced from the branch that emits the denial to the string the model receives:

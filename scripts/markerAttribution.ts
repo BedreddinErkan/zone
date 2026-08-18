@@ -83,11 +83,31 @@ function escapeForRegex(literal: string): string {
 }
 
 /**
+ * True when `line`, ignoring leading whitespace, opens with a comment marker: `//`, a JSDoc/
+ * block-comment continuation `*` (not `*/`, which closes one), or a block-comment opener `/*`.
+ * A code span inside a comment (`` `[zone-x]` ``) reads identically to a template-literal prefix
+ * to a line-based scan; this is what tells them apart. Checked against the real tree before being
+ * written, not assumed: every current backtick-adjacent false credit (three markers, one file
+ * each - item 196, docs/deferred-work.md) is a leading-anchor comment line, and none of the
+ * fifty-five genuine template-literal emissions in the tree are.
+ *
+ * NOT CAUGHT, stated rather than silently accepted: an inline trailing comment on a line that
+ * also has real code before it, and a block-comment continuation line missing its leading `*`.
+ * Neither currently occurs in this tree - checked against every real hit this rule affects, not
+ * assumed absent.
+ */
+const COMMENT_LINE_RE = /^\s*(\/\/|\*(?!\/)|\/\*)/;
+
+/**
  * Shape 1/2: `name` appears as a whole quoted argument (optionally the second argument of a
  * two-argument dispatch call, which this still matches since it only looks at the quoted token
- * itself and what follows it), or as a template literal's leading static prefix.
+ * itself and what follows it), or as a template literal's leading static prefix. Gated on
+ * COMMENT_LINE_RE first - applied to both branches, not just the backtick one: the quote+comma
+ * branch has zero real-tree comment hits today, but gating it too costs nothing and closes the
+ * same false-positive shape should it ever occur.
  */
 export function isEmittingLine(line: string, name: string): boolean {
+  if (COMMENT_LINE_RE.test(line)) return false;
   const esc = escapeForRegex(name);
   const wholeArgument = new RegExp(`["'\`]${esc}["'\`]\\s*[,)]`);
   const templatePrefix = new RegExp("`" + esc);
