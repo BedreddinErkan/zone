@@ -10165,12 +10165,25 @@ both operators is accurate for a real file and wrong for `/dev/null`, where one 
 does not. The remedy the message gives — drop the redirect, output is captured anyway — does work, so an
 agent following it is not stuck; it is only misinformed about which operator was the problem.
 
+**A second form the carve-out fails to reach, found while reading item 196's records and extending this
+entry rather than opening a new one.** The lookahead spares `/dev/null` only when what follows it is
+whitespace or the end of the string. Any other separator immediately after defeats it, so a command that
+redirects to the sink and then continues is refused. Verified by executing the pattern directly:
+`ls 2>/dev/null` is allowed, `ls 2>/dev/null -la` is allowed, and **`ls 2>/dev/null; echo hi` is
+blocked** — the semicolon, not the redirect, is what breaks the carve-out, and the rendered message names
+the redirect. This is what refused two of the four records under the sibling gate's marker that item 196
+records. **Item 217's two-condition test, both required, resolved both ways:** the population is the same —
+this entry's own subject, the single-`>` entry's `/dev/null` carve-out — and the kind is the same, the
+carve-out failing to reach a form it was written to permit, where this entry's original case is the append
+operator. Both fail, so it extends this entry and mints nothing. Not fixed, for this entry's own stated
+reason: correcting the verdict widens a safety gate.
+
 **Bucket: Neither.** A structural fact is recorded and no fix is proposed.
 
 **Where the code lives:** the two redirect entries in `BLACKLIST_PATTERNS` and the `write-redirect` entry of
 `CATCH_ALL_TEXT`. No fix is proposed here: correcting the verdict widens what a safety gate permits, and
 correcting only the message means explaining a distinction that nothing else in the system explains. See item
-103 for the shadow this rests on.
+103 for the shadow this rests on, and item 196 for the records that surfaced the separator form.
 
 ## 106. A search for dangerous text is refused for the text it searches for, and the class-tagged rewrite left every one of those routes where it found them
 
@@ -15509,21 +15522,64 @@ parsed count and zero of them are this one, agreeing with a plain count over the
 consistent with two very different worlds — the denial is rare, or the denial is common and simply predates
 the marker — and nothing recorded can separate them yet.
 
-**Superseded: the marker has fired, and the join this entry names is now performable.** Both
-figures this entry records — a marker that never fired, and a sink of 3,792 — were true when
-written and are now stale. Re-derived under two
-instruments that agree — a JSON cross-tab and a raw byte-level count with no JSON parser —
-`[zone-run-command-readonly-blocked]` carries **4 records across 2 distinct runs**, and its
-companion `[zone-plan-investigation-complete]` carries **26**, matching this entry's own
-"twenty-six of them" exactly. The denial records carry the run identifier, the command, and the
-refusal reason, which is precisely the join this entry describes as needing no new instrumentation.
-The marker is on `log()`, so the verbose gate does not bite; item 115's shield dependency still
-bounds it to sink-observable runs. Three distinct commands appear across the four records, two of
-them whitelist misses and the rest blocked patterns. **The blocking condition is discharged — the
-observation exists. The question this entry asks is deliberately left unanswered here**, because
-recording that an entry is unblocked is not answering it, and the composition reading this entry sets
-out is what the extension decision turns on. The bucket is unchanged for that reason: what it now waits on is
-the reading, not the records.
+**RETRACTED — a prior pass wrote here that this marker had fired and that the blocking condition was
+discharged. Both claims were false, and the paragraph is replaced rather than deleted so the mistake
+is not re-derived from the same source that caused it.** That paragraph counted
+`[zone-run-command-readonly-blocked]` — **a different gate's marker, emitted from a different
+module.** This entry's own marker is `[zone-investigation-command-denied]`, written on the
+investigation denial branch in the approvals module, exactly where this entry's closing sentence
+already says it is.
+
+**Re-derived, two instruments agreeing (a JSON cross-tab; a raw byte-level count with no JSON
+parser):** `[zone-investigation-command-denied]` holds **zero records**, and
+`[zone-run-command-readonly-blocked]` holds four. Instrument liveness proved before the absence
+claim: the sink carries **100 distinct marker names**, including this entry's own companion
+`[zone-plan-investigation-complete]` at **26**, matching its "twenty-six of them" exactly.
+Denominator gating, both dimensions: the emitter is `log()`, so the verbose env gate does not
+bite; item 115's shield dependency does, bounding the zero to sink-observable runs. **So this
+entry's "the marker has never fired" was correct when written, is still correct, and was never
+stale.**
+
+**How the error happened, recorded because the cause outlives it.** The string
+`[zone-run-command-readonly-blocked]` appears in the approvals module — inside a comment
+explaining that the new marker was modelled on the sibling gate's. A search for a marker name hits
+that comment and reads as an emitter. The comment itself is not at fault: its prose says "the
+sibling gate's" and "run_command_readonly's own", which tells a reader whose marker it is. What it
+cannot do is tell a *mechanical* scan, and the scan is what was trusted. This is the thirteenth
+pattern's own shape — a string's presence is evidence about the text, not about behaviour — and
+that essay already carries a prior instance of exactly it, so no new entry is minted for it.
+
+**The instrument that would have caught it, and what it finds tree-wide.** For each marker name,
+compare the set of files containing the string against the set containing an emitting call for it;
+any file in the first and not the second is a place a search will misread. Run over the tree: **406
+distinct marker names, 276 mention-without-emit pairs across 122 files** — 131 in tests, 64 in docs,
+49 in source, 26 in snapshots, the rest in scripts and manual probes. The population is large and
+mostly benign. The hazardous sub-shape is short and nameable: **four comments in source naming
+another module's marker** as a sibling or model, in the dispatch module, the model registry, the
+approvals module, and the plan-approvals module. Anyone counting a marker should confirm the file
+they found it in is the file that emits it.
+
+**One arm of this entry's own decision rule is already discharged, which narrows what the reading
+has left to decide.** That rule offers "leave the list alone and improve the message" against
+"extend the list". Traced from the branch that emits the denial to the string the model receives:
+the approvals module returns a reason token, the tool executor switches on it and renders a message
+naming the gate, listing the diagnostic set, stating that this is not a metacharacter or permission
+issue, and directing the agent to `read_file` / `search_in_files`; that string is the tool
+result's output, which reaches the model as a tool message. The message arm was completed by the
+item 190/194 fix before this entry's question was asked.
+
+**Item 190's classification reproduces exactly, so the candidate set is sound even though the
+evidence for acting on it is empty.** Executing the real predicates rather than transcribing the
+lists — first-gate entries tested against the investigation path, which is the second gate checked
+first and unconditionally, or the eleven-prefix third list — returns **61 first-gate entries, 23
+refused during investigation, and seven read-only git subcommands as the largest coherent group**,
+matching item 190's three stated figures. **Not one of the twenty-three has ever been denied in a
+recorded run**, because the gate's marker has never fired at all. A command nobody has been denied
+is not a whitelist candidate on the strength of being nameable.
+
+**Bucket, re-examined this pass and unchanged: it stays Blocked on data.** The condition is not
+discharged and the entry's own closing sentence — that the instrument exists and has produced
+nothing — is confirmed correct rather than corrected.
 
 **The reading that would settle it.** Investigation runs are already recorded by their own completion
 marker, twenty-six of them on this machine, and both markers carry the run identifier, so a denial rate per
