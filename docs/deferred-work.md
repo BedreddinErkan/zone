@@ -299,15 +299,40 @@ fixtures, not this repository's own sources. Ten real records from ten real runs
 rather than spread; the same sparse-not-brief shape item 18 records about its own window.
 
 **This entry is the root of a dependency chain the bucket does not otherwise show.** Its
-order-of-magnitude threshold is inherited by item 63, which cites it directly and notes item 1
-states none; and by item 18, which cites both. Item 75 cites item 63 in turn. **Five entries —
-1, 4, 18, 63, 75 — rest on this one number**, which this entry itself marks as an order-of-magnitude
-estimate rather than a defensible rate. Two further clusters exist beside it: items 90, 110, 143 and
-157 share one behavioural-run measurement shape by item 90's own admission, and items 166, 170, 175
-and 178 form a fourth around the requested-tools question, with item 166's own text naming item 170
-as registering the first of its unknowns. **Thirteen of the bucket's entries sit in one of the three
-clusters.** The consequence worth knowing before anyone spends: one measurement can discharge more
-than one entry, and the three cluster hubs are where that leverage sits.
+order-of-magnitude threshold is inherited by item 63, which cites it directly; and by item 18, which
+cites both. Item 75 cites item 63 in turn. **Four entries — 4, 18, 63, 75 — rest on this one
+number**, which this entry itself marks as an order-of-magnitude estimate rather than a defensible
+rate. Two further clusters exist beside it: items 90, 110, 143 and 157 form a four-entry citation
+cluster around item 90, and items 166, 170, 175 and 178 a second around the requested-tools
+question, with item 166's own text naming item 170 as registering the first of its unknowns. The
+consequence worth knowing before anyone spends: one measurement can discharge more than one entry,
+and the cluster hubs are where that leverage sits.
+
+**Three corrections to this entry's dependency-chain paragraph, each of which was wrong at the
+commit that wrote it rather than made stale by a later move.** They are separated because they fail
+for different reasons and a reader who repairs one will otherwise assume the others followed.
+
+**One edge ran backwards.** Item 1 was listed among the entries resting on this number. It contains
+no threshold-shaped language at all, and item 63 says so in as many words — "item 1 states none —
+its own 'what would close it' is a choice among three design options, not a record count." It was in
+the list on the strength of an observation that it is **not** in the list. Removed, taking the count
+from five to four.
+
+**The shared-shape claim named four entries where item 90's admission names two.** The only sentence
+in item 90 that makes the claim reads "the same shape items 110 and 143 sit in the bucket for." Item
+157 belongs to that cluster by citation and by subset, not by shared measurement shape: its own text
+says "item 90's criterion needs all seven, and nothing here speaks to the other six." Item 90's own
+paragraph is careful about exactly this and claims citation rather than shape; it is the model, and
+the error was in paraphrasing it here. Restated as a citation cluster in the corrected chain
+paragraph.
+
+**"Thirteen of the bucket's entries sit in one of the three clusters" was false when written, and
+the coincidence is what hid it.** The three clusters name thirteen entries between them, and the
+bucket holds thirteen — but the same commit that wrote the sentence moved item 4 to Actionable now
+and item 63 to Closed, so only **eleven** of the named entries were in the bucket, with items 23 and
+196 outside every cluster. Two instruments agree on the eleven, reading the bucket index and each
+entry's own declaration independently. The sentence is dropped rather than renumbered: it counted a
+membership that was never the bucket's.
 
 **The premise that made this work look necessary is false, established by execution rather than by
 reading the entry's own account of itself.** This entry opens by stating that the counts "exist only
@@ -1730,10 +1755,18 @@ and it is the thing a later reader deciding whether the threshold is met should 
 - **The trigger is currently unreachable, not merely unobserved.** Ambiguity needs two envelopes
   sharing a typed prefix. Envelopes are deleted on graceful success — `runLlmPatchFlow.ts` says so
   in as many words, "deleteRunEnvelope is only ever called on graceful success" — so only
-  interrupted runs accumulate, under a retention policy of `maxAgeDays 30` and `maxCount 200`. At
-  the moment of writing, 2026-08-06, the envelopes directory holds **one** file. That is an
-  observation at a moment, not a standing property: the policy permits far more, and a stretch of
-  interrupted runs would change it.
+  interrupted runs accumulate, under a retention policy of `maxAgeDays 30` and `maxCount 200` —
+  both figures reproduce from source. At the moment of writing, 2026-08-06, the envelopes directory
+  holds **one** file. That is an observation at a moment, not a standing property: the policy permits
+  far more, and a stretch of interrupted runs would change it.
+- **A second observation at a later moment, which is a rate rather than a re-decision.** Re-read on
+  2026-08-19: still exactly one envelope, the same file, last written 2026-07-30 — **unchanged for
+  nineteen days**, with no colliding prefix at any length tried. A sweep that read the static
+  population as evidence the trigger cannot arise was checked against this entry and is wrong: the
+  qualification this entry already carries covers it, and the same distinction resolved the same way
+  in item 1's pass — an observation that has not arisen is not an observation that cannot. What the
+  nineteen days add is that interrupted runs are not merely uncommon but absent over the window, so
+  anyone budgeting against this trigger should expect to induce it rather than wait for it.
 - **Nothing instruments prefix resolution, so silence here is not evidence.** No marker fires on a
   prefix match, ambiguous or otherwise; a sink zero would be uninformative rather than a measured
   zero. The two related tags carry, as upper bounds on item 73's key, `[zone-envelope-cleanup]` at
@@ -4298,7 +4331,6 @@ post-override one.
 **With this entry decided, item 12's no-op half is unblocked — see there.** The value this branch
 returns is correct for a run that wrote only no-ops and for a run that is merely resuming, which is
 what the blocking question was waiting on.
-
 
 **Bucket — Closed.** This entry's own stated closure condition was "a decision about what the
 function should return when no write tool was ever available," and `ef9d0608` makes it. The
@@ -10419,7 +10451,7 @@ callers at all, whereas this code is entered on every iteration and it is the co
 
 **Bucket: Neither.** A structural fact is recorded and no fix is proposed.
 
-## 110. Tier reaches only `tokenBudgetCap` for five of seven archetypes; its iteration cap and tool subset bind only when the archetype pipeline is null
+## 110. Tier reaches only `tokenBudgetCap` for two of seven archetypes below complex tier, not five; its iteration cap binds where the pipeline is null and its tool subset wherever the dispatcher supplies no filter
 
 **What it is.** `TIER_LIMITS` carries four fields. Two of them — the iteration budget and the tool subset —
 are superseded by the archetype pipeline whenever one exists, by two independent precedence rules that
@@ -10437,14 +10469,45 @@ where there is no override.
 
 **The tool path reaches the same place by a different rule.** Filter precedence puts an explicit
 `capabilityFilter` ahead of the tier-derived subset. `buildDispatcherCapabilityFilter` returns undefined
-for a null pipeline config, and only then does the tier subset apply — counting tools per subset, 5 for
-simple, 9 for medium, and no filter at all for complex. The source records this happening in practice: an
-approved answer-only plan reclassified as debug yields no capability filter, leaving the medium-tier
-subset in force.
+for a null pipeline config — **and the "only then" that used to close this clause is false, corrected
+under the third defect recorded for this entry: it also returns undefined for `targeted_fix` and
+`refactor`, whose exclusion sets come out empty.** Where it is undefined the tier subset applies —
+counting tools per subset, 5 for simple, 9 for medium, and no filter at all for complex. The source
+records this happening in practice: an approved answer-only plan reclassified as debug yields no
+capability filter, leaving the medium-tier subset in force.
 
-**Which archetypes have a null pipeline.** Counting archetypes per union, two of the seven — debug and
-complex_multi_file. For the other five the tier decides neither tools nor iterations, leaving
-`tokenBudgetCap` as the only field it still reaches.
+**Which archetypes have a null pipeline. Corrected: three, not two — wrong when written, and wrong
+at every flag setting, so the opt-in flag is not what explains it.** Counting archetypes per union
+and executing the real dispatcher rather than reading it, the nulls are `simple_add`, `debug` and
+`complex_multi_file`. **This entry's iteration-path paragraph disagrees with this one independently
+of either count:** it enumerates four pipeline caps — 3 for question, 5 for simple_add, 10 for
+targeted_fix, 12 for refactor — while this sentence claimed five pipelines, and the four it lists
+omit `investigation`, which carried a pipeline at this entry's own commit with a cap of 12, and
+include `simple_add`, which does not carry one by default. A list that contradicts its own count
+cannot be repaired by naming a flag.
+
+**A scope supplied, not a figure corrected: the count of five holds only under an opt-in flag this
+entry never names.** At default environment the dispatcher returns four non-null pipelines —
+`targeted_fix`, `refactor`, `investigation`, `question`. The fifth is `simple_add`, whose branch is
+gated on `simpleAddEnabled`, read as `env["ZONE_ARCHETYPE_ENABLE_SIMPLE_ADD"] === "1"` — opt-in, off
+unless set. Checked at this entry's own commit rather than only at head: the identical opt-in line
+was already present there, so the condition was never the default and this is a missing scope rather
+than drift. **This scope and the null-list correction are separate**; the flag explains the five,
+and nothing about the flag explains the list.
+
+**A third defect, found while establishing whether either of the first two corrections changes this
+entry's own question — and this one is the headline.** The claim that tier reaches only
+`tokenBudgetCap` for five of seven is wrong at every tier, and the direction is inverted rather than
+off by one. Tier's iteration cap binds wherever the pipeline is null, which is three archetypes.
+Tier's **tool subset** binds wherever the dispatcher supplies no capability filter — and that is not
+only the null configs. `buildDispatcherCapabilityFilter` returns undefined for any non-read-only
+pipeline whose exclusion set comes out empty, which is true of `targeted_fix` and `refactor`; the
+flow driver then spreads `capabilityFilter` only when truthy, so the field is absent from the loop
+input and the tier-derived subset wins on the next arm of the resolution. So this entry's tool-path
+paragraph is wrong in its "and only then". Counting archetypes per union, executed at each tier:
+tier reaches **only `tokenBudgetCap` for two of seven** — `investigation` and `question` — at simple
+and medium tier, and for four of seven at complex, where the tier subset is undefined for everyone.
+**Never five, and the figure is tier-dependent, which this entry states one number for.**
 
 **The subagent quota frequently cancels itself.** `Task` is withheld when the quota is zero or when the
 task is judged small, where small means an estimated iteration count below 15 or an estimated file count
@@ -10506,10 +10569,17 @@ made by a reader of its own prompt. It is not agreement with a naive human label
 one. Labelling against the full prompt instead would have measured something much closer to whether the
 model obeys its own instructions, which is a different and largely tautological question.
 
-**What it does not establish.** Nothing about whether tier changes outcomes. This entry's own finding is
-that tier reaches only `tokenBudgetCap` for five of seven archetypes, so a low agreement rate does not make
-the tier harmful and a high one would not have made it load-bearing. That question is the behavioural
-measurement, still unrun.
+**What it does not establish.** Nothing about whether tier changes outcomes. That question is the
+behavioural measurement, still unrun.
+
+**The sentence that used to close that paragraph rested on the corrected figure, and it does not
+survive the correction — recorded rather than deleted, because the reasoning is the part that
+failed, not the wording.** It read that because tier reaches only `tokenBudgetCap` for five of seven
+archetypes, "a low agreement rate does not make the tier harmful and a high one would not have made
+it load-bearing." The premise is inverted: below complex tier, tier reaches past `tokenBudgetCap`
+for **five** of seven and is confined to it for two. So the measurement this entry already ran was
+discounted on a number pointing the other way, and how much a misclassification costs is open again
+rather than argued away.
 
 **Two further arms, and the headline is neither one's percentage.** Both ran the same forty tasks against the
 same frozen labels on gpt-4o-mini. Arm B (`6cdb722b`) softened the COMPLEX trigger block's header and
@@ -10567,9 +10637,14 @@ agreement measurement ran on OpenAI for well under a cent and the behavioural on
 cost rather than by any credit balance. See item 109 for
 why a wrong tier cannot be recovered from, and item 116 for the CLAUDE.md sentence this item falsifies.
 
-**Bucket: Blocked on data.** This entry's own finding — tier reaches only `tokenBudgetCap` for five
-of seven archetypes — is established; what remains is whether that reach affects outcomes, and that
-is the behavioural measurement, registered but still unrun.
+**Bucket: Blocked on data — and the condition is unchanged by all three corrections, which is worth
+stating because an entry whose figures were wrong and whose question stands is a different record
+from one whose question was built on the wrong number.** What this entry waits on is a behavioural
+measurement, and it is still unrun; nothing about the reach's true size makes it more or less
+runnable. What the corrections do change is the stake rather than the condition. The reach is wider
+than recorded — five of seven archetypes feel tier past `tokenBudgetCap` below complex tier, not two
+— so the unrun measurement matters more than this entry has been claiming, and the argument that
+discounted the one measurement already taken is withdrawn.
 
 ## 111. Closed — the orphaned scope-audit remainder is removed at `ad7818b8`; two of this entry's own three claims were false, manufactured by an exclusion-scoped grep
 
@@ -10907,6 +10982,28 @@ search. The per-call usage ledger reaches further still, **eighty-eight days and
 thirty-four runs** against the sink's eighteen and ninety-four. **The asymmetry is why a second
 instrument was worth reaching for**, and it means a question the sink answers with silence is often
 answerable somewhere else rather than unanswerable.
+
+**That horizon is prospective, and nothing has been lost yet — a state worth separating from the
+bound, because "whatever rotation has spared" reads as loss already taken.** Rotation has fired
+exactly once, on 2026-08-16, agreed by two instruments: the sink's own rotation record, and the
+generations present on disk. It preserved what it displaced. Nor is anything missing from before the
+window: the sink module landed at 14:04 UTC on 2026-07-29 and the earliest retained record is
+timestamped five minutes later, so the sink's history is complete since inception rather than
+truncated. **What is one rotation away is the loss of 5,038 of the 5,715 records — 88 percent, the
+whole span before 2026-08-16.** So a pass deciding whether to spend on accumulation is deciding
+against a clock, not merely against a small n.
+
+**A third property of this surface, and the one that decides what an undesigned run would be worth:
+the retained runs are not spread, and the largest concentration is the least varied.** Counting
+distinct runs per day, the sink has **eight active days across a nineteen-day span**. One of them,
+2026-08-16, holds **forty-two runs — forty-five percent of every run the sink has ever seen** — and
+it is a single sweep: one archetype (`debug`), one tier (`medium`), one task, one flow branch, by
+two instruments that agree, one parsing records and one grepping the raw files by date. The early
+days are the varied ones: 2026-07-29 carried four archetype values in nine records and **both of the
+two complex-tier runs the sink has ever held**. The consequence for anyone reading a marker zero:
+volume and coverage come apart here, so a denominator can be large and still contain none of the run
+shape a question needs — which is why several entries in this document wait on populations of nought
+or two inside a sink of ninety-four runs.
 
 **Bucket: Neither.** A structural fact is recorded and no fix is proposed.
 
@@ -15692,6 +15789,20 @@ module, the model registry, the approvals module, and the plan-approvals module 
 attributed by the corrected instrument** (verified individually: each one's real emitter is
 credited, the commenting file is not) and stand as a confirmed subset of the fuller 21.
 
+**The example this entry quotes to illustrate the defect is misclassified, and the fix it records
+does not catch that example — established by executing the instrument against the line rather than
+by reading it.** The fragment this entry quotes as "markdown prose" is byte-identical to a line in
+`planApprovals.ts`, where it is a documentation comment inside a source file. Run against it, the
+instrument's file-kind helper returns `source` and its emission predicate returns **true**, because
+a marker wrapped in a code span presents the same leading backtick as a template literal. So the
+file-kind restriction recorded here as the correction is real and load-bearing for prose and tests,
+and it does not reach this case: the sole hazardous shape it cannot see is a code span in a source
+comment. Three such credits exist tree-wide, and two of them — this one and one in the classifier —
+name the true emitter in the same sentence, which is the shape that corrupted this entry to begin
+with. **A fix is not proposed here**; it is a change to the instrument rather than to this entry's
+question, and it is left to a pass of its own so that the reading this entry waits on is not blocked
+behind it. The four comments this entry confirms are unaffected: each was verified individually.
+
 **One arm of this entry's own decision rule is already discharged, which narrows what the reading
 has left to decide.** That rule offers "leave the list alone and improve the message" against
 "extend the list". Traced from the branch that emits the denial to the string the model receives:
@@ -15713,6 +15824,20 @@ is not a whitelist candidate on the strength of being nameable.
 **Bucket, re-examined this pass and unchanged: it stays Blocked on data.** The condition is not
 discharged and the entry's own closing sentence — that the instrument exists and has produced
 nothing — is confirmed correct rather than corrected.
+
+**A later pass supplied the denominator that sentence is missing, and it is nought — which qualifies
+that confirmation rather than reversing it.** The marker has never fired, and that remains literally
+true. What this entry pairs it with is the twenty-six investigation runs recorded on this machine,
+which reads as a zero observed across twenty-six runs. **None of the twenty-six could have produced
+it.** The denial marker's emitter landed at `e005320e` on 2026-08-16; the twenty-six completions run
+from 2026-07-29 to 2026-08-09, and **not one falls at or after that instant** — two instruments
+agree, one parsing the sink and one grepping the raw files, and the last investigation precedes the
+instrument by **six point eight days**. The span after the emitter landed is not empty and the
+absence is therefore specific rather than an artefact: it holds 1,923 records across 41 runs under
+35 distinct marker names, all of them `debug` archetype at `medium` tier. **So the zero is vacuous
+rather than null**: the instrument has not been exercised once, and the reading this entry proposes
+is waiting on its first qualifying run, not on a rate. See item 115 for why that particular
+denominator came out the shape it did.
 
 **The reading that would settle it.** Investigation runs are already recorded by their own completion
 marker, twenty-six of them on this machine, and both markers carry the run identifier, so a denial rate per
