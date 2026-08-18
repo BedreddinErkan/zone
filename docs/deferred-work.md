@@ -179,7 +179,7 @@ on these three items specifically, not as "already scoped, just blocked on data.
 **Where the code lives:** nowhere yet — these were option labels for work that was never
 started.
 
-## 4. 2b — thread marker-imbalance counts through seven sites
+## 4. Closed — the threshold was met and the answer is not to build the threading; the premise that made it look necessary is false
 
 **What it is:** `[zone-apply-patch-marker-imbalance]`'s counts exist only in the marker payload
 today. Threading them into the coaching text the model sees after a rejection (so the model
@@ -261,16 +261,61 @@ as registering the first of its unknowns. **Thirteen of the bucket's entries sit
 clusters.** The consequence worth knowing before anyone spends: one measurement can discharge more
 than one entry, and the three cluster hubs are where that leverage sits.
 
-**Bucket, re-decided rather than inherited: Blocked on data becomes Actionable now.** This entry's
-own stated bar — "roughly 10-20 real records" — is met at 10, and the question those records exist
-to answer is answered by them. What remains is the seven-site threading, which this entry already
-specifies in full, so nothing further needs to be learned first. Precedent: item 63, closing in the
-same pass on the same principle — an entry's own pre-stated threshold, met, decides it.
+**The premise that made this work look necessary is false, established by execution rather than by
+reading the entry's own account of itself.** This entry opens by stating that the counts "exist only
+in the marker payload today." They do not. `toolExecutor.ts` interpolates **both** counts into the
+rejection message on the same branch that emits the marker — "Your patch has N `--- FIND ---`
+marker(s) but M `--- REPLACE ---` marker(s)" — and returns that string as the tool result's
+`output`. `handleToolResult.ts` pushes `content: result.output` onto `responseInput` as a
+`role:"tool"` message. So the model is already told the exact counts, and therefore the direction,
+on every single rejection, in the immediate turn. The entry's stated goal — that the model know
+"the real direction of the imbalance, not just that one exists" — is already met at the primary
+surface.
 
-**Where the code lives:** nowhere yet — this is unbuilt. If the seven-site trace needs
-redoing, re-derive it starting from `[zone-apply-patch-marker-imbalance]`'s emission site,
-`CoachingController`'s `buildCoachingPrompt` call, and the `FailureContext`/`FailureSignal`
-types in the coaching and tool-event-handler modules.
+**What the seven-site threading would actually change is a second, later surface, and that surface
+is never reached for this trigger.** The coaching text is a different string, in `agentLoop.ts`,
+and it genuinely lacks the counts: it says only that the marker counts "did not match." But it is
+the self-correction path, which runs after a first corrective attempt fails. Three independent
+measurements agree that this trigger never gets there. **No run fired the imbalance marker more
+than once** — 10 records across 10 distinct top-level run identifiers, maximum one per run.
+**Every retry record sits at `attemptCount: 1`** — all 13 of them, on the proxy marker, meaning the
+first corrective message always sufficed. And **zero `[zone-agent-self-correct]` records fall in
+any imbalance run**, against 12 such records elsewhere in the same sink. The four
+`[zone-coaching-rule]` records that do land in imbalance runs all carry
+`rule: "test_failure_scope_check"` — a different trigger that happened to fire in the same run.
+
+**So the observation this entry waited for answers its question, and answers it against the work.**
+Threading the counts would enrich a message the model has never needed, about a failure it has
+always fixed from the information it already received. The recorded direction finding survives and
+points the same way: nine of the ten are `find=1, replace=2`, so even the coaching text could
+convey the common case as a fixed sentence without carrying any counts at all.
+
+**Two properties of the sample that bound this, stated rather than left for a re-reader to find.**
+`findMarkerCount` takes exactly **one** distinct value across all ten records — the find side never
+varies — so the direction finding rests on variation in the replace side alone. And grouping level
+changes the count sharply: **ten at the record level, ten at the run level, four at the payload
+level**, because `runId` sits at the sink record's top level and is excluded from a payload-only
+key. The payload-level four is the reading that inverted this entry once already.
+
+**What would reopen it:** a run in which the imbalance failure survives its first corrective
+message and reaches the self-correction path, or a sample in which the find side varies and the
+direction stops being predictable. Neither is present in the ten records this entry closed on.
+
+**Bucket, re-decided rather than inherited a second time: Actionable now becomes Closed**, decided
+on this entry's own condition rather than on the fix — the reading items 198 and 212 share. Its
+condition was an observation at a stated threshold; the observation exists, and read against what
+the model is actually shown it answers the entry's question in the negative. A decision against
+building is a discharge of the condition, not a deferral of it. Item 210 does not apply — its
+closure discharges a *different* entry's condition. Item 181 does not apply — it closes nothing
+because no prior condition was recorded, where this entry recorded one and it is now met.
+
+**Where the code lives:** the threading remains unbuilt and is now recorded as deliberately not
+built. The surfaces that decided it: the rejection message and the marker emission share a branch in
+`apply_patch`'s handler in `toolExecutor.ts`; the tool message carrying that output to the model is
+pushed in `handleToolResult.ts`; the countless coaching string is the
+`apply_patch_marker_imbalance` case of the self-correction guidance in `agentLoop.ts`. If the
+seven-site trace is ever needed again, re-derive it from those three plus the
+`FailureContext`/`FailureSignal` types in the coaching and tool-event-handler modules.
 
 ## 5. `[zone-search-in-files-read-error]` cannot fire on this development machine
 
@@ -16900,10 +16945,10 @@ priority ordering" cautions against ranking by importance, which this section do
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (95): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223
+**Closed** (96): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 4, 204, 210, 212, 218, 221, 223
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (1): 4
+first (0):
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (13): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196
 
