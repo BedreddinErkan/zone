@@ -15549,15 +15549,33 @@ cannot do is tell a *mechanical* scan, and the scan is what was trusted. This is
 pattern's own shape — a string's presence is evidence about the text, not about behaviour — and
 that essay already carries a prior instance of exactly it, so no new entry is minted for it.
 
-**The instrument that would have caught it, and what it finds tree-wide.** For each marker name,
-compare the set of files containing the string against the set containing an emitting call for it;
-any file in the first and not the second is a place a search will misread. Run over the tree: **406
-distinct marker names, 276 mention-without-emit pairs across 122 files** — 131 in tests, 64 in docs,
-49 in source, 26 in snapshots, the rest in scripts and manual probes. The population is large and
-mostly benign. The hazardous sub-shape is short and nameable: **four comments in source naming
-another module's marker** as a sibling or model, in the dispatch module, the model registry, the
-approvals module, and the plan-approvals module. Anyone counting a marker should confirm the file
-they found it in is the file that emits it.
+**The instrument that would have caught it now exists (`scripts/markerAttribution.ts`), and the
+corrected figures are what it reports — this entry's own first attempt at them, printed here, was
+wrong and is corrected rather than adopted.** For each marker name it compares the set of files
+containing the string against the set of *source* files containing an emitting call for it —
+shape-based, not a fixed function-name list, so a differently-named wrapper (`emitLog`, a
+two-argument dispatch callback, an object literal handed straight to a raw filesystem write) is
+still credited correctly. Emitter credit is restricted to real source files; a marker's mentions
+are still tracked across every file kind.
+
+**Corrected: 406 distinct marker names, 50 source-file mention-without-emit pairs across 18
+files, of which 21 are hazardous** — a source file mentions a marker whose real emitter sits in a
+different source file, the exact shape that corrupted this entry.
+`src/api/commandApprovals.ts` mentioning `[zone-run-command-readonly-blocked]` while
+`src/tools/toolExecutor.ts` emits it — the pairing that produced this entry's own error — is
+confirmed among them, and is pinned by a test that runs the tool against the real tree rather
+than a fixture standing in for it. The other 29 are mentions with no source emitter anywhere.
+
+**The 276/122 figures this entry printed first do not reproduce, and the reason is recorded so it
+is not repeated.** That count had no file-kind restriction on the emitter side: a quoted-tag-
+then-comma-or-paren shape appears in markdown prose (`` `[zone-tier-grant-unusable]` (loopTelemetry.ts)
+— fires ``) and in a test's mock assertion just as it appears in a real call, so docs and tests were being
+credited as emitters — the same defect this instrument exists to prevent, one level up, caught by
+checking the file kinds of what it credited before trusting the count rather than by inspecting
+the tree afterward. **The four comments named here as the hazardous sub-shape — the dispatch
+module, the model registry, the approvals module, and the plan-approvals module — are correctly
+attributed by the corrected instrument** (verified individually: each one's real emitter is
+credited, the commenting file is not) and stand as a confirmed subset of the fuller 21.
 
 **One arm of this entry's own decision rule is already discharged, which narrows what the reading
 has left to decide.** That rule offers "leave the list alone and improve the message" against
@@ -15600,7 +15618,9 @@ it now exists and has produced nothing. **Against Actionable now:** the change i
 the thirteen to add is exactly what the reading decides. **Against Neither:** a decision is proposed and a
 concrete reading is named to make it. **Where the code lives:** the marker is written on the denial branch
 in the approvals module; the completion marker is in the plan-investigation module; both land in the marker
-sink under the user's home directory. See item 190 for the gate and item 194 for the message the denial
+sink under the user's home directory. The attribution instrument that corrected this entry's own figures is
+`scripts/markerAttribution.ts` (test: `scripts/markerAttribution.test.ts`), runnable directly with
+`npx tsx scripts/markerAttribution.ts`. See item 190 for the gate and item 194 for the message the denial
 renders.
 
 ## 197. The probe that closed item 193, its two design decisions, and the join it could not use
