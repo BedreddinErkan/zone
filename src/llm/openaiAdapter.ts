@@ -10,6 +10,11 @@ import type { LLMClient, LLMProvider, LLMRequestOptions } from "./types.js";
 import { supportsEffort, resolveEffortForModel, normalizeModelId } from "./modelRegistry.js";
 import { responsesConvertParams } from "./openaiAdapter/responsesConvertParams.js";
 import { responsesConvertResponse } from "./openaiAdapter/responsesConvertResponse.js";
+import {
+  MIN_REQUEST_TIMEOUT_MS,
+  deriveRequestTimeoutMs,
+  zoneDispatcher,
+} from "./requestTimeouts.js";
 
 export class OpenAIAdapter implements LLMClient {
   readonly provider: LLMProvider;
@@ -18,7 +23,23 @@ export class OpenAIAdapter implements LLMClient {
   constructor(apiKey: string, baseUrl?: string, provider: LLMProvider = "openai") {
     // maxRetries:0 disables the SDK's built-in retry so Zone's own
     // withExponentialBackoff controls all retry timing and budget.
-    this.sdk = new OpenAI({ apiKey, baseURL: baseUrl, maxRetries: 0 });
+    //
+    // timeout is a FLOOR, not the operative value: the two non-streaming paths below pass a
+    // per-request timeout derived from their own output budget.
+    //
+    // The dispatcher is load-bearing and was the whole of ledger item 57's real finding. The SDK
+    // clears its own timer as soon as `fetch` resolves, and for a non-streaming request no bytes
+    // arrive until generation completes — so undici's `headersTimeout` is what actually bounds the
+    // call. Without a dispatcher that is the global Agent's 300s default, which cut every OpenAI
+    // generation at 5 minutes: HALF the SDK's configured 600s, and 1/12th of what a 128k-token
+    // gpt-5.x request can legitimately need. Same defect anthropicAdapter.ts already fixes.
+    this.sdk = new OpenAI({
+      apiKey,
+      baseURL: baseUrl,
+      maxRetries: 0,
+      timeout: MIN_REQUEST_TIMEOUT_MS,
+      fetchOptions: { dispatcher: zoneDispatcher },
+    });
     this.provider = provider;
   }
 
@@ -29,7 +50,11 @@ export class OpenAIAdapter implements LLMClient {
     if (this.provider === "openai" && normalizeModelId(params.model).startsWith("gpt-5")) {
       const body = responsesConvertParams(params, { effort: options.effort });
       const resp = await withExponentialBackoff(
-        () => this.sdk.responses.create(body, { signal: options.signal }),
+        () =>
+          this.sdk.responses.create(body, {
+            signal: options.signal,
+            timeout: deriveRequestTimeoutMs(body.max_output_tokens ?? undefined),
+          }),
         { provider: this.provider, model: params.model, emit: options.onRetryEvent }
       );
       return responsesConvertResponse(resp);
@@ -52,7 +77,13 @@ export class OpenAIAdapter implements LLMClient {
           : max_tokens != null ? { max_tokens } : {}),
     };
     return withExponentialBackoff(
-      () => this.sdk.chat.completions.create(resolvedParams, { signal: options.signal }),
+      () =>
+        this.sdk.chat.completions.create(resolvedParams, {
+          signal: options.signal,
+          timeout: deriveRequestTimeoutMs(
+            resolvedParams.max_completion_tokens ?? resolvedParams.max_tokens ?? undefined
+          ),
+        }),
       { provider: this.provider, model: params.model, emit: options.onRetryEvent }
     );
   }
@@ -71,6 +102,11 @@ export class OpenAIAdapter implements LLMClient {
           ? { max_completion_tokens: max_tokens }
           : max_tokens != null ? { max_tokens } : {}),
     };
+    // Deliberately left on the constructor floor rather than given a derived per-request timeout.
+    // On a streaming request the SDK timer covers time-to-first-token only, for which 600s is
+    // already generous; a budget-derived value (up to 60 min at 128k) would bound nothing useful.
+    // The dispatcher still applies, so undici no longer cuts this path at 300s either.
+    //
     // Also add retry parity with the sync path (stream creation is the retryable part;
     // mid-stream errors remain the consumer's responsibility).
     return withExponentialBackoff(
@@ -86,6 +122,8 @@ export class OpenAIAdapter implements LLMClient {
     },
     options: LLMRequestOptions = {}
   ): Promise<{ data: { embedding: number[] }[] }> {
+    // Deliberately left on the constructor floor: an embedding call has no generation phase, so
+    // its duration is not a function of any output budget and the derivation would not apply.
     const response = await this.sdk.embeddings.create(params, {
       signal: options.signal,
     });

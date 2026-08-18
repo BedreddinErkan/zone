@@ -4358,7 +4358,9 @@ export async function runLlmPatchFlow(input: {
   abortSignal?: AbortSignal;
   /**
    * BYOK: user-supplied OpenAI API key forwarded from the browser header.
-   * Passed through to runAgentLoop → createOpenAIClient so it is used instead of the env var.
+   * Passed through to runAgentLoop → createLLMClient so it is used instead of the env var.
+   * (Ledger item 57: this line used to name createOpenAIClient, which no production path reaches —
+   * agentLoop.ts calls createLLMClient({ apiKey: input.userApiKey, provider: input.provider }).)
    */
   userApiKey?: string;
   provider?: LLMProvider;

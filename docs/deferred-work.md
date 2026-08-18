@@ -3042,7 +3042,7 @@ each affected test file's own `../llm/factory.js` mock: `runLlmPatchFlow.readOnl
 `__tests__/multiFilePatch.test.ts` (`1e24f954`); `runLlmPatchFlow.test.ts` (`4f78ebed`);
 `generateFinalRunReport.test.ts` (`aeabe1a3`).
 
-## 57. No explicit timeout on the OpenAI SDK clients — a real reliability gap, found while investigating item 56 — corrected
+## 57. Closed — the OpenAI client's operative ceiling was undici's 300s default rather than the SDK's 600s, and the timeout value this entry waited for turned out to be derived rather than chosen
 
 **This entry originally claimed neither the Anthropic nor the OpenAI client sets an explicit
 timeout. The Anthropic half is false and is corrected below, not softened.** The original text
@@ -3147,7 +3147,84 @@ of 227,673 ms, roughly 3.8 minutes — 38% of the bound, and again not on the Op
 independently corroborates the code's own `@unverified-probe` note above. The argument for a bound
 is clean and the gap is real; nobody has hit it. Deferred on evidence, not on knowledge.
 
-**Bucket, re-decided twice now: Actionable now → Blocked on data.** The earlier re-decision argued
+**What the establish found, and three of this entry's own claims it corrects.** The value was
+established this pass. It is not a duration, and the reason is that the largest thing this entry got
+wrong is upstream of the value question entirely.
+
+**Correction 1 — the operative ceiling was never 600 s.** This entry describes the OpenAI half as
+relying on "the SDK's own ten-minute default." The SDK's timer is cleared as soon as `fetch`
+resolves, and for a non-streaming request no bytes arrive until generation completes, so what
+actually bounds the call is undici's `headersTimeout`. With no dispatcher passed that is the global
+Agent's 300,000 ms default — **half the SDK's configured value**, and one twelfth of what a
+128,000-token `gpt-5.x` request can legitimately need. Proven locally against a loopback server that
+delays headers: identical calls through `globalThis.fetch` succeed under the default dispatcher and
+throw `UND_ERR_HEADERS_TIMEOUT` once one with a short `headersTimeout` is installed. This is the same
+defect the Anthropic adapter already fixes, and that adapter's own comment states the mechanism in the
+present tense — so the diagnosis existed in this repository the whole time, one file away, and this
+entry's account of the OpenAI half understated the gap by describing the configured value instead of
+the operative one.
+
+**Correction 2 — the longest-recorded-request figure is not a request duration.** This entry cites a
+longest recorded request duration of 227,673 ms as independent corroboration of the code's own
+long-request annotation, at "38% of the bound." That figure comes from a marker whose duration is
+computed from a timestamp captured *before* the agent loop is entered, so it is a whole-loop wall
+clock covering every iteration and every shell command, not one request. The comparison sets a loop
+clock against a per-request deadline, and the corroboration does not follow. **This is the third
+instance of the exact error shape this entry already documents twice** — the first two were a string
+search standing in for a call-graph check, in both directions; this one is on the measurement side,
+a field's name standing in for what it measures. The same defect governs the usage ledger's
+`latencyMs`, recorded separately as item 221.
+
+**Correction 3 — a request timeout has been instrumented, and one has fired.** This entry states that
+no marker instruments request timeouts, so a sink zero would be uninformative by construction. The
+task classifier races its single call against a 5,000 ms deadline and logs the elapsed time on every
+classification. Sixty-seven records exist; the largest is 5,005 ms and carries `fallbackUsed: true`,
+`fallbackReason: "error"` and zero cost — a timeout firing. The distribution beneath it runs p50
+1,848 ms and p90 2,930 ms, so **a call whose p90 is 2,930 ms exceeded 5,000 ms once in 67.** That
+1.5% kill rate at 1.7× p90 is the establish's actual finding about the value: a deadline read off the
+percentiles of a heavy-tailed generation-time distribution kills legitimate calls at a rate those
+percentiles do not predict.
+
+**So the value is derived, not chosen, and that is what discharged the condition.** The rule was
+committed before any candidate number: the timeout exists to cut a connection that will never answer
+— cost is bounded by `max_tokens` and the daily cap, user-visible wait by the iteration cap and a
+threaded abort signal — and the acceptable rate of killing legitimate slow calls is zero, because a
+false cut discards generated output while input tokens are still billed and is terminal (a timeout
+longer than 60 s fails the retry budget's elapsed check on its first failure and surfaces as
+`upstream_unavailable`). Under that rule the existing `deriveRequestTimeoutMs` is the answer: it
+scales with the request's own output budget at a vendor-published rate, and it was already written
+and already tested. The latency data set the urgency, not the number.
+
+**What shipped.** The derivation, the transport ceiling and the shared dispatcher moved to their own
+module so both adapters use one copy, with the Anthropic adapter re-exporting the two names its
+existing tests import. The OpenAI adapter now pins that dispatcher, keeps a positive constructor
+floor, and passes a budget-derived per-request timeout on both non-streaming paths. The streaming and
+embedding paths are deliberately left on the floor, each with a comment saying why rather than
+leaving the omission to be read as an oversight. The stale doc comment naming `createOpenAIClient`,
+which this entry asked whatever pass touched this to correct, is corrected. The unreachable second
+construction site is untouched, as this entry requires — deleting it remains a separate pass.
+
+**A bound worth stating, since the reasoning generalises.** Every other place Zone issues an HTTP
+request was swept for the same defect under two instruments — a source scan for eleven
+request-issuing constructs, and the dependency manifest crossed with which modules can pin a
+dispatcher at all. Neither was sufficient alone; the scan found a Supabase path the manifest filter
+missed, and the manifest found the pin-capability list the scan could not see. Production is clean
+apart from the site fixed here: the embedding path inherits the same client, and the URL-fetch tool
+and both Supabase callers are unexposed because each carries its own deadline well below 300,000 ms
+— 15,000 ms, 30,000 ms, and a single indexed lookup respectively. Two manual probe scripts under
+`scripts/` are exposed and were left alone as out of scope; the sharper of the two asks for a
+600,000 ms ceiling on a non-streaming call and silently gets 300,000, which caps a probe built to
+observe long-request behaviour at half its intended window.
+
+**Bucket: Closed**, decided on this entry's own condition rather than on the fix — the reading item
+198 and item 212 share, re-read this pass rather than adopted. This entry's condition was that "the
+value itself needs its own establish"; the establish ran, and settled it by showing the value is
+derived from the request's own output budget rather than chosen from a distribution. The fix shipped
+in the same pass, but the bucket move does not depend on it. Item 210 does not apply — its closure
+turns on discharging a *different* entry's condition. Item 181 does not apply — it had no prior open
+condition, where this entry had a specified one. **The two earlier re-decisions are left as
+written**, because the reasoning that moved this entry into Blocked on data was correct at the time
+and is the record of how the condition came to be stated at all. The earlier re-decision argued
 the *kind* of fix was fully specified with only the numeric value deferred, and that narrowing the
 scope made it smaller rather than less specified. Two things it did not know: the narrowed scope
 included a site no path reaches, and the deferred value is not a detail but the entry's own stated
@@ -16404,22 +16481,86 @@ subagent-dispatch module, the two prompt blocks in the agent loop, and the cross
 See item 116 for the count that surfaced the divergence and item 219 for the restatement mechanism this
 is an instance of.
 
+## 221. The usage ledger's run-summary records are not what they claim to be, in two independent ways
+
+Surfaced while establishing item 57's timeout value, which needed a latency distribution and found
+that the field carrying it is mislabelled at the source.
+
+**First: `recordRunSummary` writes `provider: "openai"` as a hardcoded literal.** Every top-level
+run appends one zero-cost sentinel record under `model: "__run_summary__"` carrying `latencyMs` and
+`terminationReason`. That record's provider field is a constant in the function body, not an
+argument, so a run that spent its entire budget on Anthropic is filed under OpenAI. Measured on the
+live ledger by two instruments that agree exactly — a JSON cross-tab and a raw byte-level field
+count with no JSON parser: **926 records carry `latencyMs`, all 926 are `__run_summary__`, all 926
+say `openai`, and no sentinel lacks `latencyMs`.** A perfect 1:1, which is what makes the literal
+visible: a genuine provider split could not be that clean.
+
+**What this costs downstream.** The sentinel is read by `metricsAggregator`, which feeds the
+`/metrics` modal and the Prometheus export, so every latency percentile Zone reports about itself is
+attributed to one provider by construction. It also produced a real analytical error before being
+caught: an earlier pass read the resulting split as "latency coverage is 47% on OpenAI and 0% on
+Anthropic" and concluded the default provider was uninstrumented. Neither half was true. The 47% is
+926 sentinels divided by 926 sentinels plus 1,045 real OpenAI inference records, and the 0% is the
+literal rather than a gap — **every** top-level run of either provider is instrumented.
+
+**The attribution is recoverable, which is why this is a defect rather than a loss.** Joining each
+sentinel to the real inference records sharing its `runId` recovers the true provider: 550
+anthropic, 89 openai, 7 gemini, and 280 orphans with no inference records at all. Any consumer
+could do the same join; none does.
+
+**Second, and independent: 224 of those 926 records are vitest runs.** Fixture-shaped runIds
+(`run-f1-wire`, `run-parent`, `test-p6-cost-burn`, and 53 others) trace to
+`anthropicAdapter.toolStream.test.ts`, `agentLoop.stallDetect.test.ts` and
+`agentLoop.tierArchetypeMismatch.test.ts`. Their `latencyMs` runs 17–116 ms because nothing was
+called. They are 24.2% of the distribution and they pull the median down by 36% — the raw p50 is
+13,449 ms and the real-runs-only p50 is 20,981 ms.
+
+**That half is already closed, and the entry records it as closed rather than open.** The leak sits
+in a single 1.6-hour window on 2026-07-29, roughly 21 hours after the `~/.zone` test isolation
+landed. Zero fixture-shaped records exist after 2026-07-30, against a denominator of 984 records in
+that window — an informative zero, not a vacuous one. What is not established is *why* it escaped a
+guard that was already in place, and the entry does not guess. The records themselves remain on
+disk and will keep contaminating any percentile computed over the whole ledger.
+
+**What would close it:** thread the real provider into `recordRunSummary` rather than hardcoding
+one, or write a neutral sentinel value that consumers must resolve by join instead of silently
+believing. Either is specified; neither needs anything new to be learned first. The historical
+records cannot be relabelled in place without the same join, so a decision about backfill belongs
+with whoever changes the writer.
+
+**Why this is its own entry rather than part of item 57.** Item 217's two-condition test, both
+halves required. The population is larger: the mislabelling reaches `metricsAggregator`, the
+`/metrics` modal and the Prometheus export, none of which item 57 is about. And the kind is one
+item 57 does not anticipate: that entry is about timeout configuration on a provider SDK, and this
+is a telemetry-labelling defect in a different subsystem that merely happened to obstruct it. The
+kind half is the one that has failed on recent applications, so it is stated explicitly rather than
+assumed — item 57 contains no claim about the usage ledger at all, correct or otherwise.
+
+**Bucket: Actionable now.** A fix is specified in this entry and nothing new needs to be learned
+first. Deliberately not Blocked on data: the observation that would motivate it has already been
+taken and is recorded in this entry.
+
+**Where the code lives:** the sentinel writer is in the usage tracker; the field it mislabels is
+written at the single `latencyMs` site in the agent loop, which computes a whole-run wall clock and
+not a request duration. See item 57 for what that second property cost, and item 220 for the
+neighbouring shape — a field whose recorded values cannot answer the question they were added for.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 220 to find out which ones still need something. No index of
+reader the trouble of reading all 221 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (91): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218
+**Closed** (92): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (0):
+first (1): 221
 
-**Blocked on data** — closing requires an observation that doesn't exist yet (16): 1, 4, 18, 23, 57, 63, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196
+**Blocked on data** — closing requires an observation that doesn't exist yet (15): 1, 4, 18, 23, 63, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196
 
 **Neither — a structural fact recorded, with no fix proposed** (113): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,

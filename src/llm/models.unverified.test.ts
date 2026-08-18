@@ -28,6 +28,9 @@ const MARKED_SOURCES = [
   "models.ts",
   "modelRegistry.ts",
   "anthropicAdapter.ts",
+  // The transport marker moved here with the shared timeout derivation (ledger item 57);
+  // this list is the reason that move could not silently drop it.
+  "requestTimeouts.ts",
   // A marker belongs at the code that needs re-probing, not next to the
   // checklist entry — that is the whole point of grepping for it.
   "agentLoop.ts",
