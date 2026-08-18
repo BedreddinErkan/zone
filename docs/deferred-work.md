@@ -217,7 +217,55 @@ precisely because this trigger can repeat within a single run. A reader re-check
 against item 73's key will find this one unexplained by it — correctly, because the key was never
 involved.
 
-**Bucket: Blocked on data.** Closing requires an observation that does not exist yet.
+**Re-derived this pass, and the proxy figures this entry recorded are superseded — the threshold
+marker is now at its bar.** `[zone-apply-patch-marker-imbalance]`, the marker this entry's *threshold* is actually stated
+on, now carries **10 records across 10 distinct run identifiers**, every one of them confirmed as a
+real LLM run by cross-checking the identifier against the usage ledger. The proxy figures this entry
+recorded — 3 occurrences, 2 runs, 50 runs recorded — are superseded, not corrected: they were right when
+written and the sink has accumulated since. Re-derived on the same proxy marker
+(`[zone-apply-patch-retry]`, `reason: "marker_imbalance"`) it now reads **13 records across 12
+runs**.
+
+**That this entry states its threshold on one marker and last measured a different one is itself a
+defect, and it is corrected rather than left implicit.** The bar is written against
+`[zone-apply-patch-marker-imbalance]`; the re-derivation this entry carried measured
+`[zone-apply-patch-retry]` as a proxy without saying it was one. The reason the proxy was reached
+for is recoverable and was never stated: **the threshold marker carries no run identifier in its
+payload** — its fields are the file path, four marker counts, the patch byte length and the
+rejection flag — so per-run attribution is impossible from the payload alone and has to come from
+the sink record's own top-level identifier.
+
+**A deduplication warning, since this entry's own text invokes the convention.** The obvious
+collapse — grouping these records by payload — reports 4 distinct shapes and looks like six
+duplicates. It is wrong: the ten records carry ten different top-level run identifiers and are ten
+separate occurrences that merely share field values, because the same fixture files were patched
+repeatedly. Item 73's double-logging is real elsewhere and is **not** present here. A reader
+applying dedup to this marker must key on the record, not the payload.
+
+**First cut on the question itself, which these records now answer.** Of the ten, **nine are
+`find=1, replace=2` and one is `find=1, replace=0`** — the imbalance runs one-sided in nine cases
+out of ten, the replace side carrying one marker more than the find side. **The bound, stated so the
+sample is not read as wider than it is:** all ten fall inside a single 12.2-minute window on
+2026-08-16 and touch only two files, `src/lib.rs` (seven) and `settings.py` (three) — sweep-target
+fixtures, not this repository's own sources. Ten real records from ten real runs, concentrated
+rather than spread; the same sparse-not-brief shape item 18 records about its own window.
+
+**This entry is the root of a dependency chain the bucket does not otherwise show.** Its
+order-of-magnitude threshold is inherited by item 63, which cites it directly and notes item 1
+states none; and by item 18, which cites both. Item 75 cites item 63 in turn. **Five entries —
+1, 4, 18, 63, 75 — rest on this one number**, which this entry itself marks as an order-of-magnitude
+estimate rather than a defensible rate. Two further clusters exist beside it: items 90, 110, 143 and
+157 share one behavioural-run measurement shape by item 90's own admission, and items 166, 170, 175
+and 178 form a fourth around the requested-tools question, with item 166's own text naming item 170
+as registering the first of its unknowns. **Thirteen of the bucket's entries sit in one of the three
+clusters.** The consequence worth knowing before anyone spends: one measurement can discharge more
+than one entry, and the three cluster hubs are where that leverage sits.
+
+**Bucket, re-decided rather than inherited: Blocked on data becomes Actionable now.** This entry's
+own stated bar — "roughly 10-20 real records" — is met at 10, and the question those records exist
+to answer is answered by them. What remains is the seven-site threading, which this entry already
+specifies in full, so nothing further needs to be learned first. Precedent: item 63, closing in the
+same pass on the same principle — an entry's own pre-stated threshold, met, decides it.
 
 **Where the code lives:** nowhere yet — this is unbuilt. If the seven-site trace needs
 redoing, re-derive it starting from `[zone-apply-patch-marker-imbalance]`'s emission site,
@@ -1301,7 +1349,13 @@ normalization-class-bearing patches produce a changed hash, and the stale-compar
 at most one comparison per file path (the next failure after a resume makes both compared
 records new-style again).
 
-**Bucket: Blocked on data.** The recipe for the two remaining classes (line endings, the
+**Bucket, re-examined this pass and unchanged: it stays Blocked on data.** A sweep read this
+entry's "nothing further needs to be learned" sentence as evidence of misclassification. Checked
+against the whole entry, it is not: that sentence is this entry's own premise, and the paragraphs
+around it already reason from it to this bucket deliberately, on item 63's precedent, while stating
+outright that the bucket name is the closest fit the document has rather than an exact one. Recorded
+so the same fragment does not re-open the same question a third time. The reasoning it was checked
+against is unchanged: the recipe for the two remaining classes (line endings, the
 read_file prefix) is now fully specified and nothing further needs to be *learned* to build it —
 this entry's own bar for Actionable now — but across the only two calls ever instrumented,
 neither class fired, so what closing it buys is unmeasured rather than unknown. Deferred on
@@ -3604,7 +3658,7 @@ regex is the permissive rule this entry mis-stated; the four telemetry markers a
 cost are `PROVIDER_AGNOSTIC_HARDENING` and the `apply_patch_marker_imbalance` coaching case, both
 in `agentLoop.ts` — both de-indented by item 71, so neither reads as this entry once described it.
 
-## 63. Whether to build item 17's structured argument is blocked on tool-argument parse-failure data that doesn't exist yet
+## 63. Closed — the review point this entry set in advance is met, and the entry's own rule makes the null result the answer
 
 **What it is:** item 17's own correction found the format-ambiguity defect (item 2) can only
 close by replacing `apply_patch`'s delimited `patch` string with a structured argument, not by
@@ -3650,8 +3704,34 @@ better basis, and establishes the other two conventions fresh, since no existing
   failures are rare enough in ordinary use that the encoder-risk side of item 17's tradeoff is
   small, which is itself the input item 17's decision needs, not an absence of one.
 
-**Bucket: Blocked on data.** Closing requires an observation that does not exist yet — this entry's
-own review point is explicit that a null result by then is itself the answer, not a stalled entry.
+**Bucket, re-decided rather than inherited: Blocked on data becomes Closed**, on this entry's own
+pre-declared rule rather than on any judgement made this pass. Precedent: items 198 and 212, both
+closed on the entry's own condition rather than on a fix. Item 210 does not apply — its closure
+discharges a *different* entry's condition. Item 181 does not apply — it had no prior open
+condition, where this entry had a specified one.
+
+**The review point is met and the marker is silent — both re-derived, two instruments each.** Real
+runs since the marker went live at `03ee0b7e` (2026-08-05T19:47:41Z): **93**, counted from the usage
+ledger's run-summary sentinels with item 221's decomposition applied and clean on both exclusions —
+**0 vitest fixtures, 0 zero-LLM-call orphans** — against a stated review point of roughly 50. Records
+of `[zone-tool-args-parse-failed]` across the entire sink: **0**, agreed by a JSON cross-tab and by a
+raw byte-level count with no JSON parser. The absence claim is made only after the instrument was
+shown live: **3,896 sink records spanning 92 distinct marker names** after the same cut.
+
+**The denominator's two gating dimensions, named rather than assumed.** The marker is on `log()`,
+not the verbose-gated helper — that was this entry's own fix at `03ee0b7e` — so the first dimension
+does not bite. The second does, and it is item 115's: a marker reaches the sink only where the
+output shield is installed, which the headless JSON path does not do, so the zero is over
+sink-observable runs rather than over all 93. The run-count disagreement this produces is visible
+here too — 54 sink-visible run identifiers against the ledger's 93 over the same window — and it is
+item 115's recorded property, not a new one. The review point is met on **both** instruments
+regardless: 93 and 54 each clear roughly 50.
+
+**So this entry's own rule decides it, and the rule was written before the result.** It states that
+a marker firing rarely or not at all by the review point is not a stalled entry but the answer.
+Both conditions hold, so the answer is recorded: tool-argument parse failures are rare enough in
+ordinary use that the encoder-risk side of item 17's tradeoff is small — which is the input item 17
+needs, and is handed to it rather than left as an absence.
 
 **Where the code lives:** the marker's emission site is in `agentLoop.ts`'s tool-call parsing
 loop; `classifyJsonParseError` is defined just above it. See item 17 for the decision this data
@@ -8959,6 +9039,12 @@ rewritten.** Item 110's own blocker is dollar cost, which that entry corrected f
 the three named above. The two are still worth reading together, and a pass with budget should — but budget
 is not what either is waiting on.
 
+**This item is the hub of a four-entry cluster, recorded because the bucket does not otherwise show
+it.** Items 110, 143 and 157 all cite this entry, and this entry cites all three; a sweep that named
+only 110 and 143 undercounted by one. A single behavioural run designed against this item's own
+mechanism could discharge more than one of the four, which is worth knowing before anyone budgets
+for one of them alone. See item 4 for the bucket's other two clusters and the same consequence.
+
 ## 91. Closed — `run_command_readonly`'s description named no discovery binary, at either of the two sites that state its capability
 
 **What it is.** Across seventeen commands recovered from a session establish and re-checked directly
@@ -13925,6 +14011,12 @@ telemetry module. See item 99 for the evidence bearing on stage one, item 161 fo
 caches, item 163 for the instruments that priced this, item 165 for the phase boundary that already pays
 the cost once, and items 167 through 170 for what the shipped version leaves open.
 
+**This item is the hub of a four-entry cluster inside the Blocked-on-data bucket.** Item 170 is a
+strict subset of it — this entry's own text names it as registering the first of the unknowns listed
+here — and items 175 and 178 connect through the same family. One measurement aimed at this entry's
+question can therefore discharge more than one of the four. See item 4 for the bucket's other two
+clusters and the same consequence.
+
 ## 167. Closed — the grant moved to the layer whose ceiling is not empty, and the one-shot guard this entry told it to reuse was the wrong guard
 
 **What it was.** Item 166's grant ran where the execution capability filter is assembled and was bounded to
@@ -15372,6 +15464,22 @@ parsed count and zero of them are this one, agreeing with a plain count over the
 consistent with two very different worlds — the denial is rare, or the denial is common and simply predates
 the marker — and nothing recorded can separate them yet.
 
+**Superseded: the marker has fired, and the join this entry names is now performable.** Both
+figures this entry records — a marker that never fired, and a sink of 3,792 — were true when
+written and are now stale. Re-derived under two
+instruments that agree — a JSON cross-tab and a raw byte-level count with no JSON parser —
+`[zone-run-command-readonly-blocked]` carries **4 records across 2 distinct runs**, and its
+companion `[zone-plan-investigation-complete]` carries **26**, matching this entry's own
+"twenty-six of them" exactly. The denial records carry the run identifier, the command, and the
+refusal reason, which is precisely the join this entry describes as needing no new instrumentation.
+The marker is on `log()`, so the verbose gate does not bite; item 115's shield dependency still
+bounds it to sink-observable runs. Three distinct commands appear across the four records, two of
+them whitelist misses and the rest blocked patterns. **The blocking condition is discharged — the
+observation exists. The question this entry asks is deliberately left unanswered here**, because
+recording that an entry is unblocked is not answering it, and the composition reading this entry sets
+out is what the extension decision turns on. The bucket is unchanged for that reason: what it now waits on is
+the reading, not the records.
+
 **The reading that would settle it.** Investigation runs are already recorded by their own completion
 marker, twenty-six of them on this machine, and both markers carry the run identifier, so a denial rate per
 investigation is a join of two files with no new instrumentation. The question that decides the extension is
@@ -16792,12 +16900,12 @@ priority ordering" cautions against ranking by importance, which this section do
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (94): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223
+**Closed** (95): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (0):
+first (1): 4
 
-**Blocked on data** — closing requires an observation that doesn't exist yet (15): 1, 4, 18, 23, 63, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196
+**Blocked on data** — closing requires an observation that doesn't exist yet (13): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196
 
 **Neither — a structural fact recorded, with no fix proposed** (115): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
