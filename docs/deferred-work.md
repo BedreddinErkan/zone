@@ -14528,10 +14528,28 @@ test — but a placement assertion pins where text sits in a rendered string, an
 what the model does with a threshold stated before a branch. Only the paired render comparison separates
 those, and a green or red assertion says nothing either way.
 
+**The pre-port reconciliation was checked this pass and resolves in this entry's favour — recorded so
+the next reader does not re-derive it.** A sweep of the retained session transcripts finds an explore
+mark on a **single-file** step, which looks like direct counter-evidence, since a file-count threshold
+carried across is precisely what this entry proposes would suppress such a step. It is not
+counter-evidence. This entry never defines "the port", but its own closing sentence scopes it to the
+plan-investigation prompt's rules section, and history names the event: the criteria were ported into
+that prompt at `fb895ee9` on **2026-08-15**, as item 166's second stage. The explore-marked session
+predates that by a fortnight, at 2026-07-31. Partitioned on the port date, every retained mark falls on one side —
+sixteen occurrences before it, including both explore occurrences, and none after. So the artefact
+carrying explore marks is the pre-port baseline this entry already names, exactly as written.
+
+**One figure could not be reproduced, and is recorded as unreproduced rather than wrong.** This entry
+cites nine marked steps across criteria-carrying runs. The retained transcripts hold sixteen mark
+occurrences, all pre-port, and a plan is stored more than once per session — the explore step appears
+twice inside a single file — so an occurrence count is not a step count. The population the nine draws
+on is not identifiable from what is retained, which is a limit of these artefacts rather than a
+demonstrated error in the figure.
+
 **Bucket: Blocked on data.** Closing requires an observation that does not exist yet — the paired render
-comparison above. Against Neither: this is a registered candidate explanation awaiting a discriminating
-measurement, not a structural fact with no fix proposed. Against Actionable now: the fix would be a prompt
-change whose direction is exactly what is unestablished.
+comparison this entry sets out. Against Neither: this is a registered candidate explanation awaiting a
+discriminating measurement, not a structural fact with no fix proposed. Against Actionable now: the fix
+would be a prompt change whose direction is exactly what is unestablished.
 
 **What the marks retirement changes here, which is the stakes and not the claim.** This entry is about mark
 *production* — why the prompt yields no `explore` marks — and nothing about that depends on what reads them,
@@ -14661,11 +14679,60 @@ identifier to the per-run cost record. No new key is needed and no new join is i
 already share the identifier's name and value shape. Item 165's caveat applies unchanged, since an
 identifier names a dispatch rather than a loop.
 
-**Bucket: Blocked on data.** Closing requires an observation that does not exist yet — the complex-tier
-value of the criteria against their per-run cost. **Against Actionable now:** the obvious fix, deleting the
-copy that has no consumer, cannot be chosen without the measurement, because the same text serves the tier
-where the consumer does exist. **Against Neither:** this is a live cost with a named instrument, not a
-structural fact with nothing to do about it.
+**Re-derived this pass: one of the two cost figures does not reproduce, and it is an error rather than
+drift.** The plan-investigation span reproduces exactly at 889 characters and about 222 tokens. The
+plan-generation span does not: measured by shape from the heading through the worked examples it is
+**1476 characters, about 369 tokens**, roughly a quarter more than the figure recorded. Alternative
+boundaries were tried rather than assumed — criteria without the examples gives 656, starting from the
+instruction line rather than the heading gives 1436 — and none yields the recorded number. Measured
+again at the commit that wrote this entry, the span is also 1476, so the text has not changed and the
+figure was wrong when written.
+
+**The value question is bounded far more tightly than "unmeasured" suggests, and the bound is a
+denominator.** The annotations block renders only where the subagent tool is offered, which is complex
+tier alone. Across the marker sink's whole window the archetype marker records 91 records over **74
+distinct runs**, and their tier distribution is 60 medium, 26 unclassified, 3 simple and **2 complex**.
+So the block could render on at most two runs, and the dispatch marker — attributed to its single
+emitter with the attribution script rather than a text scan, and on the ungated logger — records
+**zero** dispatches over that same window, against a sink of 5,715 records under 100 distinct marker
+names. **The instrument this entry proposes would therefore have read those same two runs.** Whether
+the block never rendered or rendered and was ignored cannot be separated at that denominator, and it
+could not have been separated by a mark census either.
+
+**The cost comparison this entry implies cannot be built from what is recorded, and saying so is the
+finding.** Joining tier from the archetype marker to per-run cost from the usage ledger on the run
+identifier gives 56 medium runs at $0.17 mean, 2 simple at $0.17, and 2 complex at $0.77. Those arms
+are **not comparable**: they are different tasks that happened to classify differently, not one task
+run at two tiers, and the classifier assigns tier by task size — so the gap measures how large
+complex-tier tasks are, not what the tier costs. **The measurement that would settle this entry is a
+paired one it does not currently specify: the same task run at both tiers, its cost differenced, and
+the annotation quality compared.** Naming the shape is not a decision to spend on it.
+
+**A qualification to this entry's own claim that nothing can relate mark quality to anything
+downstream.** No marker records a plan's marks — that part holds. But the marks are persisted:
+session transcripts under the user-level state directory carry the eligibility field, holding sixteen
+mark occurrences, and three of those files also carry the run identifier this entry says would have to
+be added as a join key. A partial census is therefore constructible from artefacts that already exist.
+What it cannot supply is the value judgement, because retention is not guaranteed, fewer than half
+carry the key, and the population is the same two complex-tier runs.
+
+**A fix that does not need the measurement, examined and declined rather than left unsaid.** This
+entry's case against Actionable now rests on deletion being unchoosable without the measurement,
+since the same text serves the tier where the consumer exists. Gating is a different fix and would
+not need it: below complex tier this entry has already established the criteria buy nothing, and the
+plan-generation prompt already interpolates an archetype conditional into one of its own bullets, so
+conditional emission is a demonstrated shape in that exact string. What blocks it is narrower and
+worth recording: the plan-generation entry point takes an archetype and no tier, so gating by tier
+means threading tier through every call site first. Declined here on its own cost, not on the missing
+measurement — the saving is about 369 tokens on runs whose mean recorded cost is $0.17.
+
+**Bucket, re-examined this pass and unchanged: it stays Blocked on data.** The observation this entry
+waits on still does not exist and still could — complex-tier runs can accumulate, and at two observed
+runs the population is thin rather than closed. Closing requires an observation that does not exist
+yet — the complex-tier value of the criteria against their per-run cost. **Against Actionable now:** the
+obvious fix, deleting the copy that has no consumer, cannot be chosen without the measurement, because
+the same text serves the tier where the consumer does exist. **Against Neither:** this is a live cost
+with a named instrument, not a structural fact with nothing to do about it.
 
 **Where the code lives:** one rule line and two schema lines in the plan-investigation prompt's rules
 section; the criteria and their examples in the plan-generation prompt's own instructions. See item 175 for
