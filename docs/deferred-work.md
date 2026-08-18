@@ -11005,6 +11005,42 @@ volume and coverage come apart here, so a denominator can be large and still con
 shape a question needs — which is why several entries in this document wait on populations of nought
 or two inside a sink of ninety-four runs.
 
+**A fourth property, and the one that decides what several entries in this document are actually
+waiting for: two run shapes stopped being exercised, on dates, and everything since is one shape.**
+Measured by four markers that do not share a mechanism. Runs the classifier put in a read-only
+archetype — `question` or `investigation` — number nine, the last on **2026-08-05**. Runs that
+reached the plan-mode gate number twenty, the last on **2026-08-09**. Investigation completions
+number twenty-six, also ending 2026-08-09. Invocations of the read-only shell, successful or blocked,
+number three runs, ending 2026-08-05. **The first two populations are disjoint** — none of the nine
+read-only-archetype runs carries a plan-mode record — so this is two mechanisms ceasing, not one
+counted twice. Everything after the cut is a single shape: forty-one runs, archetype `debug`, flow
+branch `agent_loop`, and not one plan-mode record among them.
+
+**Why they stopped is establishable and the answer is habit, not code — which is the part that
+changes how the waiting entries read.** The plan-mode gate records what decided it, and across all
+twenty runs it reports `default-non-additive` — the environment override was never once set. When the
+plan path ran it investigated **eighteen times out of twenty**; the two exceptions were pure-addition
+tasks the gate is designed to route past. The one commit that touched the gate's own condition landed
+seventy-four minutes before the last plan run, and that run still investigated. So nothing closed the
+path; it simply stopped being the thing that got dogfooded. **One caveat belongs with that, because it
+is a change nobody has exercised:** a later commit strips leading framing and locative preambles
+before the pure-addition test anchors, so more tasks now match as additions and fewer will
+investigate. It landed after the last plan run. The eighteen-of-twenty rate is therefore a stale
+baseline, and whoever resumes the path should not expect it to hold.
+
+**How far it reaches, counted rather than described: six of the thirteen entries in the
+Blocked-on-data bucket wait on one of these two populations** — items 143, 166, 170, 175, 178 and 196,
+each by its own mechanism: the read-only shell's refusal gate, the requested-tools channel that asks
+by emitting a plan, the marks the plan-investigation prompt produces, and the criteria that sit in
+both plan prompts. **Two entries that read as though they belong on that list do not**: items 90 and
+157 rest on a probe that is tracked in the repository, imports the built tree directly and constructs
+its own question-archetype conditions, so it neither needs the dispatch path nor leaves records in
+this sink at all — they are waiting on spend with a working instrument, which is a different and
+cheaper blocker. The remaining five entries are independent of both populations. **This is recorded
+here rather than in each of the six** because it is a property of this surface, not of any one
+question; and it is not a separate entry because it is another property of the surface this entry
+already records rather than a larger population of some different thing.
+
 **Bucket: Neither.** A structural fact is recorded and no fix is proposed.
 
 **Where the code lives:** the emit functions in `loopTelemetry.ts`; the logging helper in `utils/logger.ts`;
@@ -12255,9 +12291,62 @@ varying refusal text. Building one is a prerequisite, and the measurement then n
 rather than one. Naming what would have to be built is not the same as this entry specifying a fix, which is
 why it sits where it does rather than in Actionable now.
 
-**Bucket: Blocked on data.** No instrument exists to induce or classify a refusal, and building one is
-a prerequisite this entry names but does not build — closing requires an observation that does not
-exist yet.
+**Re-examined this pass: the population is not thin, it is empty, and structurally so.** The texts
+this entry is about landed at `6f9c9a69` on 2026-08-13. Every refusal the marker sink holds — four
+records across two runs, agreed by a parsed cross-tab and a raw byte-level count with no JSON parser
+— predates that commit. **Nothing has been refused under the text whose wording this entry
+questions.** The reason is narrower than a thin sample: `checkCommandSafe` has exactly one non-test
+caller, `run_command_readonly`, and that tool records **zero invocations of any kind** after
+2026-08-05. So the gate whose wording is in question has not been reached once since the wording was
+written. The absence is specific rather than an empty file: the window after the fix holds 1,923
+records across 41 runs under 35 distinct marker names. See item 115 for how far that missing
+population reaches — this entry is one of six waiting on it — and for the established reason it
+stopped.
+
+**One half of "no instrument exists to induce or classify" is false, and the correction is
+demonstrated rather than asserted.** Classifying needs nothing built. `checkCommandSafe` is pure, and
+the sink records the rejected command verbatim, so re-running the predicate over the stored string
+recovers each refusal's class at zero cost — over the recorded three it returns `chain`,
+`whitelist-miss` and `write-redirect`, which is what separates this entry's own population (the
+catch-all texts) from the two classes that render dedicated messages. **Exactly one of the three
+recorded refusals is a catch-all.** The commands issued after a refusal are recorded too, on the
+agent's own tool-call marker, so both halves of this entry's decision rule compute directly. Inducing is
+the half that genuinely does not exist, and it is the half that needs provider calls and two arms.
+
+**A measured baseline this entry did not have, bounded at what one observation is worth.** Applying
+the decision rule to that single catch-all refusal — `write-redirect`, whose text today names `ls` —
+gives a distinct-binary count after the refusal of **three** (grep, find, wc), with the named binary
+**absent** from all of them. That is the pre-fix comparison value the refuting arm asks for, since the
+refusal predates the naming. **It is n=1**, it is one class of twelve, and the post-fix arm it would
+be compared against is empty — so it bounds nothing yet. It is recorded because the entry's refuting
+signal is defined relative to a pre-fix number that had never been computed.
+
+**What answering would change, traced rather than assumed — and it is weaker than this entry
+implies.** The refusal text is terminal output: it is the `output` string of a failed tool result and
+reaches the model as a tool message. No branch, gate or policy reads it. So the consumer is a wording
+decision over twelve strings, and it is asymmetric — a confirming result would rephrase them, a
+refuting one changes nothing, and item 93 already applied the mitigation prophylactically, framing
+every example as "for example" or "such as" and never as the sole route. A pass weighing the spend
+should see that before budgeting two arms.
+
+**A contrast this entry does not know it already has.** Of the twelve classes naming an example,
+**eleven name exactly one binary and `pipe-to-non-utility` names thirteen**. That is an unplanned
+within-family one-versus-many comparison, available post-fix only and needing no pre-fix arm — which
+sidesteps this entry's own length confounder entirely, at the cost of a per-class denominator far
+smaller than the whole. Recorded as a design note, not a proposal.
+
+**Bucket, re-examined this pass and unchanged: it stays Blocked on data.** A sweep read this entry's
+"no instrument exists" sentence as evidence it is blocked on a build rather than on data. Checked
+against the bucket's written definition — closing requires an observation that does not exist yet —
+that distinction is not one the definition draws, and the neighbours refute it: item 157 needs
+designed multi-arm runs on prompt text and sits here, items 175 and 178 need paired measurements
+nobody has run and sit here, and of the thirteen only item 170 has an instrument already emitting. If
+needing work to produce the observation disqualified an entry, this bucket would be nearly empty.
+Precedents read rather than cited: items 198 and 212 close on their own condition being discharged
+and this one is not; item 210 closes on a different entry's remedy landing and nothing has landed;
+item 181 is Neither on no observation being missing, and one is missing here. No instrument exists to
+**induce** a refusal, and building one is a prerequisite this entry names but does not build —
+closing requires an observation that does not exist yet.
 
 **Where it came from:** item 90, which retains the sentence recording that this prediction was registered
 against its mechanism; item 93 for the refusal texts themselves.
