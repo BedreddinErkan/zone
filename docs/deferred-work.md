@@ -7883,6 +7883,19 @@ prepends text, so its one-directional result is partly a property of the operato
 property established about the regular expression in general — carried here so a later reader does
 not read one-directionality as a proven property of the anchor.
 
+**Re-checked a twenty-seventh time: the repaired predicate has had no live exposure at all, and its
+verdict on everything recorded is unchanged.** The repair landed on 2026-08-11; the last run to
+reach this gate was on 2026-08-09, and none has reached it since, so no task has been routed by the
+repaired predicate in production. What can be measured instead was: executing the predicate at the
+commit before the repair and at head, against the twelve distinct task strings retained from the
+window in which this gate last ran, returns the same verdict on every one — **nothing
+reclassified**. The strips act on a shape none of those tasks has. A second instrument agrees by a
+different route, matching the two patterns against the same tasks as text without running the
+predicate, and both were proved live first. **This neither confirms nor undercuts the repair** — it
+bounds it: the sixty assertions that pin the repair still hold, and the population that would show
+its effect in practice has not existed since it landed. See item 115 for that population and what
+waits on it.
+
 **What closes and what does not, checked against this entry's own enumerated remainder.** The routing
 predicate is named in that remainder, and this closes the one defect measured against it — the anchor
 defeat. What strand one's own opening sentence states is unchanged and still holds exactly as
@@ -11016,30 +11029,76 @@ read-only-archetype runs carries a plan-mode record — so this is two mechanism
 counted twice. Everything after the cut is a single shape: forty-one runs, archetype `debug`, flow
 branch `agent_loop`, and not one plan-mode record among them.
 
-**Why they stopped is establishable and the answer is habit, not code — which is the part that
-changes how the waiting entries read.** The plan-mode gate records what decided it, and across all
-twenty runs it reports `default-non-additive` — the environment override was never once set. When the
-plan path ran it investigated **eighteen times out of twenty**; the two exceptions were pure-addition
-tasks the gate is designed to route past. The one commit that touched the gate's own condition landed
-seventy-four minutes before the last plan run, and that run still investigated. So nothing closed the
-path; it simply stopped being the thing that got dogfooded. **One caveat belongs with that, because it
-is a change nobody has exercised:** a later commit strips leading framing and locative preambles
-before the pure-addition test anchors, so more tasks now match as additions and fewer will
-investigate. It landed after the last plan run. The eighteen-of-twenty rate is therefore a stale
-baseline, and whoever resumes the path should not expect it to hold.
+**Why the plan path stopped is establishable and the answer is habit, not code — which is the part
+that changes how the waiting entries read. It covers one of the two populations, not both, and the
+distinction is recorded because every figure in this paragraph is the gate's.** The plan-mode gate
+records what decided it, and across all twenty runs it reports `default-non-additive` — the
+environment override was never once set. When the plan path ran it investigated **eighteen times out
+of twenty**; the two exceptions were pure-addition tasks the gate is designed to route past. The one
+commit that touched the gate's own condition landed seventy-four minutes before the last plan run,
+and that run still investigated. So nothing closed the path; it simply stopped being the thing that
+got dogfooded. **The first population has no such account.** Runs the classifier put in a read-only
+archetype stopped on 2026-08-05, four days before the plan path did, and nothing in the account just
+given bears on it: the gate that account reads decides a branch inside the plan path and never sees
+a run that does not enter it. Why no task has classified as `question` or `investigation` since is
+unestablished, and the entries on that population — item 143 among them — are waiting on something
+this document has not explained. **One caveat belongs with that, because it is a change nobody has
+exercised:** a later commit strips leading framing and locative preambles before the pure-addition
+test anchors, so more tasks now match as additions and fewer will investigate. It landed after the
+last plan run. The eighteen-of-twenty rate is therefore a stale baseline, and whoever resumes the
+path should not expect it to hold.
+
+**That caveat was tested and it narrows: the direction holds, the magnitude on everything recorded
+is zero, and the premise that it was unexercised is half wrong.** Executing the predicate at the
+commit before the change and at head, against the twelve distinct task strings the sink and the
+session files retain from the plan-path window, returns the identical verdict on all twelve — two
+additions, ten investigations, **nothing reclassified**. A second instrument agreeing by a different
+mechanism: lifting the two strip patterns out of the source as text and testing each task against
+them directly, never running the predicate, matches **none** of the twelve. Both instruments were
+proved live before the zero was trusted — the first flips six synthetic preamble-prefixed inputs and
+reproduces both of the change's deliberate non-strips, the second matches its own targets. **The
+zero is a property of the corpus, not of the change**: no task anyone actually ran carries the shape
+it acts on. With none observed in twelve the ordinary bound puts a true rate as high as roughly a
+quarter still consistent with what was seen, so this is an unresolved effect with a ceiling rather
+than an absent one. The one corpus where a verdict does flip is the frozen sweep set, whose runner
+targets a server item 224 records as no longer existing. **And the change is not unexercised in the
+sense that matters for trusting it** — a commit three minutes later pins it with sixty assertions
+over a twelve-task corpus read from disk at run time; what it has never had is a single live run.
 
 **How far it reaches, counted rather than described: six of the thirteen entries in the
-Blocked-on-data bucket wait on one of these two populations** — items 143, 166, 170, 175, 178 and 196,
-each by its own mechanism: the read-only shell's refusal gate, the requested-tools channel that asks
-by emitting a plan, the marks the plan-investigation prompt produces, and the criteria that sit in
-both plan prompts. **Two entries that read as though they belong on that list do not**: items 90 and
-157 rest on a probe that is tracked in the repository, imports the built tree directly and constructs
-its own question-archetype conditions, so it neither needs the dispatch path nor leaves records in
-this sink at all — they are waiting on spend with a working instrument, which is a different and
-cheaper blocker. The remaining five entries are independent of both populations. **This is recorded
-here rather than in each of the six** because it is a property of this surface, not of any one
-question; and it is not a separate entry because it is another property of the surface this entry
-already records rather than a larger population of some different thing.
+Blocked-on-data bucket wait on one of these two populations** — items 143, 166, 170, 175, 178 and
+196, each by its own mechanism, and a later pass had to make that list finer in two places. **Every
+entry's mechanism, checked against the tool wiring rather than against how the entry describes
+itself:** item 143 reaches the read-only shell's refusal gate, which is offered by the archetype
+pipeline and so sits on the first population; item 196 reaches a different gate entirely, the
+investigation wrapper's denial of a non-diagnostic `run_command`, which the four-mechanism list this
+sentence first carried never named; items 166 and 170 reach the requested-tools channel and item 178
+the subagent criteria, both of which ride on fields carried by **both** plan prompts; and item 175
+reaches the marking rule that exists in the plan-investigation prompt alone. **So the second
+population splits again on whether an entry needs the gate to choose investigation or only needs the
+plan path to run at all**: items 175 and 196 need the investigation branch specifically, while 166,
+170 and 178 are served by either branch. That distinction matters because the gate's branch rate is
+a live variable and the plan path running at all is not. **Two entries that read as though they
+belong on that list do not**: items 90 and 157 rest on a probe that is tracked in the repository,
+imports the built tree directly and constructs its own question-archetype conditions, so it neither
+needs the dispatch path nor leaves records in this sink at all — they are waiting on spend with a
+working instrument, which is a different and cheaper blocker. The remaining five entries are
+independent of both populations. **This is recorded here rather than in each of the six** because it
+is a property of this surface, not of any one question; and it is not a separate entry because it is
+another property of the surface this entry already records rather than a larger population of some
+different thing.
+
+**What produced the error in the first version of that list, recorded because it is mechanical and
+will recur.** The six were grouped by reading how each entry describes its own dependency, and the
+prose of an entry describes the question it asks, not the wiring the question runs through. Checking
+the wiring instead — which tool set each path actually offers — separated them: the
+plan-investigation wrapper offers the approval-gated `run_command` and the four read-only tools, and
+**not** the read-only shell, so the gate item 143 waits on is not on that path at all despite both
+entries reading as investigation-shaped. **The rule, stated so the next sweep applies it without
+re-deriving it: a claim that entries share a run population is checked against the tool wiring,
+never against the entries' own descriptions of themselves.** The same check has now corrected this
+list twice — it also removed items 90 and 157 from an earlier eight, on finding their probe imports
+the built tree directly and bypasses the dispatch path entirely.
 
 **Bucket: Neither.** A structural fact is recorded and no fix is proposed.
 
@@ -12299,9 +12358,17 @@ questions.** The reason is narrower than a thin sample: `checkCommandSafe` has e
 caller, `run_command_readonly`, and that tool records **zero invocations of any kind** after
 2026-08-05. So the gate whose wording is in question has not been reached once since the wording was
 written. The absence is specific rather than an empty file: the window after the fix holds 1,923
-records across 41 runs under 35 distinct marker names. See item 115 for how far that missing
-population reaches — this entry is one of six waiting on it — and for the established reason it
-stopped.
+records across 41 runs under 35 distinct marker names. **The pointer this sentence first carried was
+wrong and is corrected here rather than left for a sweep to hit.** It called this entry one of six
+waiting on a single population and sent the reader to the established reason that population
+stopped. There are two populations, and this entry is not on the one whose stoppage was explained.
+The gate it waits on, the read-only shell's, is offered by the archetype pipeline; the
+plan-investigation wrapper offers the approval-gated shell and the four read-only tools instead, so
+no amount of plan-mode investigation reaches this gate. Runs classified into a read-only archetype
+stopped on 2026-08-05, four days before the plan path did, and **why they stopped is not
+established** — the account item 115 carries reads the plan-mode gate, which never sees a run that
+does not enter the plan path. See item 115 for both populations, for which entries sit on which, and
+for the reason that covers the other one.
 
 **One half of "no instrument exists to induce or classify" is false, and the correction is
 demonstrated rather than asserted.** Classifying needs nothing built. `checkCommandSafe` is pure, and
