@@ -16657,47 +16657,154 @@ telemetry-only sibling is in `subagentDispatch.ts`'s `logSubagentDispatched`; th
 the absence of a `withRequestContext` wrapper in `runLlmPatchFlow.ts` itself. See item 221 for the
 sibling defect this one shares its cause with.
 
-## 223. Gemini's removal left two residual surfaces admitting a provider that no longer exists
+## 223. Closed — Gemini's removal left two residual surfaces admitting a provider that no longer exists
 
-Surfaced by the same tree-wide sweep that located item 221's write sites. Not fixed — a different
-subject, filed on its own per that entry's own instruction not to mix it in.
+Surfaced by the same tree-wide sweep that located item 221's write sites. Filed on its own per
+that entry's own instruction not to mix subjects.
 
 **Two exact spots, both confirmed live, neither previously tracked** (checked against this document
-before filing: no prior entry names `GEMINI_API_KEY` or `RetryContext`). `withExponentialBackoff.ts`'s
-`RetryContext.provider` union type still admits `"gemini"` alongside `"anthropic"`/`"openai"`, though
+before filing: no prior entry named `GEMINI_API_KEY` or `RetryContext`). `withExponentialBackoff.ts`'s
+`RetryContext.provider` union type still admitted `"gemini"` alongside `"anthropic"`/`"openai"`, though
 every real `LLMProvider`/`ProviderName` type in the codebase (four independent declarations, `factory.ts`,
 `modelRouting.ts`, `usage/pricing.ts`, `api/diskKeys.ts`) has been two-valued since the removal.
-`.env.example` still advertises `GEMINI_API_KEY` with a comment calling it "(experimental)."
+`.env.example` still advertised `GEMINI_API_KEY` with a comment calling it "(experimental)."
 
-**Bucket: Actionable now.** The fix is trivial and fully specified — remove the one union member,
-remove or update the two `.env.example` lines — nothing new needs to be learned first.
+**The occurrence count this entry inherited (31 across 11 files) was correct at the time and is
+superseded by this document's own growth, not by an error.** Re-derived by two instruments (a node
+case-insensitive scan; real `grep` via its resolved binary path — the shell's own `grep` is a
+ugrep-backed function per item 130, and `xargs` cannot exec a shell builtin, so `command grep`
+silently fails under a pipe and the instrument has to name the binary directly): **36 occurrences
+across 12 files** before this pass's fix, not 31/11. The delta is fully explained: this document
+had itself picked up 5 self-referential mentions across items 221–223, added after the original
+count was taken. 36 − 5 = 31, 12 − 1 = 11 — exact reconciliation.
 
-**Where the code lives:** `src/llm/withExponentialBackoff.ts`'s `RetryContext` interface;
+**Every occurrence was classified, and the deliberate-looking test uses all turned out
+independent of the type being narrowed.** `src/core/buildEnv.test.ts` uses `GEMINI_API_KEY` only as
+a fixture name for a `/_API_KEY$/i`-suffix env-stripping test, unrelated to any provider union.
+`src/llm/webSearchWarning.test.ts` passes `"gemini"` to a function whose own parameter is a bare
+`provider: string`, no union at all. `src/usage/pricing.test.ts` writes
+`formatCostNote("gemini" as ProviderName, ...)` — an explicit cast onto a *different* type
+(`usage/pricing.ts`'s own two-valued `ProviderName`), independent of `RetryContext` by construction.
+`src/repo/rankerBaseline.snapshot.json` carries a captured excerpt of `RetryContext`'s own source
+text, used as fixed input to a file-ranking algorithm test whose own comment states it runs
+"against the frozen snapshot below, never the live tree." None constructs a `RetryContext` value;
+`withExponentialBackoff.test.ts`'s own eight call sites use `provider: "anthropic"` throughout,
+never `"gemini"`.
+
+**Unreachable by construction, confirmed by execution, not by absence of observation.** Every
+production call site of `withExponentialBackoff` sits inside `anthropicAdapter.ts` or
+`openaiAdapter.ts` — the only two adapters that exist. One passes the literal `"anthropic" as
+const`; the other passes `this.provider`, itself two-valued. No Gemini SDK dependency exists in
+`package.json` (checked against three name patterns). `"gemini"` could not have been produced by
+any code path.
+
+**The removal's own verification used a committed prediction, per this session's standing
+practice for measurements expected to pass.** `npx tsc --noEmit` and `npm run typecheck` (two
+invocations of the same compiler) were predicted, before running, to emit zero errors of any kind —
+specifically none naming `RetryContext` or the literal `"gemini"` — on the reasoning that a
+string-literal union member cannot be referenced without that literal text appearing somewhere in
+source, and the case-insensitive sweep already covers the whole tree for that string. Both
+runs confirmed the prediction exactly: exit 0, zero output lines, both explicitly checked for
+either string. What the compiler checks that the text sweep and the read-and-classify pass do not:
+not coverage of the literal string, which the sweep already has by construction, but the
+*classification itself* — a mechanical proof, rather than a read, that each of the four
+deliberate-looking test uses genuinely flows through independent types. The one failure mode
+structurally invisible to a text sweep — a type derived from `RetryContext["provider"]` and used
+somewhere the literal string need not reappear because only the type, not a value, flows there —
+is exactly what a clean compile rules out.
+
+**A stale memory claim, checked and rejected rather than acted on.** A prior note in this session's
+memory called `gemini-3.5-flash` "a valid catalog entry." Swept every production non-test file for
+the string `gemini`: the only three hits are two inert comments describing a historical bug and
+this entry's own union member. No model-catalog entry for any Gemini model exists today. The claim
+was true at some earlier point and is not now; not acted on, and flagged for correction outside
+this document.
+
+**What closed it.** `RetryContext.provider` narrowed to `"anthropic" | "openai"`. `.env.example`'s
+`GEMINI_API_KEY` line and its preceding comment removed, along with the blank line that separated
+them, restoring the same double-blank-before-next-section spacing every other section in the file
+already uses. No test changed — nothing depended on the removed member, so nothing needed anything
+different to depend on instead.
+
+**Same class, one more instance found, filed separately.** A sweep for other residues of the same
+shape — something the code or docs still treat as live that is not — found `scripts/sweep.ts`
+defaulting its `API_BASE` to `http://localhost:3000`, a target that no longer exists since
+`src/api/server.ts` was removed; CLAUDE.md already documents this in its own text, but this ledger
+had never recorded it. Filed as item 224, not folded in here: different population (CLI tooling,
+not provider config/types) and different kind (a dead network target, not a type-system residue
+naming a nonexistent third-party provider) — item 217's two-condition test fails against this entry
+in both directions. Two other CLAUDE.md-documented removals were checked and found already tracked,
+not new: the `src/extension.ts` tsconfig-exclude no-op (item 148), and the dead `src/llm/prompts.ts`
+file.
+
+**Bucket: Closed**, decided on this entry's own condition rather than on the fix — the reading
+items 198 and 212 share. Its condition was a fix specified with nothing new to learn; establishing
+that condition surfaced a corrected occurrence count and a compiler-verified classification, but
+the fix itself needed nothing beyond what was already specified. Item 210 does not apply (it
+discharges a *different* entry's condition); item 181 does not apply (this entry had a specified,
+open condition, where 181 had none).
+
+**Where the code lived:** `src/llm/withExponentialBackoff.ts`'s `RetryContext` interface;
 `.env.example`.
+
+## 224. The sweep runner's default target is a server that no longer exists, and nothing in this document says so
+
+Found by the same sweep that closed item 223, a different instance of the same class — something
+still treated as live that is not — filed separately because it fails item 217's two-condition
+test against that entry in both directions: different population (CLI tooling, not provider
+config/types) and different kind (a dead network target, not a type-system residue naming a
+nonexistent third-party provider).
+
+`scripts/sweep.ts`'s own header describes its purpose as dispatching "against the running Zone
+server," and defaults `API_BASE` to `http://localhost:3000` when `ZONE_SWEEP_API_BASE` is unset.
+`src/api/server.ts` — the server this script exists to call — has been removed. CLAUDE.md's own
+text already states this plainly ("the sweep's `http://localhost:3000` target no longer exists;
+the sweep command is vestigial until a server is restored or the target is updated"), but a search
+of this document found neither `localhost:3000` nor the word `vestigial` anywhere in it — the fact
+was known and written down once, in the file injected into every run's prompt, and never carried
+into the record meant to track exactly this kind of thing.
+
+**Not simply unconfigured — there is nothing to point the default at.** Updating
+`ZONE_SWEEP_API_BASE`'s default value would not close this: no server exists anywhere in the
+tracked tree that this script, or any other, could dispatch to. The two real shapes a fix could
+take are structurally different from each other — delete the sweep command and its supporting
+files entirely, or restore a server for it to target — and choosing between them is a decision
+about whether sweep-style variance tracking is still wanted, not something this entry's own
+establish settled.
+
+**Bucket: Neither** — a structural fact recorded, with no fix proposed. Against Actionable now: no
+single fix is specified, because the two candidate shapes are not variations on one fix but two
+different decisions about what should exist. Against Blocked on data: nothing further needs to be
+learned or observed — the fact is already fully established, CLAUDE.md's own text having stated it
+outright; what is missing is a decision, not information.
+
+**Where the code lives:** `scripts/sweep.ts`, its `API_BASE` default and its own header comment;
+the corresponding `npm run sweep` / `npm run sweep:dry` entries in `package.json`; the removed
+target is `src/api/server.ts`, absent from the tree.
 
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 223 to find out which ones still need something. No index of
+reader the trouble of reading all 224 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (93): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221
+**Closed** (94): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (1): 223
+first (0):
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (15): 1, 4, 18, 23, 63, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196
 
-**Neither — a structural fact recorded, with no fix proposed** (114): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (115): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152, 154, 155, 158,
 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199, 200, 201, 202, 205,
-206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222
+206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.

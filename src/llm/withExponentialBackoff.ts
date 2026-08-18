@@ -21,7 +21,7 @@ export interface RetryClassification {
 export interface RetryContext {
   runId?: string;
   model?: string;
-  provider?: "anthropic" | "openai" | "gemini";
+  provider?: "anthropic" | "openai";
   emit?: (event: string, payload: Record<string, unknown>) => void;
 }
 
