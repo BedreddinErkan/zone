@@ -48,10 +48,58 @@ Both pairs agree; the record stays indistinguishable from a genuine model format
   against this exact patch shape surfaced item 2 below instead of a clean answer: the parser
   doesn't segment this case cleanly either.
 
-**Bucket: Blocked on data.** Closing requires either data on whether false positives cluster by
-REPLACE-body position or a decision to build one of the two structurally limited discriminators
-already named — the most promising of the three, segmentation membership, was traced against the
-parser and did not produce a clean answer.
+**Re-examined this pass: the realistic trigger cannot reach the marker this entry is about, and the
+open class shows up somewhere else entirely.** Established by running both count predicates verbatim
+from the branch against constructed inputs. Divergence was proved achievable first, so the record
+set's non-divergence is a real absence rather than a dead instrument: a marker quoted or sitting
+mid-line makes the two pairs disagree, as this entry's closed half describes. **But a *complete*
+embedded example — the "doc/example block showing the apply_patch syntax" this entry names as its
+realistic trigger — contains one of each marker, so it leaves the counts balanced, is never
+rejected, and never produces a record here at all.** For an embedded block to appear among these
+records it would have to be itself unbalanced: a partial example showing one marker without its
+pair, a far narrower case than the one this entry names.
+
+**Where it does show up, recorded so a later reader does not repeat the search.** Run against the
+real block segmenter from the built tree, a balanced patch carrying a complete embedded example
+splits into **two** blocks and splits them wrongly — the real block's replacement truncates at the
+embedded marker and a second block is fabricated from the example text. That is item 2's subject,
+established there by probe against the compiled handler rather than by tracing, and item 2 also
+records the part that matters here: the outcome is **not** silent in the common case. When the
+fabricated block's FIND text is absent from the target file — the common case, since it is
+accidental example text — the patch is rejected with a *different* message on a *different* branch.
+So this entry's open class is observable; it is this entry's own marker that cannot see it.
+
+**The current bounds on that population, both empty.** The per-call normalization-parity marker
+carries a block count and holds 48 records across 42 runs, **every one of them single-block**; the
+marker-split record, whose population is exactly the multi-block slice, holds **zero**, which is
+consistent by construction rather than a second independent zero. So no multi-block patch has
+reached the applier at all in that window, and the population where this entry's open class could
+live is empty rather than unmeasured.
+
+**A correction to this entry's own second option.** The first-marker index is described as "already
+computed nearby, for a different check" — implying it is available to reuse. It is computed **after**
+the marker-imbalance branch's own early return, on the content-before-FIND check, so the imbalance
+path never reaches it. Recomputing it is a one-line index lookup, so the cost is trivial; what is
+wrong is the framing that it is already there.
+
+**What still has no instrument, stated precisely, since it is narrower than "data".** Nothing on any
+surface carries a position within the REPLACE body — this marker's payload is a file path, four
+counts, a total patch byte length and a rejection flag, and the rejection message the model receives
+interpolates the two counts and no offset. Answering the clustering question specifically would need
+new instrumentation, not a different reading of what exists.
+
+**Bucket, re-examined this pass and unchanged: it stays Blocked on data.** The plan for this pass
+proposed moving it to Neither on the reasoning that the data half of the condition was foreclosed;
+that reasoning was checked against the other surfaces and does not hold. The observation this entry
+waits on *can* exist — the instruments that bound it exist and are accumulating — it has simply not
+occurred yet, which is this bucket's own definition. Item 38 and item 46, the precedents a Neither
+move would rest on, do not reach it: the remaining work is not purely a decision among named
+options, because one half of the disjunction is still a genuine data wait. Items 198 and 212 do not
+apply — the condition is not discharged. Item 210 discharges a different entry's condition, and item
+181 records no prior open condition. The original condition stands as written: closing requires
+either data on whether false positives cluster by REPLACE-body position or a decision to build one
+of the two structurally limited discriminators already named — the most promising of the three,
+segmentation membership, was traced against the parser and did not produce a clean answer.
 
 **Where the code lives:** the recount and a comment describing this exact split sit directly
 above the `[zone-apply-patch-marker-imbalance]` `log(...)` call, inside `apply_patch`'s

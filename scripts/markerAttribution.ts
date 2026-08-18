@@ -188,11 +188,31 @@ export function hazards(result: Map<string, MarkerAttribution>): Hazard[] {
   return out.sort((a, b) => (a.file === b.file ? a.marker.localeCompare(b.marker) : a.file.localeCompare(b.file)));
 }
 
-function readTrackedFiles(): FileInput[] {
+/**
+ * This module and its test carry marker-shaped strings that are fixtures and documentation
+ * examples, not markers this codebase emits. Counting them would make the inventory an
+ * inventory of itself.
+ *
+ * The defect this prevents is specific and was shipped once: the drift assertion's expected
+ * figures were first measured while both files were still UNTRACKED, so `git ls-files` could
+ * not see them and their eight fixture names were absent from the count. Committing the files
+ * made those names visible and moved the total from 406 to 414 — a test that passed before the
+ * commit and failed immediately after it, for a reason that had nothing to do with the tree it
+ * claims to measure. Excluding them here makes the figure mean "markers in the codebase" in
+ * both states.
+ */
+export const SELF_EXCLUDED_PATHS: readonly string[] = [
+  "scripts/markerAttribution.ts",
+  "scripts/markerAttribution.test.ts",
+];
+
+/** Reads every tracked file that could contain a marker, minus this tool's own two. */
+export function readTrackedFiles(): FileInput[] {
   const raw = execFileSync("git", ["ls-files", "-z"], { cwd: REPO_ROOT, encoding: "utf8" });
   const paths = raw.split("\0").filter(Boolean);
   const files: FileInput[] = [];
   for (const p of paths) {
+    if (SELF_EXCLUDED_PATHS.includes(p)) continue;
     let text: string;
     try {
       text = fs.readFileSync(path.join(REPO_ROOT, p), "utf8");
