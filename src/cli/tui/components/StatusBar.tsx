@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Box, Text } from "ink";
 import { useStore, type RunState, type TuiMode } from "../store.js";
+import { role, glyph } from "../theme.js";
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -103,13 +104,13 @@ export function StatusBar(): React.ReactElement {
       : null;
 
   const tokenColor =
-    tokenBudgetRatio >= 0.9 ? "red" : tokenBudgetRatio >= 0.7 ? "yellow" : undefined;
+    tokenBudgetRatio >= 0.9 ? role.danger : tokenBudgetRatio >= 0.7 ? role.caution : undefined;
 
   const cols = process.stdout.columns ?? 80;
-  const sep = "─".repeat(cols);
+  const sep = glyph.separator.repeat(cols);
   const narrow = cols < 60;
   const pill = modePill(mode, narrow);
-  const pillColor: "yellow" | "cyan" = mode === "autoAccept" ? "yellow" : "cyan";
+  const pillColor: typeof role.caution | typeof role.accent = mode === "autoAccept" ? role.caution : role.accent;
 
   const modelLabel = model || "default";
   // Absent for models that don't support effort (EffortModal.tsx:52's own read pattern).

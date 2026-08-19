@@ -3,6 +3,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import fg from "fast-glob";
 import { readAtFileContext } from "../atFileContext.js";
 import { useStore } from "../store.js";
+import { role, glyph } from "../theme.js";
 import { loadDiskTrust } from "../../../api/diskTrust.js";
 import { loadDiskKeys } from "../../../api/diskKeys.js";
 import { listSessionsMeta } from "../../../api/diskSessions.js";
@@ -130,7 +131,7 @@ export function expandSentinels(buf: string, sideMap: Map<string, PasteEntry>): 
 
 /** @internal exported for tests */
 export function renderBuffer(buf: string, pos: number, sideMap: Map<string, PasteEntry>): string {
-  return expandSentinels(buf.slice(0, pos), sideMap) + "▋" + expandSentinels(buf.slice(pos), sideMap);
+  return expandSentinels(buf.slice(0, pos), sideMap) + glyph.cursor + expandSentinels(buf.slice(pos), sideMap);
 }
 
 interface PaletteProps {
@@ -140,10 +141,10 @@ interface PaletteProps {
 
 function SlashCommandPalette({ commands, selectedIdx }: PaletteProps): React.ReactElement {
   return (
-    <Box flexDirection="column" borderStyle="single" borderColor="gray" paddingX={1}>
+    <Box flexDirection="column" borderStyle="single" borderColor={role.muted} paddingX={1}>
       {commands.map((cmd, i) => (
         <Box key={cmd.name}>
-          <Text color={i === selectedIdx ? "cyan" : undefined}>
+          <Text color={i === selectedIdx ? role.accent : undefined}>
             {cmd.name}{"  "}
           </Text>
           <Text dimColor>{cmd.desc}</Text>
@@ -727,16 +728,16 @@ export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, onRemot
   return (
     <Box flexDirection="column">
       {atPaletteOpen && atFiles.length > 0 && (
-        <Box flexDirection="column" borderStyle="single" borderColor="gray" paddingX={1}>
+        <Box flexDirection="column" borderStyle="single" borderColor={role.muted} paddingX={1}>
           {atFiles.map((f, i) => (
-            <Text key={f} color={i === atIdx ? "cyan" : undefined}>{f}</Text>
+            <Text key={f} color={i === atIdx ? role.accent : undefined}>{f}</Text>
           ))}
         </Box>
       )}
       {paletteOpen && filteredCommands.length > 0 && (
         <SlashCommandPalette commands={filteredCommands} selectedIdx={paletteIdx} />
       )}
-      <Box backgroundColor="blackBright" paddingX={2} width={stdout.columns ?? 80}>
+      <Box backgroundColor={role.surface} paddingX={2} width={stdout.columns ?? 80}>
         <Text dimColor={disabled}>{disabled ? "  " : "> "}</Text>
         <Box flexGrow={1}>
           <Text dimColor={disabled}>{displayBuffer}</Text>

@@ -1,5 +1,6 @@
 import React from "react";
 import { Box, Text } from "ink";
+import { role, glyph } from "../theme.js";
 
 /**
  * Tokenize a line for inline **bold** and `code` markers.
@@ -20,8 +21,8 @@ function renderInline(text: string, baseKey: number): React.ReactNode[] {
     if (m.startsWith("**")) {
       parts.push(<Text key={key++} bold>{m.slice(2, -2)}</Text>);
     } else {
-      // backtick code — cyan to distinguish from prose
-      parts.push(<Text key={key++} color="cyan">{m.slice(1, -1)}</Text>);
+      // backtick code — accent to distinguish from prose
+      parts.push(<Text key={key++} color={role.accent}>{m.slice(1, -1)}</Text>);
     }
     lastIndex = match.index + m.length;
   }
@@ -39,7 +40,7 @@ interface MarkdownTextProps {
  * Mini markdown-to-Ink renderer for the FINAL SUMMARY format.
  * Supported syntax:
  *   ## / ### headings  → bold text (no leading #)
- *   - / * bullets      → "• " prefix
+ *   - / * bullets      → bullet-glyph prefix
  *   **bold**           → bold inline
  *   `code`             → cyan inline
  *   blank lines        → spacer row
@@ -69,7 +70,7 @@ export function MarkdownText({ text }: MarkdownTextProps): React.ReactElement {
           inlineKeyBase += 20;
           return (
             <Box key={i}>
-              <Text color="cyan">{"• "}</Text>
+              <Text color={role.accent}>{glyph.bullet}</Text>
               <Text>{nodes}</Text>
             </Box>
           );

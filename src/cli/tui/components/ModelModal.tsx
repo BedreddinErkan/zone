@@ -5,6 +5,7 @@ import type { StoreAction } from "../store.js";
 import { USER_FACING_MODELS, getDefaultModelId } from "../../../llm/modelRegistry.js";
 import { saveDiskModel } from "../../../api/diskModel.js";
 import type { DiskModelSettings } from "../../../api/diskModel.js";
+import { role } from "../theme.js";
 
 interface Props {
   dispatch: Dispatch<StoreAction>;
@@ -51,19 +52,19 @@ export function ModelModal({ dispatch }: Props): React.ReactElement {
       lastProvider = m.provider;
       const sectionLabel = m.provider === "anthropic" ? "Anthropic" : "OpenAI";
       rows.push(
-        <Text key={`hdr-${m.provider}`} bold color="white"> {sectionLabel}</Text>
+        <Text key={`hdr-${m.provider}`} bold color={role.emphasis}> {sectionLabel}</Text>
       );
     }
     const selected = flatIdx === sel;
     const marker = m.id === currentModelId ? "(•)" : "( )";
-    const bg = selected ? "blue" : undefined;
+    const bg = selected ? role.selectionBackground : undefined;
     const retentionBadge = m.retention ? ` ⚠ ${m.retention.minDays}d retention` : "";
     const label = narrow
       ? `   ${marker} ${m.id}${retentionBadge}`
       : `   ${marker} ${m.displayName}${m.costNote ? ` — ${m.costNote}` : ""}`;
     rows.push(
       <Box key={m.id} flexDirection="column" backgroundColor={bg}>
-        <Text color={selected ? "white" : undefined}>{label}</Text>
+        <Text color={selected ? role.emphasis : undefined}>{label}</Text>
         {m.retention && !narrow && (
           <Text dimColor>
             {`      ⚠ Requires ${m.retention.minDays}-day data retention · ` +
@@ -81,11 +82,11 @@ export function ModelModal({ dispatch }: Props): React.ReactElement {
     <Box
       flexDirection="column"
       borderStyle="round"
-      borderColor="cyan"
+      borderColor={role.accent}
       paddingX={1}
       width={innerWidth}
     >
-      <Text bold color="cyan"> Model</Text>
+      <Text bold color={role.accent}> Model</Text>
       <Text> </Text>
       {rows}
       <Text> </Text>

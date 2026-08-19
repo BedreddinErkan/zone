@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Box, Text, useInput, usePaste } from "ink";
 import { useStore } from "../store.js";
 import { loadDiskKeys, setDiskKey, removeDiskKey, maskKey } from "../../../api/diskKeys.js";
+import { role } from "../theme.js";
 
 export function ApiKeysView(): React.ReactElement {
   const { state, dispatch } = useStore();
@@ -67,8 +68,8 @@ export function ApiKeysView(): React.ReactElement {
   }, { isActive: true });
 
   return (
-    <Box borderStyle="round" borderColor="yellow" flexDirection="column" paddingX={1} marginX={2}>
-      <Text bold color="yellow">API Keys</Text>
+    <Box borderStyle="round" borderColor={role.caution} flexDirection="column" paddingX={1} marginX={2}>
+      <Text bold color={role.caution}>API Keys</Text>
       {mode === "view" && (
         <>
           <Text dimColor>Keys (~/.zone/keys.json):</Text>
@@ -78,7 +79,7 @@ export function ApiKeysView(): React.ReactElement {
           ) : (
             list.map((entry, i) => (
               <Box key={entry.provider}>
-                <Text color={i === sel ? "yellow" : undefined}>
+                <Text color={i === sel ? role.caution : undefined}>
                   {i === sel ? "▸ " : "  "}{entry.provider.padEnd(12)} {maskKey(entry.key).padEnd(20)} {entry.addedAt.slice(0, 10)}
                 </Text>
               </Box>
@@ -91,13 +92,13 @@ export function ApiKeysView(): React.ReactElement {
       {mode === "select-provider" && (
         <>
           <Box height={1} />
-          <Text>Select provider: <Text color="cyan">[A]</Text>nthropic  <Text color="cyan">[O]</Text>penAI  Esc cancel</Text>
+          <Text>Select provider: <Text color={role.accent}>[A]</Text>nthropic  <Text color={role.accent}>[O]</Text>penAI  Esc cancel</Text>
         </>
       )}
       {mode === "input" && (
         <>
           <Box height={1} />
-          <Text dimColor>Enter key for <Text color="yellow">{editProvider}</Text> (Enter save, Esc cancel):</Text>
+          <Text dimColor>Enter key for <Text color={role.caution}>{editProvider}</Text> (Enter save, Esc cancel):</Text>
           {editProvider && list.find(k => k.provider === editProvider) && (
             <Text dimColor>(Current: {maskKey(list.find(k => k.provider === editProvider)!.key)})</Text>
           )}
@@ -107,7 +108,7 @@ export function ApiKeysView(): React.ReactElement {
       {mode === "confirm-delete" && (
         <>
           <Box height={1} />
-          <Text>Remove <Text color="yellow">{editProvider}</Text> key? <Text color="green">[Y]</Text>es  <Text color="red">[N]</Text>o  Esc cancel</Text>
+          <Text>Remove <Text color={role.caution}>{editProvider}</Text> key? <Text color={role.success}>[Y]</Text>es  <Text color={role.danger}>[N]</Text>o  Esc cancel</Text>
         </>
       )}
     </Box>

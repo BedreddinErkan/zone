@@ -8,6 +8,7 @@ import { getToolDisplayName, formatToolArgs } from "./toolCallFormat.js";
 import { MarkdownText } from "./MarkdownText.js";
 import { DiffView } from "./DiffView.js";
 import { PlanBody } from "./PlanBody.js";
+import { role, glyph } from "../theme.js";
 
 function renderEntry(entry: TranscriptEntry, index: number, colWidth: number): React.ReactElement {
   switch (entry.kind) {
@@ -17,7 +18,7 @@ function renderEntry(entry: TranscriptEntry, index: number, colWidth: number): R
         <Box key={index} flexDirection="column">
           {lines.map((line, i) => (
             <Box key={i}>
-              {i === 0 ? <Text color="cyan">{"◆ "}</Text> : <Text>{"  "}</Text>}
+              {i === 0 ? <Text color={role.accent}>{glyph.entryMarker}</Text> : <Text>{"  "}</Text>}
               <Box flexGrow={1}>
                 <Text>{line}</Text>
               </Box>
@@ -32,9 +33,9 @@ function renderEntry(entry: TranscriptEntry, index: number, colWidth: number): R
         <Box key={index} flexDirection="column">
           {lines.map((line, i) => (
             <Box key={i}>
-              {i === 0 ? <Text color="gray">{"◆ "}</Text> : <Text>{"  "}</Text>}
+              {i === 0 ? <Text color={role.muted}>{glyph.entryMarker}</Text> : <Text>{"  "}</Text>}
               <Box flexGrow={1}>
-                <Text color="gray">{line}</Text>
+                <Text color={role.muted}>{line}</Text>
               </Box>
             </Box>
           ))}
@@ -59,9 +60,9 @@ function renderEntry(entry: TranscriptEntry, index: number, colWidth: number): R
       return <IterMarker key={index} phase={entry.phase} />;
     case "user_prompt":
       return (
-        <Box key={index} backgroundColor="blackBright" width={colWidth}
+        <Box key={index} backgroundColor={role.surface} width={colWidth}
              paddingX={2} marginTop={1} marginBottom={1}>
-          <Text bold color="cyan">{"▸ "}</Text>
+          <Text bold color={role.accent}>{"▸ "}</Text>
           <Box flexGrow={1}>
             <Text bold>{entry.text}</Text>
           </Box>
@@ -130,7 +131,7 @@ export function Transcript(): React.ReactElement {
       </Static>
       {liveNarration && (
         <Box>
-          <Text color="cyan">{"◆ "}</Text>
+          <Text color={role.accent}>{glyph.entryMarker}</Text>
           <Box flexGrow={1}>
             <Text>{liveNarration}</Text>
           </Box>

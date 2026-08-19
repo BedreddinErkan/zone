@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Text } from "ink";
 import { useStore } from "../store.js";
 import { SPINNER_LABEL_STARTING, SPINNER_LABEL_PLANNING } from "../hooks/useAgentEvents.js";
+import { role } from "../theme.js";
 
 const FRAMES = ["✦", "✧", "✶", "✷", "✸", "✹", "✺", "✶"];
 const FRAME_MS = 100;
@@ -40,5 +41,5 @@ export function Spinner(): React.ReactElement | null {
   const words = ROTATABLE[label];
   const displayLabel = words ? words[labelIdx % words.length] : label;
 
-  return <Text bold color="magenta">{FRAMES[frame]}{displayLabel ? ` ${displayLabel}` : ""}</Text>;
+  return <Text bold color={role.activity}>{FRAMES[frame]}{displayLabel ? ` ${displayLabel}` : ""}</Text>;
 }

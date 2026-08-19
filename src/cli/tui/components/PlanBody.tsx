@@ -1,6 +1,7 @@
 import React from "react";
 import { Box, Text } from "ink";
 import { MarkdownText } from "./MarkdownText.js";
+import { role, glyph } from "../theme.js";
 
 export interface PlanBodyProps {
   objective: string;
@@ -34,7 +35,7 @@ export function PlanBody({
 }: PlanBodyProps): React.ReactElement {
   return (
     <Box flexDirection="column">
-      <Text bold color="cyan">
+      <Text bold color={role.accent}>
         {noChangeReason
           ? "Nothing to change?"
           : cannotVerifyReason
@@ -49,10 +50,10 @@ export function PlanBody({
           <MarkdownText text={narrative} />
           {(noChangeReason || cannotVerifyReason || answerOnlyReason) && (
             <Box flexDirection="column" marginTop={1}>
-              <Text bold color="yellow">
+              <Text bold color={role.caution}>
                 {noChangeReason ? "No changes needed:" : cannotVerifyReason ? "Could not verify:" : "Answering read-only:"}
               </Text>
-              <Text color="yellow">{noChangeReason ?? cannotVerifyReason ?? answerOnlyReason ?? ""}</Text>
+              <Text color={role.caution}>{noChangeReason ?? cannotVerifyReason ?? answerOnlyReason ?? ""}</Text>
             </Box>
           )}
           {filesLikely && filesLikely.length > 0 && (
@@ -75,10 +76,10 @@ export function PlanBody({
           <Text> </Text>
           {(noChangeReason || cannotVerifyReason || answerOnlyReason) && (
             <Box flexDirection="column" marginBottom={1}>
-              <Text bold color="yellow">
+              <Text bold color={role.caution}>
                 {noChangeReason ? "No changes needed:" : cannotVerifyReason ? "Could not verify:" : "Answering read-only:"}
               </Text>
-              <Text color="yellow">{noChangeReason ?? cannotVerifyReason ?? answerOnlyReason ?? ""}</Text>
+              <Text color={role.caution}>{noChangeReason ?? cannotVerifyReason ?? answerOnlyReason ?? ""}</Text>
             </Box>
           )}
           {steps.map((step, i) => (
@@ -104,7 +105,7 @@ export function PlanBody({
               <Text> </Text>
               <Text dimColor>Risks:</Text>
               {riskHints.map((hint, i) => (
-                <Text key={i}>{`  • ${hint}`}</Text>
+                <Text key={i}>{"  "}{glyph.bullet}{hint}</Text>
               ))}
             </>
           )}
