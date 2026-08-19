@@ -142,14 +142,23 @@ interface PaletteProps {
 function SlashCommandPalette({ commands, selectedIdx }: PaletteProps): React.ReactElement {
   return (
     <Box flexDirection="column" borderStyle="single" borderColor={role.muted} paddingX={1}>
-      {commands.map((cmd, i) => (
-        <Box key={cmd.name}>
-          <Text color={i === selectedIdx ? role.accent : undefined}>
-            {cmd.name}{"  "}
-          </Text>
-          <Text dimColor>{cmd.desc}</Text>
-        </Box>
-      ))}
+      {/* Selection is marked two ways on purpose. The cursor glyph is the structural half — it
+          survives a terminal with no colour at all, and matches what SessionsModal/PermissionsView/
+          ApiKeysView already do. role.brand is the colour half, chosen over role.accent (the
+          previous marker) because accent is a bare ANSI index the terminal's own theme resolves,
+          which is the same class of colour that rendered wrong in the surface pass; brand is a
+          fixed hex. */}
+      {commands.map((cmd, i) => {
+        const selected = i === selectedIdx;
+        return (
+          <Box key={cmd.name}>
+            <Text color={selected ? role.brand : undefined}>
+              {selected ? glyph.selectionCursor : "  "}{cmd.name}{"  "}
+            </Text>
+            <Text dimColor>{cmd.desc}</Text>
+          </Box>
+        );
+      })}
     </Box>
   );
 }
