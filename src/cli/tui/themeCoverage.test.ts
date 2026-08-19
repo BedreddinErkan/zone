@@ -67,6 +67,9 @@ const EXTRACTED_FILES = [
   "src/cli/tui/components/Toast.tsx",
   "src/cli/tui/components/TrustModal.tsx",
   "src/cli/tui/components/UndoModal.tsx",
+  // The palette pass — Splash.tsx starts importing theme.ts here (role.brand), previously the
+  // gradient/big-text banner had no seam literals to guard.
+  "src/cli/tui/components/Splash.tsx",
 ];
 
 const FORBIDDEN_COLOUR_LITERALS = [...new Set(Object.values(role))];

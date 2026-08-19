@@ -192,9 +192,10 @@ function collapseWhitespace(s: string): string {
 // this source file stays free of raw control bytes some editors/tooling
 // normalize away. Not imported from the `strip-ansi` package — that package
 // is not a direct dependency of this repo (absent from package.json); it is
-// pulled in only transitively, by ink-gradient and by ink's own
-// string-width/wrap-ansi, so importing it here would add an undeclared
-// dependency this repo has already, deliberately, avoided once.
+// pulled in only transitively, by ink's own string-width/wrap-ansi (formerly
+// also by ink-gradient, removed in the palette pass), so importing it here
+// would add an undeclared dependency this repo has already, deliberately,
+// avoided once.
 function stripAnsi(s: string): string {
   const esc = String.fromCharCode(0x1b);
   const ansiPattern = new RegExp(esc + "\\[[0-9;]*[A-Za-z]", "g");

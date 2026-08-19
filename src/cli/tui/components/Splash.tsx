@@ -1,7 +1,6 @@
-import { useApp, Box } from "ink";
-import Gradient from "ink-gradient";
-import BigText from "ink-big-text";
+import { useApp, Box, Text } from "ink";
 import { useEffect } from "react";
+import { role } from "../theme.js";
 
 const DURATION_MS = 850;
 
@@ -14,9 +13,7 @@ export function Splash(): React.ReactElement {
   }, []);
   return (
     <Box paddingX={1}>
-      <Gradient name="pastel">
-        <BigText text="ZONE" font="tiny" />
-      </Gradient>
+      <Text bold color={role.brand}>{"[╱] ZONE"}</Text>
     </Box>
   );
 }

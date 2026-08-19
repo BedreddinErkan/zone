@@ -53,7 +53,12 @@ function _getGitBranch(): string {
 
 function writeBannerToStdout(opts: { isResumed: boolean }): void {
   const RESET = "\x1b[0m";
-  const MAGENTA_BOLD = "\x1b[35;1m";
+  // This banner is raw stdout, outside the Ink tree and outside theme.ts's seam — it cannot
+  // reference role.brand directly. 80 is the ANSI-256 code chalk's own rgbToAnsi256 produces for
+  // role.brand's hex (#22B3C4), confirmed empirically; hardcoded to match what an Ink-rendered
+  // role.brand element degrades to on the same terminal, per colors.ts's existing convention of
+  // a flat hardcoded 256-colour escape (see c.orange) rather than a truecolor one.
+  const BRAND_TEAL_BOLD = "\x1b[38;5;80;1m";
   const DIM = "\x1b[2m";
   const cwd = process.cwd();
   const branch = _getGitBranch();
@@ -61,7 +66,7 @@ function writeBannerToStdout(opts: { isResumed: boolean }): void {
   const resumed = opts.isResumed ? ` ${DIM}(resumed)${RESET}` : "";
   // Model and cap are shown by the reactive <Header> component — not repeated here.
   process.stdout.write(
-    `${MAGENTA_BOLD}✦${RESET}  ${MAGENTA_BOLD}Zone v${_zoneVersion}${RESET}${resumed}  ${DIM}${cwdBranch}${RESET}\n\n`
+    `${BRAND_TEAL_BOLD}✦${RESET}  ${BRAND_TEAL_BOLD}Zone v${_zoneVersion}${RESET}${resumed}  ${DIM}${cwdBranch}${RESET}\n\n`
   );
 }
 

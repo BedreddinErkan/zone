@@ -9,25 +9,79 @@
   "bin": {
     "zone": "./dist/cli/index.js"
   },
-  "files": ["dist", "!dist/**/__fixtures__/**", "!dist/**/fixtures/**", "README.md", "LICENSE"],
- "exports": {
-  "./flow":       { "types": "./dist/core/runLlmPatchFlow.d.ts",         "default": "./dist/core/runLlmPatchFlow.js" },
-  "./agent":      { "types": "./dist/llm/agentLoop.d.ts",                "default": "./dist/llm/agentLoop.js" },
-  "./openai":     { "types": "./dist/llm/openaiClient.d.ts",             "default": "./dist/llm/openaiClient.js" },
-  "./approvals":  { "types": "./dist/api/commandApprovals.d.ts",         "default": "./dist/api/commandApprovals.js" },
-  "./store-core": { "types": "./dist/cli/tui/store-core.d.ts",           "default": "./dist/cli/tui/store-core.js" },
-  "./events":     { "types": "./dist/cli/tui/hooks/eventToActions.d.ts", "default": "./dist/cli/tui/hooks/eventToActions.js" },
-  "./lifecycle":  { "types": "./dist/core/agentLifecycleEvents.d.ts",    "default": "./dist/core/agentLifecycleEvents.js" },
-  "./config":     { "types": "./dist/cli/config.d.ts",                   "default": "./dist/cli/config.js" },
-  "./dispatch":   { "types": "./dist/cli/dispatch.d.ts",                 "default": "./dist/cli/dispatch.js" },
-  "./init":       { "types": "./dist/memory/initFlow.d.ts",              "default": "./dist/memory/initFlow.js" },
-  "./snapshots":  { "types": "./dist/snapshots/snapshotStore.d.ts",      "default": "./dist/snapshots/snapshotStore.js" },
-  "./model-registry":     { "types": "./dist/llm/modelRegistry.d.ts",                "default": "./dist/llm/modelRegistry.js" },
-  "./session-window":     { "types": "./dist/llm/sessionWindow.d.ts",                "default": "./dist/llm/sessionWindow.js" },
-  "./conversation-store": { "types": "./dist/core/conversationFilesystemStore.d.ts", "default": "./dist/core/conversationFilesystemStore.js" },
-  "./tier-settings":      { "types": "./dist/visual/tierSettings.d.ts",              "default": "./dist/visual/tierSettings.js" },
-  "./feedback":           { "types": "./dist/feedback/buildFeedbackReport.d.ts",      "default": "./dist/feedback/buildFeedbackReport.js" }
-},
+  "files": [
+    "dist",
+    "!dist/**/__fixtures__/**",
+    "!dist/**/fixtures/**",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    "./flow": {
+      "types": "./dist/core/runLlmPatchFlow.d.ts",
+      "default": "./dist/core/runLlmPatchFlow.js"
+    },
+    "./agent": {
+      "types": "./dist/llm/agentLoop.d.ts",
+      "default": "./dist/llm/agentLoop.js"
+    },
+    "./openai": {
+      "types": "./dist/llm/openaiClient.d.ts",
+      "default": "./dist/llm/openaiClient.js"
+    },
+    "./approvals": {
+      "types": "./dist/api/commandApprovals.d.ts",
+      "default": "./dist/api/commandApprovals.js"
+    },
+    "./store-core": {
+      "types": "./dist/cli/tui/store-core.d.ts",
+      "default": "./dist/cli/tui/store-core.js"
+    },
+    "./events": {
+      "types": "./dist/cli/tui/hooks/eventToActions.d.ts",
+      "default": "./dist/cli/tui/hooks/eventToActions.js"
+    },
+    "./lifecycle": {
+      "types": "./dist/core/agentLifecycleEvents.d.ts",
+      "default": "./dist/core/agentLifecycleEvents.js"
+    },
+    "./config": {
+      "types": "./dist/cli/config.d.ts",
+      "default": "./dist/cli/config.js"
+    },
+    "./dispatch": {
+      "types": "./dist/cli/dispatch.d.ts",
+      "default": "./dist/cli/dispatch.js"
+    },
+    "./init": {
+      "types": "./dist/memory/initFlow.d.ts",
+      "default": "./dist/memory/initFlow.js"
+    },
+    "./snapshots": {
+      "types": "./dist/snapshots/snapshotStore.d.ts",
+      "default": "./dist/snapshots/snapshotStore.js"
+    },
+    "./model-registry": {
+      "types": "./dist/llm/modelRegistry.d.ts",
+      "default": "./dist/llm/modelRegistry.js"
+    },
+    "./session-window": {
+      "types": "./dist/llm/sessionWindow.d.ts",
+      "default": "./dist/llm/sessionWindow.js"
+    },
+    "./conversation-store": {
+      "types": "./dist/core/conversationFilesystemStore.d.ts",
+      "default": "./dist/core/conversationFilesystemStore.js"
+    },
+    "./tier-settings": {
+      "types": "./dist/visual/tierSettings.d.ts",
+      "default": "./dist/visual/tierSettings.js"
+    },
+    "./feedback": {
+      "types": "./dist/feedback/buildFeedbackReport.d.ts",
+      "default": "./dist/feedback/buildFeedbackReport.js"
+    }
+  },
   "scripts": {
     "build": "node node_modules/typescript/bin/tsc -p tsconfig.json",
     "postbuild": "chmod +x dist/cli/index.js",
@@ -48,9 +102,6 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@supabase/supabase-js": "^2.57.4",
     "body-parser": "^1.20.3",
-    "qrcode-terminal": "^0.12.0",
-    "ws": "^8.21.0",
-    "undici": "^8.3.0",
     "commander": "^12.1.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
@@ -58,14 +109,15 @@
     "express-rate-limit": "^7.5.0",
     "fast-glob": "^3.3.3",
     "ink": "^7.0.3",
-    "ink-big-text": "^2.0.0",
-    "ink-gradient": "^4.0.1",
     "ink-select-input": "^6.2.0",
     "ink-spinner": "^5.0.0",
     "ink-text-input": "^6.0.0",
     "openai": "^5.23.2",
     "picomatch": "^4.0.4",
+    "qrcode-terminal": "^0.12.0",
     "react": "^19.2.0",
+    "undici": "^8.3.0",
+    "ws": "^8.21.0",
     "zod": "^3.25.0"
   },
   "devDependencies": {
