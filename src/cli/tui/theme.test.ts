@@ -31,7 +31,9 @@ describe("theme — role values, pinned", () => {
       emphasis: "white",
       selectionBackground: "blue",
       muted: "gray",
-      surface: "blackBright",
+      // Fixed hex (the landing's --ink), not theme-relative — was "blackBright", which a real
+      // terminal theme painted light grey instead of dark (this pass).
+      surface: "#0B0E0F",
       // The palette pass: new tenth role, the landing site's teal brand identity.
       brand: "#22B3C4",
     });

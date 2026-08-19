@@ -42,14 +42,21 @@ export const role = {
   selectionBackground: "blue",
   /** Quiet chrome borders, de-emphasized block text. */
   muted: "gray",
-  /** Neutral background fill for a distinct content block. */
-  surface: "blackBright",
+  /** Neutral background fill for a distinct content block. Fixed hex (the landing's `--ink`), not
+   *  theme-relative, like `role.brand`/`role.activity` — a bare ANSI index such as `blackBright`
+   *  is resolved entirely by the terminal's own colour scheme (confirmed: `ansi-styles` emits only
+   *  the index, no RGB), and on at least one real theme it painted light grey, not dark, inverting
+   *  the point of a "dark surface." A background whose only job is reading as dark cannot be
+   *  theme-relative the way a semantic colour (danger/success/etc.) correctly is. */
+  surface: "#0B0E0F",
   /** The landing site's teal brand identity (`--signal-bright` in the landing's own CSS) — used
-   *  wherever the logo/mark motif itself appears: the diff view's marker accent and the splash
-   *  banner mark. Distinct from role.accent (generic UI chrome — modal borders, selection
-   *  foreground, prompt markers) even though both read as cyan-family; reusing role.accent here
-   *  would repaint every one of those unrelated surfaces to this exact hex, which no product
-   *  decision has asked for. */
+   *  wherever the logo/mark motif itself appears: currently the diff view's marker accent
+   *  (DiffView.tsx). The persistent startup banner (index.tsx's `writeBannerToStdout`) carries
+   *  the same value too, but as a hardcoded raw-ANSI escape explained at that call site — it is
+   *  outside the Ink tree and outside this seam entirely, so it cannot import this constant.
+   *  Distinct from role.accent (generic UI chrome — modal borders, selection foreground, prompt
+   *  markers) even though both read as cyan-family; reusing role.accent here would repaint every
+   *  one of those unrelated surfaces to this exact hex, which no product decision has asked for. */
   brand: "#22B3C4",
 } as const;
 

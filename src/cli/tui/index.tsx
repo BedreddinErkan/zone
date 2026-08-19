@@ -7,7 +7,6 @@ import qrcode from "qrcode-terminal";
 
 const execAsync = promisify(exec);
 import { App } from "./App.js";
-import { Splash } from "./components/Splash.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
 import type { CliFlags } from "../config.js";
 import { loadCliConfig, validateCliConfig, applyDiskKeyFallbacks, type CliConfig } from "../config.js";
@@ -65,8 +64,12 @@ function writeBannerToStdout(opts: { isResumed: boolean }): void {
   const cwdBranch = branch ? `${cwd} · ${branch}` : cwd;
   const resumed = opts.isResumed ? ` ${DIM}(resumed)${RESET}` : "";
   // Model and cap are shown by the reactive <Header> component — not repeated here.
+  // No leading marker: the splash's own mark is gone (removed entirely, not replaced — this
+  // pass), and "✦" was a leftover from the pre-palette-pass spinner with no tie to the logo;
+  // per the palette pass's own font finding, the diagonal mark carries the same substitution
+  // risk, so this banner follows the landing's own header, which carries no glyph either.
   process.stdout.write(
-    `${BRAND_TEAL_BOLD}✦${RESET}  ${BRAND_TEAL_BOLD}Zone v${_zoneVersion}${RESET}${resumed}  ${DIM}${cwdBranch}${RESET}\n\n`
+    `${BRAND_TEAL_BOLD}Zone v${_zoneVersion}${RESET}${resumed}  ${DIM}${cwdBranch}${RESET}\n\n`
   );
 }
 
@@ -1252,13 +1255,6 @@ export async function runTui(
     } catch { /* best-effort — missing file or other errors are silently ignored */ }
   };
 
-  if (process.stdout.isTTY) {
-    const splashInst = render(
-      <Splash />,
-      { exitOnCtrlC: false, alternateScreen: false }
-    );
-    await splashInst.waitUntilExit();
-  }
   writeBannerToStdout({ isResumed: !!resumedSession });
 
   const initialMode: TuiMode = resolveInitialTuiMode(opts.permissionMode);

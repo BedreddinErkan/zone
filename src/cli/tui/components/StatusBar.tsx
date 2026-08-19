@@ -22,9 +22,9 @@ function leftText(
   const tokStr = cumulativeTokens > 0 ? ` (${formatTokens(cumulativeTokens)} tok)` : "";
   switch (runState) {
     case "idle":
-      return `idle · ${m} · perm: default`;
+      return `idle · ${m}`;
     case "running":
-      return `$${costUsd.toFixed(4)}${tokStr}${liveElapsedSec ? ` · ${liveElapsedSec}s` : ""} · ${m} · perm: default`;
+      return `$${costUsd.toFixed(4)}${tokStr}${liveElapsedSec ? ` · ${liveElapsedSec}s` : ""} · ${m}`;
     case "awaiting_input":
       return `waiting for you · $${costUsd.toFixed(4)}${tokStr} · ${m}`;
     case "done":
