@@ -10466,9 +10466,40 @@ callers at all, whereas this code is entered on every iteration and it is the co
 
 ## 110. Tier reaches only `tokenBudgetCap` for two of seven archetypes below complex tier, not five; its iteration cap binds where the pipeline is null and its tool subset wherever the dispatcher supplies no filter
 
-**What it is.** `TIER_LIMITS` carries four fields. Two of them — the iteration budget and the tool subset —
-are superseded by the archetype pipeline whenever one exists, by two independent precedence rules that
-happen to agree. Tier decides those two only for the archetypes whose pipeline config is null.
+**What it is. Corrected: `TIER_LIMITS` carries three fields, not four, and the tool subset is not
+one of them.** Executing `Object.keys` on the real object returns `maxSubagentCalls`,
+`tokenBudgetCap` and `softIterWarn`. The tool subset is tier-derived but lives elsewhere —
+`tierToolFilter` in `tierToolSubsets.ts`, keyed on tier — so counting it as a field of this object
+is what made the total four. The distinction matters because it is what this entry's next claim
+turns on: of the three real fields, the archetype pipeline supersedes exactly **one**, the iteration
+budget, and only where it supplies a smaller cap. The tool subset is superseded by a different
+mechanism on a different axis.
+
+**A fourth defect, independent of the three corrections this entry already records and of the field
+count just given: `maxSubagentCalls` is reached by tier in every cell and appears nowhere in this
+entry's reach claim.** Read at its own site, `effectiveMaxSubagentCalls =
+tierLimits?.maxSubagentCalls` — no pipeline term — and `PipelineConfig` declares no field naming a
+subagent cap. The same holds for the token cap: `effectiveTokenBudgetCap =
+tierLimits?.tokenBudgetCap ?? TOKEN_BUDGET_CAP`. **So tier reaches two of its three fields
+unconditionally, for every archetype at every tier**, and "reaches only `tokenBudgetCap`"
+undercounts by one field in all twenty-one cells.
+
+**The reach matrix, executed rather than counted — recorded because a count in this entry has now
+been wrong twice and a matrix is what the next count can be checked against.** Run with the real
+`buildPipelineConfig`, `buildDispatcherCapabilityFilter` and `tierToolFilter` at default
+environment, applying the restore guard that lets a pipeline cap win only when it is smaller than
+tier's `softIterWarn × 3`. Iteration budget comes from **tier** for `simple_add`, `debug` and
+`complex_multi_file` at all three tiers, and from the pipeline for the other four — 10 for
+`targeted_fix`, 12 for `refactor` and `investigation`, 3 for `question`. The tool subset comes from
+**tier** for five of seven below complex, the exceptions being `investigation` and `question`, which
+take a dispatcher filter; at complex `tierToolFilter` returns undefined, so those same five get **no
+filter at all** — neither tier binding nor the dispatcher supplying, a state this entry's framing
+has no cell for. The token cap and the subagent cap come from tier in every one of the twenty-one
+cells.
+
+**What it was.** Two of them — the iteration budget and the tool subset — are superseded by the
+archetype pipeline whenever one exists, by two independent precedence rules that happen to agree.
+Tier decides those two only for the archetypes whose pipeline config is null.
 
 **The iteration path.** Inside the tier branch, which runs for every main loop because `resolveTierLimits`
 never returns null and `tierLimits` is null only for subagent loops, `maxIterationsForRun` is overwritten
@@ -10528,6 +10559,16 @@ of three or fewer. At complex tier the quota is 4 but the estimate can still wit
 codebase already instruments the resulting contradiction with its own marker, describing it in place as
 the third point at which these two axes disagree.
 
+**And that quota is the clearest case of tier binding while nothing observable changes — measured,
+not argued.** Tier sets it in every cell: zero at simple and medium, four at complex, recorded
+across seventy-six runs as ninety-one records at zero and two at four. The dispatch marker,
+attributed to its single emitter with the attribution script rather than a text scan, records **zero
+dispatches** by two instruments — a parsed cross-tab and a raw byte count with no JSON parser — over
+the sink's entire window. So the one field tier reaches unconditionally and grants only at complex
+has never produced the thing it grants. **A cell where tier binds and nothing downstream differs
+answers part of this entry's own question without any new measurement**, and it is worth separating
+from the rest: whatever the behavioural run finds, it will not find it here.
+
 **Registered predictions. The agreement one has now been measured and refuted; the other two stand.**
 Classifier agreement with a hand label, 70 to 85 percent. **The prediction is left exactly as registered —
 the clause that followed it is not.** As first written it said the range was "bounded below by the
@@ -10546,6 +10587,19 @@ identical verdicts with final iteration counts within one. **The refuting signal
 different success rate or iteration distribution between the simple and complex arms on those five
 archetypes; a difference confined to debug and complex_multi_file confirms rather than refutes, since
 those are the two where tier still binds.
+
+**The prediction just stated is left exactly as registered, and its partition is recorded as
+unusable rather than quietly restated — the two are different acts and only the second would destroy
+the record of what was predicted.** Both of the groups it names are the figure this entry has since
+corrected. There are four non-null pipelines at default environment, not five, and three nulls, not
+two. The deeper fault is not the arithmetic: the prediction treats "has a non-null pipeline" as
+equivalent to "tier does not bind", and that equivalence is false on the tool axis — `targeted_fix`
+and `refactor` carry pipelines and still take the tier subset below complex. So the treatment group
+contains two archetypes where tier binds and the control group omits one where it does. **A run
+scored against this rule as written would be comparing groups that are not separated on the thing
+being tested.** Restating it needs the axis named as well as the group, since the iteration budget
+and the tool subset partition the seven differently, and that is a design decision rather than a
+transcription — left to whoever runs it.
 
 **The agreement measurement, run at `49aa3615` against labels frozen at `6b7c966d`.** Forty tasks, one
 classifier call each, on gpt-4o-mini. This is the OpenAI arm only, so nothing in it speaks to Anthropic
@@ -10593,6 +10647,23 @@ it load-bearing." The premise is inverted: below complex tier, tier reaches past
 for **five** of seven and is confined to it for two. So the measurement this entry already ran was
 discounted on a number pointing the other way, and how much a misclassification costs is open again
 rather than argued away.
+
+**Read against the corrected reach, the measurement this entry already holds answers half of what
+the withdrawal reopened, from records that already exist.** Re-derived from the frozen artefacts
+rather than from this entry's prose — joining the results file's `label` against its `returnedTier`
+over all forty rows reproduces every figure stated here: 55.0 percent overall, eighteen
+disagreements, fifteen by one tier and three by two, none downward, and the three per-source rates
+unchanged. It also yields one this entry does not state: the labels are twenty-seven simple, eleven
+medium and two complex, while the classifier returned fourteen, sixteen and **ten**. The whole
+distribution shifts up. **Every quantity tier reaches is monotone in tier** — simple to medium
+raises the token cap from four hundred thousand to six hundred thousand and the tool subset from
+five tools to nine; medium to complex raises the cap again, removes the tool filter altogether, and
+lifts the subagent quota from zero to four. **So a misclassification in the observed direction
+cannot constrain a run below what its true tier would allow; it can only over-provision.** And the
+one qualitative grant that the larger jump produces is the subagent quota, which this entry's own
+quota paragraph shows has never altered a run. What stays open is the other half — whether
+over-provisioning itself costs anything — and that is a different question from the one the
+withdrawn sentence was answering.
 
 **Two further arms, and the headline is neither one's percentage.** Both ran the same forty tasks against the
 same frozen labels on gpt-4o-mini. Arm B (`6cdb722b`) softened the COMPLEX trigger block's header and
@@ -10650,14 +10721,28 @@ agreement measurement ran on OpenAI for well under a cent and the behavioural on
 cost rather than by any credit balance. See item 109 for
 why a wrong tier cannot be recovered from, and item 116 for the CLAUDE.md sentence this item falsifies.
 
-**Bucket: Blocked on data — and the condition is unchanged by all three corrections, which is worth
-stating because an entry whose figures were wrong and whose question stands is a different record
-from one whose question was built on the wrong number.** What this entry waits on is a behavioural
-measurement, and it is still unrun; nothing about the reach's true size makes it more or less
-runnable. What the corrections do change is the stake rather than the condition. The reach is wider
-than recorded — five of seven archetypes feel tier past `tokenBudgetCap` below complex tier, not two
-— so the unrun measurement matters more than this entry has been claiming, and the argument that
-discounted the one measurement already taken is withdrawn.
+**Bucket, re-decided rather than inherited a second time: it stays Blocked on data — and this
+entry's record has to be read the other way round from the last re-check.** What this entry waits on
+is a behavioural measurement, and it is still unrun; nothing about the reach's true size makes it
+more or less runnable. What the corrections do change is the stake rather than the condition. The
+reach is wider than recorded — five of seven archetypes feel tier past `tokenBudgetCap` below
+complex tier, not two — so the unrun measurement matters more than this entry has been claiming, and
+the argument that discounted the one measurement already taken is withdrawn.
+
+**The last re-check said the question stands beside the figure rather than on it. On this pass that
+is only three-quarters true.** The prose argument did stand beside it and was withdrawn; the
+registered prediction does not — its treatment and control groups are the corrected figure, so the
+correction reaches the measurement design and not only the text around it. **The bucket is unmoved
+all the same**, and the reason is worth stating rather than assumed: what this entry waits on is a
+behavioural run, and a partition that needs restating before that run is scored is a reason the run
+has not happened, not a reason it could not. The population is the other reason and it is the harder
+one — two instruments agreeing at run level put the recorded tiers at seventy-two medium against
+**two simple and two complex**, the same denominator item 178 hit and the shape item 115 records
+when one sweep of one archetype at one tier is forty-five percent of everything retained. **Against
+Actionable now:** three separate things would have to be decided before anything could be built —
+the partition's axis, the readout, and the arm design this entry already records as underpowered.
+**Against Neither:** an observation is missing and it is nameable, which is not the same as no fix
+being proposed.
 
 ## 111. Closed — the orphaned scope-audit remainder is removed at `ad7818b8`; two of this entry's own three claims were false, manufactured by an exclusion-scoped grep
 
@@ -11083,10 +11168,30 @@ belong on that list do not**: items 90 and 157 rest on a probe that is tracked i
 imports the built tree directly and constructs its own question-archetype conditions, so it neither
 needs the dispatch path nor leaves records in this sink at all — they are waiting on spend with a
 working instrument, which is a different and cheaper blocker. The remaining five entries are
-independent of both populations. **This is recorded here rather than in each of the six** because it
-is a property of this surface, not of any one question; and it is not a separate entry because it is
-another property of the surface this entry already records rather than a larger population of some
-different thing.
+independent of both populations. **A fifth property, and it is about what a retained field can be
+asked rather than about which runs exist.** The usage ledger carries a `terminationReason` on six
+hundred and fifty-eight runs, and thirty-eight of those read `token_budget_exceeded`. That value
+cannot be taken at face value: the run-completion composer returns it for **any** trigger that is
+not natural completion, so an iteration-cap exit is recorded under a token-budget name. This is not
+a discovery — the source says so at the assignment in as many words, the contributor guide
+enumerates it as one of three preserved naming inconsistencies, and a probe test exists whose stated
+purpose is to go red if it is ever fixed. What is new is the consequence for reading the records:
+**the marker that does keep the two values apart covers one of the thirty-eight, three percent**, so
+for the rest the distinction is not recoverable from what is retained. Anyone joining on that field
+is joining on a merged category.
+
+**Two bounds on that, because the first version of this note over-reached in the way this entry's
+own rule warns against.** It reaches only `terminationReason`: the same composer derives `success`
+from the trigger and passes the iteration count through untouched, so a measurement reading either
+of those is unaffected. And checked against the wiring rather than against entry prose, **it reaches
+none of the thirteen** — nine entries mention a termination reason and none is in that bucket, and
+the one entry that looked exposed reads success and iteration count, not this field. Recorded here
+anyway, because a merged category in a retained field is a property of the surface that outlives
+whichever question first noticed it.
+
+**This is recorded here rather than in each of the six** because it is a property of this surface,
+not of any one question; and it is not a separate entry because it is another property of the
+surface this entry already records rather than a larger population of some different thing.
 
 **What produced the error in the first version of that list, recorded because it is mechanical and
 will recur.** The six were grouped by reading how each entry describes its own dependency, and the
