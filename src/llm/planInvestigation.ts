@@ -156,6 +156,11 @@ export async function runPlanInvestigation(
     provider: input.provider,
     abortSignal: input.abortSignal,
     mode: "investigation",
+    // Item 166 stage one: this loop's output IS the ExecutionPlan the execution
+    // loop reads requestedTools from, and buildPrompt above names the field in the
+    // JSON shape it hands the model — so the redirection reaches somewhere here.
+    // runInvestigationFlow shares the mode and neither property; it must not set this.
+    allowToolRequest: true,
     capabilityFilter: { allowToolNames: new Set(INVESTIGATION_TOOLS) },
     maxIterationsOverride: PLAN_INVESTIGATION_ITER_CAP,
     onToolCall: (name: string, args: Record<string, unknown>) => {

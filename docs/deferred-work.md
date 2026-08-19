@@ -14490,22 +14490,77 @@ says where to put a request, and every execution-mode run renders it byte-identi
 `[zone-requested-tools-granted]` records each grant's requested, granted and dropped names against the run
 identifier, which the usage log carries under the same key name and value shape.
 
-**The ceiling that grant lands on, measured against the real registry rather than reasoned from the
-dispatcher's general logic — and it is this pass's finding.** The notice names fifteen withheld tools to
-the investigation phase, because that phase's own offered set is a fixed five regardless of what the
-execution phase will later be. Against that vocabulary, the grantable set per archetype is: **two** for
-`simple_add`, the subagent-dispatch and scope-revision tools; **five** for the question archetype and five
-again for the investigation pipeline reached by the answer-only override, those two plus three background
-tools already documented as inert without the background runner, which stays denied by capability; and
-**zero** for targeted-fix, refactor, debug and complex-multi-file alike. The two write-capable archetypes
-that carry substantial multi-step work get nothing, and not by accident: both set subagent dispatch and
-scope revision to true already, so their dispatcher filter is undefined and there is nothing excluded by
-name for a request to lift. Debug and complex-multi-file have no pipeline config at all, which reaches the
-same undefined by a different route. **So the channel ships and, on the archetypes where a request would
-most plausibly be worth honouring, no request can be.** The reading a first draft of this work reached —
-that targeted-fix and refactor were the realistic targets — was inferred from the general shape of the
-filter builder without reading what those two pipelines set, and it was wrong; the numbers here come from
-resolving each pipeline's own literal against the registry.
+**A defect in the redirection's gate, found by testing this entry's zero and fixed here.** The redirection
+was gated on investigation mode alone, and **two callers set that mode**, established from source rather
+than assumed: the plan-investigation phase, whose output *is* the ExecutionPlan the execution loop reads
+`requestedTools` from, and the init flow's read-only investigator, whose output is prose written to the
+project memory file. Executed for the filter each actually passes: the first is shown 15 withheld names
+and the redirection, the second **16 names and the same redirection** — while its own prompt never mentions
+the field (zero occurrences in that module), its result is consumed as a chat response, and no later loop
+reads a plan from it. **A request there reaches nowhere twice over**, because that caller's filter withholds
+by capability class rather than by name, so the grant function returns zero grantable names against it by
+construction. That is precisely the case the notice builder's own doc comment rules out — telling an agent
+to ask for something it cannot receive being worse than the silence it replaces. Fixed by conjoining an
+explicit opt-in that only the plan-emitting caller sets; default-off, so a plan-emitting caller that forgets
+it gets silence rather than a dead invitation, which is the same doc comment's stated preference.
+
+**Whether that opt-in is checkable rather than merely documented, established before it shipped.** It is
+**not derivable**: the plan-emitting caller passes a strict *subset* of the other's loop fields, the only
+fields unique to the other are a progress callback, an output-format toggle and a user id, neither passes an
+execution plan, the mode is identical, and the capability-filter shapes differ in a way that describes this
+loop's own tools rather than what happens to its output. The only structural difference tracking the
+property lives inside the task string. **So it is asserted instead, and on the property rather than on the
+identity**: a real-tree regression check brace-balances every production `runAgentLoop` call, takes those
+passing the flag, and requires each such file to also name `requestedTools` — the field the redirection
+points at — with a non-vacuity assertion first so it cannot pass by finding nothing. A mutation adding the
+flag to the init-flow caller, which is exactly the future mistake the comment alone could not catch, fails
+three of those checks. **The invariant is maintained by a check, not by convention.**
+
+**The ceiling that grant lands on, as it stood before item 167 — kept as the state of this entry then,
+and superseded in six of its seven figures.** The notice names fifteen withheld tools to the investigation
+phase, because that phase's own offered set is a fixed five regardless of what the execution phase will
+later be; that half is re-derived and correct, by two instruments, once the filter the caller actually
+passes is used rather than the investigation pipeline's own. Against that vocabulary the grantable set per
+archetype was recorded as: **two** for `simple_add`, the subagent-dispatch and scope-revision tools;
+**five** for the question archetype and five again for the investigation pipeline reached by the
+answer-only override; and **zero** for targeted-fix, refactor, debug and complex-multi-file alike, on the
+reasoning that all four resolve to an undefined dispatcher filter with nothing excluded by name for a
+request to lift.
+
+**The premise of that zero survived and its conclusion did not, which is the shape worth recording.** Those
+four archetypes still resolve to an undefined dispatcher filter — that much is unchanged. What changed is
+that a filter withholding by name is no longer the only withholding shape: item 167 made absence from a
+**pure name-whitelist** eligible too, and an undefined dispatcher filter falls through to `tierToolFilter`,
+which is exactly that shape at simple and medium tier. So the reasoning broke at item 167 rather than the
+premise. **This entry already carries the correction, in its own retirement paragraph** — "against the
+tier-derived filter it grants at simple tier, five names to six, and at medium, nine to ten" — which
+re-executes exactly; the two paragraphs stood unreconciled, with the stale one labelled as the finding.
+
+**The grantable set re-executed per archetype and tier, against the real registry at HEAD, default
+environment** — a matrix rather than a count, since the count has now been wrong once:
+
+| archetype | recorded | simple | medium | complex |
+|---|---|---|---|---|
+| `simple_add` | 2 | **15** | **11** | 0 |
+| `targeted_fix`, `refactor`, `debug`, `complex_multi_file` | 0 | **15** | **11** | 0 |
+| `question` | 5 | **8** | **8** | **8** |
+| `investigation` | 5 | 5 | 5 | 5 |
+
+Only the investigation row survives. The complex-tier zeros are not a ceiling but its opposite: the filter
+in force is undefined there, so every tool is already offered and there is nothing left to grant.
+**So this entry's headline conclusion — that on the archetypes where a request would most plausibly be
+worth honouring no request can be — is withdrawn.** On those four archetypes a request can now be honoured
+at simple and medium tier, eleven to fifteen names deep.
+
+**And the three locks reach the explicit channel too, not only the retired mark-derived one.** Executed
+across the same 21 cells: 169 names are grantable in total and **155 survive into the array actually sent
+to the provider**. Every one of the 14 that do not is `Task`. It is grantable in **16 of 21 cells** and
+reaches the provider in **2** — question and investigation at complex tier — and in **none at all** once
+the task is small, because `taskIsSmall` re-closes the budget gate that `maxSubagentCalls` opened. The
+grant call site's own comment says as much and the shipped tests carry a describe block naming it a
+finding rather than a defect; what was missing is that this entry attached the locks to the retired
+channel alone. **A grant can be real at the filter and inert at the provider**, and that is a property of
+the explicit channel as much as the one that was removed.
 
 **What a grant overturns, named rather than shipped quietly.** The two names that matter are exactly the
 two capabilities the simple-add pipeline deliberately disables. So a plan can now reverse an explicit
@@ -14580,9 +14635,16 @@ subset, strict superset both times.
 
 **Bucket: Blocked on data**, moved from Neither, and decided by this entry's own stated closing condition
 rather than by the fact that code shipped. Four things were named as needing to be learned before it
-closes. Three are observations that do not exist yet — whether a model asks accurately, whether honouring
-a request pays for itself, and the cold-start cost — and item 170 registers the first of those with its
-instrument named. The fourth, how to stop a request becoming an unconditional escalation, is the one the
+closes. **Two of them are answered by construction rather than by measurement, not one**, and the second is
+recorded here because this entry counted it as an observation. Whether a model asks accurately and whether
+honouring a request pays for itself are the observations that do not exist yet, and item 170 registers the
+first of those with its instrument named — so it discharges that unknown **wholly**, and it is one of two
+outstanding rather than one of four. **The cold-start cost is the second constructional answer.** The price
+this entry computes is for a mid-loop tool-set change, which is the design it declined to build; what
+shipped grants at loop entry, and the ordering is established by shape — the grant runs where the filter is
+resolved, the tool array is built after it, and the first provider call of that loop comes later still. A
+grant therefore precedes any provider call in the loop it affects, so **there is no warm prefix for it to
+invalidate**, and exactly one production call site exists, one-shot. The fourth, how to stop a request becoming an unconditional escalation, is the one the
 shipped work answers, and it answers it by construction rather than by measurement: a cap of three names
 and a ceiling that is whatever the filter in force withholds by name. **The retirement does not move this
 bucket, and the reason is worth stating rather than leaving to inference:** retiring one of two input
@@ -14602,8 +14664,9 @@ needed the field added by hand or it would have validated and then been dropped 
 the grant function is beside `buildDispatcherCapabilityFilter` in the archetype dispatcher, and its call
 site is the agent loop, at the point its own filter is resolved — the patch-flow driver where the execution
 filter is assembled was the original call site and is no longer one; the redirection is a conditional in
-the tool-absence notice, wired from the agent loop's own investigation-mode flag; the marker is in the loop
-telemetry module. See item 99 for the evidence bearing on stage one, item 161 for what the first breakpoint
+the tool-absence notice, wired from the agent loop's investigation-mode flag **conjoined with an explicit
+per-caller opt-in on the loop input**, whose one-call-site invariant is checked in the notice-wiring test
+rather than promised by its doc comment; the marker is in the loop telemetry module. See item 99 for the evidence bearing on stage one, item 161 for what the first breakpoint
 caches, item 163 for the instruments that priced this, item 165 for the phase boundary that already pays
 the cost once, and items 167 through 170 for what the shipped version leaves open.
 
@@ -14612,6 +14675,18 @@ strict subset of it — this entry's own text names it as registering the first 
 here — and items 175 and 178 connect through the same family. One measurement aimed at this entry's
 question can therefore discharge more than one of the four. See item 4 for the bucket's other two
 clusters and the same consequence.
+
+**What the cluster actually shares is one missing population, and it is checked against wiring rather
+than against how the four describe themselves.** Every one of them is anchored in the plan-investigation
+phase: this entry's redirection renders only in investigation mode and its request field is defined in
+that phase's own prompt; item 170's marker can only fire on a request that phase produces; item 175's
+marking rule is one bullet in the same prompt; item 178's measured span is one rule line plus two schema
+lines in it, and its consumer needs complex tier — the sink holds exactly two complex-tier runs by two
+instruments, and **both of those two are also plan-investigation runs**. That phase last ran on
+**2026-08-09**, by three markers agreeing at run level and all on the unconditional logging helper.
+**So one dispatch through the plan path is the shared unblocker, and no amount of the traffic the sink
+has actually been accumulating is.** Item 115 already accounts for why the path stopped — habit rather
+than code — and that account is what makes this a resumable dependency rather than a closed one.
 
 ## 167. Closed — the grant moved to the layer whose ceiling is not empty, and the one-shot guard this entry told it to reuse was the wrong guard
 
@@ -14838,13 +14913,55 @@ on most runs says the redirection is not read as an invitation, which is a promp
 ceiling finding. **The two failures point at different fixes**, which is why they are registered as two
 quantities rather than one rate.
 
-**Bucket: Blocked on data.** Closing requires an observation that does not exist yet, and the instrument
-that would produce it is already emitting. **Against Actionable now:** no fix is specified, because which
-fix applies depends on which quantity comes back low. **Against Neither:** this is a registered prediction
-awaiting data rather than a structural fact.
+**The denominator, measured for the first time: it is zero of zero, not zero of anything.** The marker
+holds **no records at all**, agreed by a parsing cross-tab and a raw byte count. **Neither gating dimension
+bites it** — it rides the unconditional logging helper, not the verbose-gated one, and it goes to standard
+output, where the shield has three installers rather than the error channel's one. So the zero is not an
+instrument artefact. What it is instead: the three commits that built this channel landed on
+**2026-08-15**, and the last run that could have carried a request ran on **2026-08-09**, six days earlier.
+Every run the sink retains after the channel existed — **41 of them, all archetype `debug` at tier
+`medium`, inside a single 0.3-hour window** — carries zero plan-mode, zero plan-investigation and zero
+plan-decision records, by three instruments agreeing at run level and each proved live first, on 20, 26 and
+29 historical records. **No model has ever been shown the invitation this entry measures the answer to.**
+Both registered quantities are therefore **0 of 0**. A reading that took the 41 runs as exposure would be
+counting a population that could not produce the event.
 
-**Where the code lives:** the marker is in the loop telemetry module; the drop reasons are assigned in the
-grant function beside the dispatcher's filter builder. See item 166 for the channel, item 167 for the
+**The meters restated in opportunity terms, because a count of the wrong shape can grow without bound.**
+This entry registered two quantities and an instrument but neither a threshold nor a review point.
+- **Threshold:** roughly 10-20 dispatches **that reached the plan path and rendered the redirection** —
+  item 4's own magnitude, reused rather than re-derived, and keyed on qualifying dispatches rather than on
+  runs, since the sink has already accumulated 41 runs of a shape that cannot qualify.
+- **Review point, independent of the threshold:** revisit once the plan path has run at all again, whether
+  or not the threshold is near. The path stopped for habit rather than code (item 115), so the checkpoint
+  that matters is resumption, not accumulation.
+- The **null-result meaning this entry already declared** — a populated field with a near-zero grantable
+  share pointing at item 168's vocabulary, an empty field pointing at the prompt — stands unchanged and is
+  the reason this entry is worth keeping distinct from item 166 rather than folded into it.
+
+**A ceiling widened underneath the second quantity, recorded so the ratio is not read against a stale
+figure.** That quantity is a share of the grantable set, and item 167 enlarged that set substantially:
+re-executed per archetype and tier, the four archetypes item 166 recorded as granting nothing grant
+eleven to fifteen names at simple and medium tier. A share registered when the denominator was believed to
+be zero on those archetypes would read very differently against the real one. **One correction rides with
+it:** a granted name is not necessarily a usable one — `Task` is grantable in 16 of 21 cells and survives
+into the array sent to the provider in 2, none once the task is small — so the second quantity measures
+what the filter admits, not what the model can then call.
+
+**Bucket, re-decided rather than inherited: it stays Blocked on data.** Closing requires an observation
+that does not exist yet, the instrument that would produce it is already emitting, and what is missing is
+the population rather than the instrument. Precedents read this pass: **198** and **212** close on the
+entry's own condition being discharged, and this one is not; **210** closes on another entry's remedy
+landing, and nothing has landed; **181** is Neither on no observation being missing, and one is missing
+here. Merging into item 166 was considered and rejected — this entry's pre-declared null-result meaning is
+the half item 166 lacks, and folding it in would bury it. **Against Actionable now:** no fix is specified,
+because which fix applies depends on which quantity comes back low. **Against Neither:** this is a
+registered prediction awaiting data rather than a structural fact.
+
+**Where the code lives:** the marker is in the loop telemetry module, one emitter by the attribution tool;
+the drop reasons are assigned in the grant function beside the dispatcher's filter builder. The redirection
+that invites the request is gated in the agent loop on investigation mode **and** an explicit per-caller
+opt-in, added after this entry was written because the mode alone also selected a caller that emits no
+plan. See item 166 for the channel, item 167 for the
 ceiling that bounds the second quantity, and item 168 for the vocabulary that bounds the first.
 
 ## 171. Closed — a probe transcript that reads some of an enumerated set never terminates naturally, and the coverage rule that fixes it was validated in the same pass

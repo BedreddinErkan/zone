@@ -153,6 +153,24 @@ export interface AgentLoopInput {
   task: string;
   repoPath: string;
   mode?: AgentLoopMode;
+  /**
+   * Item 166 stage one. Opens the tool-absence notice's "name it in requestedTools"
+   * redirection for THIS loop. Set it only from a caller whose own output is an
+   * ExecutionPlan that a later loop reads — that, not the mode, is what makes a
+   * request reach anywhere, and `mode === "investigate"` alone does not imply it:
+   * both investigation-mode callers share the mode, and only one emits a plan.
+   *
+   * The invariant is NOT derivable from anything else this loop receives —
+   * `planInvestigation` passes a strict subset of `investigationFlow`'s fields, and
+   * the only structural difference tracking the property lives inside the task
+   * string. It is instead CHECKED, in agentLoop.toolAbsenceNoticeWiring.test.ts:
+   * every production `runAgentLoop` call passing this flag must sit in a file that
+   * also names `requestedTools`, i.e. that defines the field the redirection points
+   * at. Default-off is the deliberate direction — a plan-emitting caller that
+   * forgets the flag gets silence, which buildToolAbsenceBlock's own doc comment
+   * prefers to an invitation that cannot be taken.
+   */
+  allowToolRequest?: boolean;
   runId?: string;
   framework?: ProjectFramework;
   maxIterations?: number; // default: 10
@@ -2581,11 +2599,14 @@ async function runAgentLoopScoped(input: AgentLoopInput, stats: LoopRunStats): P
     tier: input.taskClassification?.tier,
     archetype: input.taskClassification?.archetype,
     mode,
-    // Item 166 stage one: only investigation gets the redirection — the
-    // requestedTools channel is read at the execution-phase capabilityFilter
-    // construction site, so an execution-mode run has nowhere for a request
-    // to go. isInvestigationMode is computed above at loop entry (:2280).
-    allowToolRequest: isInvestigationMode,
+    // Item 166 stage one: the redirection needs BOTH that this is a read-only
+    // investigation loop AND that this loop's own output is a plan a later loop
+    // reads. The mode alone does not carry the second half — runInvestigationFlow
+    // (/init) also runs in investigation mode, and its result is consumed as prose
+    // for .zone/memory.md, with no plan JSON and no requestedTools field anywhere
+    // in it. Inviting a request there is the exact case buildToolAbsenceBlock's own
+    // doc comment rules out. isInvestigationMode is computed at loop entry.
+    allowToolRequest: isInvestigationMode && input.allowToolRequest === true,
   });
 
   let midWarnInjected = false;
