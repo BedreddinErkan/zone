@@ -102,6 +102,8 @@ function renderEntry(entry: TranscriptEntry, index: number, colWidth: number): R
             answerOnlyReason={entry.answerOnlyReason}
             riskHints={entry.riskHints}
             scopeSummary={entry.scopeSummary}
+            narrative={entry.narrative}
+            filesLikely={entry.filesLikely}
           />
         </Box>
       );

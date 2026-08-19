@@ -12,8 +12,10 @@ const execFileAsync = promisify(execFile);
  * Returns `null` when a write to `filePath` is allowed, or an error message
  * string when it should be blocked. Allowed when:
  *   - No plan provided (chat tasks, plan-failed runs, hosted contexts)
- *   - Plan exists but no step carries `filesLikely` info (graceful fallback)
- *   - `filePath` matches the union of `step.filesLikely` across all steps
+ *   - Plan exists but neither the plan-level `filesLikely` nor any step carries one
+ *     (graceful fallback — this is the pre-existing fail-open; NOT fixed here)
+ *   - `filePath` matches the union of the plan-level `filesLikely` (D2) and every
+ *     `step.filesLikely` across all steps
  *
  * Path comparison normalizes leading `./` and Windows-style backslashes.
  * Per-step locking is intentionally NOT applied here — the agent may complete
@@ -39,31 +41,49 @@ export function checkWriteScope(
     if (absFile === absZone || absFile.startsWith(absZone + path.sep)) return null;
   }
 
-  if (!executionPlan || !Array.isArray(executionPlan.steps)) {
-    return null;
-  }
-  if (executionPlan.steps.length === 0) {
-    if (isAnswerOnlyPlan(executionPlan)) {
-      return (
-        `Write blocked: this plan is answer-only (${executionPlan.answerOnlyReason}). ` +
-        `No file changes were approved for this run.`
-      );
-    }
+  if (!executionPlan) {
     return null;
   }
 
+  // steps used to gate BOTH the answer-only check and the whole allowedFiles collection behind
+  // one early return (`steps.length === 0` -> null unless answer-only). That meant a narrative-
+  // first plan with `steps: []` and a populated plan-level filesLikely (D2) never reached the
+  // filesLikely check at all — an unconditional ALLOW, ignorant of the very field D2 exists to
+  // consult. stepsIsArray is checked once, up front, and used to guard every place that touches
+  // `.steps` from here on — including isAnswerOnlyPlan, whose own `steps.length` would throw on a
+  // non-array (kept exactly as defensive as the original `!Array.isArray` guard was).
+  const stepsIsArray = Array.isArray(executionPlan.steps);
+  if (stepsIsArray && isAnswerOnlyPlan(executionPlan)) {
+    return (
+      `Write blocked: this plan is answer-only (${executionPlan.answerOnlyReason}). ` +
+      `No file changes were approved for this run.`
+    );
+  }
+
   const allowedFiles = new Set<string>();
-  for (const step of executionPlan.steps) {
-    const list = (step as { filesLikely?: unknown }).filesLikely;
-    if (!Array.isArray(list)) continue;
-    for (const raw of list) {
+  if (Array.isArray(executionPlan.filesLikely)) {
+    for (const raw of executionPlan.filesLikely) {
       if (typeof raw !== "string") continue;
       const normalized = normalizePath(raw, repoPath);
       if (normalized && normalized !== OUT_OF_REPO_MARKER) allowedFiles.add(normalized);
     }
   }
+  if (stepsIsArray) {
+    for (const step of executionPlan.steps) {
+      const list = (step as { filesLikely?: unknown }).filesLikely;
+      if (!Array.isArray(list)) continue;
+      for (const raw of list) {
+        if (typeof raw !== "string") continue;
+        const normalized = normalizePath(raw, repoPath);
+        if (normalized && normalized !== OUT_OF_REPO_MARKER) allowedFiles.add(normalized);
+      }
+    }
+  }
 
   if (allowedFiles.size === 0) {
+    // Pre-existing fail-open, unchanged in meaning: neither source produced any file, so there
+    // is nothing to constrain against. Only what feeds this set changed above; this line and its
+    // consequence did not.
     return null;
   }
 

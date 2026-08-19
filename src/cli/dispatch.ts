@@ -496,6 +496,11 @@ export async function runOneShotInner(
               answerOnlyReason: currentPlan.answerOnlyReason,
               riskHints: currentPlan.riskHints,
               scopeSummary: currentPlan.scopeSummary,
+              // D1/D3 (plan widening) — found by tracing the construction site rather than
+              // adopted from the design's consumer list, which covered gates on this file, not
+              // this write site.
+              narrative: currentPlan.narrative,
+              filesLikely: currentPlan.filesLikely,
             },
             emit: (evt) => progressCallback({ stage: evt.type, progress: evt } as unknown as LlmPatchProgressUpdate),
             abortSignal: ac.signal,

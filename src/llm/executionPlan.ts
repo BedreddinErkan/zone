@@ -26,6 +26,18 @@ export type ExecutionPlan = {
   riskHints: string[];
   scopeSummary: string;
   scopeNotes?: string;
+  /** The free-form plan (D1). Markdown; the agent chooses its own sections. Optional at this
+   *  type/schema level even though the investigation prompt (planInvestigation.ts's buildPrompt)
+   *  asks for it unconditionally — generateExecutionPlan's separate prompt and
+   *  synthesizeMinimalPlan's raw literal never ask for it, and a plan built by either must keep
+   *  validating exactly as before. PlanBody renders this when present and falls back to the
+   *  fixed objective/steps/riskHints layout when absent — never both at once. */
+  narrative?: string;
+  /** Plan-level file set (D2) — distinct from steps[].filesLikely below, which is unchanged.
+   *  checkWriteScope unions this with the per-step sets; it is what lets a narrative plan with
+   *  no step decomposition still constrain writes. Optional for the same reason narrative is:
+   *  only the investigation prompt asks for it. */
+  filesLikely?: string[];
   /** Item 166 stage one: tools investigation was not offered but needs, named exactly.
    *  An annotation, not part of the noChangeReason/cannotVerifyReason/answerOnlyReason
    *  mutual-exclusion group below — may be set on any terminal shape. Consumed at the
@@ -110,6 +122,13 @@ const executionPlanSchema = z
     riskHints: z.array(z.string()),
     scopeSummary: z.string(),
     scopeNotes: z.string().optional(),
+    // Uncapped, same treatment as scopeSummary/scopeNotes above and for the same reason —
+    // the only prompt that asks for this (planInvestigation.ts's buildPrompt) states no length,
+    // so there is no removed instruction to measure compliance against the way the two advisory
+    // caps below do for scopeSummary/scopeNotes. Optional: see the type-level comment.
+    narrative: z.string().optional(),
+    // Plan-level file set. Optional for the same reason narrative is — see the type comment.
+    filesLikely: z.array(z.string()).optional(),
     // No .max() — deliberately unconstrained. An over-length request must never
     // throw and destroy the whole plan (D2); truncation happens only at the grant
     // site (archetypeDispatcher.ts's applyRequestedToolsGrant), which cannot throw.
@@ -264,6 +283,8 @@ export function tryParseExecutionPlan(text: string): ExecutionPlan | null {
       riskHints: plan.riskHints,
       scopeSummary: plan.scopeSummary,
       ...(plan.scopeNotes ? { scopeNotes: plan.scopeNotes } : {}),
+      ...(plan.narrative ? { narrative: plan.narrative } : {}),
+      ...(plan.filesLikely?.length ? { filesLikely: plan.filesLikely } : {}),
       ...(plan.requestedTools?.length ? { requestedTools: plan.requestedTools } : {}),
       ...(plan.noChangeReason ? { noChangeReason: plan.noChangeReason } : {}),
       ...(plan.cannotVerifyReason ? { cannotVerifyReason: plan.cannotVerifyReason } : {}),
@@ -533,6 +554,13 @@ ${input.forceSteps
     riskHints: plan.riskHints,
     scopeSummary: plan.scopeSummary,
     ...(plan.scopeNotes ? { scopeNotes: plan.scopeNotes } : {}),
+    // This prompt never asks for narrative/filesLikely (only planInvestigation.ts's does), so
+    // these are almost always absent here — copied through anyway rather than left off, so a
+    // second production reconstruction site can't silently drop a field the type declares (the
+    // exact bug class toWireFrame's dropped answerOnlyReason and buildResumeContextBlock's
+    // never-existed .title read both were).
+    ...(plan.narrative ? { narrative: plan.narrative } : {}),
+    ...(plan.filesLikely?.length ? { filesLikely: plan.filesLikely } : {}),
     ...(plan.requestedTools?.length ? { requestedTools: plan.requestedTools } : {}),
     ...(plan.noChangeReason ? { noChangeReason: plan.noChangeReason } : {}),
     ...(plan.cannotVerifyReason ? { cannotVerifyReason: plan.cannotVerifyReason } : {}),

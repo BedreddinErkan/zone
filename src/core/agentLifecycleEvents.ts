@@ -323,6 +323,9 @@ export type ZoneStructuredProgressEvent = {
   planAnswerOnlyReason?: string;
   planRiskHints?: string[];
   planScopeSummary?: string;
+  /** D1/D3 (plan widening): the free-form plan and its plan-level file set. */
+  planNarrative?: string;
+  planFilesLikely?: string[];
   /** staged_diffs_ready_for_approval: R3 checkpoint fields. */
   stagedFilesJson?: string;
   stagedVerificationSummary?: string;

@@ -242,6 +242,53 @@ describe("PlanBody — full-render regression guard (no caps)", () => {
   });
 });
 
+describe("PlanBody — narrative (D3)", () => {
+  it("renders the narrative through MarkdownText, not the fixed objective/steps layout, when present", () => {
+    const { lastFrame } = render(
+      <PlanBody {...BASE_PROPS} narrative={"## Fix the guard\n\nOne targeted change."} />
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("Fix the guard");
+    expect(frame).toContain("One targeted change.");
+    // The fixed layout's own labels must not also appear — this is a REPLACEMENT, not an addition.
+    expect(frame).not.toContain("Objective:");
+    expect(frame).not.toContain(BASE_PROPS.objective);
+  });
+
+  it("renders the fixed objective/steps/riskHints/scopeNotes layout, unchanged, when narrative is absent", () => {
+    const { lastFrame } = render(<PlanBody {...BASE_PROPS} scopeSummary="s" scopeNotes="n" />);
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("Objective:");
+    expect(frame).toContain(BASE_PROPS.objective);
+  });
+
+  it("renders a 'Files:' line under the narrative when plan-level filesLikely is populated", () => {
+    const { lastFrame } = render(
+      <PlanBody {...BASE_PROPS} narrative="Do the thing." filesLikely={["src/a.ts", "src/b.ts"]} />
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("Files:");
+    expect(frame).toContain("src/a.ts");
+    expect(frame).toContain("src/b.ts");
+  });
+
+  it("renders no 'Files:' line when narrative is present but filesLikely is absent", () => {
+    const { lastFrame } = render(<PlanBody {...BASE_PROPS} narrative="Do the thing." />);
+    expect(lastFrame() ?? "").not.toContain("Files:");
+  });
+
+  it("still shows the terminal-shape reason banner alongside a narrative (orthogonal, not replaced)", () => {
+    const { lastFrame } = render(
+      <PlanBody {...BASE_PROPS} steps={[]} narrative="Investigated; nothing to change." answerOnlyReason="Behavior is correct." />
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("Ready to answer?");
+    expect(frame).toContain("Answering read-only:");
+    expect(frame).toContain("Behavior is correct.");
+    expect(frame).toContain("Investigated; nothing to change.");
+  });
+});
+
 function lastFrame_(props: PlanBodyProps): string {
   return render(<PlanBody {...props} />).lastFrame() ?? "";
 }

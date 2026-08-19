@@ -349,6 +349,8 @@ export function eventToActions(
             answerOnlyReason: evt.planAnswerOnlyReason,
             riskHints: evt.planRiskHints ?? [],
             scopeSummary: evt.planScopeSummary ?? "",
+            narrative: evt.planNarrative,
+            filesLikely: evt.planFilesLikely,
           },
         ],
         intents: [],

@@ -94,7 +94,8 @@ change, produce steps regardless of phrasing.` : ""}
 
 JSON shape:
 {
-  "objective": "string",
+  "narrative": "string — the plan itself, in markdown. Choose your own sections: write what this particular task needs and nothing it does not. A one-file fix does not need the same structure as a multi-commit refactor.",
+  "filesLikely": ["string"],
   "steps": [
     {
       "title": "string",
@@ -104,9 +105,6 @@ JSON shape:
       "subagentType": "worker" | "explore"
     }
   ],
-  "riskHints": ["string"],
-  "scopeSummary": "string",
-  "scopeNotes": "string (optional — what is already done / out of scope)",
   "requestedTools": ["string"] (optional — name tools you were not offered but need, by exact name),
   "noChangeReason": "string (optional — set when reproduce command ran and exited 0; steps MUST be [])",
   "cannotVerifyReason": "string (optional — set when reproduce command did NOT run; steps MUST be [])"${allowAnswerOnly ? `,
@@ -114,9 +112,10 @@ JSON shape:
 }
 
 Rules:
-- filesLikely: copy paths VERBATIM from the files you read. Never invent or alter extensions.
+- narrative: this is what the user reads and approves. filesLikely and steps are read by the tooling and are not displayed beside it — do not repeat their contents as prose sections. Write the narrative as though the reader can see only it.
+- filesLikely: every file this plan will create or modify, paths verbatim from the files you read. Never invent or alter extensions. It is the write guard's input, not a reading list — list only files you intend to change.
+- steps: still used for delegation and iteration budgeting; omit or leave empty when the work has no natural step decomposition.
 - subagentEligible/subagentType: decide this per step, after the plan's steps are already decided — do not restructure steps around the marking decision. Mark subagentEligible: true with subagentType: "worker" ONLY for independent multi-file edits — the same transformation applied across 3+ files (rename across files, repeated find-replace, codemods). NOT for a single-file edit, even if complex. Mark subagentType: "explore" ONLY for pure read-only investigation that doesn't depend on parent context ("list every caller of X", "map files matching Y"). NOT for a trivial lookup you can do in one read. Example: renaming an identifier across 5 files → mark worker; mapping every caller of a function across the codebase → mark explore; adding one JSDoc comment to one file → omit the annotation entirely.
-- scopeNotes: populate if you observed already-implemented or out-of-scope work; omit if nothing notable.
 - requestedTools: name tools you were not offered but genuinely need, by exact name — only when the tool-absence notice told you they're withheld. Do not invent tool names.
 - noChangeReason: if you ran the reproduce step and exit_code=0, set this and use steps:[]. Never fabricate steps for a problem that did not reproduce.
 - cannotVerifyReason: mutually exclusive with noChangeReason. Set only when the reproduce command did not run even bare. Do NOT set this to avoid investigation — only for genuine infrastructure blocks.${allowAnswerOnly ? `

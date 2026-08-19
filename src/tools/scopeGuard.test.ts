@@ -163,6 +163,80 @@ describe("checkWriteScope", () => {
   });
 });
 
+// D2: plan-level filesLikely, unioned with steps[].filesLikely. Verified this pass against a
+// fixed before/after matrix (19 rows) run through the real function on both sides of the edit —
+// these tests pin the two rows that matrix found changed, plus the old-shape-preservation rows
+// that must stay byte-identical.
+describe("checkWriteScope — plan-level filesLikely (D2)", () => {
+  it("steps:[] with populated plan-level filesLikely now blocks a target outside it (was an unconditional ALLOW before D2)", () => {
+    const plan: ExecutionPlan = {
+      objective: "x", steps: [], riskHints: [], scopeSummary: "",
+      filesLikely: ["src/a.ts"],
+    };
+    expect(checkWriteScope("src/z.ts", plan)).toMatch(/outside the planned scope/);
+  });
+
+  it("steps:[] with populated plan-level filesLikely allows a target inside it", () => {
+    const plan: ExecutionPlan = {
+      objective: "x", steps: [], riskHints: [], scopeSummary: "",
+      filesLikely: ["src/a.ts"],
+    };
+    expect(checkWriteScope("src/a.ts", plan)).toBeNull();
+  });
+
+  it("unions plan-level and step-level filesLikely — a target only in the plan-level set is allowed", () => {
+    const plan: ExecutionPlan = {
+      objective: "x",
+      steps: [{ title: "t", description: "d", filesLikely: ["src/step-only.ts"] }],
+      riskHints: [], scopeSummary: "",
+      filesLikely: ["src/plan-only.ts"],
+    };
+    expect(checkWriteScope("src/plan-only.ts", plan)).toBeNull();
+    expect(checkWriteScope("src/step-only.ts", plan)).toBeNull();
+    expect(checkWriteScope("src/neither.ts", plan)).toMatch(/outside the planned scope/);
+  });
+
+  it("old-shape plan (steps populated, no plan-level filesLikely) behaves exactly as before D2", () => {
+    const plan = makePlan(["src/a.ts", "src/b.ts"]);
+    expect(checkWriteScope("src/a.ts", plan)).toBeNull();
+    expect(checkWriteScope("src/z.ts", plan)).toMatch(/outside the planned scope/);
+  });
+
+  it("an empty plan-level filesLikely array is treated as absent — falls through to steps-only behavior", () => {
+    const plan: ExecutionPlan = {
+      objective: "x",
+      steps: [{ title: "t", description: "d", filesLikely: ["src/a.ts"] }],
+      riskHints: [], scopeSummary: "",
+      filesLikely: [],
+    };
+    expect(checkWriteScope("src/a.ts", plan)).toBeNull();
+  });
+
+  it("answerOnlyReason still blocks unconditionally regardless of plan-level filesLikely", () => {
+    const plan: ExecutionPlan = {
+      objective: "x", steps: [], riskHints: [], scopeSummary: "",
+      filesLikely: ["src/a.ts"], answerOnlyReason: "nothing to change",
+    };
+    expect(checkWriteScope("src/a.ts", plan)).toMatch(/answer-only/);
+  });
+
+  it("malformed (non-array) steps no longer produces a blanket ALLOW when plan-level filesLikely is populated", () => {
+    // Adversarial/direct-call-only shape — unreachable through any schema-validated plan (zod
+    // always produces a real steps array or rejects the whole plan). Only reachable via a
+    // hand-built fixture or a corrupted on-disk envelope resumed without re-validation. This
+    // pass's before/after matrix found this row changes too (ALLOW -> BLOCK) beyond the two the
+    // design named, and it was accepted as an intended consequence of the same fix, not reverted.
+    const plan = { objective: "x", steps: "not-an-array" as unknown as ExecutionPlan["steps"], riskHints: [], scopeSummary: "", filesLikely: ["src/a.ts"] };
+    expect(checkWriteScope("src/z.ts", plan)).toMatch(/outside the planned scope/);
+    expect(checkWriteScope("src/a.ts", plan)).toBeNull();
+  });
+
+  it("malformed (non-array) steps with no plan-level filesLikely still allows everything, unchanged", () => {
+    const plan = { objective: "x", steps: "not-an-array" as unknown as ExecutionPlan["steps"], riskHints: [], scopeSummary: "" };
+    expect(checkWriteScope("src/anything.ts", plan)).toBeNull();
+  });
+});
+
 describe("maybeExpandScopeForSymbolMatch", () => {
   const tmpFiles: string[] = [];
 

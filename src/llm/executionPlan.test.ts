@@ -415,6 +415,51 @@ describe("generateExecutionPlan — seededFileContents + scopeNotes", () => {
   });
 });
 
+// D1: this prompt never asks for narrative/filesLikely (only planInvestigation.ts's does) — but
+// the reconstruction copies them through anyway, same as the tryParseExecutionPlan tests above,
+// so a second production reconstruction site can't silently drop a field the type declares. Not
+// dead code by construction: dispatch.ts's refine loop feeds `previousPlan` (which may carry a
+// narrative from the first, investigation-produced plan) into this function's feedbackSection,
+// which JSON.stringifies it into the prompt — a model that echoes it back in its JSON output
+// would have it survive only if this reconstruction copies it.
+describe("generateExecutionPlan — narrative/filesLikely reconstruction (D1)", () => {
+  it("narrative survives generateExecutionPlan's own reconstruction when the model returns it", async () => {
+    mockPlanResponse({
+      objective: "Add pagination",
+      steps: [{ title: "Add UI", description: "Add buttons", filesLikely: ["src/ui.ts"] }],
+      riskHints: [],
+      scopeSummary: "Add pagination UI.",
+      narrative: "## Add pagination\n\nOne new component.",
+    });
+    const plan = await generateExecutionPlan({ task: "add pagination", repoSummary: "webapp", relevantFiles: [] });
+    expect(plan.narrative).toBe("## Add pagination\n\nOne new component.");
+  });
+
+  it("plan-level filesLikely survives generateExecutionPlan's own reconstruction when the model returns it", async () => {
+    mockPlanResponse({
+      objective: "Add pagination",
+      steps: [{ title: "Add UI", description: "Add buttons", filesLikely: ["src/ui.ts"] }],
+      riskHints: [],
+      scopeSummary: "Add pagination UI.",
+      filesLikely: ["src/plan-level.ts"],
+    });
+    const plan = await generateExecutionPlan({ task: "add pagination", repoSummary: "webapp", relevantFiles: [] });
+    expect(plan.filesLikely).toEqual(["src/plan-level.ts"]);
+  });
+
+  it("both are absent when the model does not return them — the real, everyday case for this function's own prompt", async () => {
+    mockPlanResponse({
+      objective: "Add pagination",
+      steps: [{ title: "Add UI", description: "Add buttons", filesLikely: ["src/ui.ts"] }],
+      riskHints: [],
+      scopeSummary: "Add pagination UI.",
+    });
+    const plan = await generateExecutionPlan({ task: "add pagination", repoSummary: "webapp", relevantFiles: [] });
+    expect(plan.narrative).toBeUndefined();
+    expect(plan.filesLikely).toBeUndefined();
+  });
+});
+
 describe("generateExecutionPlan — cost emission (onCostUsd)", () => {
   it("emits onCostUsd exactly once when a callback and a real usage object are both present", async () => {
     mockPlanResponseWithUsage(MINIMAL_PLAN, { prompt_tokens: 1000, completion_tokens: 200 });
@@ -558,6 +603,32 @@ describe("tryParseExecutionPlan", () => {
     const result = tryParseExecutionPlan(wrapJson(withType));
     expect(result!.steps[0].subagentEligible).toBe(true);
     expect(result!.steps[0].subagentType).toBe("worker");
+  });
+
+  // D1: narrative and plan-level filesLikely, same load-bearing-reconstruction concern as
+  // requestedTools above — the schema alone is not sufficient, since this function rebuilds
+  // `result` field-by-field rather than spreading the validated object.
+  it("extracts narrative when present in the JSON", () => {
+    const withNarrative = { ...VALID_PLAN, narrative: "## Fix the guard\n\nOne targeted change." };
+    const result = tryParseExecutionPlan(wrapJson(withNarrative));
+    expect(result!.narrative).toBe("## Fix the guard\n\nOne targeted change.");
+  });
+
+  it("narrative is absent when not in JSON", () => {
+    const result = tryParseExecutionPlan(wrapJson(VALID_PLAN));
+    expect(result!.narrative).toBeUndefined();
+  });
+
+  it("extracts plan-level filesLikely when present in the JSON, distinct from steps[].filesLikely", () => {
+    const withFiles = { ...VALID_PLAN, filesLikely: ["src/plan-level.ts"] };
+    const result = tryParseExecutionPlan(wrapJson(withFiles));
+    expect(result!.filesLikely).toEqual(["src/plan-level.ts"]);
+    expect(result!.steps[0].filesLikely).toEqual(["src/ui.ts"]); // step-level, unaffected
+  });
+
+  it("plan-level filesLikely is absent when not in JSON", () => {
+    const result = tryParseExecutionPlan(wrapJson(VALID_PLAN));
+    expect(result!.filesLikely).toBeUndefined();
   });
 });
 
@@ -1144,7 +1215,9 @@ describe("plan-generation prompts — brevity instructions removed, caps lifted 
   it("investigation template: kept instructions survive, including the out-of-scope iteration-budget instruction", () => {
     const prompt = buildPrompt("add a helper", ["src/a.ts"], true);
     expect(prompt).toContain("concrete, not a restatement of the title");
-    expect(prompt).toContain("already done / out of scope");
+    // "already done / out of scope" was scopeNotes' own field description — scopeNotes left
+    // this prompt's JSON shape entirely under D1/D7 (plan widening, this pass, not item 78),
+    // so this is no longer a "kept" instruction to assert on; the field is gone, not shortened.
     expect(prompt).toContain("Terminate as soon as you have enough information");
     expect(prompt).toContain("do not over-investigate");
   });

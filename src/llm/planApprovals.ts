@@ -17,6 +17,9 @@ export interface PlanReadyProposal {
   answerOnlyReason?: string;
   riskHints: string[];
   scopeSummary: string;
+  /** D1/D3 (plan widening). */
+  narrative?: string;
+  filesLikely?: string[];
 }
 
 /**
@@ -78,6 +81,8 @@ export function requestPlanApproval(input: {
     planAnswerOnlyReason?: string;
     planRiskHints: string[];
     planScopeSummary: string;
+    planNarrative?: string;
+    planFilesLikely?: string[];
   }) => void;
   abortSignal?: AbortSignal;
   timeoutMs?: number;
@@ -141,6 +146,8 @@ export function requestPlanApproval(input: {
       ...(proposal.noChangeReason ? { planNoChangeReason: proposal.noChangeReason } : {}),
       ...(proposal.cannotVerifyReason ? { planCannotVerifyReason: proposal.cannotVerifyReason } : {}),
       ...(proposal.answerOnlyReason ? { planAnswerOnlyReason: proposal.answerOnlyReason } : {}),
+      ...(proposal.narrative ? { planNarrative: proposal.narrative } : {}),
+      ...(proposal.filesLikely?.length ? { planFilesLikely: proposal.filesLikely } : {}),
     });
     modalEmitted = true;
   });

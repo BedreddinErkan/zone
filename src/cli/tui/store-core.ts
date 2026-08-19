@@ -83,6 +83,10 @@ export type TranscriptEntry =
       answerOnlyReason?: string;
       riskHints: string[];
       scopeSummary: string;
+      /** D1/D3 (plan widening). Absent on entries persisted before this field existed —
+       *  same unchecked-load reasoning as planId/runId above. */
+      narrative?: string;
+      filesLikely?: string[];
     };
 
 export type StatusBarState = {
@@ -200,6 +204,9 @@ export type StoreState = {
     answerOnlyReason?: string;
     riskHints: string[];
     scopeSummary: string;
+    /** D1/D3 (plan widening). */
+    narrative?: string;
+    filesLikely?: string[];
   } | null;
   stagedDiffProposal: {
     approvalId: string;
@@ -419,6 +426,9 @@ export type StoreAction =
       answerOnlyReason?: string;
       riskHints: string[];
       scopeSummary: string;
+      /** D1/D3 (plan widening). */
+      narrative?: string;
+      filesLikely?: string[];
     }
   | { type: "PLAN_READY_RESOLVED" }
   | {
@@ -896,6 +906,8 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
           ...(action.answerOnlyReason ? { answerOnlyReason: action.answerOnlyReason } : {}),
           riskHints: action.riskHints,
           scopeSummary: action.scopeSummary,
+          ...(action.narrative ? { narrative: action.narrative } : {}),
+          ...(action.filesLikely?.length ? { filesLikely: action.filesLikely } : {}),
         },
         transcript: [
           ...flushed.transcript,
@@ -911,6 +923,8 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
             ...(action.answerOnlyReason ? { answerOnlyReason: action.answerOnlyReason } : {}),
             riskHints: action.riskHints,
             scopeSummary: action.scopeSummary,
+            ...(action.narrative ? { narrative: action.narrative } : {}),
+            ...(action.filesLikely?.length ? { filesLikely: action.filesLikely } : {}),
           },
         ],
       };
