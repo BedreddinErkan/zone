@@ -1662,7 +1662,19 @@ export async function executeTool(
       const staged = stagedRead(input?.stagingFiles, abs);
       const fullContent = staged !== null ? staged : fs.readFileSync(abs, "utf8");
       const charCount = fullContent.length;
-      const lineRange = args.lineRange;
+      // Some upstream callers omit lineRange by defaulting it to a sentinel like
+      // [1, 0] rather than leaving it undefined/null. That sentinel always has
+      // start > end (there is no such thing as a valid "line 0"), so treat it as
+      // "no range requested" and fall through to the smart/full read path below
+      // instead of surfacing an "Invalid lineRange" error for a call that never
+      // asked for a specific range.
+      const rawLineRange = args.lineRange;
+      const isNoRangeSentinel =
+        Array.isArray(rawLineRange) &&
+        rawLineRange.length === 2 &&
+        Number(rawLineRange[0]) === 1 &&
+        Number(rawLineRange[1]) === 0;
+      const lineRange = isNoRangeSentinel ? null : rawLineRange;
 
       if (lineRange != null && (!Array.isArray(lineRange) || lineRange.length !== 2)) {
         return {

@@ -48,6 +48,26 @@ afterEach(() => {
 // ─── Tier: ≤10K — full content, no line numbers ─────────────────────────────
 
 describe("read_file ≤10K tier (S.2)", () => {
+  it("succeeds when called with no lineRange argument at all", async () => {
+    const content = "const x = 1;\nconst y = 2;\n";
+    makeFile("no_range_arg.ts", content);
+    const result = await executeTool("read_file", { filePath: "no_range_arg.ts" }, repoPath);
+    expect(result.success).toBe(true);
+    expect(result.output).toBe(content);
+  });
+
+  it("falls through to full read when lineRange is the [1, 0] no-range sentinel", async () => {
+    const content = "const x = 1;\nconst y = 2;\n";
+    makeFile("sentinel_range.ts", content);
+    const result = await executeTool(
+      "read_file",
+      { filePath: "sentinel_range.ts", lineRange: [1, 0] },
+      repoPath
+    );
+    expect(result.success).toBe(true);
+    expect(result.output).toBe(content);
+  });
+
   it("returns full content with no line-number prefix", async () => {
     const content = Array.from({ length: 50 }, (_, i) => `const x${i} = ${i};`).join("\n");
     makeFile("small.ts", content);
