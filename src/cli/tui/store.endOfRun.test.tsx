@@ -3,9 +3,11 @@ import { reducer, buildInitialState } from "./store.js";
 import type { StoreAction, StoreState, TranscriptEntry } from "./store.js";
 
 /**
- * End-of-run transcript defects from a real dogfood run at aa46f885.
+ * Two independent end-of-run defects from a real dogfood run at aa46f885. They are pinned in one
+ * file because both are properties of the same committed transcript, but they share no mechanism —
+ * one is a duplicate render, the other is action ordering — and each has its own describe block.
  *
- * Established by driving the real reducer rather than by reading it, and both assertions
+ * Both were established by driving the real reducer rather than by reading it, and both assertions
  * below reproduce that instrument: dispatch a realistic sequence, then read the committed
  * transcript. Nothing here mocks the reducer or the entry shapes.
  */
@@ -90,5 +92,45 @@ describe("defect 1 — the end-of-run block does not repeat a diff already shown
     state = apply(state, [{ type: "POST_EXECUTE_DIFFS", files: stagedFiles("src/f.ts") }]);
 
     expect(postExecuteEntry(state).diffShownInline).toEqual([]);
+  });
+});
+
+describe("defect 2 — the final report is the last thing committed", () => {
+  /**
+   * The executed sequence that surfaced this: reads buffer into pendingReadOnlyBatch, and only a
+   * flush commits them. ASSISTANT_FINAL did not flush, so RUN_DONE's own flush landed the group
+   * BELOW the report. eventToActions pushes ASSISTANT_FINAL then RUN_DONE within the single
+   * agent_loop_complete event, so this was never a cross-event race — it is one action list.
+   */
+  it("flushes buffered read-only calls BEFORE appending the report", () => {
+    let state = buildInitialState({});
+    state = apply(state, toolCall("read_file", "src/baz.ts"));
+    state = apply(state, toolCall("read_file", "src/qux.ts"));
+    // Both reads are still buffered — nothing has committed them yet.
+    expect(state.liveTail.pendingReadOnlyBatch).toHaveLength(2);
+
+    state = apply(state, [
+      { type: "ASSISTANT_FINAL", text: "## What changed\nUpdated the constant." },
+      { type: "RUN_DONE" },
+    ]);
+
+    const kinds = state.transcript.map((e) => e.kind);
+    expect(kinds).toEqual(["tool_call_group", "assistant_final"]);
+    expect(state.transcript[state.transcript.length - 1]!.kind).toBe("assistant_final");
+  });
+
+  it("leaves nothing buffered, so RUN_DONE's own flush has nothing left to append", () => {
+    let state = buildInitialState({});
+    state = apply(state, toolCall("read_file", "src/baz.ts"));
+    state = apply(state, [{ type: "ASSISTANT_FINAL", text: "report" }]);
+
+    expect(state.liveTail.pendingReadOnlyBatch).toEqual([]);
+  });
+
+  it("is a no-op when nothing is buffered — a report with no preceding reads still commits alone", () => {
+    let state = buildInitialState({});
+    state = apply(state, [{ type: "ASSISTANT_FINAL", text: "report" }]);
+
+    expect(state.transcript.map((e) => e.kind)).toEqual(["assistant_final"]);
   });
 });

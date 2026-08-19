@@ -679,11 +679,19 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         transcript: [...state.transcript, { kind: "user_prompt", text: action.text }],
       };
 
-    case "ASSISTANT_FINAL":
+    case "ASSISTANT_FINAL": {
+      // Self-contained flush, for the same reason RUN_DONE carries one: the final report must be
+      // the last thing in the transcript, and reads still sitting in the batch would otherwise
+      // commit after it. That is exactly what happened — eventToActions pushes ASSISTANT_FINAL
+      // then RUN_DONE, so RUN_DONE's own flush landed the pending group below the report. Fixing
+      // it here rather than by reordering those two keeps the invariant true for any future
+      // dispatcher: a committed report is preceded by everything that happened before it.
+      const flushed = flushReadOnlyBatch(state);
       return {
-        ...state,
-        transcript: [...state.transcript, { kind: "assistant_final", text: action.text }],
+        ...flushed,
+        transcript: [...flushed.transcript, { kind: "assistant_final", text: action.text }],
       };
+    }
 
     case "POST_EXECUTE_DIFFS":
       return {
