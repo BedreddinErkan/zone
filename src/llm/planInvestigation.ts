@@ -169,7 +169,13 @@ export async function runPlanInvestigation(
           ? args["filePath"]
           : name === "find_references" && typeof args["sourceFile"] === "string"
             ? args["sourceFile"]
-            : "";
+            : name === "list_files" && typeof args["dirPath"] === "string"
+              ? args["dirPath"]
+              : name === "search_in_files" && typeof args["pattern"] === "string"
+                ? args["pattern"]
+                : name === "run_command" && typeof args["command"] === "string"
+                  ? args["command"]
+                  : "";
       emitProgress({
         type: "tool_call",
         title: `[tool] ${name}${fp ? `: ${fp}` : ""}`.slice(0, 240),
@@ -192,6 +198,19 @@ export async function runPlanInvestigation(
           type: "narration",
           title: String(e["title"] || "").slice(0, 200),
           text: String(e["text"] || "").slice(0, 2000),
+          iter: typeof e["iter"] === "number" ? e["iter"] : undefined,
+          status: "active",
+        } as Partial<ZoneStructuredProgressEvent>);
+      }
+      // agentLoop.ts only ever populates reasoningText from Anthropic thinking blocks
+      // (convertResponse.ts) — the OpenAI Responses API branch (responsesConvertResponse.ts)
+      // collects its own reasoning items and discards them (comment there: "S4-SEAM ...
+      // discarded for now"), so this event never fires for an OpenAI-backed investigation.
+      // That asymmetry is upstream of this forwarder and is not fixed here.
+      if (e["type"] === "thinking") {
+        emitProgress({
+          type: "thinking",
+          text: String(e["text"] || "").slice(0, 4000),
           iter: typeof e["iter"] === "number" ? e["iter"] : undefined,
           status: "active",
         } as Partial<ZoneStructuredProgressEvent>);

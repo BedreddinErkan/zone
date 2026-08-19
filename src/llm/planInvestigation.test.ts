@@ -337,6 +337,51 @@ describe("runPlanInvestigation — streaming (progressCallback)", () => {
     expect(toolCallUpdate![0].progress.title).toContain("read_file");
   });
 
+  it("onToolCall carries list_files' dirPath into the tool_call title", async () => {
+    mocks.runAgentLoop.mockImplementationOnce(async (input: Record<string, unknown>) => {
+      const onToolCall = input["onToolCall"] as (name: string, args: Record<string, unknown>) => void;
+      onToolCall("list_files", { dirPath: "src/cli/tui", pattern: null, include_ignored: null });
+      return makeDoneLoop();
+    });
+    await runPlanInvestigation(BASE_INPUT);
+    const calls = (BASE_INPUT.progressCallback as ReturnType<typeof vi.fn>).mock.calls;
+    const toolCallUpdate = calls.find(([upd]: [any]) =>
+      typeof upd === "object" && upd?.progress?.type === "tool_call"
+    );
+    expect(toolCallUpdate).toBeDefined();
+    expect(toolCallUpdate![0].progress.title).toBe("[tool] list_files: src/cli/tui");
+  });
+
+  it("onToolCall carries search_in_files' pattern (not fileGlob) into the tool_call title", async () => {
+    mocks.runAgentLoop.mockImplementationOnce(async (input: Record<string, unknown>) => {
+      const onToolCall = input["onToolCall"] as (name: string, args: Record<string, unknown>) => void;
+      onToolCall("search_in_files", { pattern: "checkWriteScope", fileGlob: "**/*.ts" });
+      return makeDoneLoop();
+    });
+    await runPlanInvestigation(BASE_INPUT);
+    const calls = (BASE_INPUT.progressCallback as ReturnType<typeof vi.fn>).mock.calls;
+    const toolCallUpdate = calls.find(([upd]: [any]) =>
+      typeof upd === "object" && upd?.progress?.type === "tool_call"
+    );
+    expect(toolCallUpdate).toBeDefined();
+    expect(toolCallUpdate![0].progress.title).toBe("[tool] search_in_files: checkWriteScope");
+  });
+
+  it("onToolCall carries run_command's command into the tool_call title", async () => {
+    mocks.runAgentLoop.mockImplementationOnce(async (input: Record<string, unknown>) => {
+      const onToolCall = input["onToolCall"] as (name: string, args: Record<string, unknown>) => void;
+      onToolCall("run_command", { command: "npm run typecheck", cwd: null });
+      return makeDoneLoop();
+    });
+    await runPlanInvestigation(BASE_INPUT);
+    const calls = (BASE_INPUT.progressCallback as ReturnType<typeof vi.fn>).mock.calls;
+    const toolCallUpdate = calls.find(([upd]: [any]) =>
+      typeof upd === "object" && upd?.progress?.type === "tool_call"
+    );
+    expect(toolCallUpdate).toBeDefined();
+    expect(toolCallUpdate![0].progress.title).toBe("[tool] run_command: npm run typecheck");
+  });
+
   it("emits a narration event when onStructuredEvent receives type='narration'", async () => {
     mocks.runAgentLoop.mockImplementationOnce(async (input: Record<string, unknown>) => {
       const onStructuredEvent = input["onStructuredEvent"] as (evt: unknown) => void;
@@ -350,6 +395,22 @@ describe("runPlanInvestigation — streaming (progressCallback)", () => {
     );
     expect(narration).toBeDefined();
     expect(narration![0].progress.title).toBe("Reading auth module");
+  });
+
+  it("forwards a thinking event when onStructuredEvent receives type='thinking'", async () => {
+    mocks.runAgentLoop.mockImplementationOnce(async (input: Record<string, unknown>) => {
+      const onStructuredEvent = input["onStructuredEvent"] as (evt: unknown) => void;
+      onStructuredEvent({ type: "thinking", text: "Let me check the scope guard first.", iter: 3 });
+      return makeDoneLoop();
+    });
+    await runPlanInvestigation(BASE_INPUT);
+    const calls = (BASE_INPUT.progressCallback as ReturnType<typeof vi.fn>).mock.calls;
+    const thinking = calls.find(([upd]: [any]) =>
+      typeof upd === "object" && upd?.progress?.type === "thinking"
+    );
+    expect(thinking).toBeDefined();
+    expect(thinking![0].progress.text).toBe("Let me check the scope guard first.");
+    expect(thinking![0].progress.iter).toBe(3);
   });
 
   it("emits a synthetic iter_cost_update carrying loop.costUsd after the loop", async () => {
