@@ -2194,7 +2194,15 @@ export async function executeTool(
         if (normalizeEol(b.find).changed || normalizeEol(b.replace).changed) {
           normParityEolChangedBlocks += 1;
         }
-        if (stripReadFilePrefix(b.find) !== b.find) {
+        // Compose in the SAME order the match-time path does — stripReadFilePrefix AFTER
+        // normalizeEol, not before it (see the normalizedFind assignment further down). The
+        // two orders disagree: stripReadFilePrefix filters blank lines with `l !== ""`, and
+        // under CRLF a blank line is "\r", which survives that filter, fails the
+        // /^\s*\d+\t/ test, and aborts the all-or-nothing strip. So a block carrying BOTH
+        // classes at once is stripped by the applier and reported as not-stripped here.
+        // Detection-only: this changes the number logged, never what gets matched or written.
+        const findEolNormalized = normalizeEol(b.find).text;
+        if (stripReadFilePrefix(findEolNormalized) !== findEolNormalized) {
           normParityPrefixStrippedBlocks += 1;
         }
       }

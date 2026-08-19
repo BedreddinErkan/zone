@@ -1299,10 +1299,13 @@ requires replicating the transformation in `hashPatchBlocks` itself, not in the 
 **Measured, with the measurement's limits stated — not assumed rare.** Smart quotes: 0
 occurrences. The zero is a *measured* zero, not a structural one — the marker
 (`[zone-self-validation]`, `rule:"smart_quote_autofix"`) predates the sink's observation window by
-months, and its sibling rules on the same tag carry **48 deduplicated records** (54 raw — item 73)
+months, and its sibling rules on the same tag carry **146 deduplicated records** (152 raw — item 73)
 in that window, so the tag is live and would have recorded a hit had one occurred. That figure was
-written as 42 and is corrected here by re-derivation, not by dedup alone: the sink has accumulated
-since. **The denominator this paragraph originally paired with the zero — "24 apply_patch calls
+written as 42, corrected to 48, and is re-derived again here rather than carried: the sink keeps
+accumulating, and the two sibling rules now split 86 `read_before_patch` to 66 `inline_ts_check`.
+**A coincidence worth naming before it misleads someone:** this sibling count passed through 42 and
+now reads 48, while the parity marker's own run count is 42 and its record count 48. The four
+numbers are unrelated. **The denominator this paragraph originally paired with the zero — "24 apply_patch calls
 that reached the walk" — is not re-derivable from the current sink and is dropped rather than
 restated.** No marker in it yields 24 on any key, and the population it named was never
 instrumented until the pass below created the record that counts it; the zero stands on the
@@ -1335,25 +1338,111 @@ marks only that the patch contained curly quotes. As a denominator the record is
 did. What is affected is any attempt to read the record as a *gap* count — summing all three
 fields would over-count by every smart-quote record. `cd02808c` is the cutoff, and the payload
 carries no version field, so pre- and post-fix records are indistinguishable in the sink despite
-`smartQuoteChanged` meaning different things on either side of it.
+`smartQuoteChanged` meaning different things on either side of it. **That hazard is real in
+principle and vacuous in the retained data, which is worth separating.** `cd02808c` landed
+2026-08-04T22:42Z and the earliest retained parity record is 2026-08-05T20:44Z, so every record the
+sink holds is post-fix and none of them is ambiguous. The marker was live for two days before the
+fix; nothing from that window survived. Also measured: `smartQuoteChanged` is **false on all 48**, so
+the over-count the summing hazard describes is currently zero.
 
-**Observed so far: zero gaps in two calls, not four records — this entry's own open question is
-resolved now, and it resolves against the entry.** The sink carries four
-`[zone-apply-patch-normalization-parity]` records, but they are **two calls logged twice**: two
-distinct payloads, each pair identical in every field except the timestamp. "Whether that is four
-calls or two double-logged" was recorded here as not established. It is established now, and it
-halves this entry's own denominator. Both calls carry `blockCount: 1` with all three fields
-zero, so the measured rate for both open classes is 0 of 2. The instrumented window is not short
-in time — the marker landed 2026-08-02 and the sink's newest record of any kind is dated
-2026-08-05, roughly four days — but both qualifying calls fall inside a single fifteen-second
-burst on the last of those days, so the window is sparse rather than brief, which is the weaker
-of the two shapes. Two calls cannot distinguish "these classes are rare" from "almost nothing
-exercised this path at all"; item 4's own precedent puts a usable threshold at roughly 10-20
-records. Recorded so nobody reads it as evidence the remaining two classes don't fire. One thing
-it does settle structurally: `blockCount: 1` on every record explains
-`[zone-apply-patch-marker-split]`'s own zero, since that marker's population is exactly this
-record's `blockCount > 1` slice — its zero is consistent, not a silent failure. The double-logging
-itself is not this marker's defect and is not this entry's to fix — it is sink-wide; see item 73.
+**A defect in the instrument itself, found by testing this entry's zero and proven by execution
+rather than by reading.** The telemetry pre-pass composed its two normalizations in the opposite
+order from the match-time path it exists to mirror: it stripped the read_file prefix from the raw
+block, where the applier strips it from the EOL-normalized block. The two orders disagree on one
+shape. `stripReadFilePrefix` filters blank lines with an exact empty-string test, and under CRLF a
+blank line is a lone carriage return — it survives that filter, fails the digits-then-tab test, and
+aborts the all-or-nothing strip. So a block carrying **both** open classes at once was stripped by
+the applier and reported by this marker as not stripped. Fixed by mirroring the applier's
+composition. Detection-only, and it changes **no retained record**: all 48 carry
+`eolChangedBlocks: 0`, so no record could have been in the divergent shape. Worth stating plainly
+because this entry's own "three things the recipe does not state" already names the applier's
+composition correctly — the prose was right and the marker this entry's own pass added did not
+follow it.
+
+**The defect was swept as a class before the one-line fix landed, because fixing a named instance
+and leaving the shape is what produces the next entry.** The shape: any diagnostic that re-derives a
+transformation the real path also applies. Two instruments with no shared mechanism — one scanning
+every marker emission for a transformation helper feeding its payload, one pairing functions within
+a module that read the same rule constant where one reports and one acts. Every surviving candidate
+was settled by **executing both compositions against constructed input**, not by reading them.
+`strippedEnvKeys` against `sanitizeVerificationEnv`, `isApplyRolledBackMessage` against
+`buildApplyRolledBackMessage`, and `matchedLeadVerb` against `isPureAddition` all **agree**; the last
+of those composes its preamble strip identically in the diagnostic and in the decision and says so at
+its own definition, which makes it the pattern this marker had departed from. `hashPatchBlocks`
+against the applier diverges on exactly the two classes this entry has open and on nothing else — the
+subject, not a second site. **The sweep found no second instance**, and that bounds the finding: the
+one-line correction is the whole of it.
+
+**Observed so far: zero gaps in 46 calls, and the denominator recorded here is superseded
+twenty-three-fold.** The sink now carries **48** `[zone-apply-patch-normalization-parity]` records
+against the four this entry used to describe. Collapsing identical `runId`-plus-payload pairs falling
+within fifty milliseconds gives **46 distinct calls** — 2 suppressed, item 73's duplication, which is
+no longer the whole story it was at n=4: it accounts for 2 of 48 rather than 4 of 4, and every
+suppressed pair is on 2026-08-05. Distinct run identifiers: **42**. All three figures agreed by two
+instruments sharing no mechanism, a parsing cross-tab and a raw byte-level count. **Every one of the
+48 carries `eolChangedBlocks: 0` and `prefixStrippedBlocks: 0`**, so the measured rate for both open
+classes is 0 of 46. `blockCount` is 1 on all 48, which still explains
+`[zone-apply-patch-marker-split]`'s own zero — that marker's population is exactly this record's
+`blockCount > 1` slice, so its zero is consistent rather than a silent failure. The double-logging is
+not this marker's defect and is not this entry's to fix — it is sink-wide; see item 73.
+
+**The window, both endpoints, replacing the four-day figure recorded here.** First qualifying record
+2026-08-05T20:44:09Z, last 2026-08-16T17:30:22Z — **260.8 hours** between them. Exposure since the
+marker landed at `563d5b63` (2026-08-02T14:54:54Z) to the sink's newest record of any kind:
+**338.6 hours**. The "single fifteen-second burst" recorded here described n=4 and no longer describes
+the population.
+
+**The denominator grew twenty-three-fold and its coverage did not grow at all, which is what decides
+whether the zero can be read.** All 42 runs join to `[zone-archetype]` with zero unjoined, and every
+one of them is archetype `debug` at tier `medium`. **41 of the 42 are the single 2026-08-16 sweep** —
+one task, one flow branch, three files — which is the concentration property item 115 records,
+landing on this entry's own denominator.
+
+**Neither class had the opportunity to fire in that population, established per class rather than
+assumed of both.**
+- **Line endings.** The precondition is a carriage return surviving into block content. Seven of the
+  1,009 tracked files in this repository genuinely carry CRLF line endings — `src/cli/index.ts` alone
+  has 1,335 of them — so the class is live in principle. But across the sink's whole window only
+  **29 distinct file paths appear in any record, and not one of the seven is among them**. Zero
+  opportunities, inside this entry's denominator and outside it.
+- **The read_file prefix.** The precondition is the model having been shown numbered lines, which
+  happens on exactly two read tiers: an explicit line range, and the outline tier's numbered head and
+  tail. **The outline tier is ruled out for all 42 runs** by `[zone-outline-cache]`, which rides the
+  unconditional logging helper and holds 9 records in the sink, none of them in a parity run. **A line
+  range is confirmed in exactly one of the 42 runs** — 2026-08-05, four calls — and is
+  **unmeasurable in the other 41**.
+
+**That last absence was checked against its instrument before being claimed, and the instrument was
+dark.** `[zone-tool-readfile-smart]` rides the verbose-gated helper. Three `debugLog`-gated markers
+sharing no other mechanism — `[zone-scope-expanded]`, `[zone-agent-diagnostic]` and
+`[zone-tool-readfile-smart]` — are absent from all 41 sweep runs and present in the one 2026-08-05
+run, at 6, 6 and 8 records. The verbose gate was off for the sweep, so read-tier silence across those
+runs carries no information in either direction.
+
+**So the zero is informative about one generating mechanism and silent about the other.** It does
+establish that models do not spontaneously emit CRLF or paste numbered lines unprompted, across 46
+calls. It establishes nothing about the rate when a CRLF-bearing file is patched or when a numbered
+read precedes the patch, because in this population neither ever happened.
+
+**Both gating dimensions on this denominator, named rather than assumed.** The verbose environment
+gate does not bite the parity marker: it is emitted through the unconditional logging helper, not the
+gated one. Item 115's output-shield dependency does not bite it either — the marker goes to standard
+output, and the stdout shield has three installers where only the error-channel shield has one. The
+verbose gate does bite the instrument the opportunity question needed, and that is where it cost
+something.
+
+**Retention bounds what is left.** 33 of the 48 records and 27 of the 42 runs sit in the rotated
+generation, which the next rotation deletes. One rotation takes this denominator from 42 runs to 15 —
+item 115 owns that horizon, and it reaches this entry.
+
+**What the fix would change is reached far more rarely than either class, which this entry has not
+previously weighed.** The hash comparison's own verdict is recorded: `[zone-apply-patch-retry]` with
+`reason: "repeated_failure"` appears **once in the sink's entire history** — 2026-07-30, at
+`attemptCount: 2` — and that run predates this marker. Inside this entry's own 42-run denominator it
+appears **zero** times. The other retry reasons are `marker_imbalance` 13, `find_mismatch` 1 and
+`unknown` 6, and marker imbalance rejects before segmentation, so those calls never reach a block hash
+at all. A firing class only changes an outcome when it coincides with a second same-file failure at
+the same trigger, and that coincidence has an observed rate near one run in ninety-four.
 
 **Smart quotes are now closed (`cd02808c`).** `parsePatchBlocks` applies `normalizeSmartQuotes`
 in the same position `segmentApplyPatchBlocks` always has — after the leading/trailing-newline
@@ -1371,6 +1460,13 @@ the walk's own EOL-replace chain from `toolExecutor.ts` (`agentLoop.ts` already 
 file; no cycle). This still **changes every existing dedup key** for any patch that ever
 contained a CRLF or a pasted `read_file` prefix — a deliberate behavior change, not a silent
 rider on item 16's extraction.
+
+**A structural narrowing on the line-ending class, not previously recorded here.** Segmentation's own
+trim removes each block's first and last newline together with its carriage return, so a single-line
+FIND block cannot retain an interior carriage return and can never register the class — only a block
+with an interior newline can. Pinned already by the marker-adjacent-padding test. The precondition is
+therefore narrower than "the patch contains CRLF", and narrower again than the seven-CRLF-files
+exposure figure: a run must patch a CRLF-bearing file *and* quote at least two of its lines.
 
 **The claim that a characterization test needs a deliberate edit to close this is false, and the
 sentence is thrown out rather than qualified.** This entry named **T6** (line endings) as pinning
@@ -1450,13 +1546,18 @@ included.
 distinguish them — so it is recorded here as a decision.** After the corrections above the recipe
 is fully understood and the fix is small: two normalizations, on the parsed blocks, `find`-only
 for the prefix, plus the tests that do not exist yet. Nothing further needs to be *learned* to
-build it. What is missing is evidence: across the only two calls ever instrumented, neither class
-fired. Deferred on motivation, not on knowledge. That moves this entry out of "actionable now,"
-whose bar is that a fix is specified and nothing new must be learned — both true here, and still
-not sufficient — and into "blocked on data," on item 63's precedent: that entry is likewise a
-*whether to build* question parked on records that do not exist yet, not a *what to build* one.
-Item 4, whose 10-20 threshold this entry already cites, sits in the same bucket for the same
-reason. The bucket name is the closest fit the document has, not an exact one.
+build it. What is missing is evidence: across 46 instrumented calls, neither class fired. Deferred on
+motivation, not on knowledge. That moves this entry out of "actionable now," whose bar is that a fix
+is specified and nothing new must be learned — both true here, and still not sufficient — and into
+"blocked on data," on item 63's precedent: a *whether to build* question parked on records that do
+not exist yet, not a *what to build* one. **Both precedents this sentence rests on have since closed,
+and they were stated here in the present tense as fellow-waiters.** Item 63 closed on its own
+pre-declared rule; item 4 closed when its threshold was met and the answer turned out to be not to
+build. Neither still "sits in the same bucket". What survives is the convention rather than the
+company, and that survival is not assumed: item 63 adopted item 4's magnitude explicitly *after*
+citing it, then closed on its own rule, so a closed entry's convention still governs and the
+inheritance is live rather than dangling. The bucket name is the closest fit the document has, not an
+exact one.
 
 **The resume interaction.** `failureHistory` persists `patchHash` into the run envelope
 (`FailureRecordLite`) with no version marker on the value itself — only the envelope's own
@@ -1467,17 +1568,46 @@ normalization-class-bearing patches produce a changed hash, and the stale-compar
 at most one comparison per file path (the next failure after a resume makes both compared
 records new-style again).
 
-**Bucket, re-examined this pass and unchanged: it stays Blocked on data.** A sweep read this
-entry's "nothing further needs to be learned" sentence as evidence of misclassification. Checked
-against the whole entry, it is not: that sentence is this entry's own premise, and the paragraphs
-around it already reason from it to this bucket deliberately, on item 63's precedent, while stating
-outright that the bucket name is the closest fit the document has rather than an exact one. Recorded
-so the same fragment does not re-open the same question a third time. The reasoning it was checked
-against is unchanged: the recipe for the two remaining classes (line endings, the
-read_file prefix) is now fully specified and nothing further needs to be *learned* to build it —
-this entry's own bar for Actionable now — but across the only two calls ever instrumented,
-neither class fired, so what closing it buys is unmeasured rather than unknown. Deferred on
-motivation, not on knowledge, on item 63's precedent.
+**Bucket, re-decided rather than inherited a third time: it stays Blocked on data.** A sweep once
+read this entry's "nothing further needs to be learned" sentence as evidence of misclassification;
+checked against the whole entry it is not, and that check is settled and not reopened. What is new is
+that the threshold this entry waits on is **met on count and unmet on opportunity**: 46 calls against
+item 4's roughly 10-20, and zero opportunities for either class inside them. Closing on item 63's rule
+was considered and rejected — that rule reads a null at the review point as the answer, and it
+presumes the instrument had a chance to fire. Item 5's precedent is the governing one instead: a
+zero over a population that could not produce the event must not be tallied as a zero over a
+population that could. Precedents read directly this pass: **198** and **212** close on the entry's
+own condition being discharged, and this one is not; **210** closes on another entry's remedy
+landing, and nothing has landed; **181** is Neither on no observation being missing, and one is
+missing here.
+
+**The consequence, and it is the part that changes what a future pass should do: more accumulation of
+the same kind cannot discharge this entry.** The shape producing the volume is a `debug`/`medium`
+sweep over LF files with no numbered reads — zero opportunity for either class at any n. Waiting is
+not the instrument. What would settle it is a patch against one of the seven CRLF-bearing files, or
+one following a line-range read; a targeted opportunity rather than more volume.
+
+**Item 63's convention has three parts and this entry carried one, which is why it had no way to stop
+waiting.** Item 63 established a threshold, a review point independent of it, and what a null result
+means; it diagnosed items 1 and 4 as having only the first. Read directly this pass: **item 75 has
+all three, item 1 has none** — its own "what would close it" is a choice among three design options,
+which is item 63's diagnosis of it verbatim, so **neither item 1 nor item 75 needs an edit, and the
+finding is that neither needed one.** This entry had only the threshold. The other two are supplied
+now, and deliberately in opportunity terms rather than record counts, since this pass establishes
+that record count is the wrong meter here:
+
+- **Review point, independent of the threshold:** revisit once **ten `[zone-apply-patch-normalization-parity]`
+  records exist whose call had an opportunity** — a patch on a file carrying CRLF, or one in a run
+  that also emitted a line-range or outline read — whether or not the raw record count has grown at
+  all. The raw count has already passed item 4's magnitude while the qualifying count sits at
+  approximately one, and a threshold that a sweep can satisfy without ever exercising the path is not
+  a checkpoint.
+- **What a null result means, stated so a later pass does not read the silence as waiting:** if ten
+  qualifying calls produce no firing of either class, that is not a stalled entry — it is the answer.
+  It would mean the two remaining classes are rare enough in real use that the dedup divergence costs
+  nothing worth a behavior change, which is the input the *whether to build* question needs rather
+  than an absence of one. A null across a population with **no** opportunity, which is what exists
+  today, means neither thing.
 
 **Where the code lives:** `normalizeSmartQuotes` is in `src/utils/smartQuotes.ts`, imported by
 both `toolExecutor.ts` (`segmentApplyPatchBlocks`) and `agentLoop.ts` (`parsePatchBlocks`). The
@@ -1494,7 +1624,9 @@ rewording it now would mean writing it twice. `detectRepeatedFailure`'s matching
 `agentLoop.ts`. `[zone-apply-patch-normalization-parity]`'s pre-pass and emission sit in
 `apply_patch`'s handler, `toolExecutor.ts`, right after the existing smart-quote telemetry — item
 55 (now closed) records what closing this item's smart-quotes class did and did not change about
-that marker's own test-file header comment. The characterization tests pinning current values are split across
+that marker's own test-file header comment. The pre-pass's own composition fix and the two fixtures
+pinning it (the co-occurring-classes block, and the CRLF block with no prefix) are in that same
+handler and in `toolExecutor.normalizationParityTelemetry.test.ts`. The characterization tests pinning current values are split across
 two files now: `agentLoop.patchBlocksCharacterization.test.ts` (`parsePatchBlocks`) and
 `toolExecutor.patchBlocksCharacterization.test.ts` (`segmentApplyPatchBlocks`, plus the direct
 comparison tests between the two).

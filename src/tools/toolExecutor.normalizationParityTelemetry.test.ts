@@ -150,6 +150,49 @@ describe("apply_patch normalization-parity telemetry", () => {
     expect(payload.eolChangedBlocks).toBe(0);
   });
 
+  it("CRLF and a read_file prefix in the same block, with a blank line → prefixStrippedBlocks is 1", async () => {
+    // The composition probe. stripReadFilePrefix filters blank lines with `l !== ""`; under CRLF
+    // a blank line is "\r", survives that filter, fails /^\s*\d+\t/, and aborts the
+    // all-or-nothing strip. The match-time path normalizes EOL FIRST and therefore does strip
+    // here, so a pre-pass that strips first reports 0 for a block the applier normalizes.
+    // Only this fixture co-occurs the two classes — every other one here carries at most one.
+    const filePath = "src/g.js";
+    writeRepoFile(filePath, "const a = 1;\n\nconst b = 2;\n");
+    const patch =
+      "--- FIND ---\r\n" +
+      "     1\tconst a = 1;\r\n" +
+      "\r\n" +
+      "     3\tconst b = 2;\r\n" +
+      "--- REPLACE ---\n" +
+      "const a = 9;\n" +
+      "\n" +
+      "const b = 8;";
+
+    await applyPatch(filePath, patch);
+
+    const call = findNormalizationParityCall();
+    const payload = JSON.parse(call![1] as string) as Record<string, unknown>;
+    expect(payload.eolChangedBlocks).toBe(1);
+    expect(payload.prefixStrippedBlocks).toBe(1);
+  });
+
+  it("CRLF with no prefix, single block → prefixStrippedBlocks stays 0 (both sides of the comparison are normalized)", async () => {
+    // Pins that the EOL normalization added for the composition applies to BOTH operands. A
+    // one-sided version (normalize the stripped side only) makes every CRLF block compare
+    // unequal and count as prefix-stripped. Not the sole discriminator — the three-block
+    // fixture below also catches it — but it isolates the property in one block.
+    const filePath = "src/h.js";
+    writeRepoFile(filePath, "line1\nline2\n");
+    const patch = "--- FIND ---\r\nline1\r\nline2\r\n--- REPLACE ---\r\nline3\r\nline4";
+
+    await applyPatch(filePath, patch);
+
+    const call = findNormalizationParityCall();
+    const payload = JSON.parse(call![1] as string) as Record<string, unknown>;
+    expect(payload.eolChangedBlocks).toBe(1);
+    expect(payload.prefixStrippedBlocks).toBe(0);
+  });
+
   it("three blocks, one CRLF-only, one prefix-only, one neither → counts are exactly 1 and 1, read against blockCount", async () => {
     const filePath = "doc.md";
     writeRepoFile(filePath, "unrelated content\n");
