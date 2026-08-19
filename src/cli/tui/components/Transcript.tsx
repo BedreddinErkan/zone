@@ -76,6 +76,12 @@ function renderEntry(entry: TranscriptEntry, index: number, colWidth: number): R
       );
     case "post_execute_diffs": {
       const { files } = entry;
+      // The aggregation (header, path, +N/-M) is what this block adds over the inline tool-call
+      // rendering and is always shown. The diff body is shown only for files whose diff was NOT
+      // already rendered inline — see diffsAlreadyShownInline in store-core.ts, which computes
+      // this at dispatch. A write_file overwrite and a multi_edit both land here with their diff
+      // intact, because neither produces a matching inline one.
+      const alreadyShown = new Set(entry.diffShownInline ?? []);
       return (
         <Box key={index} flexDirection="column" marginTop={1}>
           <Text dimColor>── {files.length} file{files.length === 1 ? "" : "s"} changed ──</Text>
@@ -85,7 +91,7 @@ function renderEntry(entry: TranscriptEntry, index: number, colWidth: number): R
               {(f.added > 0 || f.removed > 0) && (
                 <Text dimColor>{f.added > 0 ? `+${f.added}` : ""}{f.removed > 0 ? ` -${f.removed}` : ""}</Text>
               )}
-              <DiffView patch={f.findReplace} />
+              {!alreadyShown.has(f.path) && <DiffView patch={f.findReplace} />}
             </Box>
           ))}
         </Box>

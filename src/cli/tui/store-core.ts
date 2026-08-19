@@ -68,7 +68,13 @@ export type TranscriptEntry =
   | { kind: "phase_marker"; phase: string }
   | { kind: "user_prompt"; text: string }
   | { kind: "assistant_final"; text: string }
-  | { kind: "post_execute_diffs"; files: StagedFile[] }
+  /** `diffShownInline` lists the paths whose diff a preceding `tool_call` entry already rendered
+   *  inline, so the end-of-run block can show its aggregation (header, path, +N/-M) without
+   *  repeating a diff body the user has already read. Computed once at dispatch — see the
+   *  POST_EXECUTE_DIFFS reducer case — because it is a fact about the transcript at that moment,
+   *  not something the renderer should re-derive on every paint. Optional so entries persisted
+   *  before this field existed still load. */
+  | { kind: "post_execute_diffs"; files: StagedFile[]; diffShownInline?: string[] }
   | {
       kind: "plan_ready";
       // Absent on entries persisted before these two fields existed; the disk loader casts
@@ -475,6 +481,34 @@ function flushReadOnlyBatch(state: StoreState): StoreState {
   };
 }
 
+/** Tools whose `tool_call` entry renders an inline DiffView. Mirrors ToolCall.tsx's own
+ *  DIFF_TOOLS — the two must agree, since diffShownInline below predicts what that component
+ *  rendered. */
+const INLINE_DIFF_TOOLS = new Set(["apply_patch", "write_file", "multi_edit"]);
+
+/**
+ * Paths in `files` whose diff a preceding `tool_call` entry has already rendered inline.
+ *
+ * The predicate mirrors ToolCall.tsx's render gate exactly — diff-capable tool, a patch present,
+ * and a last result that is ok and not blocked — because a mismatch in either direction is a
+ * visible defect: too loose suppresses a diff the user never saw, too strict brings the duplicate
+ * back. Matching on `args` is what keeps the two shapes that genuinely need the end-of-run diff:
+ * a write_file overwriting an existing file carries no patch (buildToolCallPatch only builds one
+ * for new files), and multi_edit's args is a summary string ("N files · find=…"), never a path,
+ * so neither can match here and both keep showing their diff.
+ */
+function diffsAlreadyShownInline(transcript: TranscriptEntry[], files: StagedFile[]): string[] {
+  const shown = new Set<string>();
+  for (const entry of transcript) {
+    if (entry.kind !== "tool_call") continue;
+    if (!INLINE_DIFF_TOOLS.has(entry.toolName) || !entry.patch) continue;
+    const last = entry.results[entry.results.length - 1];
+    if (!last?.ok || last.blocked) continue;
+    shown.add(entry.args);
+  }
+  return files.map((f) => f.path).filter((p) => shown.has(p));
+}
+
 export function reducer(state: StoreState, action: StoreAction): StoreState {
   switch (action.type) {
     case "SPINNER_START":
@@ -652,7 +686,17 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
       };
 
     case "POST_EXECUTE_DIFFS":
-      return { ...state, transcript: [...state.transcript, { kind: "post_execute_diffs", files: action.files }] };
+      return {
+        ...state,
+        transcript: [
+          ...state.transcript,
+          {
+            kind: "post_execute_diffs",
+            files: action.files,
+            diffShownInline: diffsAlreadyShownInline(state.transcript, action.files),
+          },
+        ],
+      };
 
     case "TRANSCRIPT_CLEAR":
       return { ...state, transcript: [], todos: [] };
