@@ -7,6 +7,7 @@ import type { FeedbackReport } from "../../../feedback/buildFeedbackReport.js";
 import { useStore } from "../store.js";
 import type { StoreAction } from "../store.js";
 import { copyToClipboard, openUrlInBrowser } from "../../../utils/clipboardMailto.js";
+import { role, glyph } from "../theme.js";
 
 const REPO_SLUG = "BedreddinErkan/zone";
 
@@ -86,11 +87,11 @@ export function FeedbackModal({ dispatch }: Props): React.ReactElement {
     <Box
       flexDirection="column"
       borderStyle="round"
-      borderColor="cyan"
+      borderColor={role.accent}
       paddingX={1}
       width={innerWidth}
     >
-      <Text bold color="cyan"> Send feedback</Text>
+      <Text bold color={role.accent}> Send feedback</Text>
       <Text> </Text>
       <Text dimColor> Run ID: {data.runId}</Text>
       {logLines.length > 0 && (
@@ -103,7 +104,7 @@ export function FeedbackModal({ dispatch }: Props): React.ReactElement {
       )}
       <Text> </Text>
       <Text> Message:</Text>
-      <Text>   {draftMsg}▋</Text>
+      <Text>   {draftMsg}{glyph.cursor}</Text>
       <Text> </Text>
       {status === "delivering"
         ? <Text dimColor> Opening GitHub issue…</Text>

@@ -1,5 +1,6 @@
 import { Box, Text, useInput } from "ink";
 import type { McpConfig } from "../../../api/diskMcp.js";
+import { role, glyph } from "../theme.js";
 
 interface McpTrustModalProps {
   config: McpConfig;
@@ -28,23 +29,23 @@ export function McpTrustModal({ config, onApprove, onDeny }: McpTrustModalProps)
     <Box
       flexDirection="column"
       borderStyle="round"
-      borderColor="yellow"
+      borderColor={role.caution}
       paddingX={2}
       paddingY={1}
       marginY={1}
     >
-      <Text bold color="yellow">MCP Servers — Trust Required</Text>
+      <Text bold color={role.caution}>MCP Servers — Trust Required</Text>
       <Text> </Text>
       <Text>This project defines MCP servers in .zone/mcp.json</Text>
       <Text>that will be spawned as subprocesses during agent tool use.</Text>
       <Text> </Text>
       {serverEntries.map(([name, cfg]) => (
-        <Text key={name}>  <Text color="cyan">●</Text> {serverCommandLine(name, cfg)}</Text>
+        <Text key={name}>  <Text color={role.accent}>{glyph.groupMarker}</Text> {serverCommandLine(name, cfg)}</Text>
       ))}
       <Text> </Text>
       <Text dimColor>
-        <Text bold color="green">[a]</Text> Approve and connect{"  "}
-        <Text bold color="red">[N]</Text> Keep disabled
+        <Text bold color={role.success}>[a]</Text> Approve and connect{"  "}
+        <Text bold color={role.danger}>[N]</Text> Keep disabled
       </Text>
     </Box>
   );

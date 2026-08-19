@@ -2,6 +2,7 @@ import { Box, Text, useInput } from "ink";
 import { useState } from "react";
 import { useStore } from "../store.js";
 import { writeDailyUsdCapOverride } from "../../../visual/tierSettings.js";
+import { role } from "../theme.js";
 
 export function LimitsModal(): React.ReactElement {
   const { state, dispatch } = useStore();
@@ -48,19 +49,19 @@ export function LimitsModal(): React.ReactElement {
     <Box
       flexDirection="column"
       borderStyle="round"
-      borderColor="cyan"
+      borderColor={role.accent}
       paddingX={1}
       width={innerWidth}
     >
-      <Text bold color="cyan"> Daily USD Cap</Text>
+      <Text bold color={role.accent}> Daily USD Cap</Text>
       <Text> </Text>
-      <Text dimColor>Current cap: <Text color="white">${currentCap.toFixed(2)}</Text></Text>
+      <Text dimColor>Current cap: <Text color={role.emphasis}>${currentCap.toFixed(2)}</Text></Text>
       {orgPolicy && (
-        <Text color="yellow">  Note: org policy may override this value.</Text>
+        <Text color={role.caution}>  Note: org policy may override this value.</Text>
       )}
       <Text> </Text>
       <Text>New cap: <Text bold>$</Text>{input}<Text inverse> </Text></Text>
-      {error !== null && <Text color="red">  {error}</Text>}
+      {error !== null && <Text color={role.danger}>  {error}</Text>}
       <Text> </Text>
       <Text dimColor>↵ apply · Esc cancel</Text>
     </Box>

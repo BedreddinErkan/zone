@@ -4,6 +4,7 @@ import type { Dispatch } from "react";
 import type { StoreAction, StoreState } from "../store.js";
 import { resolveStagedApproval } from "../../../api/stagedApprovals.js";
 import { DiffView } from "./DiffView.js";
+import { role, glyph } from "../theme.js";
 
 interface StagedDiffModalProps {
   proposal: NonNullable<StoreState["stagedDiffProposal"]>;
@@ -11,7 +12,7 @@ interface StagedDiffModalProps {
 }
 
 function renderFeedbackBuffer(buf: string, pos: number): string {
-  return buf.slice(0, pos) + "▋" + buf.slice(pos);
+  return buf.slice(0, pos) + glyph.cursor + buf.slice(pos);
 }
 
 export function StagedDiffModal({ proposal, dispatch }: StagedDiffModalProps): React.ReactElement {
@@ -83,8 +84,8 @@ export function StagedDiffModal({ proposal, dispatch }: StagedDiffModalProps): R
   }, { isActive: true });
 
   return (
-    <Box flexDirection="column" borderStyle="double" borderColor="cyan" paddingX={2} paddingY={1}>
-      <Text bold color="cyan">Review staged changes</Text>
+    <Box flexDirection="column" borderStyle="double" borderColor={role.accent} paddingX={2} paddingY={1}>
+      <Text bold color={role.accent}>Review staged changes</Text>
       <Text dimColor>
         {proposal.trigger === "natural_completion" ? "Task complete" : "Iteration limit reached"}
         {" · "}{proposal.verificationSummary}
@@ -103,7 +104,7 @@ export function StagedDiffModal({ proposal, dispatch }: StagedDiffModalProps): R
       {feedbackMode ? (
         <>
           <Text dimColor>{"Refine (describe changes):"}</Text>
-          <Box borderStyle="single" borderColor="cyan">
+          <Box borderStyle="single" borderColor={role.accent}>
             <Text>{renderFeedbackBuffer(feedbackBuffer, feedbackCursor)}</Text>
           </Box>
           <Text dimColor>{"Enter to submit  ·  Esc to cancel"}</Text>

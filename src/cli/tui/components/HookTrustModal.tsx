@@ -1,6 +1,7 @@
 import React from "react";
 import { Box, Text, useInput } from "ink";
 import type { UserHooksConfig, UserHookEntry } from "../../../api/diskHooks.js";
+import { role, glyph } from "../theme.js";
 
 interface HookTrustModalProps {
   config: UserHooksConfig;
@@ -13,8 +14,8 @@ function renderHookEntry(entry: UserHookEntry, index: number): React.ReactElemen
   const label = entry.description ? `[${entry.description}]` : `[hook ${index + 1}]`;
   return (
     <Box key={index} paddingLeft={2}>
-      <Text>{"● "}</Text>
-      <Text color="yellow">{label}</Text>
+      <Text>{glyph.groupMarker} </Text>
+      <Text color={role.caution}>{label}</Text>
       <Text>{" "}{entry.command}</Text>
     </Box>
   );
@@ -34,8 +35,8 @@ export function HookTrustModal({ config, projectPath, onApprove, onDeny }: HookT
   const totalCount = preHooks.length + postHooks.length;
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={2} paddingY={1} marginY={1}>
-      <Text bold color="yellow">⚠  Hook Trust Required</Text>
+    <Box flexDirection="column" borderStyle="round" borderColor={role.caution} paddingX={2} paddingY={1} marginY={1}>
+      <Text bold color={role.caution}>{glyph.warningMark}  Hook Trust Required</Text>
       <Box marginTop={1}>
         <Text>This project defines {totalCount} shell hook{totalCount !== 1 ? "s" : ""} in .zone/hooks.json</Text>
       </Box>
@@ -56,9 +57,9 @@ export function HookTrustModal({ config, projectPath, onApprove, onDeny }: HookT
         </Box>
       )}
       <Box marginTop={1}>
-        <Text bold color="green">{"[a]"}</Text>
+        <Text bold color={role.success}>{"[a]"}</Text>
         <Text> Approve and arm  </Text>
-        <Text bold color="red">{"[N]"}</Text>
+        <Text bold color={role.danger}>{"[N]"}</Text>
         <Text> Keep disabled</Text>
       </Box>
     </Box>

@@ -3,6 +3,7 @@ import { Box, Text, useInput, usePaste } from "ink";
 import type { Dispatch } from "react";
 import type { StoreAction, StoreState } from "../store.js";
 import { resolvePlanApproval } from "../../../llm/planApprovals.js";
+import { role, glyph } from "../theme.js";
 
 interface PlanActionPromptProps {
   proposal: StoreState["planReadyProposal"];
@@ -10,7 +11,7 @@ interface PlanActionPromptProps {
 }
 
 function renderFeedbackBuffer(buf: string, pos: number): string {
-  return buf.slice(0, pos) + "▋" + buf.slice(pos);
+  return buf.slice(0, pos) + glyph.cursor + buf.slice(pos);
 }
 
 // Always mounted (App.tsx renders it unconditionally, replacing the old
@@ -111,7 +112,7 @@ export function PlanActionPrompt({ proposal, dispatch }: PlanActionPromptProps):
                 ? "Feedback (then plan a fix):"
                 : "Feedback (then revise):"}
           </Text>
-          <Box borderStyle="single" borderColor="cyan">
+          <Box borderStyle="single" borderColor={role.accent}>
             <Text>{renderFeedbackBuffer(feedbackBuffer, feedbackCursor)}</Text>
           </Box>
           <Text dimColor>{"Enter to submit  ·  Esc to cancel"}</Text>

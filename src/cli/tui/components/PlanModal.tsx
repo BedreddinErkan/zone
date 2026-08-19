@@ -2,6 +2,7 @@ import { Box, Text, useInput } from "ink";
 import type { Dispatch } from "react";
 import type { StoreAction, StoreState } from "../store.js";
 import { resolveRevisionApproval } from "../../../llm/revisionApprovals.js";
+import { role } from "../theme.js";
 
 interface PlanModalProps {
   proposal: NonNullable<StoreState["planProposal"]>;
@@ -26,8 +27,8 @@ export function PlanModal({ proposal, dispatch }: PlanModalProps): React.ReactEl
   const typeLine = `Type: ${proposal.revisionType}`;
 
   return (
-    <Box flexDirection="column" borderStyle="double" borderColor="cyan" paddingX={2} paddingY={1}>
-      <Text bold color="cyan">Plan Review</Text>
+    <Box flexDirection="column" borderStyle="double" borderColor={role.accent} paddingX={2} paddingY={1}>
+      <Text bold color={role.accent}>Plan Review</Text>
       <Text dimColor>{typeLine}</Text>
       <Text> </Text>
       <Text dimColor>Reason:</Text>

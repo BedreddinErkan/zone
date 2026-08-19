@@ -6,6 +6,7 @@ import { useState } from "react";
 import type { Dispatch } from "react";
 import { useStore } from "../store.js";
 import type { StoreAction } from "../store.js";
+import { role, glyph } from "../theme.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -90,11 +91,11 @@ export function CommitModal({ dispatch }: Props): React.ReactElement {
     <Box
       flexDirection="column"
       borderStyle="round"
-      borderColor="cyan"
+      borderColor={role.accent}
       paddingX={1}
       width={innerWidth}
     >
-      <Text bold color="cyan"> Commit changes</Text>
+      <Text bold color={role.accent}> Commit changes</Text>
       <Text> </Text>
       <Text dimColor> Files:</Text>
       {data.filePaths.map(fp => (
@@ -102,10 +103,10 @@ export function CommitModal({ dispatch }: Props): React.ReactElement {
       ))}
       <Text> </Text>
       <Text> Message:</Text>
-      <Text>   {draftMsg}▋</Text>
+      <Text>   {draftMsg}{glyph.cursor}</Text>
       <Text> </Text>
       {status === "error" && (
-        <Text color="red">  {errorMsg}</Text>
+        <Text color={role.danger}>  {errorMsg}</Text>
       )}
       {status === "running"
         ? <Text dimColor> Committing…</Text>

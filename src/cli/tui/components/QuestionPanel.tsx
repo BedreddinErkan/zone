@@ -1,5 +1,6 @@
 import React from "react";
 import { Box, Text } from "ink";
+import { role } from "../theme.js";
 
 /**
  * The agent's pending question, pinned above the StatusBar.
@@ -27,14 +28,14 @@ export function QuestionPanel({
   return (
     <Box flexDirection="column" paddingX={2}>
       <Box>
-        <Text color="cyan">? </Text>
+        <Text color={role.accent}>? </Text>
         <Box flexGrow={1}>
           <Text>{question}</Text>
         </Box>
       </Box>
       {carriedOver && conversationLost && (
         <Box>
-          <Text color="yellow">
+          <Text color={role.caution}>
             {"  the earlier conversation was too large to save — only the summary survived"}
           </Text>
         </Box>

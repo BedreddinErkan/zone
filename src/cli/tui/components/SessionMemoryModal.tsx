@@ -5,6 +5,7 @@ import { useStore } from "../store.js";
 import type { StoreAction } from "../store.js";
 import { saveDiskModel } from "../../../api/diskModel.js";
 import { getDefaultModelId } from "../../../llm/modelRegistry.js";
+import { role, glyph } from "../theme.js";
 
 interface Props {
   dispatch: Dispatch<StoreAction>;
@@ -55,26 +56,26 @@ export function SessionMemoryModal({ dispatch, onSessionClear }: Props): React.R
     <Box
       flexDirection="column"
       borderStyle="round"
-      borderColor="cyan"
+      borderColor={role.accent}
       paddingX={1}
       width={innerWidth}
     >
-      <Text bold color="cyan"> Session memory</Text>
+      <Text bold color={role.accent}> Session memory</Text>
       <Text> </Text>
       {MEMORY_OPTIONS.map((opt, i) => {
         const selected = i === sel;
-        const marker = currentMemory === opt ? "(•)" : "( )";
+        const marker = currentMemory === opt ? glyph.radioSelected : glyph.radioUnselected;
         return (
-          <Box key={String(opt)} backgroundColor={selected ? "blue" : undefined}>
-            <Text color={selected ? "white" : undefined}>   {marker} {MEMORY_LABELS[String(opt)]}</Text>
+          <Box key={String(opt)} backgroundColor={selected ? role.selectionBackground : undefined}>
+            <Text color={selected ? role.emphasis : undefined}>   {marker} {MEMORY_LABELS[String(opt)]}</Text>
           </Box>
         );
       })}
-      <Box backgroundColor={sel === 2 ? "blue" : undefined}>
-        <Text color={sel === 2 ? "white" : "yellow"}>   ⟳  Clear — start fresh next run</Text>
+      <Box backgroundColor={sel === 2 ? role.selectionBackground : undefined}>
+        <Text color={sel === 2 ? role.emphasis : role.caution}>   ⟳  Clear — start fresh next run</Text>
       </Box>
       <Text> </Text>
-      <Text dimColor> ↑↓ navigate · Enter select/clear · Esc cancel</Text>
+      <Text dimColor> {glyph.navigateArrows} navigate · Enter select/clear · Esc cancel</Text>
     </Box>
   );
 }

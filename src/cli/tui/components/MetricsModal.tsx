@@ -2,6 +2,7 @@ import { Box, Text, useInput } from "ink";
 import { useState, useEffect } from "react";
 import { useStore } from "../store.js";
 import { buildRunRecords, aggregateMetrics, type MetricsResponse } from "../../../llm/metricsAggregator.js";
+import { role } from "../theme.js";
 
 type Period = "day" | "week" | "month" | "all";
 const PERIODS: Period[] = ["day", "week", "month", "all"];
@@ -89,16 +90,16 @@ export function MetricsModal(): React.ReactElement {
     <Box
       flexDirection="column"
       borderStyle="round"
-      borderColor="cyan"
+      borderColor={role.accent}
       paddingX={1}
       width={innerWidth}
     >
-      <Text bold color="cyan"> Metrics</Text>
+      <Text bold color={role.accent}> Metrics</Text>
       <Text> </Text>
       <Box flexDirection="row" justifyContent="space-between">
         <Text>Period: <Text bold>{periodRow}</Text></Text>
         <Text>Auto-refresh: {autoRefresh
-          ? <Text color="green">on</Text>
+          ? <Text color={role.success}>on</Text>
           : <Text dimColor>off</Text>}
         </Text>
       </Box>

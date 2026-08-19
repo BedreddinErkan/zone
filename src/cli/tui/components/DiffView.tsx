@@ -1,5 +1,6 @@
 import React from "react";
 import { Box, Text } from "ink";
+import { role } from "../theme.js";
 
 const FIND_MARKER = "--- FIND ---";
 const REPLACE_MARKER = "--- REPLACE ---";
@@ -57,9 +58,9 @@ export function DiffView({ patch, maxLines = DEFAULT_MAX_DIFF_LINES }: { patch: 
           <Text key={i} dimColor>{"···"}</Text>
         ) : (
           <Box key={i}>
-            <Text color={l.kind === "remove" ? "red" : "green"}>{l.kind === "remove" ? "- " : "+ "}</Text>
+            <Text color={l.kind === "remove" ? role.danger : role.success}>{l.kind === "remove" ? "- " : "+ "}</Text>
             <Box flexGrow={1}>
-              <Text color={l.kind === "remove" ? "red" : "green"}>{l.text}</Text>
+              <Text color={l.kind === "remove" ? role.danger : role.success}>{l.text}</Text>
             </Box>
           </Box>
         )

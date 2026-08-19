@@ -4,6 +4,7 @@ import { resolveCommandApproval } from "../../../api/commandApprovals.js";
 import { resolveEditApproval } from "../../../api/editApprovals.js";
 import { addDiskTrustPrefix } from "../../../api/diskTrust.js";
 import type { StoreAction } from "../store.js";
+import { role } from "../theme.js";
 
 interface Props {
   approvalId: string;
@@ -49,18 +50,18 @@ export function ApprovalModal({ approvalId, runId, command, kind, dispatch }: Pr
   });
 
   return (
-    <Box borderStyle="single" borderColor="yellow" flexDirection="column" paddingX={1} marginX={2}>
-      <Text bold color="yellow">{isEdit ? "Edit approval required" : "Command approval required"}</Text>
+    <Box borderStyle="single" borderColor={role.caution} flexDirection="column" paddingX={1} marginX={2}>
+      <Text bold color={role.caution}>{isEdit ? "Edit approval required" : "Command approval required"}</Text>
       <Box marginTop={1}>
         {isEdit
-          ? <><Text color="cyan">  📄 </Text><Text>{command}</Text></>
-          : <><Text color="cyan">  $ </Text><Text>{command}</Text></>
+          ? <><Text color={role.accent}>  📄 </Text><Text>{command}</Text></>
+          : <><Text color={role.accent}>  $ </Text><Text>{command}</Text></>
         }
       </Box>
       <Box marginTop={1}>
         {isEdit
-          ? <Text>{"  "}<Text color="green">[Y]</Text>{"es  "}<Text color="red">[N]</Text>{"o"}</Text>
-          : <Text>{"  "}<Text color="green">[Y]</Text>{"es  "}<Text color="red">[N]</Text>{"o  "}<Text color="yellow">[T]</Text>{"rust prefix"}</Text>
+          ? <Text>{"  "}<Text color={role.success}>[Y]</Text>{"es  "}<Text color={role.danger}>[N]</Text>{"o"}</Text>
+          : <Text>{"  "}<Text color={role.success}>[Y]</Text>{"es  "}<Text color={role.danger}>[N]</Text>{"o  "}<Text color={role.caution}>[T]</Text>{"rust prefix"}</Text>
         }
       </Box>
     </Box>

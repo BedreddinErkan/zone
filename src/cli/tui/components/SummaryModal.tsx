@@ -4,6 +4,7 @@ import { useStore } from "../store.js";
 import type { StoreAction } from "../store.js";
 import { saveDiskModel } from "../../../api/diskModel.js";
 import { getDefaultModelId } from "../../../llm/modelRegistry.js";
+import { role, glyph } from "../theme.js";
 
 interface Props {
   dispatch: Dispatch<StoreAction>;
@@ -47,23 +48,23 @@ export function SummaryModal({ dispatch }: Props): React.ReactElement {
     <Box
       flexDirection="column"
       borderStyle="round"
-      borderColor="cyan"
+      borderColor={role.accent}
       paddingX={1}
       width={innerWidth}
     >
-      <Text bold color="cyan"> Summary format</Text>
+      <Text bold color={role.accent}> Summary format</Text>
       <Text> </Text>
       {FORMATS.map((fmt, i) => {
         const selected = i === sel;
-        const marker = currentFormat === fmt ? "(•)" : "( )";
+        const marker = currentFormat === fmt ? glyph.radioSelected : glyph.radioUnselected;
         return (
-          <Box key={fmt} backgroundColor={selected ? "blue" : undefined}>
-            <Text color={selected ? "white" : undefined}>   {marker} {FORMAT_LABELS[fmt]}</Text>
+          <Box key={fmt} backgroundColor={selected ? role.selectionBackground : undefined}>
+            <Text color={selected ? role.emphasis : undefined}>   {marker} {FORMAT_LABELS[fmt]}</Text>
           </Box>
         );
       })}
       <Text> </Text>
-      <Text dimColor> ↑↓ navigate · Enter select · Esc cancel</Text>
+      <Text dimColor> {glyph.navigateArrows} navigate · Enter select · Esc cancel</Text>
     </Box>
   );
 }

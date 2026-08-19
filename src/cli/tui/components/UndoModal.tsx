@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { StoreAction } from "../store.js";
 import type { SnapshotManifest } from "../../../snapshots/snapshotStore.js";
 import { restoreSnapshot } from "../../../snapshots/snapshotStore.js";
+import { role, glyph } from "../theme.js";
 
 interface Props {
   data: { manifest: SnapshotManifest; driftedPaths: string[] };
@@ -42,8 +43,8 @@ export function UndoModal({ data, dispatch }: Props): React.ReactElement | null 
   const width = Math.min(cols - 4, 62);
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1} width={width}>
-      <Text bold color="yellow"> Undo last run?</Text>
+    <Box flexDirection="column" borderStyle="round" borderColor={role.caution} paddingX={1} width={width}>
+      <Text bold color={role.caution}> Undo last run?</Text>
       <Text> </Text>
       <Text>{` Revert ${manifest.files.length} file(s) to state before last run:`}</Text>
       {manifest.files.map((entry) => {
@@ -55,7 +56,7 @@ export function UndoModal({ data, dispatch }: Props): React.ReactElement | null 
         if (isCreated && isDrifted) suffix = "  (edited since run — will delete)";
         return (
           <Box key={entry.path}>
-            {isDrifted ? <Text color="yellow"> ⚠ </Text> : <Text>{"   "}</Text>}
+            {isDrifted ? <Text color={role.caution}> {glyph.warningMark} </Text> : <Text>{"   "}</Text>}
             <Text>{entry.path}</Text>
             {suffix ? <Text dimColor>{suffix}</Text> : null}
           </Box>

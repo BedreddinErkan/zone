@@ -1,6 +1,7 @@
 import { Box, Text, useInput } from "ink";
 import { useStore } from "../store.js";
 import { loadSession } from "../../../api/diskSessions.js";
+import { role, glyph } from "../theme.js";
 
 function truncate(s: string, max: number): string {
   return s.length > max ? s.slice(0, max - 1) + "…" : s;
@@ -32,8 +33,8 @@ export function SessionsModal(): React.ReactElement {
   });
 
   return (
-    <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={1} marginX={2}>
-      <Text bold color="cyan">Sessions</Text>
+    <Box borderStyle="round" borderColor={role.accent} flexDirection="column" paddingX={1} marginX={2}>
+      <Text bold color={role.accent}>Sessions</Text>
       <Text dimColor>Past sessions — Enter to resume, Esc to cancel:</Text>
       <Box height={1} />
       {list.length === 0 ? (
@@ -42,11 +43,11 @@ export function SessionsModal(): React.ReactElement {
         list.map((meta, i) => {
           const selected = i === sel;
           const dateStr = meta.startedAt.slice(0, 16).replace("T", " ");
-          const prefix = `${selected ? "▸" : " "} ${String(i + 1).padStart(2)}.`;
+          const prefix = `${selected ? glyph.selectionCursor : "  "}${String(i + 1).padStart(2)}.`;
           if (narrow) {
             return (
               <Box key={meta.sessionId} flexDirection="column">
-                <Text color={selected ? "cyan" : undefined}>{prefix} {dateStr}</Text>
+                <Text color={selected ? role.accent : undefined}>{prefix} {dateStr}</Text>
                 {selected && meta.firstUserMessage ? (
                   <Text dimColor>{"     "}{truncate(meta.firstUserMessage, cols - 6)}</Text>
                 ) : null}
@@ -63,7 +64,7 @@ export function SessionsModal(): React.ReactElement {
             : "";
           return (
             <Box key={meta.sessionId}>
-              <Text color={selected ? "cyan" : undefined}>
+              <Text color={selected ? role.accent : undefined}>
                 {prefix} {dateStr}{"  "}{modelStr}{"  "}{costStr}{msgLabel}{msgStr ? `  ${msgStr}` : ""}
               </Text>
             </Box>
@@ -71,7 +72,7 @@ export function SessionsModal(): React.ReactElement {
         })
       )}
       <Box height={1} />
-      <Text dimColor>↑↓ navigate  Enter resume  Esc close</Text>
+      <Text dimColor>{glyph.navigateArrows} navigate  Enter resume  Esc close</Text>
     </Box>
   );
 }

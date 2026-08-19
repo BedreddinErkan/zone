@@ -4,6 +4,7 @@ import { useStore } from "../store.js";
 import type { StoreAction } from "../store.js";
 import { saveDiskModel } from "../../../api/diskModel.js";
 import { getDefaultModelId } from "../../../llm/modelRegistry.js";
+import { role, glyph } from "../theme.js";
 
 interface Props {
   dispatch: Dispatch<StoreAction>;
@@ -48,23 +49,23 @@ export function PlanModeModal({ dispatch }: Props): React.ReactElement {
     <Box
       flexDirection="column"
       borderStyle="round"
-      borderColor="cyan"
+      borderColor={role.accent}
       paddingX={1}
       width={innerWidth}
     >
-      <Text bold color="cyan"> Plan depth</Text>
+      <Text bold color={role.accent}> Plan depth</Text>
       <Text> </Text>
       {DEPTHS.map((d, i) => {
         const selected = i === sel;
-        const marker = currentDepth === d ? "(•)" : "( )";
+        const marker = currentDepth === d ? glyph.radioSelected : glyph.radioUnselected;
         return (
-          <Box key={d} backgroundColor={selected ? "blue" : undefined}>
-            <Text color={selected ? "white" : undefined}>   {marker} {DEPTH_LABELS[d]}</Text>
+          <Box key={d} backgroundColor={selected ? role.selectionBackground : undefined}>
+            <Text color={selected ? role.emphasis : undefined}>   {marker} {DEPTH_LABELS[d]}</Text>
           </Box>
         );
       })}
       <Text> </Text>
-      <Text dimColor> ↑↓ navigate · Enter select · Esc cancel</Text>
+      <Text dimColor> {glyph.navigateArrows} navigate · Enter select · Esc cancel</Text>
     </Box>
   );
 }
