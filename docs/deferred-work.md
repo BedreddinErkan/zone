@@ -4913,7 +4913,13 @@ resumed run whose applied-nothing status was guessed and then reported as valida
 only shape where the guess reaches a surface anyone reads. **It does not occur today:** across the
 sink window from 2026-07-29 to 2026-08-05 the two markers' run-id sets are disjoint, and neither
 resumed run in that window reached run completion at all, so no resumed run has reached the predicate
-yet. Both figures are upper bounds on item 73's key. **Neither resumed run carries an archetype
+yet. Both figures are upper bounds on item 73's key. **That window is stated as of when it was
+measured and the sink has since grown past it — bounded here rather than retracted, because
+re-deriving against the wider span leaves the claim standing.** The sink now spans 2026-07-29 to
+2026-08-19, and widening to the full span adds no `[zone-resume-rehydrated]` records at all: both
+remain 2026-07-30, inside the original window. So the disjointness and the no-completion finding are
+unaffected by the growth, and the date range is a property of when the measurement was taken rather
+than of the population it describes. **Neither resumed run carries an archetype
 record either**, since archetype is emitted only at loop close — item 73 records that constraint,
 and it bears directly here: this trigger cannot be narrowed to a read-only archetype even if a
 later pass wanted it to be.
@@ -12698,8 +12704,24 @@ smaller than the whole. Recorded as a design note, not a proposal.
 against the bucket's written definition — closing requires an observation that does not exist yet —
 that distinction is not one the definition draws, and the neighbours refute it: item 157 needs
 designed multi-arm runs on prompt text and sits here, items 175 and 178 need paired measurements
-nobody has run and sit here, and of the thirteen only item 170 has an instrument already emitting. If
+nobody has run and sit here, and four of the thirteen already have an instrument emitting. If
 needing work to produce the observation disqualified an entry, this bucket would be nearly empty.
+
+**The sentence that stood here was false in both directions, and is corrected rather than softened.**
+It read "of the thirteen only item 170 has an instrument already emitting." Item 170 is the one entry
+it named, and item 170's own marker has produced **nothing**: `[zone-requested-tools-granted]`, zero
+records. Meanwhile four entries do have emitting instruments —
+`[zone-apply-patch-marker-imbalance]` at ten records for item 1,
+`[zone-apply-patch-normalization-parity]` at forty-eight for item 18, and
+`[zone-resume-rehydrated]` at two, shared by items 23 and 75. So the count was wrong and the one
+entry singled out was the wrong entry. **Both zeros are proven rather than assumed:** each marker
+name was confirmed to exist in source before its absence was believed — `[zone-requested-tools-granted]`
+in `loopTelemetry.ts`'s `emitRequestedToolsGranted`, `[zone-investigation-command-denied]` (item 196,
+also zero) in `commandApprovals.ts` — and both use `log`, not `debugLog`, so neither zero is a
+`ZONE_VERBOSE_LOGS` artefact. The first attempt at this recount searched a marker name that does not
+exist and returned a false zero for items 23 and 75; enumerating the sink's distinct names before
+trusting any absence is what caught it, which is the thirteenth pattern's own instrument failure
+again — a string search standing in for the property it is supposed to measure.
 Precedents read rather than cited: items 198 and 212 close on their own condition being discharged
 and this one is not; item 210 closes on a different entry's remedy landing and nothing has landed;
 item 181 is Neither on no observation being missing, and one is missing here. No instrument exists to
@@ -17860,29 +17882,207 @@ outright; what is missing is a decision, not information.
 the corresponding `npm run sweep` / `npm run sweep:dry` entries in `package.json`; the removed
 target is `src/api/server.ts`, absent from the tree.
 
+## 225. Plan mode is reachable only from the TUI, so no scripted invocation can produce plan-path traffic
+
+**What it is.** The plan gate is `opts.mode === "plan"` in `runOneShotInner`, `cli/dispatch.ts`. Of
+the seven terminal dispatches in `cli/index.ts`'s `run()`, **three reach it and all three are
+`runTui`**: a positional task with a TTY, the idle REPL, and the envelope-resume branch when not
+headless. The other four cannot. `runHeadless`'s text branch calls `runOneShotInner` with a fourth
+argument carrying only `sessionId` — no `mode` — so the gate is never entered; its JSON branch and
+`runHeadlessResume` bypass `runOneShotInner` entirely and call `runLlmPatchFlow` with `mode: "patch"`;
+and the deprecated `--task` flow reaches `runCliWithOptions`, which has its own unrelated
+`resolveMode`. Since `isHeadless` is `options.print === true || !process.stdout.isTTY`, **every
+invocation from a non-interactive shell lands in the headless half**, including the JSON mode a CI
+or scripted caller would reach for.
+
+**Deliberate, on three independent signals, so this is scoping rather than a defect.** The flag's own
+help text reads "plan starts the TUI in plan mode"; `resolveInitialTuiMode` lives in
+`cli/tui/initialMode.ts`; and the option is typed `TuiMode`, the type name itself saying where it
+applies. What is not recorded anywhere is the consequence.
+
+**The consequence, which is why this is written down.** Plan-path traffic cannot be produced by any
+scripted invocation — only by a human driving the TUI, or by a harness calling `runOneShotInner`
+directly, which is what the three runs behind item 226 had to do. That bears on every entry waiting
+on that population: items 166, 170, 175, 178 and 196 are not waiting on someone remembering to run
+something scriptable, and a future pass planning to feed them by automation will find no entry point
+that does it.
+
+**This does not contradict item 115's account, and the distinction is the whole point.** That entry
+establishes the plan path stopped for "habit, not code", reading the `[zone-plan-mode]` gate's own
+`gatedBy` field across all twenty recorded runs. That gate is `shouldInvestigate`, one level *inside*
+plan mode; nothing closed it. This entry is about the gate one level *outside*, which was never open
+to scripts at all. Both hold: the inner gate stayed open and the outer one was always TUI-only.
+
+**Bucket: Neither** — a structural fact recorded, with no fix proposed. Against Actionable now: no
+fix is specified here, and whether headless should have a plan path is a question nobody has posed,
+not a decision waiting to be executed. Against Blocked on data: nothing is missing; the reachability
+was established by reading every dispatch and is not contingent on an observation.
+
+**Where the code lives:** `cli/index.ts`'s `run()` and its `isHeadless` assignment; `runHeadless`,
+`runHeadlessResume` and `runOneShotInner` in `cli/dispatch.ts`; `resolveInitialTuiMode` in
+`cli/tui/initialMode.ts`; the `--permission-mode` option declaration in `cli/index.ts`.
+
+## 226. The plan schema was widened to a free-form narrative, and the three runs that read its pre-declared criteria fired none of them
+
+**What shipped.** Two commits. `aca64aa7` added a required `narrative` and a plan-level `filesLikely`
+to `ExecutionPlan` and to the investigation prompt's JSON shape, and removed `objective`,
+`riskHints`, `scopeSummary` and `scopeNotes` from that prompt's asks. `af9c4ae0` finished the demotion
+the first commit had only half-made — see item 228 — by making the three surviving fields optional at
+both the type and schema layers.
+
+**Four falsification criteria were pre-declared before any of it ran, and none had ever been
+reachable** until `af9c4ae0`, because the first commit left the widening inert. Three runs against a
+one-file fix, a multi-file ordered change and a question, all routing investigate-first, all
+producing `planNarrative`:
+
+- **Invariance across task shapes — did not fire, and its literal test is recorded as uninformative
+  rather than passed.** The criterion was that the agent writes the same fixed section set every
+  time. The three heading lists are identical — all three are **empty**. No narrative used a markdown
+  heading at all, so the test meant to catch a repeated scaffold instead compared three empty sets.
+  Structure did vary where it can be seen: one paragraph, one paragraph, and four with bold-lead
+  pseudo-sections for the question. The distinction matters for anyone re-reading the criterion: it
+  was not satisfied, it was not applicable.
+- **Machinery starved — did not fire, and the literal signal is a false positive.** The signal is an
+  empty file set, which the question-shaped run has. Executed against the real `checkWriteScope`,
+  that run blocks **every** write including in-scope ones, because it is answer-only. The guard is in
+  its strictest state, which is the opposite of starved.
+- **Duplication — did not fire.** No narrative restates a step title verbatim, and none carries a
+  line that reads as a file list.
+- **Guard widened rather than fed — did not fire.** Each plan through the real
+  `evaluatePlanAlignment` scores 100 with zero out-of-plan files.
+
+**One branch shipped and has never been exercised, recorded on item 196's precedent.** The schema now
+accepts a non-empty `narrative` as its own evidence that a stepless plan is complete, and
+`planTerminalShape` gained a `"narrative"` discriminator for exactly that state. The one
+question-shaped run took `answerOnlyReason` with empty steps instead — `planTerminalShape` returned
+`"answer"` — because the model had a truthful reason available and gave it. So the escape valve is
+built and untried; whether it ever fires depends on a plan that finds real work and declines to
+decompose it, which has not happened yet.
+
+**Bucket: Neither** — a structural fact recorded, with no fix proposed. Against Blocked on data: the
+criteria have been read, so this is not waiting on an observation; the unexercised branch is a
+property of what has run, not a question this entry is gated on.
+
+**Where the code lives:** `buildPrompt` in `llm/planInvestigation.ts`; `executionPlanSchema`,
+`planTerminalShape` and the `ExecutionPlan` type in `llm/executionPlan.ts`; `checkWriteScope` in
+`tools/scopeGuard.ts`; `evaluatePlanAlignment` in `core/evaluatePlanAlignment.ts`. See item 225 for
+why the runs needed a harness, item 228 for the defect that made the first commit inert.
+
+## 227. Replacing four structured fields with one prose field made a plan cheaper, and the dominant term is not the prose
+
+**What it is.** The standing intuition is that asking for prose costs more than asking for short
+fields, because output tokens are the expensive side. The same task, same repository, run once under
+the broken schema and once under the fixed one, went **down**: `$0.1212` to `$0.0577`, a 52 percent
+fall, corroborated on a second instrument that does not price anything — output tokens **2,902 to
+1,112**, a 62 percent fall.
+
+**The per-call decomposition is the finding, and it narrows the claim considerably.** The broken run
+made six billed calls to the fixed run's five. Four investigation iterations cost `$0.0758` against
+`$0.0577`. The sixth call is the `generateExecutionPlan` fallback that the rejected plan forced, and
+it alone cost **`$0.0454` — thirty-seven percent of the broken run's total**. Comparing only the call
+that emits the plan, legacy fields against narrative, gives **752 output tokens against 640**, about
+fifteen percent. So the honest statement is not "prose is cheaper than fields": **the dominant term is
+an eliminated second plan-generation call, and the prose contributes a much smaller second-order
+saving on the emitting call.** Both are real; only one is about prose, and it is the smaller one.
+
+**A first report of this arc stated the 52 percent as though the narrative caused it. That reading is
+corrected here rather than carried forward** — it was true as an aggregate and wrong as an
+attribution, and the per-call ledger was what separated them.
+
+**One figure this entry deliberately does not restate as checked.** A character-level comparison —
+1,618 characters across the four fields against 644 of narrative — was measured once from the captured
+approval events. Those captures lived in a session scratchpad and are gone, and a rejected plan is
+persisted nowhere: the run envelope stores `executionPlan` only for interrupted runs, and these were
+rejected. The figure is recorded as **measured once and not reproducible from anything now on disk**.
+The output-token figures this entry states (2,902 against 1,112 for the run, 752 against 640 for the
+plan-emitting call) are durable, joined by run id in the usage ledger, and are what any later reader
+should re-derive against.
+
+**Bucket: Neither** — a structural fact recorded, with no fix proposed. The measurement is complete;
+nothing is specified to do about it.
+
+**Where the code lives:** the two prompts are `buildPrompt` in `llm/planInvestigation.ts` and
+`generateExecutionPlan`'s own inline template in `llm/executionPlan.ts`; the fallback that produced
+the sixth call is `runPlanInvestigation`'s parse-failure branch in `llm/planInvestigation.ts`.
+
+## 228. Closed — the prompt asked for a shape the schema rejected by construction, and a whole test suite was blind to it because every fixture was the wrong shape
+
+**What it was.** `aca64aa7` removed `objective`, `riskHints` and `scopeSummary` from the investigation
+prompt's JSON shape but left all three **required** in `executionPlanSchema`. A model following the
+prompt exactly therefore produced a plan the schema rejected — not sometimes, but by construction, one
+hundred percent of the time. Every investigation fell through to `generateExecutionPlan`, whose own
+prompt never asks for a narrative, so the widening produced nothing and looked like a model that
+declined to use a new field. It was caught only by a real run, whose
+`[zone-plan-investigation-complete]` record carried `fallbackUsed: true`.
+
+**Why twenty tests and six mutations missed it, which is the part worth keeping.** Every fixture in
+the suite supplied the full legacy shape by hand. Nothing was skipped, nothing was vacuous, and the
+mutation testing that accompanied the commit killed each of its six mutations exactly as predicted —
+because all of them were aimed at fields the fixtures did supply. **No test ever constructed the input
+the production path actually produces.** The suite was testing a different input population from the
+system's, and every signal available said it was healthy.
+
+**The masking, which any future schema work on this document inherits.** Zod stops at the first failing
+layer: refinements do not run when base-shape validation has already failed. The three `Required`
+errors therefore hid a fourth, structurally different failure — `superRefine` rejecting empty steps
+with no reason field — which only became visible once the three fields were made optional. Two failure
+layers, not one, and the second is invisible while the first stands. Enumerating every refinement on the
+schema afterwards, against base-shape-valid inputs, found one `superRefine` carrying two distinct issues
+and one unconditional `.transform()` — three branches, not one — and no further cause: the second
+`superRefine` branch rejects a combination the prompt's own rules forbid a compliant model from
+producing, and the transform does not apply to the prompted shape's step count.
+
+**The remedy, and why it is written the way it is.** The three fields are optional at both layers;
+`superRefine` accepts a narrative as evidence a stepless plan is intentional; `planTerminalShape` gained
+a `"narrative"` value so its `"unknown"` arm keeps meaning "impossible" rather than absorbing a case that
+is now valid; and five read sites that would throw on an absent field are guarded — two of which the
+original design never named, one of them on the live approval path. The added test **derives its fixture
+from `buildPrompt`'s own returned text** by brace-depth extraction rather than restating the shape, so a
+prompt edit changes what the test checks; a field the prompt starts naming with no typed value fails the
+test loudly instead of vanishing from the fixture.
+
+**One instance is not a population, and this entry does not promote a pattern from it.** The closest
+recorded shape is the non-promoted candidate on correctness versus discrimination, which was rejected
+against the eighth pattern and whose reopening condition names a failure of **assertion granularity**
+rather than of fixture choice. This is fixture choice: the assertions are fine and would fail if the
+feature were deleted; they never met the real input. That is a third mechanism, distinct from value
+coincidence and from path convergence, and one clear case is not the population item 217's test asks for
+before generalising.
+
+**Bucket: Closed**, decided on this entry's own condition rather than on the fix — items 198 and 212's
+reading. The condition was a defect with a specified remedy; it is built, mutation-tested against six
+predicted mutations, and confirmed end to end against the rebuilt artefact. Against Actionable now: the
+work is done, not specified. Against Neither: a fix was proposed and built.
+
+**Where the code lived:** `executionPlanSchema` and `planTerminalShape` in `llm/executionPlan.ts`;
+`buildPrompt` in `llm/planInvestigation.ts`; the guarded read sites in `llm/executionPlan.ts`,
+`llm/planApprovals.ts`, `core/evaluatePlanAlignment.ts` and `tools/scopeGuard.ts`. See item 226 for what
+the widening then measured, and the thirteenth pattern for the instrument-failure shape the original
+miss belongs to.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 224 to find out which ones still need something. No index of
+reader the trouble of reading all 228 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (96): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 4, 204, 210, 212, 218, 221, 223
+**Closed** (97): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 4, 204, 210, 212, 218, 221, 223, 228
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (0):
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (13): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196
 
-**Neither — a structural fact recorded, with no fix proposed** (115): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (118): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152, 154, 155, 158,
 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199, 200, 201, 202, 205,
-206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224
+206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
