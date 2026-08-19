@@ -1,6 +1,7 @@
 import { Box, Text, useInput } from "ink";
 import { useStore } from "../store.js";
 import { removeDiskTrustPrefix } from "../../../api/diskTrust.js";
+import { role, glyph } from "../theme.js";
 
 export function PermissionsView(): React.ReactElement {
   const { state, dispatch } = useStore();
@@ -24,8 +25,8 @@ export function PermissionsView(): React.ReactElement {
   });
 
   return (
-    <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={1} marginX={2}>
-      <Text bold color="cyan">Permissions</Text>
+    <Box borderStyle="round" borderColor={role.accent} flexDirection="column" paddingX={1} marginX={2}>
+      <Text bold color={role.accent}>Permissions</Text>
       <Text dimColor>Trusted command prefixes (.zone/trust.json):</Text>
       <Box height={1} />
       {list.length === 0 ? (
@@ -33,14 +34,14 @@ export function PermissionsView(): React.ReactElement {
       ) : (
         list.map((entry, i) => (
           <Box key={entry.prefix}>
-            <Text color={i === sel ? "cyan" : undefined}>
-              {i === sel ? "▸ " : "  "}{String(i + 1).padStart(2)}. {entry.prefix.padEnd(20)} {entry.addedAt.slice(0, 16).replace("T", " ")} {entry.addedBy}
+            <Text color={i === sel ? role.accent : undefined}>
+              {i === sel ? glyph.selectionCursor : "  "}{String(i + 1).padStart(2)}. {entry.prefix.padEnd(20)} {entry.addedAt.slice(0, 16).replace("T", " ")} {entry.addedBy}
             </Text>
           </Box>
         ))
       )}
       <Box height={1} />
-      <Text dimColor>↑↓ navigate  Del/d remove  Esc close</Text>
+      <Text dimColor>{glyph.navigateArrows} navigate  Del/d remove  Esc close</Text>
     </Box>
   );
 }

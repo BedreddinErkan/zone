@@ -1,3 +1,5 @@
+import { role, glyph } from "../theme.js";
+
 const TOOL_NAME_MAP: Record<string, string> = {
   read_file: "Read",
   run_command: "Bash",
@@ -40,11 +42,11 @@ export function formatToolArgs(_toolName: string, args: string): string {
 
 export function getStatusGlyph(
   lastResult: ToolResult | null
-): { icon: string; color?: "red" | "yellow" } {
-  if (!lastResult) return { icon: "○" };
-  if (lastResult.blocked) return { icon: "⚠", color: "yellow" };
-  if (!lastResult.ok) return { icon: "✗", color: "red" };
-  return { icon: "●" };
+): { icon: string; color?: typeof role.caution | typeof role.danger } {
+  if (!lastResult) return { icon: glyph.pendingMark };
+  if (lastResult.blocked) return { icon: glyph.warningMark, color: role.caution };
+  if (!lastResult.ok) return { icon: glyph.failureMark, color: role.danger };
+  return { icon: glyph.groupMarker };
 }
 
 export function shouldShowPreview(toolName: string, lastResult: ToolResult | null): boolean {

@@ -1,6 +1,7 @@
 import React from "react";
 import { Box, Text } from "ink";
 import { getToolDisplayName, formatToolArgs } from "./toolCallFormat.js";
+import { glyph } from "../theme.js";
 
 export interface ToolCallGroupProps {
   calls: Array<{ toolName: string; arg: string }>;
@@ -36,13 +37,13 @@ export function ToolCallGroup({ calls }: ToolCallGroupProps): React.ReactElement
     <Box flexDirection="column">
       <Box>
         {/* No explicit color: matches getStatusGlyph's own success case (icon only, no color). */}
-        <Text>{"● "}</Text>
+        <Text>{glyph.groupMarker} </Text>
         <Text dimColor>{parts.join(", ")}</Text>
       </Box>
       {calls.map((call, i) =>
         call.arg === "" ? null : (
           <Box key={i} paddingLeft={2}>
-            <Text dimColor>{"└ "}{formatToolArgs(call.toolName, call.arg)}</Text>
+            <Text dimColor>{glyph.detailConnector}{formatToolArgs(call.toolName, call.arg)}</Text>
           </Box>
         )
       )}

@@ -11,6 +11,7 @@ import {
 import { DiffView } from "./DiffView.js";
 import { CommandTail } from "./CommandTail.js";
 import { WRITE_FILE_PREVIEW_LINES } from "../../../core/toolCallPatch.js";
+import { role, glyph as themeGlyph } from "../theme.js";
 
 const DIFF_TOOLS = new Set(["apply_patch", "write_file", "multi_edit"]);
 
@@ -44,13 +45,13 @@ export function ToolCall({ toolName, args, results, patch }: ToolCallProps): Rea
     lastResult && (!lastResult.ok || lastResult.blocked) ? formatPreview(lastResult) : null;
 
   let secondLine: string | null = null;
-  let secondLineColor: "red" | "yellow" | undefined = undefined;
+  let secondLineColor: typeof role.danger | typeof role.caution | undefined = undefined;
   if (lastResult?.blocked) {
     secondLine = inlineMsg ? `blocked: ${inlineMsg}` : "blocked";
-    secondLineColor = "yellow";
+    secondLineColor = role.caution;
   } else if (lastResult && !lastResult.ok) {
     secondLine = isBash ? null : inlineMsg;
-    secondLineColor = isBash ? undefined : "red";
+    secondLineColor = isBash ? undefined : role.danger;
   } else {
     secondLine = (patch && DIFF_TOOLS.has(toolName)) || isBash ? null : successPreview;
   }
@@ -67,9 +68,9 @@ export function ToolCall({ toolName, args, results, patch }: ToolCallProps): Rea
       {secondLine && (
         <Box paddingLeft={2}>
           {secondLineColor ? (
-            <Text color={secondLineColor}>└ {secondLine}</Text>
+            <Text color={secondLineColor}>{themeGlyph.detailConnector}{secondLine}</Text>
           ) : (
-            <Text dimColor>└ {secondLine}</Text>
+            <Text dimColor>{themeGlyph.detailConnector}{secondLine}</Text>
           )}
         </Box>
       )}

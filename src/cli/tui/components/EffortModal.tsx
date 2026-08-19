@@ -5,6 +5,7 @@ import type { StoreAction } from "../store.js";
 import { supportsEffort, getDefaultModelId, effortLevelsFor } from "../../../llm/modelRegistry.js";
 import type { EffortLevel } from "../../../llm/modelRegistry.js";
 import { saveDiskModel } from "../../../api/diskModel.js";
+import { role, glyph } from "../theme.js";
 
 interface Props {
   dispatch: Dispatch<StoreAction>;
@@ -55,29 +56,29 @@ export function EffortModal({ dispatch }: Props): React.ReactElement {
     <Box
       flexDirection="column"
       borderStyle="round"
-      borderColor="cyan"
+      borderColor={role.accent}
       paddingX={1}
       width={innerWidth}
     >
-      <Text bold color="cyan"> Reasoning effort</Text>
+      <Text bold color={role.accent}> Reasoning effort</Text>
       <Text> </Text>
       {EFFORTS.map((effort, i) => {
         const selected = i === sel;
-        const marker = currentEffort === effort ? "(•)" : "( )";
+        const marker = currentEffort === effort ? glyph.radioSelected : glyph.radioUnselected;
         return (
-          <Box key={effort} backgroundColor={selected ? "blue" : undefined}>
-            <Text color={selected ? "white" : undefined}>   {marker} {ALL_EFFORT_LABELS[effort]}</Text>
+          <Box key={effort} backgroundColor={selected ? role.selectionBackground : undefined}>
+            <Text color={selected ? role.emphasis : undefined}>   {marker} {ALL_EFFORT_LABELS[effort]}</Text>
           </Box>
         );
       })}
       <Text> </Text>
       <Text> Current model: <Text bold>{currentModel}</Text></Text>
       {modelSupports
-        ? <Text color="green"> Supports effort: yes</Text>
-        : <Text color="yellow"> Does not use effort (preference saved for later)</Text>
+        ? <Text color={role.success}> Supports effort: yes</Text>
+        : <Text color={role.caution}> Does not use effort (preference saved for later)</Text>
       }
       <Text> </Text>
-      <Text dimColor> ↑↓ navigate · Enter select · Esc cancel</Text>
+      <Text dimColor> {glyph.navigateArrows} navigate · Enter select · Esc cancel</Text>
     </Box>
   );
 }

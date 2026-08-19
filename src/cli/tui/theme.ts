@@ -48,9 +48,36 @@ export const glyph = {
   /** Marks the first line of a multi-line transcript block. Structural — the colour that pairs
    *  with it (role.accent or role.muted) varies by entry kind; the glyph itself does not. */
   entryMarker: "◆ ",
-  /** Horizontal rule, drawn to the terminal width. */
+  /** Horizontal rule, drawn to the terminal width. Also used undivided as a short decorative
+   *  flourish (IterMarker) — same character, same role, shorter run. */
   separator: "─",
   /** List-item prefix. Appears both plain (a risk-hint line) and role.accent-coloured (a markdown
    *  list item) — the glyph is the shared part, the colour is not. */
   bullet: "• ",
+  /** Paired with role.caution or role.danger at every site — a caveat, a blocked action, or a
+   *  destructive-prompt title. */
+  warningMark: "⚠",
+  /** Uncoloured filled-circle marker: a plain bullet in a trust-prompt list, and the
+   *  no-issue/no-preview status icon for a collapsed or successful tool call. */
+  groupMarker: "●",
+  /** Paired with role.danger at every site — a failed command or a failed tool call. */
+  failureMark: "✗",
+  /** Prefixes a detail/explanation line subordinate to the line above it. */
+  detailConnector: "└ ",
+  /** Paired with role.success at every site — a successful command or a completed todo. */
+  successMark: "✓",
+  /** The selection-row cursor in a navigable list. */
+  selectionCursor: "▸ ",
+  /** Marks a user-prompt transcript entry. Same character as selectionCursor, deliberately kept
+   *  as its own name: this one is unconditional (always shown for this entry kind), not tied to
+   *  a navigable selection state, and a future redesign may want to treat them differently. */
+  promptMarker: "▸ ",
+  /** Uncoloured — "no result yet" / "not started" marker. */
+  pendingMark: "○",
+  /** The up/down navigation hint, always rendered as one two-character unit, never split. */
+  navigateArrows: "↑↓",
+  /** Paired radio markers for a single-select list: the currently-active option vs. every other
+   *  one. Always used as a pair — a list rendering one is rendering the other for its siblings. */
+  radioSelected: "(•)",
+  radioUnselected: "( )",
 } as const;

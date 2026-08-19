@@ -36,7 +36,25 @@ describe("theme — role values, pinned", () => {
 
 describe("theme — glyph values, pinned", () => {
   it("is exactly these glyphs, so adding or removing one is a visible edit", () => {
-    expect(Object.keys(glyph).sort()).toEqual(["bullet", "cursor", "entryMarker", "separator"].sort());
+    expect(Object.keys(glyph).sort()).toEqual(
+      [
+        "bullet",
+        "cursor",
+        "detailConnector",
+        "entryMarker",
+        "failureMark",
+        "groupMarker",
+        "navigateArrows",
+        "pendingMark",
+        "promptMarker",
+        "radioSelected",
+        "radioUnselected",
+        "selectionCursor",
+        "separator",
+        "successMark",
+        "warningMark",
+      ].sort()
+    );
   });
 
   it("holds today's rendered characters", () => {
@@ -45,13 +63,38 @@ describe("theme — glyph values, pinned", () => {
       entryMarker: "◆ ",
       separator: "─",
       bullet: "• ",
+      warningMark: "⚠",
+      groupMarker: "●",
+      failureMark: "✗",
+      detailConnector: "└ ",
+      successMark: "✓",
+      selectionCursor: "▸ ",
+      promptMarker: "▸ ",
+      pendingMark: "○",
+      navigateArrows: "↑↓",
+      radioSelected: "(•)",
+      radioUnselected: "( )",
     });
   });
 
-  it("every glyph is a single visible character (plus trailing space where the site needs one), not a multi-glyph string", () => {
+  /**
+   * Corrected, not just extended. This originally asserted every glyph was exactly one visible
+   * character after trimming trailing space — true of the first four glyphs (Part 1), false of
+   * two real ones added here: navigateArrows ("↑↓", two characters, no trailing space to trim)
+   * and the radioSelected/radioUnselected pair (three characters each, parens included). The
+   * original assertion encoded an assumption that happened to hold for its first four examples,
+   * not a real constraint — a glyph is a named, shared UI unit, not necessarily one code point.
+   * What actually matters: no glyph is empty, and no glyph is accidentally a whole sentence.
+   */
+  it("every glyph is a short, non-empty visible unit — not empty, not accidentally a sentence", () => {
     for (const [name, value] of Object.entries(glyph)) {
-      const bare = value.trimEnd();
-      expect([...bare].length, `glyph "${name}" (${JSON.stringify(value)}) is not one visible character`).toBe(1);
+      const bare = value.trim();
+      expect(bare.length, `glyph "${name}" (${JSON.stringify(value)}) is empty once trimmed`).toBeGreaterThan(0);
+      expect([...bare].length, `glyph "${name}" (${JSON.stringify(value)}) is suspiciously long for a glyph`).toBeLessThanOrEqual(3);
     }
+  });
+
+  it("radioSelected and radioUnselected are the same length — a UI pair must line up in a fixed-width column", () => {
+    expect([...glyph.radioSelected].length).toBe([...glyph.radioUnselected].length);
   });
 });

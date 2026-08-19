@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Box, Text, useInput, usePaste } from "ink";
 import { useStore } from "../store.js";
 import { loadDiskKeys, setDiskKey, removeDiskKey, maskKey } from "../../../api/diskKeys.js";
-import { role } from "../theme.js";
+import { role, glyph } from "../theme.js";
 
 export function ApiKeysView(): React.ReactElement {
   const { state, dispatch } = useStore();
@@ -80,7 +80,7 @@ export function ApiKeysView(): React.ReactElement {
             list.map((entry, i) => (
               <Box key={entry.provider}>
                 <Text color={i === sel ? role.caution : undefined}>
-                  {i === sel ? "▸ " : "  "}{entry.provider.padEnd(12)} {maskKey(entry.key).padEnd(20)} {entry.addedAt.slice(0, 10)}
+                  {i === sel ? glyph.selectionCursor : "  "}{entry.provider.padEnd(12)} {maskKey(entry.key).padEnd(20)} {entry.addedAt.slice(0, 10)}
                 </Text>
               </Box>
             ))

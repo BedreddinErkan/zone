@@ -62,7 +62,7 @@ function renderEntry(entry: TranscriptEntry, index: number, colWidth: number): R
       return (
         <Box key={index} backgroundColor={role.surface} width={colWidth}
              paddingX={2} marginTop={1} marginBottom={1}>
-          <Text bold color={role.accent}>{"▸ "}</Text>
+          <Text bold color={role.accent}>{glyph.promptMarker}</Text>
           <Box flexGrow={1}>
             <Text bold>{entry.text}</Text>
           </Box>

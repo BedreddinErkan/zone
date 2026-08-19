@@ -28,6 +28,7 @@ const REPO_ROOT = path.resolve(__dirname, "../../..");
  *  pass across the remaining components extends this list; the test starts guarding a file the
  *  moment its path is added here. */
 const EXTRACTED_FILES = [
+  // Part 1 (f39ce482)
   "src/cli/tui/components/Composer.tsx",
   "src/cli/tui/components/Transcript.tsx",
   "src/cli/tui/components/ApiKeysView.tsx",
@@ -36,6 +37,15 @@ const EXTRACTED_FILES = [
   "src/cli/tui/components/Spinner.tsx",
   "src/cli/tui/components/ModelModal.tsx",
   "src/cli/tui/components/StatusBar.tsx",
+  // Part 2, commit 1 — proves the new glyph vocabulary
+  "src/cli/tui/components/ErrorLine.tsx",
+  "src/cli/tui/components/ToolCallGroup.tsx",
+  "src/cli/tui/components/CommandTail.tsx",
+  "src/cli/tui/components/ToolCall.tsx",
+  "src/cli/tui/components/toolCallFormat.ts",
+  "src/cli/tui/components/PlanPanel.tsx",
+  "src/cli/tui/components/PermissionsView.tsx",
+  "src/cli/tui/components/EffortModal.tsx",
 ];
 
 const FORBIDDEN_COLOUR_LITERALS = [...new Set(Object.values(role))];

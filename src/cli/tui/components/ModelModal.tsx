@@ -5,7 +5,7 @@ import type { StoreAction } from "../store.js";
 import { USER_FACING_MODELS, getDefaultModelId } from "../../../llm/modelRegistry.js";
 import { saveDiskModel } from "../../../api/diskModel.js";
 import type { DiskModelSettings } from "../../../api/diskModel.js";
-import { role } from "../theme.js";
+import { role, glyph } from "../theme.js";
 
 interface Props {
   dispatch: Dispatch<StoreAction>;
@@ -56,7 +56,7 @@ export function ModelModal({ dispatch }: Props): React.ReactElement {
       );
     }
     const selected = flatIdx === sel;
-    const marker = m.id === currentModelId ? "(•)" : "( )";
+    const marker = m.id === currentModelId ? glyph.radioSelected : glyph.radioUnselected;
     const bg = selected ? role.selectionBackground : undefined;
     const retentionBadge = m.retention ? ` ⚠ ${m.retention.minDays}d retention` : "";
     const label = narrow

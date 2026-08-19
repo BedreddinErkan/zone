@@ -1,5 +1,6 @@
 import React from "react";
 import { Box, Text } from "ink";
+import { role, glyph } from "../theme.js";
 
 const META_LINE_REGEX = /^\[exit_code=|^\[zone-/;
 const TAIL_SUCCESS_LINES = 3;
@@ -22,14 +23,14 @@ export function CommandTail({
   const exitCodeMatch = detail.match(/^\[exit_code=(\d+)/m);
   const exitCode = exitCodeMatch ? parseInt(exitCodeMatch[1]) : null;
   const indicatorText = ok
-    ? "✓"
+    ? glyph.successMark
     : exitCode !== null && exitCode !== 0
-    ? `✗ exit ${exitCode}`
-    : "✗";
+    ? `${glyph.failureMark} exit ${exitCode}`
+    : glyph.failureMark;
   return (
     <Box flexDirection="column">
       <Box>
-        <Text color={ok ? "green" : "red"}>{indicatorText}</Text>
+        <Text color={ok ? role.success : role.danger}>{indicatorText}</Text>
       </Box>
       {tail.map((line, i) => (
         <Box key={i}>

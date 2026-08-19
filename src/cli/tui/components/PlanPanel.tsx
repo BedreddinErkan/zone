@@ -1,14 +1,15 @@
 import React from "react";
 import { Box, Text } from "ink";
 import type { RunTodo, TodoStatus } from "../../../core/todoLifecycle.js";
+import { role, glyph as themeGlyph } from "../theme.js";
 
 function glyphFor(status: TodoStatus): { glyph: string; color?: string; dim?: boolean } {
   switch (status) {
-    case "completed":   return { glyph: "✓", color: "green" };
-    case "in_progress": return { glyph: "▶", color: "cyan" };
+    case "completed":   return { glyph: themeGlyph.successMark, color: role.success };
+    case "in_progress": return { glyph: "▶", color: role.accent };
     case "skipped":     return { glyph: "⊘", dim: true };
     case "pending":
-    default:            return { glyph: "○", dim: true };
+    default:            return { glyph: themeGlyph.pendingMark, dim: true };
   }
 }
 
