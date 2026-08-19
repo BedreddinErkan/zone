@@ -34,7 +34,7 @@ import { isRunInFlight } from "./store-core.js";
 import { deriveCommitMessage, shouldAutoCommit } from "./commitMessage.js";
 import { executeCommit } from "./components/CommitModal.js";
 import { loadUserCommands, type UserCommand } from "./userCommands.js";
-import { shouldRedrawOnResize } from "./resize.js";
+import { shouldRedrawOnResize, applyResizeRedraw } from "./resize.js";
 import { getUsage } from "../../usage/usageTracker.js";
 import { startRemoteControlServer, type RemoteControlServerHandle } from "../../remote/controlServer.js";
 import { createRemoteControlAdapter } from "../../remote/remoteControlAdapter.js";
@@ -1303,10 +1303,14 @@ export async function runTui(
   );
 
   // ── Resize controller ────────────────────────────────────────────────────
-  // On narrowing, full-width live lines reflow into more physical rows than Ink
-  // erases → ghost rows. Fix: clear screen + scrollback, then bump the <Static>
-  // key (TRANSCRIPT_REMOUNT) so Ink re-emits the transcript cleanly.
-  // Widening is self-correcting (Ink over-erases); only narrowing acts.
+  // On any column change: clear screen + scrollback, then bump the <Static> key
+  // (TRANSCRIPT_REMOUNT) so Ink re-emits the transcript at the new width.
+  // Both halves are load-bearing and must stay paired — the remount re-emits the
+  // transcript either way, and the clear is what wipes the old copy so the
+  // re-emission replaces it instead of appending below it.
+  // Widening used to be skipped as "self-correcting"; it is not — see the
+  // measured explanation in resize.ts. The cost of acting on it is that widening
+  // now discards native scrollback too, the same cost narrowing has always paid.
   let prevCols = process.stdout.columns ?? 80;
   let resizeTimer: ReturnType<typeof setTimeout> | null = null;
   if (process.stdout.isTTY) {
@@ -1316,8 +1320,10 @@ export async function runTui(
         resizeTimer = null;
         const nextCols = process.stdout.columns ?? 0;
         if (shouldRedrawOnResize(prevCols, nextCols)) {
-          process.stdout.write("\x1b[2J\x1b[3J\x1b[H"); // clear screen + scrollback + cursor home
-          storeCapture.dispatch?.({ type: "TRANSCRIPT_REMOUNT" });
+          applyResizeRedraw(
+            (s) => process.stdout.write(s),
+            () => storeCapture.dispatch?.({ type: "TRANSCRIPT_REMOUNT" }),
+          );
         }
         prevCols = nextCols; // always update baseline (tracks widening too, no-op for clear)
       }, 100);
