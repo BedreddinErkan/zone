@@ -1,5 +1,5 @@
 import React from "react";
-import { Box, Text } from "ink";
+import { Box, Text, useStdout } from "ink";
 import { role } from "../theme.js";
 
 const FIND_MARKER = "--- FIND ---";
@@ -51,16 +51,21 @@ export function DiffView({ patch, maxLines = DEFAULT_MAX_DIFF_LINES }: { patch: 
   const shown = allLines.slice(0, cutIdx);
   const remaining = allLines.slice(cutIdx).filter((l) => l.kind !== "sep").length;
 
+  const { stdout } = useStdout();
+  // ToolCall.tsx wraps this component in <Box paddingLeft={2}>; that padding sits outside this
+  // component's own width, so it must be subtracted here or the background overruns the terminal.
+  const lineWidth = (stdout.columns ?? 80) - 2;
+
   return (
     <Box flexDirection="column">
       {shown.map((l, i) =>
         l.kind === "sep" ? (
           <Text key={i} dimColor>{"···"}</Text>
         ) : (
-          <Box key={i}>
-            <Text color={l.kind === "remove" ? role.danger : role.success}>{l.kind === "remove" ? "- " : "+ "}</Text>
+          <Box key={i} width={lineWidth} backgroundColor={role.surface}>
+            <Text color={role.brand}>{l.kind === "remove" ? "- " : "+ "}</Text>
             <Box flexGrow={1}>
-              <Text color={l.kind === "remove" ? role.danger : role.success}>{l.text}</Text>
+              <Text bold={l.kind === "add"} color={l.kind === "add" ? role.emphasis : role.muted}>{l.text}</Text>
             </Box>
           </Box>
         )

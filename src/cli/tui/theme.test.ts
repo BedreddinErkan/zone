@@ -2,11 +2,12 @@ import { describe, expect, it } from "vitest";
 import { role, glyph } from "./theme.js";
 
 describe("theme — role values, pinned", () => {
-  it("is exactly these nine roles, so adding or removing one is a visible edit", () => {
+  it("is exactly these ten roles, so adding or removing one is a visible edit", () => {
     expect(Object.keys(role).sort()).toEqual(
       [
         "accent",
         "activity",
+        "brand",
         "caution",
         "danger",
         "emphasis",
@@ -29,6 +30,8 @@ describe("theme — role values, pinned", () => {
       selectionBackground: "blue",
       muted: "gray",
       surface: "blackBright",
+      // The palette pass: new tenth role, the landing site's teal brand identity.
+      brand: "#22B3C4",
     });
   });
 

@@ -24,9 +24,11 @@ export const role = {
   accent: "cyan",
   /** Modal chrome on yes/no risk-decision prompts; notices and caveats; mid-level budget warning. */
   caution: "yellow",
-  /** Destructive options, errors, failed tool calls, diff removals, high budget warning. */
+  /** Destructive options, errors, failed tool calls, high budget warning. Diff removals moved to
+   *  the background-weight treatment in DiffView.tsx (the palette pass) — no longer a consumer. */
   danger: "red",
-  /** Affirmative options, diff additions, successful tool calls, completed todos. */
+  /** Affirmative options, successful tool calls, completed todos. Diff additions moved to the
+   *  background-weight treatment in DiffView.tsx (the palette pass) — no longer a consumer. */
   success: "green",
   /** The spinner. Its only use. */
   activity: "magenta",
@@ -39,6 +41,13 @@ export const role = {
   muted: "gray",
   /** Neutral background fill for a distinct content block. */
   surface: "blackBright",
+  /** The landing site's teal brand identity (`--signal-bright` in the landing's own CSS) — used
+   *  wherever the logo/mark motif itself appears: the diff view's marker accent and the splash
+   *  banner mark. Distinct from role.accent (generic UI chrome — modal borders, selection
+   *  foreground, prompt markers) even though both read as cyan-family; reusing role.accent here
+   *  would repaint every one of those unrelated surfaces to this exact hex, which no product
+   *  decision has asked for. */
+  brand: "#22B3C4",
 } as const;
 
 export const glyph = {
