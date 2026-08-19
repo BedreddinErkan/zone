@@ -447,7 +447,27 @@ export async function runOneShotInner(
       // Safety net: a non-problem task whose plan returned empty steps must still reach the modal.
       // Answer-only plans are excluded — that shape must survive to the modal
       // unconverted, not get force-stepped into concrete work nobody asked for.
-      if (preGeneratedPlan.steps.length === 0 && !isAnswerOnlyPlan(preGeneratedPlan)) {
+      //
+      // Narrative-only plans are excluded for the same reason, and this arm is the third shape
+      // this net has had to learn (b4488330 taught it the second). What it actually protects
+      // against is narrower than "empty steps": the schema has rejected a stepless plan carrying
+      // no reason and no narrative since 9ce93625, which predates this gate — so the case it
+      // catches is a stepless "nothing to do" returned for a task that asked for work. A
+      // narrative-only plan is the opposite shape: it HAS a plan and an intent, just no step
+      // decomposition, which is exactly what planInvestigation.ts's prompt tells the model it may
+      // return. Force-stepping it discarded the one artifact that prompt calls the thing the user
+      // reads and approves, and replaced it with prose from a cold call that was never shown it.
+      //
+      // planTerminalShape rather than a bare `!!narrative` predicate, deliberately: its precedence
+      // (steps > no_change > cannot_verify > answer > narrative) means a plan carrying BOTH a
+      // narrative and a noChangeReason still classifies as no_change and is still force-stepped.
+      // A naive `steps.length === 0 && !!plan.narrative` check would exempt that plan too, which
+      // widens this from a narrower condition into a hole.
+      if (
+        preGeneratedPlan.steps.length === 0 &&
+        !isAnswerOnlyPlan(preGeneratedPlan) &&
+        planTerminalShape(preGeneratedPlan) !== "narrative"
+      ) {
         // Hoisted purely so the synthesis marker can name what failed just before
         // it: `e` is scoped to the catch below and out of scope at the fallback.
         let forceStepsFailReason: string | undefined;
