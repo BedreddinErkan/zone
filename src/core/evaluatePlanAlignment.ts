@@ -51,7 +51,7 @@ export function evaluatePlanAlignment(input: {
   }
 
   const scopeMismatch =
-    isLikelyTargetedScope(input.plan.scopeSummary) &&
+    isLikelyTargetedScope(input.plan.scopeSummary ?? "") &&
     (changedFiles.length > 2 || (input.massScopeScore ?? 0) >= 40);
 
   if (scopeMismatch) {

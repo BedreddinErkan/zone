@@ -9,14 +9,18 @@ import { log } from "../utils/logger.js";
 export interface PlanReadyProposal {
   runId: string;
   planId: string;
-  objective: string;
+  /** Optional — mirrors ExecutionPlan.objective (this pass). See executionPlan.ts's
+   *  type-level comment for why. */
+  objective?: string;
   steps: Array<{ title: string; description: string; filesLikely: string[]; subagentEligible?: boolean }>;
   scopeNotes?: string;
   noChangeReason?: string;
   cannotVerifyReason?: string;
   answerOnlyReason?: string;
-  riskHints: string[];
-  scopeSummary: string;
+  /** Optional — mirrors ExecutionPlan.riskHints. */
+  riskHints?: string[];
+  /** Optional — mirrors ExecutionPlan.scopeSummary. */
+  scopeSummary?: string;
   /** D1/D3 (plan widening). */
   narrative?: string;
   filesLikely?: string[];
@@ -73,14 +77,16 @@ export function requestPlanApproval(input: {
     ts: number;
     title: string;
     planId: string;
-    planObjective: string;
+    // objective/riskHints/scopeSummary optional (this pass) — mirrors ExecutionPlan's own
+    // fields, all three demoted the same way and for the same reason.
+    planObjective?: string;
     planStepsJson: string;
     planScopeNotes?: string;
     planNoChangeReason?: string;
     planCannotVerifyReason?: string;
     planAnswerOnlyReason?: string;
-    planRiskHints: string[];
-    planScopeSummary: string;
+    planRiskHints?: string[];
+    planScopeSummary?: string;
     planNarrative?: string;
     planFilesLikely?: string[];
   }) => void;
@@ -136,7 +142,7 @@ export function requestPlanApproval(input: {
       type: "plan_ready_for_approval",
       runId: proposal.runId,
       ts: Date.now(),
-      title: `Plan ready: ${proposal.objective.slice(0, 80)}`,
+      title: `Plan ready: ${(proposal.objective ?? "").slice(0, 80)}`,
       planId,
       planObjective: proposal.objective,
       planStepsJson: JSON.stringify(proposal.steps),

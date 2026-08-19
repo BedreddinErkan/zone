@@ -285,7 +285,7 @@ export async function maybeExpandScopeForSymbolMatch(
     return { expanded: false, addedFile: null, reason: "no_plan" };
   }
   const symbols = extractPlanSymbols(
-    `${executionPlan.objective} ${executionPlan.scopeSummary}`
+    `${executionPlan.objective ?? ""} ${executionPlan.scopeSummary ?? ""}`
   );
   if (symbols.length === 0) {
     return { expanded: false, addedFile: null, reason: "no_symbols_in_plan" };

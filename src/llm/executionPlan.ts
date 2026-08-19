@@ -10,7 +10,12 @@ import { totalCost } from "../usage/pricing.js";
 import { round4 } from "../usage/usageTracker.js";
 
 export type ExecutionPlan = {
-  objective: string;
+  /** Demoted alongside riskHints/scopeSummary below (D1) — only generateExecutionPlan's own
+   *  prompt and synthesizeMinimalPlan's raw literal still populate this; the investigation
+   *  prompt (planInvestigation.ts's buildPrompt) no longer asks for it, so a schema-valid plan
+   *  can genuinely lack it. Every read site is guarded (`?? ""`), confirmed by execution, not
+   *  assumed — see the five real throw sites this pass found and fixed. */
+  objective?: string;
   steps: {
     title: string;
     description: string;
@@ -23,8 +28,10 @@ export type ExecutionPlan = {
      *  multi-file edits; "explore" = read-only investigation. */
     subagentType?: "explore" | "worker";
   }[];
-  riskHints: string[];
-  scopeSummary: string;
+  /** Demoted alongside objective/scopeSummary — see that comment. */
+  riskHints?: string[];
+  /** Demoted alongside objective/riskHints — see that comment. */
+  scopeSummary?: string;
   scopeNotes?: string;
   /** The free-form plan (D1). Markdown; the agent chooses its own sections. Optional at this
    *  type/schema level even though the investigation prompt (planInvestigation.ts's buildPrompt)
@@ -82,31 +89,43 @@ export function isAnswerOnlyPlan(plan: ExecutionPlan): boolean {
   return plan.steps.length === 0 && !!plan.answerOnlyReason;
 }
 
-export type PlanTerminalShape = "steps" | "no_change" | "cannot_verify" | "answer" | "unknown";
+export type PlanTerminalShape = "steps" | "no_change" | "cannot_verify" | "answer" | "narrative" | "unknown";
 
 /** The single discriminator every consumer branches on instead of a hand-rolled
  *  ternary over the (now three) mutually-exclusive reason fields. "unknown" — steps
- *  empty, no reason field at all — stays schema-REJECTED (superRefine below is
- *  unchanged in that respect), so this arm is an unreachable tripwire for any
- *  schema-validated plan: it can only fire if something built an ExecutionPlan-
- *  shaped object without going through executionPlanSchema.parse. House rule 1 says
- *  an unmatched case must be loud, not silently absorbed by whichever consumer runs
- *  next — if this ever fires, that is itself the finding. Emits inline: a plan
- *  classified "unknown" more than once (multiple consumers calling this on the same
+ *  empty, no reason field AND no narrative — stays schema-REJECTED (superRefine's
+ *  escape valve below only accepts a narrative, not nothing), so this arm is an
+ *  unreachable tripwire for any schema-validated plan: it can only fire if something
+ *  built an ExecutionPlan-shaped object without going through executionPlanSchema.parse.
+ *  House rule 1 says an unmatched case must be loud, not silently absorbed by whichever
+ *  consumer runs next — if this ever fires, that is itself the finding. Emits inline: a
+ *  plan classified "unknown" more than once (multiple consumers calling this on the same
  *  plan) emits more than once — acceptable given this arm should never fire at all
- *  under normal operation; not engineered around for that reason. */
+ *  under normal operation; not engineered around for that reason.
+ *
+ *  "narrative" is deliberately its own value, checked before the "unknown" fallback,
+ *  rather than folded into "unknown" — a narrative-only plan (steps empty, no reason
+ *  field, prose instead) is schema-VALID since this pass's E3 decision, not the
+ *  genuinely-impossible case "unknown" exists to flag. Reusing "unknown" for it would
+ *  have the tripwire fire routinely on legitimate output. dispatch.ts's
+ *  SHAPE_TO_REASON_FIELD maps this to the "unknown" reasonField bucket for
+ *  emitPlanEmptyApproval's telemetry — a stated, narrow precision cost: that one
+ *  marker's reasonField can no longer distinguish "narrative-only, working as
+ *  intended" from "genuinely malformed" by itself. */
 export function planTerminalShape(plan: ExecutionPlan): PlanTerminalShape {
   if (plan.steps.length > 0) return "steps";
   if (plan.noChangeReason) return "no_change";
   if (plan.cannotVerifyReason) return "cannot_verify";
   if (plan.answerOnlyReason) return "answer";
-  log("[zone-plan-unknown-terminal-shape]", JSON.stringify({ objective: plan.objective.slice(0, 80) }));
+  if (plan.narrative) return "narrative";
+  log("[zone-plan-unknown-terminal-shape]", JSON.stringify({ objective: (plan.objective ?? "").slice(0, 80) }));
   return "unknown";
 }
 
 const executionPlanSchema = z
   .object({
-    objective: z.string(),
+    // Optional — see the type-level comment. Matches narrative/filesLikely's own pattern.
+    objective: z.string().optional(),
     steps: z
       .array(
         z.object({
@@ -119,8 +138,10 @@ const executionPlanSchema = z
       )
       .min(0)
       .max(8),
-    riskHints: z.array(z.string()),
-    scopeSummary: z.string(),
+    // Optional — see the type-level comment.
+    riskHints: z.array(z.string()).optional(),
+    // Optional — see the type-level comment.
+    scopeSummary: z.string().optional(),
     scopeNotes: z.string().optional(),
     // Uncapped, same treatment as scopeSummary/scopeNotes above and for the same reason —
     // the only prompt that asks for this (planInvestigation.ts's buildPrompt) states no length,
@@ -146,11 +167,18 @@ const executionPlanSchema = z
       // When steps is empty, exactly one of noChangeReason / cannotVerifyReason /
       // answerOnlyReason must be set — zero stays rejected, same as before this
       // field existed; a hard rejection is the loudest response to a genuinely
-      // malformed model output.
-      if (reasonsSet === 0) {
+      // malformed model output. E3's escape valve: a non-empty narrative is accepted
+      // as its own evidence the plan is complete and intentional — none of the three
+      // reason fields describe "found something to change but chose not to decompose
+      // it into steps" (each is specifically about finding nothing to change; read
+      // verbatim off the investigation prompt's own Rules text), so a narrative-first
+      // plan with no natural decomposition has nothing truthful to report through any
+      // of them. Still rejects the case this existed for: reasonsSet===0 AND no
+      // narrative either is a genuinely empty, malformed response.
+      if (reasonsSet === 0 && !data.narrative) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: "steps must be non-empty unless noChangeReason, cannotVerifyReason, or answerOnlyReason is set",
+          message: "steps must be non-empty unless noChangeReason, cannotVerifyReason, answerOnlyReason, or narrative is set",
           path: ["steps"],
         });
       }
@@ -310,14 +338,14 @@ export function formatExecutionPlanForPrompt(plan?: ExecutionPlan | null): strin
     .join("\n");
 
   const lines = [
-    `Objective: ${plan.objective}`,
+    `Objective: ${plan.objective ?? ""}`,
     "Steps:",
     steps,
-    `Scope: ${plan.scopeSummary}`,
+    `Scope: ${plan.scopeSummary ?? ""}`,
   ];
-  if (plan.riskHints.length > 0) {
+  if ((plan.riskHints ?? []).length > 0) {
     lines.push("Risks:");
-    lines.push(plan.riskHints.map((hint) => `- ${hint}`).join("\n"));
+    lines.push((plan.riskHints ?? []).map((hint) => `- ${hint}`).join("\n"));
   }
   if (plan.scopeNotes) {
     lines.push("Caveats:");

@@ -136,6 +136,26 @@ describe("requestPlanApproval + resolvePlanApproval", () => {
     resolvePlanApproval({ planId: PROPOSAL.planId, runId: "run-plan-001", decision: "reject" });
     await p;
   });
+
+  // Proven live this pass: threw synchronously inside `new Promise(...)` — "Cannot read
+  // properties of undefined (reading 'slice')" — before the `?? ""` guard existed. autoApprove
+  // short-circuits before ever reaching this line, so only the real (non-autoApprove) emit path
+  // exercises it — the exact path this test uses.
+  it("does not throw when proposal.objective is absent (narrative-only plan, non-autoApprove path)", async () => {
+    const { emit, events } = makeEmit();
+    const narrativeOnly: PlanReadyProposal = {
+      runId: "run-narrative-001",
+      planId: "plan-narrative-001",
+      steps: [],
+      narrative: "## Narrative-only plan\n\nNo objective field at all.",
+    };
+    expect(() => requestPlanApproval({ proposal: narrativeOnly, emit: emit as any })).not.toThrow();
+    await Promise.resolve();
+    expect(events).toHaveLength(1);
+    const evt = events[0] as Record<string, unknown>;
+    expect(evt["title"]).toBe("Plan ready: ");
+    resolvePlanApproval({ planId: narrativeOnly.planId, runId: "run-narrative-001", decision: "reject" });
+  });
 });
 
 describe("autoApprove bypass", () => {

@@ -46,6 +46,13 @@ const SHAPE_TO_REASON_FIELD = {
   no_change: "noChangeReason",
   cannot_verify: "cannotVerifyReason",
   answer: "answerOnlyReason",
+  // "narrative" (steps empty, no reason field, prose instead — schema-valid since this
+  // pass's E3 decision) has no real reasonField to report through emitPlanEmptyApproval's
+  // three-value union; reusing "unknown" is a stated, narrow telemetry precision cost —
+  // that one marker's reasonField can no longer distinguish "narrative-only, working as
+  // intended" from "genuinely malformed" by itself. See executionPlan.ts's
+  // PlanTerminalShape comment for the full reasoning.
+  narrative: "unknown",
   unknown: "unknown",
 } as const;
 

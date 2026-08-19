@@ -632,6 +632,105 @@ describe("tryParseExecutionPlan", () => {
   });
 });
 
+// The test that was missing: what buildPrompt asks the model to produce must parse. The prior
+// pass added 20 tests and 6 mutations without this one, because every fixture supplied the full
+// legacy shape by hand — none ever asked "does what the prompt now requests actually parse". The
+// fixture below is DERIVED from buildPrompt's own returned text (brace-depth field extraction,
+// not a hand-written field list), so a future prompt edit changes what this test checks rather
+// than leaving it silently checking a stale shape.
+describe("tryParseExecutionPlan — the prompted shape actually parses (was missing)", () => {
+  // Isolates the top-level `{ ... }` following "JSON shape:\n" by brace-balance, mirroring the
+  // establish script this pass used, not a hand-maintained duplicate of it.
+  function extractShapeBlock(prompt: string): string {
+    const marker = "JSON shape:\n{";
+    const start = prompt.indexOf(marker);
+    if (start === -1) throw new Error("buildPrompt: no 'JSON shape:' block found — prompt shape changed");
+    const braceStart = start + marker.length - 1;
+    let depth = 0, i = braceStart;
+    for (; i < prompt.length; i++) {
+      if (prompt[i] === "{") depth++;
+      else if (prompt[i] === "}") { depth--; if (depth === 0) { i++; break; } }
+    }
+    return prompt.slice(braceStart, i);
+  }
+
+  // Depth 1 = keys directly inside the outer {}. Depth is computed from brace/bracket count
+  // in the text preceding each matched key, not from a fixed indentation assumption.
+  function topLevelFieldNames(block: string): string[] {
+    const names: string[] = [];
+    const keyRe = /"([A-Za-z]+)":/g;
+    let m: RegExpExecArray | null;
+    while ((m = keyRe.exec(block)) !== null) {
+      const before = block.slice(0, m.index);
+      let d = 0;
+      for (const c of before) { if (c === "{" || c === "[") d++; else if (c === "}" || c === "]") d--; }
+      if (d === 1) names.push(m[1]);
+    }
+    return names;
+  }
+
+  // Concrete, correctly-typed values for every field the prompt could plausibly name. A field
+  // present in the prompt's shape with no entry here fails the test loudly (via the `must have a
+  // typed value` assertion below) rather than silently being omitted from the constructed object —
+  // that assertion is the drift detector: it fires the moment the prompt starts naming a field
+  // this list doesn't know about.
+  const KNOWN_VALUES: Record<string, unknown> = {
+    narrative: "## Derive the pattern from the map\n\nOne source of truth for the curly-quote set.",
+    filesLikely: ["src/utils/smartQuotes.ts"],
+    steps: [{
+      title: "Derive the regex from SMART_QUOTE_MAP",
+      description: "Build the character class from Object.keys(SMART_QUOTE_MAP) instead of a literal.",
+      filesLikely: ["src/utils/smartQuotes.ts"],
+      subagentEligible: false,
+    }],
+    requestedTools: undefined,
+    noChangeReason: undefined,
+    cannotVerifyReason: undefined,
+    answerOnlyReason: undefined,
+  };
+
+  function buildCompliantObject(steps: unknown[]): Record<string, unknown> {
+    const prompt = buildPrompt("Fix the thing", ["src/a.ts"], true);
+    const fields = topLevelFieldNames(extractShapeBlock(prompt));
+    expect(fields.length).toBeGreaterThan(0); // the extraction itself must find something
+    const obj: Record<string, unknown> = {};
+    for (const f of fields) {
+      if (!Object.prototype.hasOwnProperty.call(KNOWN_VALUES, f)) {
+        throw new Error(`buildPrompt's JSON shape now names "${f}" — add a typed value to KNOWN_VALUES`);
+      }
+      if (KNOWN_VALUES[f] !== undefined) obj[f] = KNOWN_VALUES[f];
+    }
+    obj.steps = steps;
+    return obj;
+  }
+
+  it("the prompted shape with steps present parses", () => {
+    const obj = buildCompliantObject([{
+      title: "Derive the regex from SMART_QUOTE_MAP",
+      description: "Build the character class from Object.keys(SMART_QUOTE_MAP).",
+      filesLikely: ["src/utils/smartQuotes.ts"],
+    }]);
+    const result = tryParseExecutionPlan("```json\n" + JSON.stringify(obj) + "\n```");
+    expect(result).not.toBeNull();
+    expect(result!.narrative).toBe(obj.narrative);
+    expect(result!.filesLikely).toEqual(obj.filesLikely);
+  });
+
+  it("the prompted shape with steps:[] parses — the Rules text's own invitation to omit decomposition", () => {
+    const obj = buildCompliantObject([]);
+    const result = tryParseExecutionPlan("```json\n" + JSON.stringify(obj) + "\n```");
+    expect(result).not.toBeNull();
+    expect(result!.narrative).toBe(obj.narrative);
+  });
+
+  it("the prompted shape with steps:[] and NO narrative still correctly rejects — the escape valve is narrative-gated, not a blanket relaxation", () => {
+    const obj = buildCompliantObject([]);
+    delete obj.narrative;
+    const result = tryParseExecutionPlan("```json\n" + JSON.stringify(obj) + "\n```");
+    expect(result).toBeNull();
+  });
+});
+
 // E4: noChangeReason / isNoChangePlan — reproduce-first honest outcome
 describe("E4: noChangeReason / isNoChangePlan", () => {
   const VALID_PLAN = {
@@ -1017,6 +1116,19 @@ describe("formatExecutionPlanForPrompt", () => {
   it("returns an empty string when no plan is given", () => {
     expect(formatExecutionPlanForPrompt(undefined)).toBe("");
     expect(formatExecutionPlanForPrompt(null)).toBe("");
+  });
+
+  // Proven live this pass: throws "Cannot read properties of undefined (reading 'length')"
+  // before the `?? []` guard existed. A narrative-only plan (objective/riskHints/scopeSummary
+  // all absent) reaching this function un-validated — e.g. via a stored envelope — must not crash.
+  it("does not throw when objective/riskHints/scopeSummary are absent (narrative-only plan)", () => {
+    const narrativeOnly: ExecutionPlan = {
+      steps: [],
+      narrative: "## Narrative-only plan\n\nNo legacy fields at all.",
+    };
+    expect(() => formatExecutionPlanForPrompt(narrativeOnly)).not.toThrow();
+    const text = formatExecutionPlanForPrompt(narrativeOnly);
+    expect(text).not.toContain("Risks:");
   });
 
   it("renders objective, steps, and scope unchanged when riskHints is empty", () => {
