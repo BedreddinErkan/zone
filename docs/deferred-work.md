@@ -9239,16 +9239,68 @@ this pass's to do, and the criterion stands unamended. **The prompt-audit delta 
 the with-notice and without-notice reconstructions differ by exactly the notice's own length, and so do the
 two executed prompts, because the audit's omission is carried identically by both sides of the subtraction.
 
-**Bucket, re-decided rather than inherited a second time: it stays Blocked on data.** The competing reading
+**Bucket, re-decided rather than inherited a third time: it stays Blocked on data.** The competing reading
 was checked and rejected. Against the move: closing this item under its own current criterion requires a run in which
 every task uses the shell, and no such observation exists — the same shape items 110 and 143 sit in the
-bucket for. For the move, in the form the argument first took: the observation exists and what remained was
+bucket for. **Both of those have since been tested individually and the claim holds**, re-read from their
+own current bucket sentences: each still waits on an observation that has not been made. **One refinement
+belongs with it, because the claim is about shape and a reader will take it for distance.** What 110 and
+143 wait on is traffic — a forced-tier arm against a population of two, and a run shape that stopped —
+while what this item and item 157 wait on is a decision to spend cents through a harness that works
+today. Same bucket by the written definition, and not the same distance from an answer. For the move, in the form the argument first took: the observation exists and what remained was
 item 149's judgment, a decision rather than data, the shape item 38 and item 46 sit in Neither for. **That
 half is now settled and it did not change the decision.** The judgment has been made, and because it is
 explicitly not an exception to this item's criterion it cannot close this item — it can only have motivated
 a further registered revision, and on the branch it landed it does not even do that. Reading the bucket as
 satisfied by any conceivable revision would empty it, since every entry in it could be closed by rewriting
 its own bar. What this item waits on is unchanged and is a run.
+
+**Every figure in this entry re-derived from the surviving captures, through the committed scorer, at no
+cost — and all of them reproduce.** Per-task shell counts 1, 1, 2, 1, 3, 1, 0; discovery counts
+1, 1, 0, 1, 3, 1, 0; nine shell calls across seven tasks, six of seven using the shell; per-task costs
+matching this entry's own list to the cent and the arm total to `$0.292629` exactly. The third
+instrument-is-wrong condition was re-checked in the same pass: every task's scored shell count agrees
+with the raw call list in its own record, seven of seven, zero disagreements. **This is the first entry
+tested in this arc whose own figures needed no correction.**
+
+**And the captures this entry recorded its figures against, rather than pointing at, are still there.**
+Thirty-four files under the per-repo audits directory, including this arm's own two and every T7 cell
+since. The precaution was right and the loss it guarded against has not happened yet.
+
+**What this entry is actually open on, stated as a count rather than left to inference: T7 alone.** Six
+of the seven tasks clear the revised criterion already, and only the seventh does not. Across every
+pinned-model T7 cell ever captured — the five pre-fix controls and item 157's three post-fix — the
+count is **one of eight**, and the single success is item 157's. So the closing branch turns on one
+cell at roughly a one-in-three rate, and this entry's own deferral of a stochastic-cell scoring rule is
+what stands between that rate and a defensible close. A pass buying an arm today buys a one-in-three
+chance of closing and a two-in-three chance of a result this entry has already ruled un-rerunnable.
+
+**A fourth instrument-is-wrong condition this entry never had, now mechanised.** The three registered
+conditions cover the offered set, the prompt-audit delta and the scored-versus-raw agreement. **None of
+them covers build freshness**, and the instrument compiles from a build directory — so a run against a
+`dist/` behind `src/` measures the old prompt and bills for it. That is not hypothetical: checked this
+pass, `dist/` was five source files behind. Item 157 knew the risk and could only address it by hand,
+by inspecting its own dumps for the scoped bullet afterwards. The probe now refuses to start against a
+stale build, before predictions, before key resolution and before the credit probe, and the refusal was
+verified by running it — it exits without a single billed call. **The fix is not this instrument's
+alone:** four scripts in that directory both import the build directory and spend money, and all four
+were unguarded; the guard lives in the shared staleness module they now all call.
+
+**An input to the assembled prompt that neither this entry nor its neighbours record.** The project
+memory file is read unconditionally into the system prompt — 3,916 characters as of this pass, against
+a 4,078-token measured input — and it is untracked, carries no commit history, and was last modified
+2026-08-17, after this arm ran on the 14th. A re-run therefore varies it alongside everything else, and
+unlike the notice-and-preamble confound this entry already names, this one cannot be reconstructed.
+
+**The dumps and the executed prompt are different artefacts, and only one of them can be compared
+across runs.** Three dump generations exist and they differ by two *instrument* fixes rather than by
+any prompt change: this arm's own dumps still render `PATCH RULES`, `TASK SUBAGENTS` and `SEARCH FIRST`
+— write-tool blocks the question archetype never sends — while item 153's and item 157's do not, and
+only item 157's carries a project-memory block. That is item 150's finding, quantified. **The executed
+prompts are comparable, through input tokens:** all five control cells report 4,078 and item 157's
+three report 4,095 to 4,097, a rise consistent with item 156's own ninety-eight characters. A worry
+that item 153's four cells ran a different prompt from this arm's is raised and dissolved by that
+agreement.
 
 **Where the run's own artefacts are, and their durability.** The two capture files, carrying every tool call
 and the scored comparison, sit under the per-repo audits directory alongside the earlier OpenAI ones. That
@@ -9299,7 +9351,9 @@ not this item's: it has a real decision rule and no instrument whatever, where t
 and a broken referent, and one bucket line cannot describe both.
 
 **Where the code lives:** the notice is `llm/toolAbsenceNotice.ts`, `buildToolAbsenceBlock`; the
-prefix-suppression rule is inside it. The splice fix is in `assembleAgentSystemPrompt`, `llm/agentLoop.ts`.
+prefix-suppression rule is inside it. The instrument's build-freshness guard is `assertBuildFresh` in
+the shared staleness module beside the probe, called from all four cost-bearing scripts, with the
+per-script invariant checked against the real tree in that module's own test file. The splice fix is in `assembleAgentSystemPrompt`, `llm/agentLoop.ts`.
 See item 88 for the notice this regression came from, and item 89 for a different, unrelated way the same
 notice can go stale, and item 93 for the second surface this item's own mechanism was applied to in advance.
 See item 110 for the other pending measurement in this arc: it carries its own registered predictions and
@@ -13795,12 +13849,42 @@ a six-cent estimate for four. The searching cell cost nearly four times a declin
 against one — which is why the bound bit after three. The estimate's error was in the per-cell figure for a
 searching cell, not in the direction: the interesting outcome was correctly predicted to be the dearer one.
 
-**Bucket, decided rather than inherited: Blocked on data.** The registration's own question — does the fix
+**Every figure here re-derived from the captures through the committed scorer, and all of them
+reproduce.** Control: shell calls on zero of five. Post-fix: one of three. Cost: `$0.087522` against
+"just under nine cents". **And this entry's own claim that the prompt grew by ninety-eight characters
+and nothing else is corroborated by an instrument it did not use** — measured input tokens are 4,078 on
+every one of the five control cells and 4,095 to 4,097 on the three post-fix ones, a rise consistent
+with that growth and with no other change.
+
+**One association spotted in those captures, checked, and withdrawn.** Both T7 cells that used the shell
+report non-zero cached tokens while all seven that declined report zero — a clean two-of-two against
+zero-of-seven. It does not survive: cached tokens imply more than one iteration in every capture row,
+the searching cell's own per-iteration record shows its first call cold, and every declining cell ran
+exactly one iteration. **Cache warmth is a consequence of running longer, not a cause of searching**,
+and this entry's own statement that the control cells were as cold as its first cell stands.
+
+**The added instrument condition this entry had to check by hand is now mechanical.** Its fourth
+signal — that the dumps carry the scoped bullet, so a run on a stale build is not read as a run on the
+fixed prompt — was a post-hoc inspection of an artefact. The probe now refuses to start against a build
+behind source, before any billed call, and so do the three other scripts in that directory that import
+the build and spend; the check was previously absent from all four.
+
+**What closing costs, priced from real cells rather than estimated.** The design this entry specifies is
+eleven further cells: six on the measured arm and five on the control, and the control's must run on the
+pre-fix prompt, which needs a checkout and a rebuild. Against the measured per-cell figures — a
+declining cell at roughly one and a half cents, a searching one at nearly six — that is about seventeen
+cents if every cell declines and about thirty-four at the rate observed so far. **It is also the cheaper
+of the two buys in this cluster and the one that reaches item 90's only open task**, since that entry
+is open on this task alone.
+
+**Bucket, re-decided rather than inherited: Blocked on data.** The registration's own question — does the fix
 restore searching — has an answer that is not separable from variance at this n, so the observation that
 would settle it still does not exist. Closing needs both arms near ten, per this entry's own power
 paragraph, and the further control cells must run on the pre-fix prompt. Against: Closed would require the
 question answered, and three in eight is not an answer; Neither would require no fix proposed, and the
-design that would settle it is specified here.
+design that would settle it is specified here. Precedents read this pass: items 198 and 212 close on the
+entry's own condition being discharged and this one is not; item 210 closes on another entry's remedy
+landing and nothing has landed; item 181 is Neither on no observation being missing, and one is missing.
 
 **Where the code lives:** the instrument is `scripts/notice-regression-probe.mjs` with its single-task
 selection; the directive is item 156's. See item 156 for the defect and the fix, item 153 for the control

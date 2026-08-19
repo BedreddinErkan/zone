@@ -71,27 +71,68 @@ function walkSourceFiles(srcRoot) {
   return out;
 }
 
-function main() {
-  const srcDir = process.env.ZONE_BUILD_STALENESS_SRC_DIR
-    ? path.resolve(process.env.ZONE_BUILD_STALENESS_SRC_DIR)
-    : path.join(repoRoot, "src");
+/**
+ * Resolves the build proxy and walks the source tree, returning the same one-line
+ * message describeBuildStaleness produces, or null when dist/ is current. The single
+ * source of truth for "is dist/ behind src/": main() prints it, and every cost-bearing
+ * script in this directory aborts on it through assertBuildFresh below.
+ *
+ * Returns `{ message, srcDir, proxyPath }` rather than the bare string so a caller that
+ * aborts can name what it checked — a guard that says only "stale" sends the reader
+ * looking for which tree it walked.
+ */
+export function computeBuildStaleness({ srcDir: srcDirArg, proxyPath: proxyArg } = {}) {
+  const srcDir = srcDirArg
+    ? path.resolve(srcDirArg)
+    : process.env.ZONE_BUILD_STALENESS_SRC_DIR
+      ? path.resolve(process.env.ZONE_BUILD_STALENESS_SRC_DIR)
+      : path.join(repoRoot, "src");
 
-  let proxyPath;
-  if (process.env.ZONE_BUILD_STALENESS_PROXY_PATH) {
-    proxyPath = path.resolve(process.env.ZONE_BUILD_STALENESS_PROXY_PATH);
-  } else {
-    const pkg = JSON.parse(readFileSync(path.join(repoRoot, "package.json"), "utf8"));
-    const binRel = pkg.bin?.zone;
-    if (!binRel) {
-      process.exit(0);
-      return;
+  let proxyPath = proxyArg ? path.resolve(proxyArg) : null;
+  if (!proxyPath) {
+    if (process.env.ZONE_BUILD_STALENESS_PROXY_PATH) {
+      proxyPath = path.resolve(process.env.ZONE_BUILD_STALENESS_PROXY_PATH);
+    } else {
+      const pkg = JSON.parse(readFileSync(path.join(repoRoot, "package.json"), "utf8"));
+      const binRel = pkg.bin?.zone;
+      if (!binRel) return { message: null, srcDir, proxyPath: null };
+      proxyPath = path.join(repoRoot, binRel);
     }
-    proxyPath = path.join(repoRoot, binRel);
   }
 
   const buildTimeMs = existsSync(proxyPath) ? statSync(proxyPath).mtimeMs : null;
   const sourceFiles = existsSync(srcDir) ? walkSourceFiles(srcDir) : [];
-  const message = describeBuildStaleness({ buildTimeMs, sourceFiles });
+  return { message: describeBuildStaleness({ buildTimeMs, sourceFiles }), srcDir, proxyPath };
+}
+
+/**
+ * Throws when dist/ is behind src/. For instruments that BOTH import dist/ and spend
+ * money: a stale build means the run measures the harness rather than the system, and
+ * the spend buys nothing. Reporting is enough for `npm test`, whose own header comment
+ * records that a stale build is sometimes deliberate; it is not enough before a billed
+ * call, where the deliberate case does not exist — an instrument compiled from an old
+ * tree cannot answer a question about the current one.
+ *
+ * Call it BEFORE the first billed call, not merely somewhere in the file. The ordering
+ * is what the guard is for, and checkBuildStaleness.test.ts asserts it per script
+ * against the real tree rather than trusting this sentence.
+ */
+export function assertBuildFresh(label) {
+  const { message, srcDir } = computeBuildStaleness();
+  if (!message) return;
+  throw new Error(
+    `[${label}] refusing to run against a stale build — this instrument imports dist/ and makes ` +
+    `billed calls, so a stale dist/ measures the harness rather than the system.\n  ${message}\n  ` +
+    `(source tree walked: ${srcDir}) Run \`npm run build\` and try again.`
+  );
+}
+
+function main() {
+  const { message, proxyPath } = computeBuildStaleness();
+  if (proxyPath === null) {
+    process.exit(0);
+    return;
+  }
   if (message) console.log(message);
   process.exit(0);
 }

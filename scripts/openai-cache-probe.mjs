@@ -34,6 +34,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 
 import { responsesConvertParams } from "../dist/llm/openaiAdapter/responsesConvertParams.js";
+import { assertBuildFresh } from "./checkBuildStaleness.mjs";
 
 // ── Config ───────────────────────────────────────────────────────────────────
 const MODEL = "gpt-5.6-luna";
@@ -126,6 +127,8 @@ function summarize(armName, rows) {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
+  assertBuildFresh("openai-cache-probe");
+
   sdk = new OpenAI({ apiKey: loadApiKey(), timeout: 180_000, maxRetries: 0 });
 
   // ── Run ────────────────────────────────────────────────────────────────────

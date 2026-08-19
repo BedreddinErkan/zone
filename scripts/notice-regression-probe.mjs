@@ -82,6 +82,7 @@ import { buildDispatcherCapabilityFilter, QUESTION_PIPELINE } from "../dist/llm/
 import { buildToolAbsenceBlock } from "../dist/llm/toolAbsenceNotice.js";
 import { createLLMClient } from "../dist/llm/factory.js";
 import { readProjectMemoryBlock } from "../dist/memory/projectMemory.js";
+import { assertBuildFresh } from "./checkBuildStaleness.mjs";
 
 const REPO = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 const DEFAULT_MODEL = { anthropic: "claude-sonnet-4-6", openai: "gpt-5.5" };
@@ -497,6 +498,18 @@ async function main() {
       `Arms A, B, and C were all measured on claude-sonnet-4-6 — this run is a PORTABILITY measurement, ` +
       `not a verification of item 90's or item 91's pending observation.`
     );
+  }
+
+  // Before predictions, keys, or any billed call: this instrument imports dist/, so a
+  // dist/ behind src/ measures the OLD prompt and bills for it. Item 157 could only
+  // check that by hand, by inspecting its own dumps for the scoped bullet afterwards;
+  // this is that check, mechanised and moved ahead of the spend rather than after it.
+  // Ahead of loadDiskKeys too, which can migrate a legacy key file and therefore write.
+  try {
+    assertBuildFresh("notice-arm");
+  } catch (e) {
+    console.error(String(e && e.message ? e.message : e));
+    process.exit(5);
   }
 
   // Predictions are loaded BEFORE any key resolution or model call, per design —

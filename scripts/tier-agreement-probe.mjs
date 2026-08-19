@@ -58,6 +58,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { homedir } from "node:os";
 import { classifyTask } from "../dist/llm/taskClassifier.js";
+import { assertBuildFresh } from "./checkBuildStaleness.mjs";
 
 const REPO = process.cwd();
 const args = process.argv.slice(2);
@@ -184,6 +185,8 @@ function isTransportFallback(r) {
 }
 
 async function main() {
+  assertBuildFresh("tier-agreement-probe");
+
   const labels = JSON.parse(fs.readFileSync("scripts/tier-agreement-labels.json", "utf8"));
   const apiKey = readOpenAiKey();
   const results = [];

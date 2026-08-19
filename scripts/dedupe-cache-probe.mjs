@@ -19,6 +19,7 @@ import { pruneStaleReads } from "../dist/llm/contextPruner.js";
 import { R2ShimProcessor } from "../dist/llm/history/R2ShimProcessor.js";
 import { convertParams } from "../dist/llm/anthropicAdapter/convertParams.js";
 import { ZONE_TOOLS } from "../dist/tools/toolDefinitions.js";
+import { assertBuildFresh } from "./checkBuildStaleness.mjs";
 
 // ── Config ───────────────────────────────────────────────────────────────────
 const N_TURNS = 12;
@@ -371,6 +372,8 @@ function sanityCheck(rows, label) {
 async function main() {
   console.log("=== dedupe-cache-probe ===");
   console.log(`Model: ${MODEL} | Turns: ${N_TURNS} | max_tokens: ${MAX_TOKENS}`);
+
+  assertBuildFresh("dedupe-cache-probe");
 
   const apiKey = loadApiKey();
   const anthropic = new Anthropic({ apiKey, maxRetries: 0 });
