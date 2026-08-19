@@ -30,8 +30,11 @@ export const role = {
   /** Affirmative options, successful tool calls, completed todos. Diff additions moved to the
    *  background-weight treatment in DiffView.tsx (the palette pass) — no longer a consumer. */
   success: "green",
-  /** The spinner. Its only use. */
-  activity: "magenta",
+  /** The spinner, rendering the brand mark's own diagonal in motion. Its only use. Same value as
+   *  role.brand by coincidence of this pass's outcome, not by structural necessity — kept as its
+   *  own role so the spinner's colour stays independently reasoned and independently revertible
+   *  from the diff/banner treatment that introduced role.brand. */
+  activity: "#22B3C4",
   /** Stronger-than-default text: section headers within a modal, selected-row foreground,
    *  a highlighted value. */
   emphasis: "white",
@@ -58,7 +61,9 @@ export const glyph = {
    *  with it (role.accent or role.muted) varies by entry kind; the glyph itself does not. */
   entryMarker: "◆ ",
   /** Horizontal rule, drawn to the terminal width. Also used undivided as a short decorative
-   *  flourish (IterMarker) — same character, same role, shorter run. */
+   *  flourish (IterMarker) — same character, same role, shorter run. Also the spinner's 180°
+   *  rotation frame (the palette pass) — the diagonal mark, momentarily horizontal, is the same
+   *  glyph as the rule rather than a disconnected local literal of the same character. */
   separator: "─",
   /** List-item prefix. Appears both plain (a risk-hint line) and role.accent-coloured (a markdown
    *  list item) — the glyph is the shared part, the colour is not. */

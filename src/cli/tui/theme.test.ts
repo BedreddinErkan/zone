@@ -25,7 +25,9 @@ describe("theme — role values, pinned", () => {
       caution: "yellow",
       danger: "red",
       success: "green",
-      activity: "magenta",
+      // The palette pass: was "magenta"; now the same brand teal as role.brand (independently
+      // reasoned and independently revertible — see both roles' own doc comments in theme.ts).
+      activity: "#22B3C4",
       emphasis: "white",
       selectionBackground: "blue",
       muted: "gray",

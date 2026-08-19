@@ -132,8 +132,11 @@ describe("TUI.2 transcript rendering", () => {
     await wait(50); // no label debounce — spinner shows immediately
 
     const frame = lastFrame() ?? "";
-    const anyStarFrame = ["✦", "✧", "✶", "✷", "✸", "✹", "✺"].some((f) => frame.includes(f));
-    expect(anyStarFrame).toBe(true); // star frame shown when active
+    // The palette pass replaced the star cycle with the logo mark's own rotating diagonal
+    // (Spinner.tsx). "╱" is FRAMES[0], the frame still showing at this low an advance-time, and
+    // — unlike the other three frames in that cycle — does not collide with any other glyph the
+    // app shell already renders (see Spinner.test.tsx's own comment on this).
+    expect(frame.includes("╱")).toBe(true); // spinner's diagonal frame shown when active
     unmount();
   });
 
