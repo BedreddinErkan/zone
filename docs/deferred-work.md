@@ -14073,14 +14073,90 @@ is asserted as likelier — the historical 5/5-declining pattern belonged to a *
 condition than the frozen-memory arm this harness now runs, so that pattern cannot be assumed to
 carry over to the very comparison being built to test it.
 
-**Bucket, re-decided rather than inherited: it stays Blocked on data, on a corrected blocker.** The
-observation that would settle the question still does not exist. Against Closed: three in eight is
-not an answer, and under the correctness definitions there is no post-fix signal at all. Against
-Actionable now: an observation, not a code change, is what remains, and none is proposed here.
-Against Neither: a design is specified, built, and priced. **The correction a future reader needs
-is narrower now than it was: the control-arm instrument is no longer missing — cost is the only
-thing standing between this entry and its next five cells, run under the frozen-memory condition
-above.**
+**The arms ran. The result is INDETERMINATE under a rule fixed before the first cell, and the
+pre-commitment is what made it so.**
+
+**The design, and why it is not the one this entry specified.** This entry's own "five further
+control cells" and "both arms near ten" both assumed pooling with the historical cells — pooling
+that the memory-condition finding refused. **Neither number survives the removal of its premise**,
+and treating one as void while inheriting the other would have been the same error twice. Arm size
+was chosen on the power curve instead: against the observed rate, 10→15 cells/arm buys **+35.1
+points** and 15→20 buys **+5.7**, so 15 is the knee. **15 v 15, 30 cells.**
+
+**A second, larger correction: a worktree at the pre-fix commit is not a control.** The harness this
+entry recorded as built — `5ee8d842`, install, build, frozen memory — differs from HEAD in **20 of
+the modules the per-task call actually traverses, ~800 lines**, `agentLoop.ts` alone +188/−21. It
+would have measured five days of development, not the bullet. Caught before any spend by a diff
+restricted to the traversed modules; recorded as item 253, which is the more reusable finding of
+that pass. **The control actually run is a worktree at HEAD with only the third bullet reverted**,
+byte-identical to `e0509485^`'s own text (`diff` clean, sha256 `58e721f8…`). A whole-`src` diff
+between the two arms returns **exactly one differing file**.
+
+**Both arms verified internally consistent before comparison.** All 15 control dumps hash to one
+value (`84169908…`), all 15 post-fix dumps to one other (`a9ea0e63…`). Declining cells' input tokens
+are **perfectly uniform within each arm** — 4,109 across all 14 control decliners, 4,119 across all
+10 post-fix decliners — which is stronger evidence of prompt stability than the hash alone, since it
+is the prompt as the API itself counted it.
+
+**The arms differ in two things, not one, and the second is arithmetic rather than hidden.** The
+dump diff returns the bullet **and** the rendered `Repository path:` line, since the arms
+necessarily live in different directories. The two dumps differ by **exactly 80 characters**, which
+the bullet (+98) and the path (−18) account for **completely** — so no third difference exists. The
+instrument already carries the parameter that would remove even this (`runPromptAudit`'s
+`renderedRepoPath`), and `main()` does not pass it; a future clean re-run is one argument away.
+
+| | control (bullet unscoped) | post-fix (bullet scoped) |
+|---|---|---|
+| **SEARCHED** | **1 / 15** = 0.067, 95% CI **[0.002, 0.319]** | **5 / 15** = 0.333, 95% CI **[0.118, 0.616]** |
+| CORRECT_BASENAME | 0 / 15, CI [0.000, 0.218] | 0 / 15, CI [0.000, 0.218] |
+| CORRECT_FULLPATH | 0 / 15, CI [0.000, 0.218] | 0 / 15, CI [0.000, 0.218] |
+| declining-cell cost | $0.015099 mean (n=14) | $0.015412 mean (n=10) |
+| searching-cell cost | $0.067691 (n=1) | $0.045142 mean (n=5) |
+
+**Fisher's exact, one-sided: p = 0.0843.** The threshold was pre-committed as a function of the
+**measured** control, precisely so it could not be chosen afterwards: control 1/15 requires post-fix
+**k ≥ 6**. **Observed k = 5. INDETERMINATE.** Had the control returned 0/15 the threshold would have
+been k ≥ 4 and this same post-fix arm would have cleared it — which is exactly why the rule was
+written against the measured control rather than the assumed one, and why it is left as written.
+
+**The design was powered against an assumption the data falsified.** 79.1% power assumed a 0/15
+control. Against the rates that actually obtained (0.067 vs 0.333) the same 15 v 15 design carries
+only **44.5%** power. The control being non-zero is itself the finding that cost this run its
+power — and the historical 0/5 that made a zero control seem safe belonged to the different memory
+condition this arm was built to escape.
+
+**The post-fix rate replicates the historical figure exactly.** 5/15 = 0.333 against the earlier
+1/3, under a frozen memory condition and a clean bullet-only control. The point estimate is stable;
+what is missing is n, not consistency.
+
+**Correctness is unchanged and unmoved: 0/15 in both arms.** Thirty further cells, and still no cell
+in any arm has ever named `src/cli/tui/components/ApiKeysView.tsx`. The searching does not become
+answering, and item 251's decision to keep SEARCHED primary while recording correctness separately
+is what keeps that visible rather than absorbed.
+
+**Cost, both instruments, and they disagree.** Captures' `costUsd` sums to **$0.658910**; the daily
+usage ledger's own rows sum to **$0.778900** — 18.2% higher. The ledger is the correct one: it
+reproduces to $0.0003 from the token counts at `pricing.ts`'s published rates, and `costUsd`
+reproduces under no obvious variant. Recorded as item 254. **Actual spend $0.778900 against a
+registered $0.436–$1.739** — inside the range, though the range itself was built from `costUsd`
+figures and is therefore ~18% low in real terms. The ~30 credit probes are separately billed and
+ledger-recorded at effectively nought.
+
+**The resolving N, registered against the measured rates rather than the assumed ones.** At 0.067
+vs 0.333 the design needs **40 cells/arm (80 cells) for 89.6% power**, ledger-corrected cost
+**≈$2.00**; 30/arm reaches 76% at ≈$1.50. **Poolability, as a condition rather than an assumption:**
+a future run pools with these 30 cells only if the frozen memory still hashes `93297818…`, the
+control is rebuilt as HEAD-plus-bullet-revert (never as an old-commit checkout), and both arms'
+dumps still hash to this pass's two values. These cells can never pool with the historical eight.
+
+**Bucket, re-decided rather than inherited: it stays Blocked on data, on a blocker that has now
+changed twice.** It was never spend; then it was a missing instrument; the instrument exists and has
+run, and what remains is n. Against Closed: 5/15 against 1/15 at p=0.0843 does not clear the
+pre-committed threshold, and a rule adjusted after seeing that would be the narrowing this arc
+forbids. Against Actionable now: an observation, not a change, is what is missing. Against Neither:
+a design is specified, priced, and now executed once. **Verdict: INCOMPLETE** — the question has a
+consistent point estimate and not enough n behind it, and this is one task under one memory
+condition on one model, not a general claim about the directive fix.
 
 ## 158. A local suite can pass because the compiled build it partly reads is stale, so a source change breaks a test the changing pass cannot see
 
@@ -19610,22 +19686,117 @@ result record; the reader is `scripts/rescoreAnswerCorrectness.ts`. See item 251
 field's absence was distorting, item 157 for the heading it corrects, and item 144 for the scorer
 that read the other half of the record.
 
+## 253. Closed — a worktree at the pre-fix commit is a natural-looking control that measures every commit in between, and it survived two passes before an instrument caught it
+
+**The defect.** To measure whether one prompt bullet changes behaviour, the obvious control is a
+worktree at the commit before the bullet changed. It reads as rigorous: a real checkout, a real
+install, a real build, the exact historical code. **It is not a control.** It differs from the arm
+it is compared against by *every* change between the two commits, and only one of those is the thing
+under test.
+
+**Measured, not argued.** Between `5ee8d842` and `f04490e9` — five days — **20 of the modules the
+per-task call actually traverses changed, ~800 lines**: `agentLoop.ts` +188/−21, `toolExecutor.ts`
++145/−20, `archetypeDispatcher.ts` +121/−0, plus seventeen more including the adapter, the tool
+registry, the safety whitelist and the pricing table. A result from that comparison could not be
+attributed to the bullet by any argument.
+
+**How long it survived, which is the part worth recording.** The worktree was designed, approved,
+built, installed, built again, memory-frozen, content-verified, and written into this document as a
+completed harness **across two passes** before anything caught it. Every check it passed was a real
+check — it genuinely was at the right commit, with the right memory, with a correctly-built `dist`.
+None of them asked the one question that mattered.
+
+**Two distinct errors fed it, and the second is the more transferable.** First, a plan asserted the
+arms were clean because "the three stale files were established unreachable" — but **`dist/`
+staleness and inter-commit difference are different quantities**. Three files behind between `dist/`
+and `src/` *in one tree* says nothing about twenty modules differing *between two commits*. Both the
+brief and the plan conflated them. Second, the prompt-dump diff was offered as the proof of
+cleanliness; **a dump diff can only see what reaches the system prompt**, and everything downstream
+of prompt assembly — tool execution, the adapter, retry behaviour, pricing — is invisible to it.
+That is the same `runPromptAudit`-versus-`runAgentLoop` distinction that cost an earlier pass, one
+level up.
+
+**The instrument that caught it, which is the reusable part.** A diff restricted to the modules the
+call actually traverses — enumerated from the entry point's own import list, not from the whole
+tree, and not from the prompt. Run against the abandoned design it returns 20 changed files; run
+against the corrected one it returns **exactly one file and exactly the bullet**, and a whole-`src`
+diff agrees at one file.
+
+**The corrected shape, stated so it is reached for first next time.** To isolate a change, build the
+control as **HEAD with only that change reverted**, and prove the revert byte-identical to the
+original (here: `diff` clean and sha256 `58e721f8…` against `e0509485^`'s own text). Never as a
+checkout of an old commit. The residual difference is then only what the two trees cannot share —
+in this case the rendered repository path, which is arithmetic (80 characters, fully accounted) and
+which the instrument already has a parameter to remove.
+
+**Bucket: Closed.** The confounded design was abandoned before it consumed a cell, the corrected one
+was built and run, and both the instrument and the corrected shape are recorded. Against Actionable
+now: nothing further is proposed. Against Blocked on data: no observation is missing — the diff was
+always available and simply was not run. Against Neither: a design was replaced, not merely
+described. **The `5ee8d842` worktree is deliberately kept as this entry's evidence.**
+
+**Where this lives:** the abandoned worktree at `/dev/shm/zone-notice-control-5ee8d842`; the
+corrected one at `/dev/shm/zone-control-head-revert`; both on tmpfs and neither surviving a reboot.
+See item 157 for the measurement this unblocked and item 254 for a second instrument disagreement
+found in the same run.
+
+## 254. Blocked on data — the agent loop's own `costUsd` under-reports spend by 18% against the usage ledger, and the ledger is the one that reconciles
+
+**The disagreement.** One run of 30 cells, two instruments. The captures' per-cell `costUsd` sums to
+**$0.658910**. The daily usage ledger's own per-call rows, for the same run identifiers, sum to
+**$0.778900**. The gap is **$0.119990, or 18.2%** of the smaller figure.
+
+**Which one is right, established rather than assumed.** Recomputing from the ledger's own token
+counts (123,447 uncached input; 72,992 cache-write; 44,627 cache-read; 8,078 output) at
+`src/usage/pricing.ts`'s published `claude-sonnet-4-6` rates gives **$0.778619** — the ledger to
+within $0.0003, which is rounding. **The ledger reconciles from documented rates; `costUsd` does
+not.** Cache-write tokens are worth $0.273720 at those rates and are the obvious suspect, but
+`costUsd` matches neither the with-cache-write figure nor the without ($0.504899), nor cache-write
+priced at the input or cache-read rate — so it is a third calculation, not a simple omission, and
+naming its exact rule needs a read this entry has not done.
+
+**Why it matters beyond one run.** Every per-cell cost figure this document carries was taken from
+`costUsd`: the declining/searching spread that priced item 251's escalation ladder, item 157's
+registered bounds, and the arm totals items 90 and 157 both quote. **All of them are low by roughly
+this factor.** Item 157's own $0.436–$1.739 estimate held only because the actual spend came in
+mid-range; the estimate itself understates real money by ~18%.
+
+**A related structural silence, recorded here because the same run surfaced it.** The probe's
+`COST_GATE_USD` (1.5) projects task-1's cost over `tasks.length` and stops the run if the projection
+exceeds the gate. On a **single-task invocation `tasks.length` is 1**, so the projection is just the
+one cell's cost and the gate can never fire — 30 invocations here, every one structurally
+ungated. That is a property of the gate, not of this run: a cost gate that scales by task count is
+silent on exactly the invocation shape a repeated-measures design uses. Its silence must not be read
+as headroom.
+
+**Bucket: Blocked on data.** Closing requires reading the loop's own cost accounting against the
+adapter's usage reporting to find which term diverges — an observation that does not exist yet, and
+one this pass deliberately did not make, since it is a different question from the measurement the
+run was bought for. Against Actionable now: no fix is specified, because which term is wrong is
+exactly what the reading decides. Against Neither: a concrete discrepancy with a reconciling
+instrument is recorded, not merely a structural fact. Against Closed: nothing was fixed.
+
+**Where this lives:** `costUsd` originates in the agent loop's cost meter and is copied into each
+capture by `buildCaptureRecord`; the ledger is `~/.zone/usage/local-dev.jsonl`, written by
+`src/usage/usageTracker.ts` and priced by `src/usage/pricing.ts`. The gate is `COST_GATE_USD` in
+`scripts/notice-regression-probe.mjs`. See item 157 for the run that surfaced both.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 252 to find out which ones still need something. No index of
+reader the trouble of reading all 254 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (111): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 237, 238, 240, 241, 242, 245, 246, 251, 252
+**Closed** (112): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 237, 238, 240, 241, 242, 245, 246, 251, 252, 253
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (2): 236, 239
 
-**Blocked on data** — closing requires an observation that doesn't exist yet (14): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250
+**Blocked on data** — closing requires an observation that doesn't exist yet (15): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250, 254
 
 **Neither — a structural fact recorded, with no fix proposed** (125): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
