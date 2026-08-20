@@ -64,6 +64,15 @@ export const POSITIONAL_LINE_BASED_ABSOLUTE = 112;
  * Wrap-normalized count, same commit. NOT required to equal the line-based figure — see
  * sweep()'s doc comment. Locked independently so a silent drift in either instrument, not just
  * their difference, is caught.
+ *
+ * Confirmed by three instruments, the same evidence the line-based absolute carries, and for the
+ * same reason: a figure derived once by one engine is one instrument, not two, however many ways
+ * it is printed. The paragraph-join transform is the obstacle to cross-checking rather than the
+ * count, so it was reproduced outside Node twice — `awk 'BEGIN{RS=""}' + gsub` piped to
+ * `command grep -E -o`, and `perl -00 -pe 's/\n/ /g'` piped to the same — and both agree with
+ * this module's own JS matcher exactly. Two of the three share no regex engine with it, so
+ * POSIX-ERE-vs-JS divergence on `([a-z]+ ){1,4}` followed by an alternation, which is a real
+ * possibility for this shape, is ruled out by measurement rather than assumed away.
  */
 export const POSITIONAL_WRAP_NORMALIZED_ABSOLUTE = 126;
 
