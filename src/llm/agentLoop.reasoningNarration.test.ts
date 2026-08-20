@@ -206,14 +206,22 @@ describe("agentLoop.ts thinking-event emitter — driven by a REAL captured Open
       },
     } as unknown as OpenAIResponse;
 
+    // Fixture guard, before anything reaches agentLoop.ts. Deliberately written so that an
+    // emptied fixture fails as a readable ASSERTION rather than a TypeError from indexing
+    // summary[0] — confirmed by mutation: emptying the array first produced
+    // "Cannot read properties of undefined", which kills the test but says nothing about why.
+    const fixtureSummaries = (realResponse.output[0] as { summary?: { text: string }[] }).summary ?? [];
+    expect(
+      fixtureSummaries.length,
+      "fixture must carry at least one summary part — with none, this test would pass vacuously " +
+        "for a converter that extracts nothing"
+    ).toBeGreaterThan(0);
+    const expectedText = fixtureSummaries.map((s) => s.text).join("\n\n").trim();
+    expect(expectedText.length, "fixture summary text must be non-empty").toBeGreaterThan(0);
+
     const convertedFirstCall = responsesConvertResponse(realResponse);
-    // Sanity check on the fixture itself, before it ever reaches agentLoop.ts: the real
-    // converter really did extract a non-empty reasoningText from this real response. If this
-    // assertion ever fails, the test below would be exercising a fixture that no longer proves
-    // anything about the live seam — fail loud here, not silently downstream.
-    expect(convertedFirstCall.reasoningText).toBe(
-      realResponse.output[0]!.summary![0]!.text
-    );
+    // The real converter really did extract that text from this real response.
+    expect(convertedFirstCall.reasoningText).toBe(expectedText);
 
     let callCount = 0;
     mocks.createChatCompletion.mockImplementation(async () => {
@@ -237,6 +245,6 @@ describe("agentLoop.ts thinking-event emitter — driven by a REAL captured Open
       (e) => (e as { type?: string }).type === "thinking"
     ) as { type: string; text: string } | undefined;
     expect(thinking).toBeDefined();
-    expect(thinking!.text).toBe(realResponse.output[0]!.summary![0]!.text);
+    expect(thinking!.text).toBe(expectedText);
   });
 });
