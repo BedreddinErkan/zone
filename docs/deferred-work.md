@@ -18421,7 +18421,7 @@ Neither: a fix is proposed, not merely a structural fact. Against Closed: nothin
 the home guard's own setup file. See item 235 for the two incidents and item 233 for the first of
 them in detail.
 
-## 237. Actionable now — OpenAI's reasoning summary is never asked for, so the discard the record points at is discarding an opaque blob
+## 237. Closed — OpenAI's reasoning summary is now requested and surfaced, gated on model capability rather than on the condition this entry originally specified
 
 **What the record says.** Commit `2abc9dac` (2026-08-19) records that on the Responses API branch the
 response converter "collects reasoning items into an explicitly discarded `_`-prefixed variable", and
@@ -18484,16 +18484,52 @@ clear pure addition, and the investigation inherits the user's own provider and 
 in plan mode is therefore the exact population that sees tool names and no reasoning, which is the
 symptom `2abc9dac` was opened against.
 
-**Bucket: Actionable now.** A remedy is specified in this entry and nothing new needs to be learned
-first — the live call that was the open question has been made and its answer is recorded here.
-Against Blocked on data: the observation that was missing now exists. Against Neither: a fix is
-proposed, not merely a structural fact. Against Closed: nothing was built, on a pass whose brief was
-establish-only.
+**Built, with one correction to the remedy this entry itself specified.** The one branch this entry
+named as needing care — "the reasoning object is constructed only when an effort level resolves" —
+turned out to be the wrong condition, found before it shipped rather than after. The full model set
+reachable by the Responses branch is seven `gpt-5.x` identifiers, not an undifferentiated "every
+gpt-5.x model": `gpt-5.4-nano` routes there on its id alone but is explicitly excluded from
+`EFFORT_SUPPORTED_MODELS`, the same "reasoning model in name, not in this catalog's capability model"
+exclusion Haiku already has on the Anthropic side. Gating the new `summary` request on whether an
+effort override happened to resolve — this entry's own original plan — would have sent it to that
+excluded model regardless, since the exclusion and the effort question are independent. The params
+converter gates on `supportsEffort(model)` instead — the identical capability check the sibling Chat
+Completions branch in the same file already uses for the identical question — with `effort` added to
+the request only when it separately resolves. A model this codebase already declares has no reasoning
+capability now receives no `reasoning` object at all; a model that does gets one regardless of whether
+`--effort` was passed, closing the gap this entry was opened against. A mutation built specifically
+for `gpt-5.4-nano` confirms the gate holds.
+
+**The end-to-end claim was re-instrumented, not just asserted.** A hand-built `{reasoningText: "..."}`
+object fed through the agent loop's emitter only proves narration fires if the converter emits that
+shape — it does not prove the converter emits it, the same gap a hand-rolled `chalk.hex(...)`
+assertion once left open for a different defect in this repository. A second test drives a response
+captured live against `gpt-5.5` — the dominant model in item 238's own recorded data, not just
+`gpt-5.4-mini` — through the real converter and the real emitter. One call, 87 input and 51 output
+tokens, about $0.002; it returned both a reasoning item with real summary prose and a `function_call`
+in the same response, independently confirming the fix generalizes past the one model this entry's
+own live call had tested. A whole-test-tree search, not the six-file sample first checked, confirms no
+test anywhere already exercised this chain for either provider.
+
+**The field name is now declared once.** `reasoningText` is a field on `LLMClient`'s own return type
+now, not a cast at the read site — a rename of the shared declaration fails every direct reader's
+build. That alone left a real gap open: TypeScript's excess-property check does not reach through a
+spread, so a converter that quietly renamed its own returned key while leaving the return type
+annotation untouched passed `tsc` clean — run and confirmed, not assumed. The response converter now
+builds that field through an intermediately-typed `Pick` constant instead of an inline spread; the
+identical rename against that version fails the build. `encrypted_content` stays discarded — the S4
+carrier this entry already named as unbuilt still is, and nothing here builds one.
+
+**Bucket: Closed.** The remedy is built, its one wrong assumption corrected before shipping rather
+than after, and the instrument that proves it fires is not the instrument this entry would have
+settled for. Against Actionable now: nothing further is proposed. Against Blocked on data: every
+observation needed has been made, including the second live call this entry's own scope did not
+originally ask for. Against Neither: a fix was built, not merely proposed.
 
 **Where this lives:** the two Responses-API converter modules under the OpenAI adapter directory, the
-reasoning-text extractor and response converter under the Anthropic adapter directory for the shape
-to mirror, and the thinking-event emitter in the agent loop. See item 238 for the token figure and
-item 239 for the ledger field that made the figure easy to misread.
+shared return type on `LLMClient` in `types.ts`, the thinking-event emitter and its comment in the
+agent loop, and the forwarder comment in the plan-investigation module. See item 238 for the token
+figure and item 239 for the ledger field that made the figure easy to misread.
 
 ## 238. Closed — the 218-of-1,966 reasoning figure is right at its vintage, counts two different populations, and measures billing rather than content
 
@@ -18580,20 +18616,73 @@ establish-only.
 **Where this lives:** the usage record type in the usage tracker, the usage breakdown type and the
 post-call hook in the recording client. See item 238 for the record defect the shape produced.
 
+## 240. Closed — the positional-reference sweep is now a stored module; the "46" five passes carried forward was never recorded anywhere
+
+**What it is.** Five consecutive passes carried a positional-reference-sweep absolute of 46 forward
+under a "verify, not adopt" instruction, without any of them finding where it came from. A
+repository-and-git-history-wide search this pass — every literal `46` in this document individually
+checked, all of `CLAUDE.md`, every script, the whole `src/` tree, and `git log --all` for the phrase
+itself — found zero locations, in the current state or any past commit, where 46 is recorded in this
+role. The last pass's own seven candidate patterns are the only trace of the search that produced it,
+and none of their counts is 46 either. **There was nothing to retract**, because no entry in this
+document ever cited it.
+
+**The same circularity item 126 already fixed once, for a different sweep.** Each pass reconstructing
+a pattern from prose and checking it against a number nobody had stored is exactly the shape item 126
+closed for the anaphor sweep, by moving that pattern into an importable module. `scripts/deferredWorkPositionalSweep.ts`
+does the same for this concept — a sibling in file layout, export shape, and doc-comment density,
+storing the pattern, both counting instruments, and the two locked absolutes as code, not prose.
+
+**Two absolutes, deliberately not required to agree.** The module counts two ways — line-based and
+paragraph-wrap-normalized, mirroring the anaphor sweep's own two instruments — but does not carry an
+anaphor-sweep-style zero-gap requirement between them. That invariant holds for the anaphor sweep
+because no single-word anaphor in this document currently straddles a line wrap, so agreement is a
+meaningful "nothing is hidden" signal. This wider, multi-word pattern disagrees for a structural
+reason instead: a wider window is simultaneously more likely to catch a referent genuinely split
+across a wrap and more likely to glue two unrelated clauses across a wrap boundary into a false
+match — both effects confirmed with real examples in the module's own doc comments, not asserted.
+Forcing the two counts to agree would have meant either trusting only the narrower instrument, which
+would hide real wrapped referents, or trusting the wider one blindly, which would silently absorb the
+false positives it introduces. Both numbers are locked independently instead; a nonzero gap between
+them is documented as expected, not treated as a defect the way it would be for the anaphor sweep.
+
+**A regex property with no analogue in the anaphor sweep's single-token pattern, confirmed on the real
+production function.** Testing the pattern's match count at each intervening-word-length separately
+and summing the results gives a different, larger number than running the combined multi-length
+pattern once — a real, previously reachable defect shape, not a hypothetical: mutating the module's
+own line-based counter to actually sum per-length matches instead of scanning once reproduces the
+larger, wrong number exactly. The module's own doc comments name both figures.
+
+**The absolutes currently in the module are the ones this pattern measures against `docs/deferred-work.md`
+as of this entry's own landing commit** — necessarily after this entry's own prose exists, since prose
+describing a sweep for this document is itself something the sweep would count. Whether the module's
+constants needed a further adjustment once this entry and item 237's rewrite were both in place is
+recorded in the commit that closes this entry, not restated here as a number that would itself go
+stale the next time this document grows.
+
+**Bucket: Closed.** The module and its test exist, are mutation-tested, and the absolutes they assert
+are locked against this document's own final state for this pass. Against Actionable now: nothing
+further is proposed. Against Blocked on data: the search this entry's own premise depended on —
+whether 46 exists anywhere — has been run exhaustively, not left open. Against Neither: this is
+completed work, not a structural fact recorded without a fix.
+
+**Where this lives:** `scripts/deferredWorkPositionalSweep.ts` and its test, sibling to
+`scripts/deferredWorkAnaphorSweep.ts`.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 239 to find out which ones still need something. No index of
+reader the trouble of reading all 240 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (103): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 238
+**Closed** (105): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 237, 238, 240
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (3): 236, 237, 239
+first (2): 236, 239
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (13): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196
 
