@@ -31,3 +31,23 @@ export function realUserHome(): string {
 export function realZoneDir(): string {
   return path.join(realUserHome(), ".zone");
 }
+
+/**
+ * Directory names inside the repository that a test run may legitimately write
+ * to (ledger item 236). Held here, as bare names rather than resolved paths, so
+ * the two halves of the repository guard cannot drift apart: `homeGuard.ts`
+ * refuses writes at the call, `globalHome.ts` diffs an inventory at teardown,
+ * and an allowlist that differed between them would make one half's silence
+ * meaningless.
+ *
+ * One measured reason each — no unexplained entries:
+ *  - `node_modules`: vitest writes `.vite/vitest/results.json` on every run.
+ *  - `.git`: version-control plumbing, not test output.
+ *
+ * `dist` and `.zone` are deliberately absent. A full clean run was inventoried
+ * at 5,840 files before and after and wrote to neither, so listing them would
+ * exempt exactly the directories an accidental write should be caught in — and
+ * both are named in item 236's own text as assumed-necessary exemptions, which
+ * the measurement contradicts.
+ */
+export const REPO_GUARD_ALLOWED_DIRS: readonly string[] = ["node_modules", ".git"];
