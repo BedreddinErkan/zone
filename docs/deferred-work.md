@@ -13987,21 +13987,100 @@ question of spend — a design "blocked on a decision to spend cents through a h
 today", in item 90's own phrasing. Five of those eleven are **control** cells that must run on the
 **pre-fix prompt**, which no longer exists in the tree: reaching it needs a worktree at `5ee8d842`
 (the parent of item 156's fix `e0509485`), its own dependency install, and its own build, since the
-probe compiles from a build directory and refuses to start against a stale one. **That harness has
-never been built.** The blocker is a missing instrument, not a missing dollar, and the distinction
-matters because a pass budgeting cents for this would discover the gap only after committing to it.
+probe compiles from a build directory and refuses to start against a stale one. **That harness had
+never been built; it now has.** The blocker was a missing instrument, not a missing dollar, and the
+distinction mattered because a pass budgeting cents for this would have discovered the gap only
+after committing to it.
 
 **What is genuinely spend-blocked here is the smaller half.** The six further *measured* cells need
 no new machinery — but this entry's own power paragraph already establishes that extending the
 measured arm alone cannot close it, because the control's count of five caps the achievable
 significance. So the cheap half cannot close the entry and the half that could is not cheap.
 
+**The harness, built this pass, zero billed calls.**
+
+- **Location:** `git worktree add --detach /dev/shm/zone-notice-control-5ee8d842 5ee8d842` — on
+  tmpfs, deliberately not on the `/home` partition, which measured **100% capacity, 450M free**
+  (`df -h`) against this repo's own `node_modules` at 146M; `/dev/shm` had 7.6G free. **Named
+  consequence: tmpfs does not survive a reboot.** If that worktree path is gone, reconstruct it exactly:
+  ```
+  git worktree add --detach /dev/shm/zone-notice-control-5ee8d842 5ee8d842
+  cd /dev/shm/zone-notice-control-5ee8d842 && npm ci && npm run build
+  mkdir -p .zone && cp ~/.zone/notice-regression-frozen-memory.md .zone/memory.md
+  ```
+- **Install:** `npm ci` completed in 2.4s, 336 packages, zero network fetch — fully cache-hit
+  against `~/.npm`, so reproducible rather than best-effort. `package.json`'s real dependency set
+  differs from HEAD (`ink-gradient`/`ink-big-text` at this commit vs. today's `chalk`), and
+  `package-lock.json` is tracked and present at this commit (5104 lines; today's 4853 is a pure
+  subtraction, not version bumps) — but the probe's own import list touches none of the differing
+  packages, confirmed by reading it directly, so the dependency drift cannot reach the measured
+  path.
+- **Build:** `npm run build` completed in 4.0s, clean. Total worktree footprint measured after:
+  **167M** (`node_modules` 147M, `dist` 8.3M, source ~12M) — `/dev/shm` sits at 257M/7.7G after,
+  comfortable margin; nowhere close to the ENOSPC a tighter budget would have risked.
+- **Freshness, content-verified because it must be — `assertBuildFresh` does not exist at this
+  commit at all** (the module postdates it), so nothing will stop a future run against a stale
+  build automatically. The check, as a command with its exact expected output, so a future pass
+  runs it rather than remembers a rule:
+  ```
+  D=/dev/shm/zone-notice-control-5ee8d842
+  command grep -c "Only read or search the repository if the user explicitly names or confirms" "$D/dist/llm/agentLoop.js"   # expect: 1  (pre-fix bullet present)
+  command grep -c "Only read or search the repository for it if the user" "$D/dist/llm/agentLoop.js"                        # expect: 0  (post-fix tie-back absent)
+  command grep -c "That restriction is about the referenced content itself" "$D/dist/llm/agentLoop.js"                       # expect: 0  (post-fix disclaimer absent)
+  ```
+  Run and confirmed this pass: 1, 0, 0, exactly as predicted.
+
+**The memory confound is closed by construction, not accepted as the arm's condition.** Established
+first, behaviourally: `runAgentLoop`'s real per-task call (`repoPath: REPO`, not the diagnostic
+audit path) reads project memory via `readProjectMemoryBlock(input.repoPath)` unconditionally
+(`src/llm/agentLoop.ts`, byte-identical at both commits) — confirmed by driving the built function
+directly against a temp directory: present, it returns 3,916 characters (exactly item 90's own
+recorded figure, an independent cross-check that both entries measured the same thing); absent, it
+returns `""`. `.zone/memory.md` is untracked with zero git history (`git log --all -- .zone/memory.md`
+→ empty) and `.zone/` is gitignored at both commits, so a fresh worktree checkout materializes
+neither the true pre-fix content (unrecoverable) nor today's. Left alone, the two arms of this
+comparison would differ in **two** things — bullet-3 wording and memory content — which is exactly
+the shape a control arm must not have. **Fix: hold memory constant across both arms instead of
+accepting it as absent in one.** Today's `.zone/memory.md` is frozen at
+`~/.zone/notice-regression-frozen-memory.md` (SHA-256 `93297818…`, chosen over `/dev/shm` or the
+repo scratchpad specifically because both are tmpfs and this snapshot must outlive the worktree),
+copied into the worktree's own `.zone/memory.md` (hash-verified identical), and **any future
+post-fix arm run for this same comparison must copy the identical file, hash-verified against
+`93297818…`, before running** — the only difference between the two arms is then bullet-3's
+wording, which is what this entry exists to measure. This is a harder version of last pass's own
+pooling refusal, not a separate problem: last pass forbade pooling new cells with the historical
+0/5 on token-count grounds; this establishes why, structurally, and fixes it going forward rather
+than only diagnosing it for the arm already spent.
+
+**The scorer was verified against the real writer, not a reconstruction of it.** A hand-typed JSON
+capture proves the scorer accepts a shape matching someone's model of the schema — this session has
+paid for that gap twice before (a `chalk.hex` assertion that stayed green while the real frame
+diverged; a hand-built `reasoningText` literal that proved the emitter gate but not the converter
+seam). Instead: imported `buildCaptureRecord` directly from the worktree's own
+`scripts/notice-regression-probe.mjs` (a pure, exported function — real task metadata from the real,
+hash-confirmed-identical `rankerBaseline.snapshot.json`, a stubbed `loop` return, zero model calls),
+wrote its real output through the same envelope the probe's own `writeFileSync` call uses, and ran
+`scripts/rescoreAnswerCorrectness.ts` unmodified against that file. It read correctly: `taskId: T7`,
+`correctFile` matched the real ground truth, `searched: true` matched the stub's one tool call. The
+writer path is reachable without a model call, so this is the stronger instrument, not a fallback.
+
+**Cost, both bounds, no likelihood claim attached to either.** Item 251's N=6 ladder does not
+govern this arm — it was registered for item 90's seven-task CLEAR/FAIL/INDETERMINATE criterion, a
+different question from this two-arm A/B comparison; this arm follows its own already-registered
+design (five further control cells now). From this pass's own measured per-cell spread (declining
+$0.014544–$0.016119; searching $0.057957): **5 cells cost between $0.073 and $0.290.** Neither bound
+is asserted as likelier — the historical 5/5-declining pattern belonged to a *different* memory
+condition than the frozen-memory arm this harness now runs, so that pattern cannot be assumed to
+carry over to the very comparison being built to test it.
+
 **Bucket, re-decided rather than inherited: it stays Blocked on data, on a corrected blocker.** The
 observation that would settle the question still does not exist. Against Closed: three in eight is
 not an answer, and under the correctness definitions there is no post-fix signal at all. Against
-Actionable now: the control arm requires an instrument that must be built first, which is not a
-remedy this entry specifies. Against Neither: a design is specified and priced. **The correction a
-future reader needs is that "blocked on spend" was never true of this entry's control arm.**
+Actionable now: an observation, not a code change, is what remains, and none is proposed here.
+Against Neither: a design is specified, built, and priced. **The correction a future reader needs
+is narrower now than it was: the control-arm instrument is no longer missing — cost is the only
+thing standing between this entry and its next five cells, run under the frozen-memory condition
+above.**
 
 ## 158. A local suite can pass because the compiled build it partly reads is stale, so a source change breaks a test the changing pass cannot see
 
