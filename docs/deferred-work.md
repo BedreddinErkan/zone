@@ -18841,11 +18841,113 @@ Closed: nothing was built.
 guard whose source it mirrors. Recorded in `CLAUDE.md` alongside the other search-tool hazards. See
 item 243 for the guard whose real behaviour this fixture misreports.
 
+## 245. Actionable now — the "no valid blocks" rejection is four different failures wearing one message, and it emits nothing
+
+**What it is.** `apply_patch`'s handler runs three ordered gates before per-block matching: a
+marker-count imbalance check, a content-before-first-FIND check, and then the segmentation walk. If
+the walk returns zero blocks the call is rejected with "No valid --- FIND --- / --- REPLACE ---
+blocks found in patch." That rejection is reached by **at least four distinct input shapes**,
+established by driving each through the real compiled handler: a patch with no FIND marker at all;
+a patch whose markers are lowercased (the walk matches by exact substring, so case is significant);
+an empty patch string; and a whitespace-only patch. All four produce the identical message.
+
+**And unlike its two sibling gates, it is silent.** The imbalance gate returns
+`error:"apply_patch_marker_imbalance"` and emits a record carrying four count fields. The
+content-before-FIND gate returns its own error code and emits a record carrying the model. This one
+returns `success:false` and an output string — **no error code, no rejection reason, no marker**.
+Confirmed twice over: behaviourally, by capturing everything the call logged and finding no
+apply_patch record; and by attribution, which knows of no such marker name in the tracked tree.
+
+**So its incidence is unmeasurable, and must never be written down as zero.** The sink cannot see
+this branch at all. A count of zero from it would be a property of the instrument, not of the world
+— the same vacuity that makes another entry's structural zero permanently unreadable. What can be
+said is only that the branch is silent, and therefore that the owner's recollection of seeing it
+cannot be checked against recorded data in either direction.
+
+**A second, narrower gap in the same family.** The imbalance marker's payload carries the two count
+pairs, the patch size and a rejected flag, but **not the model** — while the content-before-FIND
+marker beside it does carry one. Recovering which model produced the thirteen recorded imbalances
+therefore required joining their run identifiers against the daily usage ledger. That join worked,
+so this is a friction rather than a blocker, but the asymmetry is arbitrary and the sibling already
+sets the precedent.
+
+**The remedy, specified.** Emit a record from the zero-blocks branch carrying a discriminator for
+which of the four shapes produced it — marker presence, marker count, patch length after trimming —
+and give it an error code, so the branch is as legible from records as the two gates ahead of it.
+Add the model field to the imbalance payload in the same edit, matching its sibling. Neither
+changes which patches are accepted.
+
+**Why it is not built in the pass that records it.** That pass was scoped to establishment, and its
+own rule was that no fix lands unless the establishment is unambiguous and the change is one line.
+The model field is one line; the zero-blocks record is not, and splitting them would land the
+smaller half of one coherent edit.
+
+**Bucket: Actionable now.** A remedy is specified in this entry and nothing new needs to be learned
+first — the two sibling gates in the same handler are the template, down to the emission helper.
+Against Blocked on data: no missing observation blocks it; the observation it would create is the
+point. Against Neither: a fix is proposed. Against Closed: nothing was built.
+
+**Where this lives:** the `apply_patch` handler's three rejection gates in the tool executor, and the
+segmentation walk under the utils directory that the third gate reads. See item 246 for what the
+recorded imbalances turn out to be, and item 1 for the false-positive question the count fields
+were added to answer.
+
+## 246. Actionable now — every recorded marker imbalance is the shape a missing worked example would produce, and no worked example exists
+
+**The recorded shape is strikingly specific.** Thirteen imbalance records exist across both marker-sink
+generations, spanning 2026-07-29 to 2026-08-19, under two independent instruments agreeing exactly.
+**Eleven of the thirteen are one FIND marker and two REPLACE markers.** Two are one FIND and zero
+REPLACE. **None is the reverse**, and none has a count above two. The line-anchored recount agrees
+with the substring count in every one of the thirteen, so none of them is the quoted-or-mid-line
+false positive those fields were added to expose.
+
+**They are not one run retrying.** Thirteen distinct run identifiers, across three languages — Rust,
+Python and TypeScript — which argues against anything language-specific. All thirteen ran on the same
+model, recovered by joining run identifiers against the daily usage ledger because the marker itself
+does not record one.
+
+**The prompt never demonstrates the shape it demands.** The assembled system prompt contains exactly
+**one FIND marker and zero REPLACE markers**, and that single occurrence is prose — "Nothing may
+precede `--- FIND ---`". It describes the patch format entirely in words and shows no worked example
+at all. The tool description shows exactly **one balanced pair**, while instructing "N edits to a
+file → ONE call with N blocks". So a model asked to batch two edits has been told to emit two blocks,
+given a template containing one, and shown no example of what two look like. Appending a second
+REPLACE to the single template it was given is the failure that instruction predicts, and it is what
+eleven of thirteen records are.
+
+**This is correlation with a mechanism, not proof of causation.** Every recorded instance comes from
+one model, so the records cannot discriminate a prompt-side cause from a model-side one; a run on a
+second model would. What can be stated without a live call is the structural fact — that the format
+is specified in prose and demonstrated only in the single-block case — and that the observed failures
+are exactly the shape that omission would produce.
+
+**The cost is one iteration, not a failed run.** All thirteen recovered: every imbalance is followed
+by a retry and then a successful staging, with no exception in the recorded window. The rejection
+message works as a teacher, and the reason it works is worth naming — **it contains the very
+multi-block example the tool description omits**. Zone demonstrates the correct shape only after the
+model has already got it wrong.
+
+**The remedy, specified.** Move that example forward: give the tool description the two-block form it
+already teaches in the rejection message. The text exists and is proven effective by the thirteen
+recoveries; this changes where it appears, not what it says.
+
+**Bucket: Actionable now.** A remedy is specified and nothing new needs to be learned first — the
+replacement text is already in the repository and already demonstrated to work. Against Blocked on
+data: the cross-model observation would strengthen the causal claim but is not needed to justify
+showing an example of a format the prompt demands. Against Neither: a fix is proposed. Against
+Closed: nothing was built.
+
+**Where this lives:** the `apply_patch` tool description in the tool definitions, the PATCH RULES
+block in the agent loop's assembled system prompt, and the imbalance rejection message in the tool
+executor that carries the example today. See item 245 for the silent sibling branch, item 1 for the
+false-positive question these records also answer, and item 2 for the embedded-pair defect that is a
+different mechanism entirely.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 244 to find out which ones still need something. No index of
+reader the trouble of reading all 246 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -18854,7 +18956,7 @@ first.
 **Closed** (107): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 237, 238, 240, 241, 242
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (2): 236, 239
+first (4): 236, 239, 245, 246
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (13): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196
 
