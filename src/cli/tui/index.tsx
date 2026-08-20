@@ -13,6 +13,7 @@ import { loadCliConfig, validateCliConfig, applyDiskKeyFallbacks, type CliConfig
 import { runOneShotInner, type TuiMode } from "../dispatch.js";
 import { ApiKeyError, ProviderRequestError, PlanRefusalError } from "../../llm/factory.js";
 import { resolveInitialTuiMode } from "./initialMode.js";
+import { buildBannerLine } from "./banner.js";
 import type { LlmPatchFlowResult } from "../../core/runLlmPatchFlow.js";
 import { createEventBus } from "../eventBus.js";
 import { applyStdoutInterception, applyStderrInterception } from "./stdoutShield.js";
@@ -51,25 +52,15 @@ function _getGitBranch(): string {
 }
 
 function writeBannerToStdout(opts: { isResumed: boolean }): void {
-  const RESET = "\x1b[0m";
-  // This banner is raw stdout, outside the Ink tree and outside theme.ts's seam — it cannot
-  // reference role.brand directly. 80 is the ANSI-256 code chalk's own rgbToAnsi256 produces for
-  // role.brand's hex (#22B3C4), confirmed empirically; hardcoded to match what an Ink-rendered
-  // role.brand element degrades to on the same terminal, per colors.ts's existing convention of
-  // a flat hardcoded 256-colour escape (see c.orange) rather than a truecolor one.
-  const BRAND_TEAL_BOLD = "\x1b[38;5;80;1m";
-  const DIM = "\x1b[2m";
-  const cwd = process.cwd();
-  const branch = _getGitBranch();
-  const cwdBranch = branch ? `${cwd} · ${branch}` : cwd;
-  const resumed = opts.isResumed ? ` ${DIM}(resumed)${RESET}` : "";
-  // Model and cap are shown by the reactive <Header> component — not repeated here.
-  // No leading marker: the splash's own mark is gone (removed entirely, not replaced — this
-  // pass), and "✦" was a leftover from the pre-palette-pass spinner with no tie to the logo;
-  // per the palette pass's own font finding, the diagonal mark carries the same substitution
-  // risk, so this banner follows the landing's own header, which carries no glyph either.
+  // Construction lives in banner.ts so it can be asserted on byte-for-byte; this side of it is
+  // only the stdout write.
   process.stdout.write(
-    `${BRAND_TEAL_BOLD}Zone v${_zoneVersion}${RESET}${resumed}  ${DIM}${cwdBranch}${RESET}\n\n`
+    buildBannerLine({
+      version: _zoneVersion,
+      cwd: process.cwd(),
+      branch: _getGitBranch(),
+      isResumed: opts.isResumed,
+    })
   );
 }
 

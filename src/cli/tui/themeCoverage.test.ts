@@ -67,6 +67,11 @@ const EXTRACTED_FILES = [
   "src/cli/tui/components/Toast.tsx",
   "src/cli/tui/components/TrustModal.tsx",
   "src/cli/tui/components/UndoModal.tsx",
+  // The selection-contrast pass's follow-up: the startup banner stopped carrying a hardcoded
+  // 256-colour escape and now formats role.brand through chalk. index.tsx itself is deliberately
+  // NOT declared here — after the extraction it holds no colour and imports no seam, so the
+  // "must import theme.ts" assertion below would fail on it.
+  "src/cli/tui/banner.ts",
 ];
 
 const FORBIDDEN_COLOUR_LITERALS = [...new Set(Object.values(role))];
@@ -144,6 +149,42 @@ describe("theme-seam completeness — no colour literal or extracted glyph survi
       }
     }
     expect(offenders, offenders.join("\n")).toEqual([]);
+  });
+
+  /**
+   * The converse of the check below, and the gap that check cannot see on its own. EXTRACTED_FILES
+   * is a declaration, so a file dropped from it silently leaves coverage while every assertion
+   * here stays green — measured, by deleting an entry and watching the suite pass. That is the
+   * "declared, not everything" discipline this file's header describes, and it is correct as a
+   * default; what makes it safe to keep is that for THIS subtree the declaration can be checked
+   * against reality, because a file consuming the seam is exactly a file importing it.
+   *
+   * So: every non-test file under the TUI tree that imports theme.ts must be declared. Adding a
+   * seam consumer without declaring it now fails here instead of quietly going unguarded.
+   */
+  it("every file that imports theme.ts is declared — a seam consumer cannot go unguarded", () => {
+    const TUI_ROOT = path.join(REPO_ROOT, "src/cli/tui");
+    const importers: string[] = [];
+    const walk = (dir: string): void => {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        const abs = path.join(dir, e.name);
+        if (e.isDirectory()) {
+          walk(abs);
+          continue;
+        }
+        if (!/\.tsx?$/.test(e.name)) continue;
+        if (/\.test\.tsx?$/.test(e.name)) continue;
+        const rel = path.relative(REPO_ROOT, abs);
+        if (rel.endsWith("src/cli/tui/theme.ts")) continue; // the seam itself, not a consumer
+        if (/from ["'][./]+theme\.js["']/.test(fs.readFileSync(abs, "utf8"))) importers.push(rel);
+      }
+    };
+    walk(TUI_ROOT);
+
+    expect(importers.length, "no theme.ts importers found — the walk is broken, not the tree").toBeGreaterThan(0);
+    const declared = new Set(EXTRACTED_FILES);
+    const undeclared = importers.filter((f) => !declared.has(f)).sort();
+    expect(undeclared, `these import theme.ts but are not declared:\n${undeclared.join("\n")}`).toEqual([]);
   });
 
   it("every declared file actually imports from theme.ts", () => {
