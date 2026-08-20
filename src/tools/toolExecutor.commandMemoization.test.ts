@@ -56,8 +56,17 @@ describe("command memoization (Phase 2)", () => {
     setupNpmEnv({ build: `printf "x" >> hits.log` });
     const cmd = "npm run build";
 
-    const staging1 = new Map([["src/a.ts", "const a = 1;"]]);
-    const staging2 = new Map([["src/a.ts", "const a = 2;"]]);
+    // Absolute keys, because that is the staging map's actual contract: every production
+    // caller computes `path.join(repoPath, filePath)` before stagedWrite, and
+    // withStagingTempFlush names its own loop variable `abs` and hands the key straight to
+    // fs.writeFileSync with no repoPath to resolve against. A relative key here therefore did
+    // not stay inside this test's tmpdir at all -- it resolved against process.cwd() and wrote
+    // a real src/a.ts into the repository being tested, for the duration of the command, which
+    // is long enough for a concurrent `tsc` to compile it and fail on it.
+    const stagedFile = path.join(repoPath, "src/a.ts");
+    const staging1 = new Map([[stagedFile, "const a = 1;"]]);
+    const staging2 = new Map([[stagedFile, "const a = 2;"]]);
+    expect(path.isAbsolute([...staging1.keys()][0]!), "staging keys must be absolute").toBe(true);
 
     await executeTool("run_command", { command: cmd }, repoPath, undefined, { runId: "r2", stagingFiles: staging1 });
     await executeTool("run_command", { command: cmd }, repoPath, undefined, { runId: "r2", stagingFiles: staging2 });
