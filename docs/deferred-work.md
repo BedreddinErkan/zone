@@ -18060,29 +18060,237 @@ work is done, not specified. Against Neither: a fix was proposed and built.
 the widening then measured, and the thirteenth pattern for the instrument-failure shape the original
 miss belongs to.
 
+## 229. Closed — the selected row collided with its own background, because both halves were resolved by the terminal rather than by the app
+
+**What it was.** `role.selectionBackground` and `role.emphasis` were both theme-relative — bare Ink
+colour names the terminal's own palette resolves, with no RGB ever entering the process — and they were
+stacked on the same row at six sites across five modals. Two independently-resolved colours carry no
+contrast guarantee between them, and on the owner's terminal they landed close enough to make the
+selected row unreadable. The same defect class as `role.surface` painting light grey where dark was
+intended.
+
+**What landed, in three commits.** `selectionBackground` moved to a fixed hex; a new
+`selectionForeground` took over the selected-row foreground job and six call sites moved onto it;
+`ToolCallGroup`'s per-item detail lines gained italic for the pattern-bearing tools, so a grep pattern
+and a file path stopped rendering under an identical shape; and a pre-existing fix for `read_file`'s
+`[1, 0]` no-range sentinel was cherry-picked from the dogfood branch, unmodified, preserving its author.
+
+**Why `role.emphasis` itself was not repointed, which is the reusable part.** Its remaining jobs — a
+modal section header, a bold diff addition — have no app-painted background beneath them. There the
+terminal's own foreground and background design contract is exactly what keeps text legible, so
+theme-relative is correct rather than merely tolerated. Forcing the role to a value chosen for a bright
+teal fill would have made the diff line near-black on near-black on any dark terminal. The axis that
+decides a role is therefore not "semantic versus structural" but **whether the app paints the surface
+underneath it**; only a role that can be stacked on an app-painted fill has to be fixed.
+
+**A figure in that pass's own report was wrong, and the correction is the reason this entry carries
+numbers.** It reported `role.emphasis` at seven consumer files inside a table whose other rows were
+post-push. Seven is the count at the commit before the migration; after it the count is three, because
+four modals lost the role entirely and `ModelModal` kept only its section header. Re-deriving every one
+of the eleven roles at both vintages found `emphasis` and `selectionForeground` to be the only two
+counts the push moved at all, so that one row was the whole of the contamination. The same re-derivation
+replaced an unexplained range on `role.accent` with an exact figure agreed by two instruments.
+
+**The counting rule, written down because a rule loose enough to produce a range for one role is loose
+for all eleven.** A consumer is a **file** under the TUI subtree that names the role in executable code;
+`theme.ts` is the definition site and does not count; test files are instruments and do not count;
+occurrences inside comments, strings and regex literals do not count. Under that rule the two
+instruments agree on ten of eleven roles.
+
+**Where the eleventh disagreement came from, and why neither instrument alone was right.** Textual
+search over-counts prose: the startup banner's own comment discusses `role.brand` three times in a file
+that never imports the seam at all, which inflates that role by a whole file. A compiler-API instrument
+resolving identifiers correctly ignores that — but it under-counts in the other direction, because a
+`typeof role.caution` in a type annotation is a qualified name rather than a property access and is
+invisible to a visitor written for the value position only. Both instruments had to be corrected before
+their numbers agreed; the disagreement, not either number, was the finding.
+
+**Bucket: Closed**, decided on the condition rather than on the size of the fix. The condition was a
+defect with a specified remedy; it is built, mutation-tested, and the corrected figures are recorded
+here. Against Actionable now: the work is done, not specified. Against Neither: a fix was proposed and
+built.
+
+**Where the code lived:** the `role` object in `cli/tui/theme.ts`; the selected-row ternaries in
+`ModelModal`, `EffortModal`, `SummaryModal`, `PlanModeModal` and `SessionMemoryModal`; the per-item
+detail line in `cli/tui/components/ToolCallGroup.tsx`; the sentinel check beside `read_file`'s
+`lineRange` validation in `tools/toolExecutor.ts`. See item 230 for the colour regime that bounds how
+any of this can be verified, and item 231 for a mismatch the same establish uncovered.
+
+## 230. Neither — a frame capture proves nothing about colour until the regime it ran under is stated, and absence-shaped claims are the ones that fail silently
+
+**What it is.** Ink colours through chalk, and chalk decides how much colour to emit from the
+environment rather than from the code under test. Three regimes matter and they are not the two anyone
+assumes. With neither `FORCE_COLOR` nor `COLORTERM` set — which is exactly the regime the repository's
+own baseline command uses — chalk sits at level zero and a captured frame contains **no styling bytes at
+all**. With `FORCE_COLOR` set but `COLORTERM` absent, chalk sits at level two, and a fixed hex is
+down-converted to a 256-colour index rather than emitted as RGB. Only with `COLORTERM` naming truecolor
+does chalk reach level three and emit the actual red, green and blue components. `FORCE_COLOR` set to
+three does **not** by itself produce truecolor; the numeric value does not select the level the way its
+name suggests.
+
+**Why this is recorded as a hazard and not a tip.** Claims made from frame capture divide into two
+shapes that fail very differently. A **presence-shaped** claim — this code IS emitted — is
+self-announcing under the wrong regime, because the assertion simply fails and someone investigates. An
+**absence-shaped** claim — this code is not emitted, or a harness could not have caught this — is
+silently vacuous under a colourless regime, because absence is precisely what an unstyled frame shows.
+Every such claim passes, proves nothing, and reads in the record exactly like a claim that was tested.
+The rule that follows: an absence-shaped visual claim must state its regime, and a claim made under an
+unrecoverable regime is retracted rather than softened.
+
+**The correction this makes to an existing record.** The finding that frame capture could not catch
+`role.surface` rendering light grey was diagnosed as a single cause — a bare palette index resolves
+inside the terminal, so the actual colour never enters the process. That cause is real and remains
+true. It is not the only one: under the baseline regime there is no code in the frame to inspect in the
+first place, so the harness was blind twice over, for two independent reasons, and the record naming
+only the subtler one understates how easily the same measurement is repeated wrongly.
+
+**What survives the hazard unharmed, established rather than assumed.** A dim measurement is not
+regime-fragile in the same way, because dim is a style rather than a colour: it emits the same code at
+every level above zero. The recorded plan-gate figures were taken with colour forced on, which their own
+commit message states, and they therefore reproduce at any of the three non-zero regimes. Only a
+level-zero run would have flattened them, and a level-zero run would have reported zero dim everywhere
+rather than a plausible percentage.
+
+**Bucket: Neither.** This is a structural fact about the measuring apparatus, recorded so a future pass
+declares its regime before making a visual claim. No fix is proposed: nothing in the product is wrong,
+and pinning a regime into the test configuration would change what the whole suite measures for the sake
+of a handful of assertions that do not currently depend on colour at all. Against Actionable now: no
+remedy is specified. Against Closed: nothing was built.
+
+**Where this lives:** chalk's own level detection, reached through Ink's text rendering; the baseline
+command in this repository's test script; and the ANSI-versus-Ink separation described at the head of
+`cli/tui/theme.ts`. Confirmed by rendering the same element across all three regimes and reading the
+emitted bytes.
+
+## 231. Actionable now — the startup banner hardcodes a 256-colour approximation of the brand teal, and does not match what Ink renders beside it on a truecolor terminal
+
+**What it is.** The persistent startup banner is written straight to stdout, outside the Ink tree and
+outside the theme seam, so it cannot import the brand colour and carries a hardcoded escape instead. The
+escape selects a 256-colour palette index. Its own comment explains the choice as matching what an
+Ink-rendered brand element degrades to on the same terminal, confirmed empirically. The empirical
+confirmation was taken under a regime where chalk was capped below truecolor, and on a terminal that
+reports truecolor support Ink does not degrade at all: it emits the exact brand components. The banner
+and the Ink-rendered brand colour are therefore two visibly different colours on the machine this was
+written on — the palette index resolves to a paler, lighter cyan than the brand teal.
+
+**Why the comment was reasonable and still wrong.** It names a real fallback and a real convention, and
+the number in it is genuinely the index chalk produces for that hex. What it does not name is the
+condition under which that fallback applies. The measurement was correct; its generalisation to "the
+same terminal" was not, and it is a clean instance of the hazard item 230 records — a colour claim
+carried forward without the regime that produced it.
+
+**The fix that is specified, which is why this is not Neither.** Emit the truecolor form in the banner
+so it matches the seam's value exactly, accepting that terminals without truecolor support will render
+it approximately, or detect support once at startup and choose between the two forms. The first is a
+one-line change and matches what the Ink tree beside it already does on any modern terminal; the second
+is strictly more correct and needs a support check the banner does not currently make. Either way the
+comment must lose its unconditional claim.
+
+**What is deliberately not being decided here.** Which of the two shapes to take is a product call about
+how much the banner should degrade on older terminals, and the owner has previously and explicitly
+preferred leaving a colour alone over changing it to something wrong. The defect is recorded with both
+options costed rather than fixed in passing during an audit.
+
+**Bucket: Actionable now.** A remedy is specified in this entry and nothing further needs to be learned
+first; only a preference between two named shapes is outstanding. Against Blocked on data: the
+observation already exists and is recorded here. Against Neither: a fix is proposed, not merely a fact.
+
+**Where the code lives:** the banner writer near the top of `cli/tui/index.tsx`, and the brand role in
+`cli/tui/theme.ts` whose value it is approximating. See item 230 for why the original measurement read
+as confirmed.
+
+## 232. Neither — the two inverse call sites are safe because of what is currently written around them, not because inverse is structurally immune
+
+**What it is.** An audit of every mechanism that can put an app-chosen colour behind text found exactly
+one prop in use across the interface tree plus Ink's inverse, which swaps foreground and background. The
+two inverse sites, both single-space input cursors, were recorded as structurally immune to the
+selection-contrast defect class. Rendering them proves the conclusion right and the reason wrong.
+Inverse does not clear colour; it swaps whatever is active. A colour set on the same element, or
+inherited from an enclosing text element, is still active when the swap happens and therefore lands in
+the background position. The two sites are safe only because neither sets a colour and neither has a
+coloured ancestor.
+
+**Why the distinction is worth a record rather than a shrug.** "Structurally immune" tells a future
+reader that no edit here can create the defect. The truth is that adding a colour to either element, or
+wrapping either in a coloured parent, silently creates exactly the stacked-pair collision the selection
+work exists to prevent — and it creates it with no test failing, because the suite runs colourless and
+nothing asserts on rendered colour anywhere. A safety property that depends on the absence of an
+attribute is a property that the next edit can remove without noticing.
+
+**Bucket: Neither.** A structural fact with no fix proposed: both sites are correct as written, so there
+is nothing to repair, and the guard that would pin the property — an assertion that no coloured ancestor
+encloses an inverted span — is speculative work against a defect that does not exist yet. Against
+Actionable now: no remedy is specified. Against Closed: nothing was built.
+
+**Where the code lives:** the input cursors in `cli/tui/components/LimitsModal.tsx` and
+`cli/tui/components/ApiKeysView.tsx`. See item 229 for the stacked-pair class itself and item 230 for
+why the suite cannot see any of it.
+
+## 233. Closed — a test wrote into the repository's own source tree, because a staging key was relative and nothing resolves staging keys
+
+**What it was.** A build failed naming a source file that does not exist, during a run where a full
+suite happened to be executing at the same time. The file did exist, for about a third of a second, and
+had been compiled and left behind in the build output. Polling the source directory during a suite run
+reproduced it directly: a test creates a real file inside the repository being tested, runs a command,
+and deletes it again.
+
+**The mechanism, which is a contract violation rather than a race in the usual sense.** The helper that
+temporarily flushes staged files to disk so a shell command can see them takes only the staging map and
+a callback. It has no repository path to resolve against, names its own loop variable for an absolute
+path, and hands each key straight to the file writer. Every production caller computes an absolute path
+before staging, so the contract holds everywhere it matters. One test supplied a repository-relative key
+instead, and a relative path handed to the file writer resolves against the process working directory —
+which during a test run is the repository root. The staged file therefore never entered the test's own
+temporary directory at all.
+
+**Why the first diagnosis was wrong and the shape of that error is the reusable part.** It was dismissed
+as compiler flakiness under parallel invocation. There is no incremental build state in this project at
+all — no build-info file exists and no configuration enables one — so the hypothesis that a stale cache
+named a vanished file had nothing to rest on. The file was simply there. A dismissal that names a
+plausible mechanism without checking whether that mechanism is even present is the failure worth
+remembering, not the missing path resolution.
+
+**What landed.** The test computes an absolute key, and asserts that it did, so the assertion fires
+before the command runs rather than detecting the pollution afterwards — which matters because the
+write is transient and self-cleaning, and a check made after the fact would find nothing. Reverting the
+key to its relative form was confirmed to fail that assertion; making the two staging maps identical was
+confirmed to fail the cache-miss assertion the test exists for.
+
+**What is left open on purpose.** The flush helper still accepts a relative key and still writes it
+wherever the process happens to be standing. Hardening it to refuse or resolve one is a change to
+production behaviour on a path every write flows through, and it wants its own establish rather than a
+line added during an audit.
+
+**Bucket: Closed**, on the condition rather than on the hardening. The condition was a test mutating the
+tree it was testing; that is fixed and pinned. Against Actionable now: the work is done. Against
+Neither: a fix was proposed and built.
+
+**Where the code lived:** the staging flush helper and the absolute-path computation feeding
+`stagedWrite`, both in `tools/toolExecutor.ts`; the fixture in the command-memoization test beside it.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 228 to find out which ones still need something. No index of
+reader the trouble of reading all 233 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (97): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 4, 204, 210, 212, 218, 221, 223, 228
+**Closed** (99): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 4, 204, 210, 212, 218, 221, 223, 228, 229, 233
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (0):
+first (1): 231
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (13): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196
 
-**Neither — a structural fact recorded, with no fix proposed** (118): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (120): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152, 154, 155, 158,
 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199, 200, 201, 202, 205,
-206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227
+206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230, 232
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
