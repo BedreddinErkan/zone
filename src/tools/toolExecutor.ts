@@ -3543,6 +3543,39 @@ export async function executeTool(
             filesStaged: [],
           };
         }
+        // Tur P2-scope: the same plan-scope guard apply_patch and write_file already apply.
+        // Its absence here was a standing bypass that a populated filesLikely did NOT close —
+        // every write outside the planned scope succeeded as long as it went through this tool.
+        // Checked in the same pre-flight pass as the boundary check, for the same reason: a
+        // scope block mid-batch would leave the ambiguous partial-staging state the comment
+        // above exists to prevent.
+        //
+        // No symbol-expansion retry here, deliberately, and that IS parity rather than a
+        // shortfall: maybeExpandScopeForSymbolMatch only fires for refactor/complex_multi_file,
+        // and checkWriteScope returns null for exactly those two archetypes before it could be
+        // reached — so the expansion path at the other two call sites is already unreachable in
+        // production. Adding it here would copy dead code, not behaviour.
+        const scopeError = checkWriteScope(filePath, input?.executionPlan ?? null, repoPath, input?.archetype);
+        if (scopeError) {
+          onProgress?.(JSON.stringify({
+            event: "zone-scope-block",
+            tool: "multi_edit",
+            filePath,
+            reason: "out_of_plan_scope",
+          }));
+          debugLog("[zone-scope-block]", JSON.stringify({
+            tool: "multi_edit",
+            filePath,
+            reason: "out_of_plan_scope",
+          }));
+          return {
+            success: false,
+            output: `${scopeError} — no files in this batch were modified`,
+            error: "multi_edit_blocked_out_of_plan_scope",
+            rejectionReason: "out_of_plan_scope",
+            filesStaged: [],
+          };
+        }
       }
 
       // Normalize find/replace to LF so multi-line patterns match CRLF files.
