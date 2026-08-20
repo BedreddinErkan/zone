@@ -255,10 +255,13 @@ function findColumnZeroViolations(sources: CoachingSource[]): { violations: stri
 }
 
 describe('patch-format teaching surfaces: no indented block-shaped FIND/REPLACE marker', () => {
-  // Measured at HEAD post-fix: 16 block-shaped marker lines across 24 distinct sources.
-  // Floor set with a margin below that, not at it — a legitimate future wording change
-  // that drops a line or two shouldn't make this test fragile, but a collection that finds
-  // near-zero real content (the vacuous-pass failure mode this control exists to catch)
+  // Re-derived via this suite's own instrument (a temporary console.log inside this test,
+  // run and removed, not hand-incremented): 20 block-shaped marker lines across 24 distinct
+  // sources, up from a prior 16/24 — the +4 is patch.description's own worked multi-block
+  // example (two FIND lines + two REPLACE lines), source count unchanged since no new source
+  // was added. Floor set with a margin below that, not at it — a legitimate future wording
+  // change that drops a line or two shouldn't make this test fragile, but a collection that
+  // finds near-zero real content (the vacuous-pass failure mode this control exists to catch)
   // still fails loudly.
   const MIN_BLOCK_SHAPED_LINES = 12;
 

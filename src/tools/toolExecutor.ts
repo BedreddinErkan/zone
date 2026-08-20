@@ -30,6 +30,7 @@ import type { CommandDenialReason } from "../api/commandApprovals.js";
 import { hashStagingState } from "../llm/loopDetector.js";
 import { MEMORY_WARN_THRESHOLD_BYTES } from "../memory/constants.js";
 import { segmentPatchBlocks } from "../utils/patchBlocks.js";
+import { PATCH_MULTI_BLOCK_EXAMPLE } from "./patchMultiBlockExample.js";
 
 const execAsync = promisify(exec);
 
@@ -2060,15 +2061,7 @@ export async function executeTool(
           `Your patch has ${findMarkerCount} \`${FIND_MARKER}\` marker(s) but ${replaceMarkerCount} \`${REPLACE_MARKER}\` marker(s). ` +
           `Markers must be balanced: every \`${FIND_MARKER}\` must be paired with exactly one \`${REPLACE_MARKER}\`.\n\n` +
           `If you intended to make multiple edits in this file, use the multi-block syntax:\n\n` +
-          `--- FIND ---\n` +
-          `<first region from file>\n` +
-          `--- REPLACE ---\n` +
-          `<replacement for first region>\n` +
-          `--- FIND ---\n` +
-          `<second region from file>\n` +
-          `--- REPLACE ---\n` +
-          `<replacement for second region>\n\n` +
-          `Each block does ONE local substitution. Do not collapse two unrelated edits into one block.`;
+          PATCH_MULTI_BLOCK_EXAMPLE;
 
         // Line-anchored counts distinguish ONE class of false positive, not all of them: a
         // marker-looking string that is quoted or sits mid-line (e.g. "--- FIND ---" inside a
