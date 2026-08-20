@@ -19196,17 +19196,203 @@ commit `542d40d9`) and item 246's fix being live (it is, as of commit `283bd285`
 why this protocol's outcome variable and comparator are defined the way they are, and item 246 for
 the claim this measurement would confirm or retract.
 
+## 251. Closed — the stochastic-cell scoring rule item 90 deferred, registered in full before the runs it will judge
+
+**Why this is its own entry.** Item 90 records that one of its seven tasks issues shell calls in
+some runs and not others, that a one-run-per-cell design cannot settle such a cell, and that the
+rule for scoring it "gets a pass of its own, recorded first and applied second" — naming three
+things the rule must decide so they cannot be narrowed later. This is that registration. It is
+committed in its own commit, before any further billed cell, so that "the rule preceded every run
+judged by it" is checkable from history rather than asserted.
+
+**A fourth thing had to be decided first, and it was not on item 90's list.** The rule scores an
+outcome, and the outcome variable was not settled: `correctFile` is carried in every capture and
+read by no scoring function. Registering thresholds on top of an unsettled outcome would have
+pre-registered the wrong event — worse than deferring, because history would then show a rule that
+preceded its runs while measuring something other than what the entries claim. Item 252 records the
+field; this entry records what it changes.
+
+### The three definitions, all named, because a bare "0/3" is unreadable without one
+
+| definition | meaning |
+|---|---|
+| **SEARCHED** | at least one `run_command_readonly` call was **issued** |
+| **CORRECT_BASENAME** | SEARCHED **and** the answer contains the ground-truth file's basename |
+| **CORRECT_FULLPATH** | SEARCHED **and** the answer contains the full repo-relative path |
+
+Every recorded figure states which definition it is under. Re-scored through
+`scripts/rescoreAnswerCorrectness.ts` (landed at `a291421b`), the eight pinned T7 cells are
+**1/8 SEARCHED, 0/8 CORRECT_BASENAME, 0/8 CORRECT_FULLPATH** — the one searching cell is correct
+under neither, checked against five name variants across all eight answers in both phases.
+
+**SEARCHED is the primary, and its boundary is registered rather than left to the reader.** A cell
+that issues one call and then declines **counts as SEARCHED**; call success is not consulted, since
+a refused call is still a reach. The regression item 90 exists to detect is the agent ceasing to
+reach for the shell *at all* — arm B went to zero calls on every task, against arm A's fifteen — so
+one reach refutes total suppression. This is the boundary the T7 cells sit nearest to, which is why
+it is stated as a rule and not inferred per cell.
+
+**The consequence of that choice, registered with it rather than left to be worked out.** Under
+SEARCHED, **item 90 can close with zero correct answers**, and the arc's only positive result is
+precisely such a cell: it searched, cited a real helper exactly, and never named the file the frozen
+ground truth records. That is defensible — item 90 detects a decline-instead-of-search regression,
+and answer quality is a different question — but it is a real limit on what closing this item would
+mean, and a reader must not have to derive it from the secondary column.
+
+**CORRECT_BASENAME is the registered secondary.** An unqualified basename counts, because the ground
+truth is a file identity and the arm's own answers cite files inconsistently; CORRECT_FULLPATH is
+kept as the stricter third figure. Two cells (T2, T5) separate these two definitions, so the choice
+is not cosmetic.
+
+**T3's missing ground truth is a gap in the secondaries only.** `correctFile` is `null` for T3, so
+it is **unscoreable under CORRECT_\*** and **fully scoreable under SEARCHED** — searching needs no
+ground truth. Since the primary governs closure, T3 does not block it today; if a future pass
+promotes a correctness definition to primary, T3 blocks until its ground truth is recorded. The
+missing field is its own gap and is recorded as one.
+
+### Rate first, verdict second
+
+Every stochastic cell records **k of N with N stated and its exact Clopper–Pearson 95% interval**,
+never a bare fraction. The instrument computes them; two independent implementations (the module's
+bisection and a separate `python3` one) agree on every population reported here.
+
+| population | k/N | rate | exact 95% CI |
+|---|---|---|---|
+| T7 post-fix, SEARCHED | 1/3 | 0.333 | [0.008, 0.906] |
+| T7 pre-fix control, SEARCHED | 0/5 | 0.000 | [0.000, 0.522] |
+| T7 post-fix, CORRECT_BASENAME | 0/3 | 0.000 | [0.000, 0.708] |
+| T1–T6, **each**, SEARCHED | 1/1 | 1.000 | [0.025, 1.000] |
+| T7 all-time — **MIXED POPULATION** | 1/8 | 0.125 | [0.003, 0.527] |
+
+**The all-time figure spans the pre-fix/post-fix boundary and may not be pooled.** Cells either side
+of item 156's directive fix ran different prompts — confirmed by hashing the captured dumps, which
+fall into exactly two distinct values along that boundary. It is a different population, not a
+larger sample of one.
+
+**A single success is consistent with a true rate of 2.5%**, which is why T1–T6 at 1/1 each are six
+*unmeasured* tasks rather than six clearing ones.
+
+### The threshold, two-sided, with an explicit indeterminate band
+
+At **N = 6**: **CLEARS** at k ≥ 5; **FAILS** at k ≤ 1; **INDETERMINATE** at 2 ≤ k ≤ 4 — the cell
+neither clears nor fails, and the entry it belongs to stays open with the rate recorded. A two-sided
+rule with a named middle is what stops a coin-flip resolving in either direction.
+
+**Achieved power at N=6** (`python3`, exact binomial):
+
+| true rate | P(CLEARS) | P(FAILS) | P(INDETERMINATE) |
+|---|---|---|---|
+| 0.90 | 0.886 | 0.000 | 0.114 |
+| 0.50 | 0.109 | 0.109 | **0.781** |
+| 0.33 (T7 observed) | 0.017 | 0.358 | **0.625** |
+| 0.10 | 0.000 | 0.886 | 0.114 |
+
+**Stated as a limitation of the measurement rather than hidden in it:** N=6 separates 0.90 from 0.10
+at 88.6% each way and **cannot separate 0.33 from 0.50** — both land INDETERMINATE most of the time.
+A cell in that band is not resolvable at this N, and a future pass should know that before paying
+for one.
+
+### Escalation and stopping, with cost as a range because composition drives it
+
+**Cost is outcome-dependent by a factor of three, and the ladder is cheapest exactly when the fix
+fails.** Measured from the captures: a **declining** cell costs $0.014544–$0.016119 (n=7, mean
+$0.015071); a **searching** cell costs $0.032645–$0.069448 (n=7, mean $0.047877). Ratio of means
+**3.18×**, extremes **4.78×**. A cell that clears is a cell that mostly searched, so the closing
+scenario sits near the ceiling and the failing scenario near the floor. **Reporting a single
+per-cell average would have priced every rung at the outcome that does not close the item.**
+
+**The $0.0418/cell figure this rule replaces was reconciled, not discarded.** It is item 90's arm
+total divided by seven, and the arm total is exactly the sum of its seven cells' `costUsd`:
+$0.036766 (T1) + $0.255863 (T2–T7) = **$0.292629**, matching the recorded figure to the cent. **No
+instrument disagreement** — the mean is real, it is simply a mean over a 4.78× spread.
+
+| step | N | CLEARS | FAILS | P(CLEARS \| p=0.90) | cells (7 tasks) | all-decline floor | all-search ceiling | worst case |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 6 | k≥5 | k≤1 | 0.886 | 42 | $0.63 | $2.01 | $2.92 |
+| 2 | 10 | k≥8 | k≤2 | 0.930 | 70 | $1.05 | $3.35 | $4.86 |
+| 3 (stop) | 16 | k≥13 | k≤3 | 0.932 | 112 | $1.69 | $5.36 | $7.78 |
+
+**Composition assumption, named:** the floor assumes every cell declines and the ceiling assumes
+every cell searches; a real run lands between, nearer the ceiling the closer it is to closing.
+
+**Stopping rule.** A cell still INDETERMINATE at N=16 is recorded as **unresolvable at affordable
+N**, and the entry says so rather than escalating indefinitely.
+
+**All 42 cells at step 1 are fresh; the existing 8 are historical context, not a partial sample.**
+`.zone/memory.md` is read unconditionally into the assembled prompt, is untracked, and changed after
+every existing cell ran — two of its lines (the sweep bullets) are absent from the captured Aug-14
+dumps, established by comparing the current file against the dump line by line. So a new cell's
+prompt cannot hash to the existing post-fix value
+(`14c3e5b3e3ea9f6024a47ba462175be1b759992ae69bf23e3471f43b0f4261fa`), and **pooling is refused as a
+fact rather than as a check to perform.** The ladder above already prices it that way.
+
+**The pooling instrument is the dump hash, not a token count.** An input-token window is a lossy
+proxy — two different prompts can produce identical counts — and the hash is already the instrument
+item 157 used to establish its own three cells were identical.
+
+### The closing rule for item 90, decided rather than inherited
+
+Item 90 says it closes only if all seven tasks clear. With an indeterminate outcome now possible
+that rule needs restating, and the restatement is a decision with a measured cost, so both the
+choice and the rejected alternative are recorded.
+
+**Registered: item 90 closes only when all seven tasks CLEAR. An INDETERMINATE cell blocks closure
+exactly as a FAIL does.** The difference between the two is what the entry records about *why* it
+stays open, never whether.
+
+**The alternative that was rejected, with the arithmetic that decided it** — closing when **no task
+FAILS** (every task at k ≥ 2), 7 tasks, independence assumed:
+
+| true rate | ALL-7-CLEAR | NO-TASK-FAILS |
+|---|---|---|
+| 0.95 | 0.792 | 1.000 |
+| 0.90 | **0.428** | 0.9996 |
+| 0.80 | 0.052 | 0.989 |
+| 0.50 | 0.000 | **0.445** |
+| 0.33 | 0.000 | 0.045 |
+| 0.10 | 0.000 | 0.000 |
+
+**All-seven-clear is close to unsatisfiable and that is registered, not discovered later:** even if
+every task is truly at 0.90, a complete run closes item 90 only **43%** of the time, and no
+affordable N drives that past ~0.61 (0.428 → 0.601 at N=10 → 0.609 at N=16) because the per-cell
+power ceiling (~0.93) caps the joint.
+
+**What makes that 40%-plus non-closure rate on good data worth paying.** The two rules fail in
+opposite directions. All-seven-clear's error is **non-closure on good data**, which costs money and
+another run. No-task-fails' error is **closure at a coin-flip** — it closes 44.5% of the time when
+every task is at p=0.50, which for an entry whose entire purpose is detecting a suppression
+regression means declaring the regression fixed when it is half-present. **A regression detector
+must err toward not-closing**, so the strict rule stays and the price is stated rather than hidden.
+
+**Independence is assumed and flagged as an assumption.** The seven tasks share a prompt, a model
+and a run, so the true joint may be higher (correlated failure) or lower. Nothing measures it, and
+every joint figure above inherits that caveat.
+
+**Bucket: Closed — and the reason is stated so it is not inferred.** What is discharged is the
+*rule*, which is complete: three definitions named, a primary chosen with its consequence, a
+two-sided threshold with computed power, an escalation ladder with costed rungs, a stopping rule,
+and a closing rule decided against its alternative. The *observation* the rule governs is not
+discharged and lives in item 90, which stays Blocked on data. A registered criterion and the
+measurement it judges are different objects and belong in different entries. Against Actionable
+now: nothing further is proposed here. Against Blocked on data: no observation is missing for the
+rule itself — deciding it required a judgement, not data.
+
+**Where this lives:** `scripts/rescoreAnswerCorrectness.ts` and its test, landed at `a291421b`; the
+captures under the per-repo audits directory. See item 90 for the entry that deferred this rule and
+now inherits it, item 252 for the unread field that forced the outcome-variable decision, and item
+157 for the measurement whose headline the re-scoring changes.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 250 to find out which ones still need something. No index of
+reader the trouble of reading all 251 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (109): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 237, 238, 240, 241, 242, 245, 246
+**Closed** (110): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 237, 238, 240, 241, 242, 245, 246, 251
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (2): 236, 239
