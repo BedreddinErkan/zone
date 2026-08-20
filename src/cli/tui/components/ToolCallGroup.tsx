@@ -25,6 +25,14 @@ export interface ToolCallGroupProps {
  * construction, so N is always small; a truncation branch would be
  * complexity with nothing to truncate. Detail lines stay in call order, not
  * regrouped by tool: that's what happened, and it needs no extra sort step.
+ *
+ * search_in_files/find_references render italic, the other tools don't: a grep pattern and a
+ * file path were otherwise indistinguishable here (same connector, same dim styling, and
+ * formatToolArgs truncates without naming which tool it came from) — the header line above names
+ * the aggregate counts once, but nothing on this per-item line said which kind of string it was.
+ * Scoped to this component rather than to formatToolArgs itself: that function has two other call
+ * sites (ToolCall.tsx, Transcript.tsx's live preview) that already print the tool's display name
+ * directly next to the args and have no such ambiguity to fix.
  */
 export function ToolCallGroup({ calls }: ToolCallGroupProps): React.ReactElement {
   const counts = new Map<string, number>();
@@ -43,7 +51,12 @@ export function ToolCallGroup({ calls }: ToolCallGroupProps): React.ReactElement
       {calls.map((call, i) =>
         call.arg === "" ? null : (
           <Box key={i} paddingLeft={2}>
-            <Text dimColor>{glyph.detailConnector}{formatToolArgs(call.toolName, call.arg)}</Text>
+            <Text
+              dimColor
+              italic={call.toolName === "search_in_files" || call.toolName === "find_references"}
+            >
+              {glyph.detailConnector}{formatToolArgs(call.toolName, call.arg)}
+            </Text>
           </Box>
         )
       )}
