@@ -19740,26 +19740,72 @@ corrected one at `/dev/shm/zone-control-head-revert`; both on tmpfs and neither 
 See item 157 for the measurement this unblocked and item 254 for a second instrument disagreement
 found in the same run.
 
-## 254. Blocked on data — the agent loop's own `costUsd` under-reports spend by 18% against the usage ledger, and the ledger is the one that reconciles
+## 254. Blocked on data — `costUsd` misses whole LLM calls rather than mispricing them, so there is no percentage to correct by
 
-**The disagreement.** One run of 30 cells, two instruments. The captures' per-cell `costUsd` sums to
-**$0.658910**. The daily usage ledger's own per-call rows, for the same run identifiers, sum to
-**$0.778900**. The gap is **$0.119990, or 18.2%** of the smaller figure.
+**This entry's own first version was wrong in the way that mattered, and the correction is the
+point.** It reported that `costUsd` "under-reports spend by 18%" and that every figure derived from
+it "is low by roughly this factor." **Both clauses are false.** 18.2% was one arm's aggregate, not a
+rate; and the mechanism is not a pricing error at all. A future reader must not reach for a scalar.
 
-**Which one is right, established rather than assumed.** Recomputing from the ledger's own token
-counts (123,447 uncached input; 72,992 cache-write; 44,627 cache-read; 8,078 output) at
-`src/usage/pricing.ts`'s published `claude-sonnet-4-6` rates gives **$0.778619** — the ledger to
-within $0.0003, which is rounding. **The ledger reconciles from documented rates; `costUsd` does
-not.** Cache-write tokens are worth $0.273720 at those rates and are the obvious suspect, but
-`costUsd` matches neither the with-cache-write figure nor the without ($0.504899), nor cache-write
-priced at the input or cache-read rate — so it is a third calculation, not a simple omission, and
-naming its exact rule needs a read this entry has not done.
+**The disagreement, restated.** One run of 30 cells: captures' per-cell `costUsd` sums to
+**$0.658910**; the ledger's per-call rows for the same run identifiers sum to **$0.778900**.
 
-**Why it matters beyond one run.** Every per-cell cost figure this document carries was taken from
-`costUsd`: the declining/searching spread that priced item 251's escalation ladder, item 157's
-registered bounds, and the arm totals items 90 and 157 both quote. **All of them are low by roughly
-this factor.** Item 157's own $0.436–$1.739 estimate held only because the actual spend came in
-mid-range; the estimate itself understates real money by ~18%.
+**The mechanism, established arithmetically.** Solving each multi-iteration cell for the cache-write
+tokens its own `costUsd` implies, against the ledger's totals for the same run:
+
+| capture $ | ledger cache-write | cache-write the meter saw | missed | ledger calls | loop iters |
+|---|---|---|---|---|---|
+| 0.067691 | 23,882 | 12,315 | 11,567 | 4 | 3 |
+| 0.048810 | 14,393 | 7,545 | 6,848 | 4 | 3 |
+| **0.047175** | **6,483** | **6,483** | **0** | **3** | **3** |
+| 0.046228 | 10,022 | 6,642 | 3,380 | 4 | 3 |
+| 0.037421 | 6,043 | 4,862 | 1,181 | 4 | 3 |
+| 0.046076 | 12,169 | 6,619 | 5,550 | 4 | 3 |
+
+**The one cell whose ledger call count equals its loop iteration count misses exactly zero and
+matches the ledger to six decimal places.** Every cell with an extra call misses one call's worth.
+All 24 single-call cells match to rounding. **So recorded calls are priced correctly — the meter
+simply never sees some calls.** Pricing is not duplicated either: both paths reach the same
+`totalCost` in `src/usage/pricing.ts`, the loop via `iterCostMeter.ts`. This is not the
+two-normalizers class.
+
+**Which calls, and why they are missed.** `agentLoop.ts` makes LLM calls at five sites and only two
+feed `budget.recordLLMCall` — the main loop and the continuation path. The unfed ones are the
+token-budget wrapup, the max-iteration chat answer, the final assessment, and — separately, from
+`compaction/summarizer.ts` — the compaction summary call. The ledger sees all of them because
+`RecordingLLMClient` wraps `createChatCompletion` and `factory.ts` returns it unconditionally: the
+ledger is complete **by construction**, and the meter is complete **by call-site discipline**. Item
+255 specifies the remedy.
+
+**Therefore the gap is not constant and cannot be corrected by a factor.** It is **0% for any run
+whose calls the meter all saw**, and rises with the size of whatever call it missed — 40% on this
+run's worst cell. **Every affected figure is re-derived individually from ledger tokens; none is
+scaled.**
+
+**The discriminator, which makes the correction tractable.** `terminationReason` predicts it:
+`natural_completion` runs that never compacted are exact, and `token_budget_exceeded` /
+`max_iterations` runs are low. **Verified against an independent dataset the mechanism was not
+derived from** — item 94's seven OpenAI cells on a different model and provider: the two recorded
+`token budget exceeded` cells are exactly the two that move ($0.013854→$0.024600,
+$0.008508→$0.017800), and all five `natural completion` cells match the ledger to rounding. Seven of
+seven.
+
+**One class of figure is unaffected and worth naming so it is not corrected needlessly.**
+**Per-iteration** figures are right, because the defect drops whole rows rather than distorting
+them — the per-iteration medians and means drawn from `~/.zone/cost-logs/` stand. It is **per-run
+totals** that move, and only when the run made an unfed call.
+
+**Severity is gating, not merely reporting — and this entry's first version got that wrong too.**
+The daily USD cap is safe: it reads `getUsage` → the ledger, never `costUsd`. But `antiThrash`'s
+cost-burn trigger reads `ctx.costUsd`, and while the three terminal calls provably cannot reach it
+(the wrapup is invoked inside a `return` that exits the loop, and no `computeAntiThrashSignal` sits
+between the last in-loop check and the terminal calls), **the compaction call is different: it fires
+at `checkAndMaybeCompact` inside the loop body, before an anti-thrash check in the same body.** So
+on any run where compaction fires, the cost-burn gate reads an under-counted figure and trips later
+than its threshold intends. Bounded to compacting runs, but real.
+
+**Subagents add no new call sites** — they recurse through `runAgentLoop` — but they compound it: a
+subagent's own under-reported total is added verbatim to the parent through `recordSubagentResult`.
 
 **A related structural silence, recorded here because the same run surfaced it.** The probe's
 `COST_GATE_USD` (1.5) projects task-1's cost over `tasks.length` and stops the run if the projection
@@ -19769,23 +19815,91 @@ ungated. That is a property of the gate, not of this run: a cost gate that scale
 silent on exactly the invocation shape a repeated-measures design uses. Its silence must not be read
 as headroom.
 
-**Bucket: Blocked on data.** Closing requires reading the loop's own cost accounting against the
-adapter's usage reporting to find which term diverges — an observation that does not exist yet, and
-one this pass deliberately did not make, since it is a different question from the measurement the
-run was bought for. Against Actionable now: no fix is specified, because which term is wrong is
-exactly what the reading decides. Against Neither: a concrete discrepancy with a reconciling
-instrument is recorded, not merely a structural fact. Against Closed: nothing was fixed.
+**Bucket, re-decided now that the mechanism is known: it moves to Neither.** The observation this
+entry originally waited on — which term diverges — **has been made**, so it is no longer blocked on
+data. It is not Closed, because nothing was fixed. It is not Actionable now, because the remedy is
+specified in its own entry rather than here. What remains here is the structural fact: two
+accounting paths for one set of events, one complete by construction and one by discipline.
+**Verdict: WRONG** — as first written, in both its headline factor and its reporting-only severity;
+corrected above rather than annotated.
 
-**Where this lives:** `costUsd` originates in the agent loop's cost meter and is copied into each
-capture by `buildCaptureRecord`; the ledger is `~/.zone/usage/local-dev.jsonl`, written by
+**Where this lives:** `costUsd` originates in the agent loop's cost meter
+(`TokenBudgetMeter.snapshot()` over `iterCostMeter`'s accumulator) and is copied into each capture by
+`buildCaptureRecord`; the ledger is `~/.zone/usage/local-dev.jsonl`, written by
 `src/usage/usageTracker.ts` and priced by `src/usage/pricing.ts`. The gate is `COST_GATE_USD` in
-`scripts/notice-regression-probe.mjs`. See item 157 for the run that surfaced both.
+`scripts/notice-regression-probe.mjs`. See item 255 for the specified remedy, item 157 for the run
+that surfaced this, and item 94 for the independent dataset that confirmed the discriminator.
+
+## 255. Actionable now — the loop's cost meter is complete by discipline where the ledger is complete by construction, and the sample fix has already been applied once
+
+**The remedy item 254 needs, specified so a future pass executes rather than re-decides.** Nothing
+is built here, deliberately: landing it would move `costUsd` in the same pass that re-derives figures
+against it, and this document's own practice is to keep the measured thing and the measuring thing
+in separate passes.
+
+**The four unfed call sites, by shape** — each makes an LLM call that the ledger bills and the
+meter never sees:
+
+| site | shape | when |
+|---|---|---|
+| token-budget wrapup | `synthesizeTokenBudgetExit`'s `createChatCompletion` | terminal |
+| max-iteration chat answer | the "Max iterations reached — requesting final chat answer" call | terminal |
+| final assessment | the read-only-archetype final `createChatCompletion` | terminal |
+| **compaction summary** | `compaction/summarizer.ts`'s call, via `checkAndMaybeCompact` | **mid-loop** |
+
+The fourth is the one that makes this a gating defect rather than a reporting one, and it lives in a
+different file from the other three — a site list drawn only from `agentLoop.ts` would miss it.
+
+**The stopgap, and why it is not the fix.** Adding `budget.recordLLMCall` at each site works, and
+the template already exists in the same file at the continuation path, whose own comment states the
+argument for all of them: *"Record continuation cost/tokens so `budget.snapshot()` in `finalizeRun`
+is accurate."* **That comment is the whole case, and it was applied to exactly one site.** Patching
+four more is the same sample fix again — the class this document already records for the two model-id
+normalizers, and for the marker-attribution mentions-versus-emissions confusion.
+
+**The actual remedy, and the reason it is structural.** `RecordingLLMClient` wraps
+`createChatCompletion` and records every call; `factory.ts` returns it unconditionally. **The ledger
+is therefore complete by construction and cannot be bypassed by forgetting.** The meter is a
+parallel, manual path with no coupling to the call it accounts for, so **a call site added tomorrow
+inherits the omission by default** — the question is not whether the current four are patched but
+whether the fifth is possible. The remedy is to derive the loop's cost view from the seam that
+already sees every call, rather than maintaining a second hand-fed accounting of the same events.
+A future pass should establish whether the meter can subscribe to that seam without losing the
+per-iteration attribution it also provides — that is the one design question this entry does not
+settle.
+
+**Blast radius, measured before the work rather than discovered during it.** **15 test files
+reference `costUsd`; 22 touch the terminal exit paths.** Mocked calls that return a `usage` field
+would begin contributing to totals, so exact-value assertions may move. That is the exposure, and it
+is why this is its own pass.
+
+**The predicted kill set, by name.** Silence each site's new recording independently: the
+token-budget site's kill is a `token_budget_exceeded` cost assertion; the max-iteration site's is a
+`max_iterations` one; the compaction site's requires a test where compaction actually fires, which
+is the one that may not exist yet and would have to be written first. **A site whose silencing kills
+nothing is an untested site, not a safe one.**
+
+**The acceptance test, already in hand and re-runnable at no cost.** Post-fix, every cell whose
+ledger call count *exceeds* its loop iteration count must match the ledger to six decimals —
+exactly as the one equal-count cell already does. The thirty captured cells from item 157's arms are
+the fixture; no new spend is required to check the fix.
+
+**Bucket: Actionable now.** The remedy is specified, its exposure measured, its acceptance test
+written and its fixture already on disk; nothing new needs to be learned first except whether the
+meter can subscribe to the recording seam without losing per-iteration attribution. Against Blocked
+on data: no observation is missing — item 254 made it.
+Against Neither: a concrete fix is proposed. Against Closed: nothing is built.
+
+**Where this lives:** the four unfed call sites, in `src/llm/agentLoop.ts` and
+`src/llm/compaction/summarizer.ts`; the meter in `src/llm/tokenBudget/TokenBudgetMeter.ts` over
+`src/usage/iterCostMeter.ts`; the seam in `src/llm/recordingClient.ts`, wired at
+`src/llm/factory.ts`. See item 254 for the mechanism and its arithmetic.
 
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 254 to find out which ones still need something. No index of
+reader the trouble of reading all 255 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -19794,16 +19908,16 @@ first.
 **Closed** (112): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 237, 238, 240, 241, 242, 245, 246, 251, 252, 253
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (2): 236, 239
+first (3): 236, 239, 255
 
-**Blocked on data** — closing requires an observation that doesn't exist yet (15): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250, 254
+**Blocked on data** — closing requires an observation that doesn't exist yet (14): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250
 
-**Neither — a structural fact recorded, with no fix proposed** (125): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (126): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152, 154, 155, 158,
 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199, 200, 201, 202, 205,
-206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230, 232, 243, 244, 247, 248, 249
+206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230, 232, 243, 244, 247, 248, 249, 254
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
