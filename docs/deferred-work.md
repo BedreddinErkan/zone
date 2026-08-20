@@ -18520,9 +18520,9 @@ builds that field through an intermediately-typed `Pick` constant instead of an 
 identical rename against that version fails the build. `encrypted_content` stays discarded — the S4
 carrier this entry already named as unbuilt still is, and nothing here builds one.
 
-**Bucket: Closed.** The remedy is built, its one wrong assumption corrected before shipping rather
-than after, and the instrument that proves it fires is not the instrument this entry would have
-settled for. Against Actionable now: nothing further is proposed. Against Blocked on data: every
+**Bucket: Closed.** Landed in `17aecade`. The remedy is built, its one wrong assumption corrected
+before shipping rather than after, and the instrument that proves it fires is not the instrument
+this entry would have settled for. Against Actionable now: nothing further is proposed. Against Blocked on data: every
 observation needed has been made, including the second live call this entry's own scope did not
 originally ask for. Against Neither: a fix was built, not merely proposed.
 
@@ -18660,8 +18660,8 @@ constants needed a further adjustment once this entry and item 237's rewrite wer
 recorded in the commit that closes this entry, not restated here as a number that would itself go
 stale the next time this document grows.
 
-**Bucket: Closed.** The module and its test exist, are mutation-tested, and the absolutes they assert
-are locked against this document's own final state for this pass. Against Actionable now: nothing
+**Bucket: Closed.** Landed in `e56f5e63`. The module and its test exist, are mutation-tested, and
+the absolutes they assert are locked against this document's own final state for that pass. Against Actionable now: nothing
 further is proposed. Against Blocked on data: the search this entry's own premise depended on —
 whether 46 exists anywhere — has been run exhaustively, not left open. Against Neither: this is
 completed work, not a structural fact recorded without a fix.
@@ -18669,29 +18669,201 @@ completed work, not a structural fact recorded without a fix.
 **Where this lives:** `scripts/deferredWorkPositionalSweep.ts` and its test, sibling to
 `scripts/deferredWorkAnaphorSweep.ts`.
 
+## 241. Closed — two model-id normalizers had already diverged, and last pass's summary:"auto" never reached anyone running a dated OpenAI id
+
+**The defect, and its scope.** `modelRegistry.ts` stripped only the Anthropic snapshot spelling
+(`-YYYYMMDD`). `usage/pricing.ts` stripped both that and the OpenAI spelling (`-YYYY-MM-DD`). The
+consequence was measured, not inferred: `supportsEffort("gpt-5.5-2026-04-23")` returned **false**,
+so a dated OpenAI id reaching the Responses converter received **no reasoning object at all** —
+neither `effort` nor, once it shipped, `summary:"auto"`. Pricing resolved the identical id
+correctly the whole time, which is why nothing surfaced it: the two consumers disagreed silently
+about what the same string meant.
+
+**The honest scope of what the previous pass delivered.** Item 237 closed on a fix that added
+`summary:"auto"` to the Responses request. That fix landed behind this hole. **Anyone running a
+dated OpenAI id never received it**, and never received `effort` either, from before that pass
+until this one. The feature was correct and unreachable for that population.
+
+**Why the fix is one module rather than two aligned copies.** Copying pricing's two lines into
+`modelRegistry` would have aligned today's behaviour and left the actual defect — two
+implementations free to diverge again — fully intact. The transformation now lives in one leaf
+module both import. Import direction forbade the obvious placement and that was measured rather
+than assumed: `pricing.ts` imports nothing and the existing chain runs `modelRegistry → models →
+pricing`, so exporting from `modelRegistry` and importing that from `pricing` closes a cycle.
+
+**Enumerated rather than encountered.** Both prior normalizers had been found by running into
+them. A whole-tree sweep under two instruments returns exactly two sites and no third, and they
+differ in nothing else — no casing, trimming, or provider-prefix handling on either side. Order
+between the two patterns is provably irrelevant: zero overlap across every shape either consumer
+sees, both orders identical on all of them.
+
+**The single-source property is pinned, not assumed.** A structural test runs that same
+enumeration as an assertion. It was demonstrated rather than asserted: with a duplicate
+reintroduced, all 28 behavioural tests still passed and only the structural guard failed. Without
+it the extraction would have been a one-time cleanup rather than a guarantee, since a copy is
+behaviourally identical right up until it silently diverges.
+
+**A second correction, on evidence rather than stipulation.** `gpt-5.4-nano` was excluded from
+`EFFORT_SUPPORTED_MODELS` by a comment stating **no reason at all**, and that silence was then
+cited three times — the Responses params converter, item 237, and commit `64060503` — as though it
+established a fact about the model. Measured against the real API, nano **accepts** both
+`reasoning.effort` and `reasoning.summary` at low/medium/high and returns genuine summary prose at
+every one. It is in the catalog now. A first probe reporting zero reasoning was an artifact of an
+easy prompt at low effort, caught only because a known-reasoning control was run beside it — one
+prompt away from committing the opposite conclusion.
+
+**Bucket: Closed.** The duplicate is deleted, the single-source property is pinned by a test that
+was shown to fire, and the unmeasured exclusion is corrected against live evidence. Against
+Actionable now: nothing further is proposed. Against Blocked on data: the observations that were
+missing have been made. Against Neither: work was built, not merely recorded.
+
+**Where this lives:** the shared normalizer module under the llm directory, its consumers in the
+model registry and the usage pricing table, and the Responses params converter whose comment
+carried the stipulation. Landed in `2402cff5`. See item 237 for the feature this hole was hiding.
+
+## 242. Closed — multi_edit never called the write-scope guard, and a populated filesLikely did not close it
+
+**What it was.** `multi_edit` ran the repository-boundary check on every path in its batch but
+never the plan-scope guard that `apply_patch` and `write_file` both apply. Any write outside the
+planned scope succeeded as long as it went through this tool. Unlike the empty-`filesLikely`
+fail-open recorded in item 243, this did not depend on the plan being empty — a fully populated
+`filesLikely` did not close it, which makes it the wider of the two.
+
+**Why it landed rather than being specified.** The concern was that `refactor` and
+`complex_multi_file` legitimately write outside the plan and `multi_edit` is the tool they use
+most, so a guard that blocked correctly but bypassed differently would be its own defect. Parity
+was established rather than assumed: across all three write tools on seven scenarios — in-scope,
+out-of-scope, both archetype bypasses, a non-bypassing archetype, empty `filesLikely`, and no plan
+at all — the decisions agree in every row.
+
+**One placement decision worth recording.** The check sits in the existing pre-flight loop beside
+the boundary check, for the reason that loop's own comment gives: a scope block discovered
+mid-batch would leave the ambiguous partial-staging state pre-flight exists to prevent. A batch
+containing one out-of-scope file now refuses to start and stages nothing, including its in-scope
+members.
+
+**One deliberate omission, which is parity rather than a shortfall.** No symbol-expansion retry.
+That helper fires only for `refactor`/`complex_multi_file`, and the guard returns null for exactly
+those two archetypes before it could be reached — so the expansion path at the other two call
+sites is **already unreachable in production**. Copying it here would have copied dead code.
+Recorded because reading the two existing handlers suggests the opposite.
+
+**Bucket: Closed.** The bypass is closed with measured parity and mutation coverage. Against
+Actionable now: nothing further is proposed. Against Blocked on data: the parity question that
+would have deferred it was answerable and answered. Against Neither: work was built.
+
+**Where this lives:** the `multi_edit` handler in the tool executor and its new parity test.
+Landed in `3ab6df59`. See item 243 for the adjacent fail-open this does **not** change.
+
+## 243. Neither — the write-scope guard's empty-filesLikely allow is a documented contract, not an unnoticed defect, and it is narrower than it sounds
+
+**The behaviour is real.** Executing the compiled guard confirms it: when the union of the
+plan-level and per-step `filesLikely` sets is empty, every write is allowed. Absent and
+present-but-empty are **indistinguishable** — they converge on one branch, and the empty case is
+additionally collapsed into the absent case before the guard is ever called, because both plan
+reconstruction sites strip an empty array.
+
+**But three things about it are commonly misstated, and each changes what a fix would mean.**
+
+*It is not unnoticed.* It is an explicit branch, commented "Pre-existing fail-open" at the branch
+and again in the file header, and **pinned by five assertions across four test files**. One of
+those files asserts the enforcing layer for stepless plans is capability filtering rather than the
+scope guard. Closing it is a change to a documented contract, not a bug fix, and would require
+deliberately rewriting those assertions.
+
+*"Every write flips to allow" is true only of the scope layer.* The repository-boundary check
+(symlink-aware, fails closed on an unresolvable path), capability filtering (write tools are not
+offered at all on read-only pipelines), the answer-only deny-all (which fires **before** this
+branch), and the manual edit-approval gate all survive. What is genuinely lost is *semantic*
+containment — the guard stops answering "is this file part of the approved work?" while still
+answering "is it inside the repository?".
+
+*The compounding effect is the part worth weighting.* With no blocks, the consecutive-scope-block
+counter never advances, so the three-block replan signal and the five-block circuit breaker never
+fire. The fail-open disables the alarm along with the guard.
+
+**Measured, with the measurement's own limits stated.** Two independent instruments agree exactly:
+of **15 stored plans** spanning 2026-07-30 to 2026-08-19, **zero** would have triggered it, and
+the smallest observed scope union was two files. That figure does **not** license a conclusion.
+Only user-visible plans and resumable envelopes are stored, so plans that failed validation,
+aborted before the approval modal, or were self-generated on non-plan runs leave no trace — and
+the population most likely to be empty is exactly the unrecorded one. Empty-versus-absent is
+additionally unmeasurable from stored data, since both plan reconstruction sites strip an empty
+array before anything is written. **This is not "0% empty in
+production."** Measuring it properly needs live plan generation at roughly $0.06 per plan, which
+exceeded this pass's spending bar and was not run.
+
+**A related premise that turned out false, recorded so it is not re-derived.** The guard exempts
+the repository-local `.zone/` directory unconditionally, and it was proposed that this leaves API
+keys writable while `read_file` blocks reading them. It does not. Keys and sessions live in the
+**user-level** `~/.zone/`, outside the repository, and the boundary check refuses every write
+there — confirmed behaviourally against all three write tools, with a positive control proving the
+harness could produce a success, and the real keys file byte-identical afterward. The exemption
+covers only the repository-local directory, which holds project memory, conversations, trust and
+model settings, and no secrets.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed. Against Actionable now:
+the change is specifiable but its own evidence does not support making it — flipping a documented,
+test-pinned contract on a sample that cannot see the relevant population would be acting on a
+measurement that does not exist. Against Blocked on data: naming the missing observation is the
+point of this entry, but the entry is complete without it. Against Closed: nothing was built here.
+
+**Where this lives:** the write-scope guard under the tools directory and the four test files that
+pin its empty-set branch. See item 242 for the adjacent bypass that **was** closed, and item 79 for
+the answer-only branch that fires ahead of this one.
+
+## 244. Neither — a tracked test fixture embeds a stale copy of the scope guard's source, and greps for that source hit the fixture
+
+**What it is.** `src/repo/rankerBaseline.snapshot.json` embeds, as JSON string data, a copy of
+several source files including the write-scope guard — and the embedded copy predates the plan-level
+`filesLikely` work. Searching the repository for the guard's own source returns the fixture
+alongside the real module, and the fixture's version answers differently: it has no plan-level read
+at all and gates its whole allowed-files collection behind a steps-length check that the live module
+no longer has.
+
+**Why it belongs in the record rather than in a parenthetical.** This is an active measurement
+trap, not a tidiness problem. It silently corrupts the establishment step of any pass that reads the
+guard by search rather than by opening the module — and the wrong answer it returns is plausible,
+self-consistent, and stale in exactly the direction that matters. It is the same class of
+environment fact as the shell's `grep` being a function that skips gitignored-but-tracked files: a
+tool that answers confidently and wrongly, where the defence is knowing in advance that it does.
+
+**Not fixed here, and the reason is scope rather than difficulty.** The fixture exists to pin a
+ranking baseline, so what it must contain is a question for whoever owns that baseline; regenerating
+it without understanding what the ranker consumes would trade one silent staleness for another.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed. Against Actionable now: a
+remedy is *not* specified — what the fixture may safely contain is unresolved. Against Blocked on
+data: the hazard is fully observed; what is missing is a decision, not an observation. Against
+Closed: nothing was built.
+
+**Where this lives:** the ranker baseline snapshot under the repo directory, and the write-scope
+guard whose source it mirrors. Recorded in `CLAUDE.md` alongside the other search-tool hazards. See
+item 243 for the guard whose real behaviour this fixture misreports.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 240 to find out which ones still need something. No index of
+reader the trouble of reading all 244 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (105): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 237, 238, 240
+**Closed** (107): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 237, 238, 240, 241, 242
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (2): 236, 239
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (13): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196
 
-**Neither — a structural fact recorded, with no fix proposed** (120): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (122): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152, 154, 155, 158,
 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199, 200, 201, 202, 205,
-206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230, 232
+206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230, 232, 243, 244
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
