@@ -2092,6 +2092,8 @@ export async function executeTool(
           replaceMarkerCountLineAnchored,
           patchBytes: Buffer.byteLength(patch, "utf8"),
           rejected: true,
+          runId: input?.runId ?? null,
+          model: input?.model ?? null,
         }));
 
         return {
@@ -2136,6 +2138,23 @@ export async function executeTool(
       const { blocks, sqFindTotal, sqReplaceTotal } = segmentPatchBlocks(patch);
 
       if (blocks.length === 0) {
+        // Previously silent — confirmed by driving all four input shapes below through the
+        // real handler with a console.log spy and finding no marker of any kind. Item 245's own
+        // spec: a discriminator for which shape produced the zero-block result, since "no valid
+        // blocks" collapses at least four causes (no marker at all; markers present but wrong
+        // case, since matching is exact-substring per FIND_MARKER/REPLACE_MARKER above; an empty
+        // patch; a whitespace-only patch) into one message. The four fields below are exactly
+        // what distinguishes them after the fact, without re-parsing the patch text.
+        log("[zone-apply-patch-no-valid-blocks]", JSON.stringify({
+          filePath,
+          patchBytes: Buffer.byteLength(patch, "utf8"),
+          patchTrimmedLength: patch.trim().length,
+          hasFindMarkerCaseInsensitive: /--- ?find ?---/i.test(patch),
+          hasReplaceMarkerCaseInsensitive: /--- ?replace ?---/i.test(patch),
+          rejected: true,
+          runId: input?.runId ?? null,
+          model: input?.model ?? null,
+        }));
         return {
           success: false,
           output:
@@ -2146,6 +2165,8 @@ export async function executeTool(
             "--- REPLACE ---\n" +
             "<replacement content>\n\n" +
             "Do not put content outside the blocks or reverse the marker order.",
+          error: "apply_patch_no_valid_blocks",
+          rejectionReason: "no_valid_blocks",
         };
       }
 
@@ -2435,9 +2456,24 @@ export async function executeTool(
               rejectionReason: "find_block_empty",
             })
           );
+          // Alongside the diagnostic debugLog above, not a replacement for it: that call needs
+          // ZONE_VERBOSE_LOGS=1 to ever reach console.log (a module-level gate evaluated once at
+          // import), so in normal operation this cause has never once reached the marker sink.
+          // This one is unconditional, dedicated, and deliberately minimal — the rich per-block
+          // diagnostic fields stay on the debugLog call above; this just makes the cause
+          // countable.
+          log("[zone-apply-patch-find-block-empty]", JSON.stringify({
+            filePath,
+            block: bi + 1,
+            rejected: true,
+            runId: input?.runId ?? null,
+            model: input?.model ?? null,
+          }));
           return {
             success: false,
             output: `Block ${bi + 1}: FIND block is empty. Provide exact lines to locate the insertion point.`,
+            error: "apply_patch_find_block_empty",
+            rejectionReason: "find_block_empty",
           };
         }
 
@@ -2450,11 +2486,20 @@ export async function executeTool(
               rejectionReason: "replace_block_empty",
             })
           );
+          log("[zone-apply-patch-replace-block-empty]", JSON.stringify({
+            filePath,
+            block: bi + 1,
+            rejected: true,
+            runId: input?.runId ?? null,
+            model: input?.model ?? null,
+          }));
           return {
             success: false,
             output:
               `Block ${bi + 1}: REPLACE block is empty. ` +
               `To delete lines, set intent to 'delete' and retry.`,
+            error: "apply_patch_replace_block_empty",
+            rejectionReason: "replace_block_empty",
           };
         }
 
@@ -2467,6 +2512,14 @@ export async function executeTool(
               rejectionReason: "find_not_found",
             })
           );
+          log("[zone-apply-patch-find-not-found]", JSON.stringify({
+            filePath,
+            block: bi + 1,
+            scopeActive: activeScopeInfo !== null,
+            rejected: true,
+            runId: input?.runId ?? null,
+            model: input?.model ?? null,
+          }));
           if (isMultiBlockPatch) {
             log("[zone-apply-patch-marker-split]", JSON.stringify({
               filePath,
@@ -2474,6 +2527,8 @@ export async function executeTool(
               findMarkerCount,
               contentEmbeddedBoundaryCount,
               rejected: true,
+              runId: input?.runId ?? null,
+              model: input?.model ?? null,
             }));
           }
           return {
@@ -2485,6 +2540,8 @@ export async function executeTool(
                 : "") +
               `. Re-read the file with read_file and copy the exact lines (whitespace matters).\n` +
               `FIND (first 300 chars):\n${block.find.slice(0, 300)}`,
+            error: "apply_patch_find_not_found",
+            rejectionReason: "find_not_found",
           };
         }
 
@@ -2618,6 +2675,8 @@ export async function executeTool(
           findMarkerCount,
           contentEmbeddedBoundaryCount,
           rejected: false,
+          runId: input?.runId ?? null,
+          model: input?.model ?? null,
         }));
       }
 

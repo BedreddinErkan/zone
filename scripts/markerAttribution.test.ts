@@ -322,9 +322,14 @@ describe("self-exclusion — the tool does not inventory its own fixtures", () =
  * shifts these numbers should make this test fail and prompt a review, not silently drift.
  */
 describe("drift check — today's figures against the real tree", () => {
-  it("406 marker names; emitter-count distribution zero=42 one=345 several=19; 24 hazards", () => {
+  it("410 marker names; emitter-count distribution zero=42 one=349 several=19; 24 hazards", () => {
+    // Re-derived via this file's own scanTree/hazards, not hand-added to the prior 406/345 —
+    // four new single-emitter apply_patch markers landed (zero-blocks, empty-FIND,
+    // empty-REPLACE, FIND-not-found), each mentioned and emitted in exactly one file, so `one`
+    // moves 345->349 and total moves 406->410; `zero`, `several`, and hazards are unaffected,
+    // confirmed by running the scan rather than assumed from the shape of the change.
     const result = scanTree(readTrackedFiles());
-    expect(result.size).toBe(406);
+    expect(result.size).toBe(410);
 
     const dist = { zero: 0, one: 0, several: 0 };
     for (const attr of result.values()) {
@@ -333,7 +338,7 @@ describe("drift check — today's figures against the real tree", () => {
       else if (c === 1) dist.one++;
       else dist.several++;
     }
-    expect(dist).toEqual({ zero: 42, one: 345, several: 19 });
+    expect(dist).toEqual({ zero: 42, one: 349, several: 19 });
     expect(hazards(result)).toHaveLength(24);
   });
 
