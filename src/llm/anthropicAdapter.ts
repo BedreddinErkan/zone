@@ -8,7 +8,7 @@ import type {
   ChatCompletionCreateParamsStreaming,
   ChatCompletionMessageToolCall,
 } from "openai/resources/chat/completions";
-import type { LLMClient, LLMRequestOptions } from "./types.js";
+import type { ChatCompletionWithReasoning, LLMClient, LLMRequestOptions } from "./types.js";
 import { convertParams } from "./anthropicAdapter/convertParams.js";
 import { convertResponse } from "./anthropicAdapter/convertResponse.js";
 import { convertStream } from "./anthropicAdapter/convertStream.js";
@@ -94,7 +94,7 @@ export class AnthropicAdapter implements LLMClient {
   async createChatCompletion(
     params: ChatCompletionCreateParamsNonStreaming,
     options: LLMRequestOptions = {}
-  ): Promise<ChatCompletion> {
+  ): Promise<ChatCompletionWithReasoning> {
     try {
       if (options.onToolArgumentsDelta) {
         // await required: without it a streaming-path rejection bypasses this try/catch
@@ -123,7 +123,7 @@ export class AnthropicAdapter implements LLMClient {
   private async _streamWithToolCallbacks(
     params: ChatCompletionCreateParamsNonStreaming,
     options: LLMRequestOptions
-  ): Promise<ChatCompletion> {
+  ): Promise<ChatCompletionWithReasoning> {
     const { params: anthropicParams, warnings } = convertParams(params, { effort: options.effort, webSearch: options.webSearch });
     if (warnings.length > 0) {
       for (const w of warnings) console.warn(`[zone-anthropic] ${w}`);
@@ -241,13 +241,21 @@ export class AnthropicAdapter implements LLMClient {
           ...(hasToolCalls ? { tool_calls: toolCalls } : {}),
         };
 
+        // Typed const rather than an inline spread, for the same reason convertResponse.ts and
+        // responsesConvertResponse.ts use one — and doubly needed here: this literal is returned
+        // from a generic callback passed to withExponentialBackoff, so its type is INFERRED from
+        // the literal and there is no contextual type to check against at all. The const carries
+        // its own target type, so it is checked regardless of what encloses it.
+        const reasoningTextField: Pick<ChatCompletionWithReasoning, "reasoningText"> =
+          streamReasoningText ? { reasoningText: streamReasoningText } : {};
+
         return {
           id: responseId,
           object: "chat.completion",
           created: Math.floor(Date.now() / 1000),
           model: responseModel,
           choices: [{ index: 0, message, finish_reason: finishReason, logprobs: null }],
-          ...(streamReasoningText ? { reasoningText: streamReasoningText } : {}),
+          ...reasoningTextField,
           ...(streamThinkingBlocks.length > 0 ? { thinkingBlocks: streamThinkingBlocks } : {}),
           usage: {
             prompt_tokens: usagePrompt,

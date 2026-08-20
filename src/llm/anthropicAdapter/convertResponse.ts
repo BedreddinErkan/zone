@@ -104,6 +104,15 @@ export function convertResponse(
     ...(hasToolCalls ? { tool_calls: toolCalls } : {}),
   };
 
+  // Typed as a Pick of the shared type rather than built inline below, matching
+  // responsesConvertResponse.ts. Excess-property checking runs on a literal assigned to a typed
+  // target but is bypassed for one merged into a wider object via spread — so before this const
+  // existed, renaming the key here passed `tsc` completely clean (confirmed by mutation, not
+  // reasoned), leaving the emitter reading `undefined` forever with a green build.
+  const reasoningTextField: Pick<ChatCompletionWithReasoning, "reasoningText"> = reasoningText
+    ? { reasoningText }
+    : {};
+
   return {
     id: msg.id,
     object: "chat.completion",
@@ -117,7 +126,7 @@ export function convertResponse(
         logprobs: null,
       },
     ],
-    ...(reasoningText ? { reasoningText } : {}),
+    ...reasoningTextField,
     ...(thinkingBlocks.length > 0 ? { thinkingBlocks } : {}),
     usage: {
       prompt_tokens: msg.usage.input_tokens,

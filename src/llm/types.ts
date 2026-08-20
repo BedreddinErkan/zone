@@ -14,14 +14,25 @@ export type LLMChatParams =
   | ChatCompletionCreateParamsStreaming;
 
 /**
- * Both provider converters (anthropicAdapter/convertResponse.ts,
- * openaiAdapter/responsesConvertResponse.ts) attach reasoning text under this one field name.
- * Declaring it here — on LLMClient's own return type, not as a cast at the read site — is what
- * lets a rename on either side fail the build instead of silently reading `undefined` forever:
- * the field name is checked once, at its single declaration, rather than independently at every
- * producer and consumer. `thinkingBlocks` (Anthropic's own replay payload) stays out of this
- * shared type deliberately — it is provider-specific, not part of the generic contract, and the
- * one site that reads it (agentLoop.ts) still casts for it, unchanged.
+ * All three provider producers (anthropicAdapter/convertResponse.ts, anthropicAdapter.ts's
+ * streaming path, and openaiAdapter/responsesConvertResponse.ts) attach reasoning text under this
+ * one field name, and every one of them builds it through a `Pick<…, "reasoningText">`-typed
+ * const rather than an inline conditional spread.
+ *
+ * That const is the load-bearing part, and an earlier version of this comment got it wrong: it
+ * claimed that declaring the field here "lets a rename on either side fail the build." Declaring
+ * it here is necessary but not sufficient. TypeScript's excess-property check runs on a literal
+ * assigned to a typed target and is bypassed for one merged into a wider object via spread — so
+ * while this type was declared and the annotations were correct, renaming the key at either
+ * Anthropic producer still passed `tsc` completely clean (confirmed by mutating both, not
+ * reasoned). The read site would then have gone `undefined` forever with a green build. The typed
+ * const at each producer is what actually closes it; the streaming site additionally needs it
+ * because its literal is returned from a generic callback and has no contextual type at all.
+ *
+ * `thinkingBlocks` (Anthropic's own replay payload) stays out of this shared type deliberately —
+ * it is provider-specific, not part of the generic contract, and the one site that reads it
+ * (agentLoop.ts) still casts for it, unchanged. It therefore has none of the protection described
+ * above, at any of its producers or at its reader.
  */
 export type ChatCompletionWithReasoning = ChatCompletion & { reasoningText?: string };
 
