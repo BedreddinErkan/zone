@@ -8,7 +8,7 @@ import type {
   ResponseIncludable,
   FunctionTool,
 } from "openai/resources/responses/responses.js";
-import { resolveEffortForModel } from "../modelRegistry.js";
+import { resolveEffortForModel, supportsEffort } from "../modelRegistry.js";
 import type { EffortLevel } from "../modelRegistry.js";
 
 export function responsesConvertParams(
@@ -50,11 +50,35 @@ export function responsesConvertParams(
           }))
       : undefined;
 
-  // Effort → reasoning.{effort}. Reuse the same xhigh/max→"high" narrowing as openaiAdapter.ts:27-30.
+  // Effort → reasoning.effort, same xhigh/max→"high" narrowing as openaiAdapter.ts:63-65.
+  //
+  // `reasoning` is gated on supportsEffort(model), NOT on whether an effort override
+  // resolved — those are different questions. supportsEffort is the same reasoning-capability
+  // check the sibling Chat Completions branch already uses in this file (openaiAdapter.ts) to
+  // decide whether to send reasoning_effort at all; gpt-5.4-nano is on the Responses branch
+  // (its id starts "gpt-5") but is deliberately excluded from EFFORT_SUPPORTED_MODELS, the
+  // same exclusion Haiku gets on the Anthropic side — "reasoning model in name, not in this
+  // catalog's capability model." Gating on whether the USER happened to pass --effort instead
+  // would send an unconditional `reasoning` object to a model this codebase already declares
+  // has no reasoning capability, for no product reason; gating on model capability is the
+  // narrower, correct condition and costs nothing normal callers would ever notice, since
+  // every effort-capable model reasons internally regardless of whether an override was sent.
+  //
+  // summary:"auto" is fixed, not configurable — no CLI flag/env/disk setting. The text this
+  // requests is only ever displayed behind the existing investigation-mode + tool-call + runId
+  // gate in agentLoop.ts, which has no user-facing toggle on the Anthropic side either; adding
+  // one only for OpenAI's request shape would be an asymmetry nothing asks for.
+  //
+  // The explicit `ResponseCreateParamsNonStreaming["reasoning"]` annotation on `reasoning` is
+  // load-bearing, not decorative: without it, `summary: "auto"` widens to plain `string` on
+  // this standalone const and fails structural assignability against the SDK's own
+  // `'auto' | 'concise' | 'detailed' | null` field the first time it's assigned into `result`.
   const resolvedEffort = resolveEffortForModel(params.model, options.effort);
   const narrowedEffort =
     resolvedEffort === "xhigh" || resolvedEffort === "max" ? "high" : resolvedEffort;
-  const reasoning = narrowedEffort ? { effort: narrowedEffort } : undefined;
+  const reasoning: ResponseCreateParamsNonStreaming["reasoning"] = supportsEffort(params.model)
+    ? { summary: "auto", ...(narrowedEffort ? { effort: narrowedEffort } : {}) }
+    : undefined;
 
   const result: ResponseCreateParamsNonStreaming = {
     model: params.model,

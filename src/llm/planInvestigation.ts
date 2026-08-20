@@ -201,11 +201,11 @@ export async function runPlanInvestigation(
           status: "active",
         } as Partial<ZoneStructuredProgressEvent>);
       }
-      // agentLoop.ts only ever populates reasoningText from Anthropic thinking blocks
-      // (convertResponse.ts) — the OpenAI Responses API branch (responsesConvertResponse.ts)
-      // collects its own reasoning items and discards them (comment there: "S4-SEAM ...
-      // discarded for now"), so this event never fires for an OpenAI-backed investigation.
-      // That asymmetry is upstream of this forwarder and is not fixed here.
+      // agentLoop.ts populates reasoningText from either provider now: Anthropic's thinking
+      // blocks (convertResponse.ts) and OpenAI's reasoning summary (responsesConvertResponse.ts,
+      // requested via reasoning.summary:"auto" and extracted from the response's reasoning
+      // items). This forwarder is provider-agnostic by construction — it keys on event type,
+      // never on which provider produced it — so no change was needed here to close that gap.
       if (e["type"] === "thinking") {
         emitProgress({
           type: "thinking",

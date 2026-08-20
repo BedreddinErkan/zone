@@ -216,8 +216,8 @@ describe("responsesConvertResponse — usage mapping", () => {
   });
 });
 
-describe("responsesConvertResponse — reasoning items discarded (S4 seam dormant)", () => {
-  it("reasoning items do not appear in message; function_call does appear in tool_calls", () => {
+describe("responsesConvertResponse — encrypted_content stays discarded (S4 seam dormant); summary no longer is", () => {
+  it("reasoning items (including the opaque blob) do not appear in message; function_call does appear in tool_calls", () => {
     const response = makeResponse({
       output: [
         {
@@ -238,12 +238,83 @@ describe("responsesConvertResponse — reasoning items discarded (S4 seam dorman
     });
     const result = responsesConvertResponse(response);
     const msg = result.choices[0].message;
-    // Reasoning must not appear anywhere in message
+    // Reasoning must not appear anywhere in message. This assertion only inspects `message`,
+    // never the top-level result, so it stays a valid regression guard now that a top-level
+    // `result.reasoningText` exists too — see the describe block below for that surface.
     expect(JSON.stringify(msg)).not.toContain("OPAQUE_BLOB");
     expect(JSON.stringify(msg)).not.toContain("reasoning");
     // Tool call must be present
     expect(msg.tool_calls).toHaveLength(1);
     expect(msg.tool_calls![0].id).toBe("call_999");
+  });
+});
+
+describe("responsesConvertResponse — reasoning summary → reasoningText", () => {
+  it("extracts and joins summary text, trimmed, matching Anthropic's extractReasoningText separator convention", () => {
+    const response = makeResponse({
+      output: [
+        {
+          type: "reasoning",
+          id: "rs_1",
+          summary: [
+            { type: "summary_text", text: " First part. " },
+            { type: "summary_text", text: "Second part." },
+          ],
+          encrypted_content: "OPAQUE_BLOB",
+        },
+      ] as unknown as OpenAIResponse["output"],
+    });
+    const result = responsesConvertResponse(response);
+    // Outer trim only — the trailing space on the first part before the \n\n join survives.
+    // Real behavior, not an idealized one: mirrors extractReasoningText (thinkingBlocks.ts)
+    // exactly, which also only trims the joined string's own ends.
+    expect(result.reasoningText).toBe("First part. \n\nSecond part.");
+  });
+
+  it("empty summary array → no reasoningText key at all, not an empty string", () => {
+    const response = makeResponse({
+      output: [
+        { type: "reasoning", id: "rs_1", summary: [], encrypted_content: "OPAQUE_BLOB" },
+      ] as unknown as OpenAIResponse["output"],
+    });
+    const result = responsesConvertResponse(response);
+    // The S4-seam test above only inspects `message` and cannot catch this — this is the one
+    // case it structurally can't see, which is why this test exists as its own assertion.
+    expect("reasoningText" in result).toBe(false);
+  });
+
+  it("multiple reasoning items — summaries across all of them are joined in encounter order", () => {
+    const response = makeResponse({
+      output: [
+        { type: "reasoning", id: "rs_1", summary: [{ type: "summary_text", text: "First." }] },
+        { type: "reasoning", id: "rs_2", summary: [{ type: "summary_text", text: "Second." }] },
+      ] as unknown as OpenAIResponse["output"],
+    });
+    const result = responsesConvertResponse(response);
+    expect(result.reasoningText).toBe("First.\n\nSecond.");
+  });
+
+  it("a reasoning item alongside a function_call — reasoningText is set AND tool_calls still populate", () => {
+    const response = makeResponse({
+      output: [
+        {
+          type: "reasoning",
+          id: "rs_1",
+          summary: [{ type: "summary_text", text: "Checking the file first." }],
+        },
+        {
+          type: "function_call",
+          id: "fc_1",
+          call_id: "call_1",
+          name: "read_file",
+          arguments: "{}",
+          status: "completed",
+        },
+      ] as unknown as OpenAIResponse["output"],
+    });
+    const result = responsesConvertResponse(response);
+    expect(result.reasoningText).toBe("Checking the file first.");
+    expect(result.choices[0].message.tool_calls).toHaveLength(1);
   });
 });
 

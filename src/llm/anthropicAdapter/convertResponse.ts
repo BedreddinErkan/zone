@@ -9,6 +9,7 @@ import {
   isThinkingBlock,
   type ProviderThinkingBlock,
 } from "./thinkingBlocks.js";
+import type { ChatCompletionWithReasoning } from "../types.js";
 
 export function convertStopReason(
   reason: Anthropic.StopReason | null
@@ -44,7 +45,7 @@ export function stripJsonFences(content: string): string {
 export function convertResponse(
   msg: Anthropic.Message,
   options: ConvertResponseOptions = {}
-): ChatCompletion & { reasoningText?: string; thinkingBlocks?: ProviderThinkingBlock[] } {
+): ChatCompletionWithReasoning & { thinkingBlocks?: ProviderThinkingBlock[] } {
   const created = Math.floor(Date.now() / 1000);
 
   const textParts: string[] = [];

@@ -4351,11 +4351,15 @@ Example:
     // chatResponse / run_completed_with_result bubble rendered by the UI.
     const toolCalls = extractFunctionCallItems(response);
 
-    // Surface Anthropic thinking blocks as a separate `thinking` event so the
-    // UI can render them without mixing with message.content narration.
+    // Surface reasoning text as a separate `thinking` event so the UI can render it without
+    // mixing with message.content narration. Populated from either provider's converter
+    // (Anthropic's convertResponse.ts or OpenAI's responsesConvertResponse.ts) — reasoningText
+    // is declared once, on LLMClient's own return type (types.ts), so this read needs no cast
+    // and no provider check: whichever adapter produced `response`, the field name is the same
+    // one the type checker already verified both converters use.
     // Gated: investigation mode only, only when there are tool calls (not the
     // final iter), and only when runId is set (i.e. a real TUI run).
-    const responseReasoningText = (response as { reasoningText?: string }).reasoningText ?? "";
+    const responseReasoningText = response.reasoningText ?? "";
     if (
       responseReasoningText &&
       isInvestigationMode &&

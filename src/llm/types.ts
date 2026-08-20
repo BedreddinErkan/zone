@@ -13,6 +13,18 @@ export type LLMChatParams =
   | ChatCompletionCreateParamsNonStreaming
   | ChatCompletionCreateParamsStreaming;
 
+/**
+ * Both provider converters (anthropicAdapter/convertResponse.ts,
+ * openaiAdapter/responsesConvertResponse.ts) attach reasoning text under this one field name.
+ * Declaring it here — on LLMClient's own return type, not as a cast at the read site — is what
+ * lets a rename on either side fail the build instead of silently reading `undefined` forever:
+ * the field name is checked once, at its single declaration, rather than independently at every
+ * producer and consumer. `thinkingBlocks` (Anthropic's own replay payload) stays out of this
+ * shared type deliberately — it is provider-specific, not part of the generic contract, and the
+ * one site that reads it (agentLoop.ts) still casts for it, unchanged.
+ */
+export type ChatCompletionWithReasoning = ChatCompletion & { reasoningText?: string };
+
 export interface LLMRequestOptions {
   /** Abort the in-flight request when this signal fires. */
   signal?: AbortSignal;
@@ -41,7 +53,7 @@ export interface LLMClient {
   createChatCompletion(
     params: ChatCompletionCreateParamsNonStreaming,
     options?: LLMRequestOptions
-  ): Promise<ChatCompletion>;
+  ): Promise<ChatCompletionWithReasoning>;
 
   createChatCompletionStream(
     params: ChatCompletionCreateParamsStreaming,

@@ -56,23 +56,31 @@ describe("responsesConvertParams — tool unnesting", () => {
 });
 
 describe("responsesConvertParams — effort → reasoning", () => {
-  it("high effort → reasoning:{effort:'high'}", () => {
+  it("high effort → reasoning:{summary:'auto', effort:'high'}", () => {
     const result = responsesConvertParams(makeBase([{ role: "user", content: "hi" }]), { effort: "high" });
-    expect(result.reasoning).toEqual({ effort: "high" });
+    expect(result.reasoning).toEqual({ summary: "auto", effort: "high" });
   });
 
   it("max effort clamps to high for gpt-5.4", () => {
     const result = responsesConvertParams(makeBase([{ role: "user", content: "hi" }]), { effort: "max" });
-    expect(result.reasoning).toEqual({ effort: "high" });
+    expect(result.reasoning).toEqual({ summary: "auto", effort: "high" });
   });
 
   it("xhigh effort clamps to high for gpt-5.4", () => {
     const result = responsesConvertParams(makeBase([{ role: "user", content: "hi" }]), { effort: "xhigh" });
-    expect(result.reasoning).toEqual({ effort: "high" });
+    expect(result.reasoning).toEqual({ summary: "auto", effort: "high" });
   });
 
-  it("no effort → no reasoning field", () => {
+  it("no effort → reasoning is still sent, with summary:'auto' and no effort key", () => {
     const result = responsesConvertParams(makeBase([{ role: "user", content: "hi" }]), {});
+    expect(result.reasoning).toEqual({ summary: "auto" });
+  });
+
+  it("a model excluded from supportsEffort (gpt-5.4-nano) → no reasoning field at all, even with effort requested", () => {
+    const result = responsesConvertParams(
+      makeBase([{ role: "user", content: "hi" }], { model: "gpt-5.4-nano" }),
+      { effort: "high" }
+    );
     expect(result.reasoning).toBeUndefined();
   });
 });

@@ -1,15 +1,27 @@
 import type { Response as OpenAIResponse } from "openai/resources/responses/responses.js";
 import type { ChatCompletion } from "openai/resources/chat/completions";
+import type { ChatCompletionWithReasoning } from "../types.js";
 
-export function responsesConvertResponse(response: OpenAIResponse): ChatCompletion {
+export function responsesConvertResponse(response: OpenAIResponse): ChatCompletionWithReasoning {
   const textParts: string[] = [];
   const toolCalls: ChatCompletion.Choice["message"]["tool_calls"] = [];
-  // Reasoning items collected for S4-SEAM below (discarded for now).
-  const _reasoningItems: unknown[] = [];
+  // Reasoning items collected for the S4-SEAM carrier below. Only encrypted_content remains an
+  // unconsumed discard now — the carrier itself is still unbuilt. reasoningTextParts is the
+  // display half (mirrors Anthropic's extractReasoningText); reasoningItems stays the full-item
+  // record S4's carrier will eventually consume, same split thinkingBlocks.ts draws between
+  // captureThinkingBlocks (replay, whole block) and extractReasoningText (display, text only) —
+  // narrowed to one pass here because only the display half exists on this side yet.
+  const reasoningItems: unknown[] = [];
+  const reasoningTextParts: string[] = [];
 
   for (const item of response.output) {
     if (item.type === "reasoning") {
-      _reasoningItems.push(item);
+      reasoningItems.push(item);
+      for (const part of item.summary) {
+        if (typeof part.text === "string" && part.text.length > 0) {
+          reasoningTextParts.push(part.text);
+        }
+      }
       continue;
     }
     if (item.type === "function_call") {
@@ -35,10 +47,17 @@ export function responsesConvertResponse(response: OpenAIResponse): ChatCompleti
   }
 
   // S4-SEAM: carrier.store(callIds, reasoningItems) — stash reasoning when carrier is added in S4.
+  // encrypted_content is the only field still discarded past this point; summary text has
+  // already been read out into reasoningText, below.
   // S4 will add:
-  //   if (_reasoningItems.length > 0 && toolCalls.length > 0) {
-  //     carrier?.store(toolCalls.map(c => c.id), _reasoningItems);
+  //   if (reasoningItems.length > 0 && toolCalls.length > 0) {
+  //     carrier?.store(toolCalls.map(c => c.id), reasoningItems);
   //   }
+
+  // Join/trim convention matches thinkingBlocks.ts's extractReasoningText exactly: the outer
+  // trim strips only the joined string's own ends, so a trailing space on a non-final part
+  // survives inside the string — real behavior, not an idealized one, and pinned by a test.
+  const reasoningText = reasoningTextParts.join("\n\n").trim();
 
   const hasToolCalls = toolCalls.length > 0;
   const text = textParts.join("");
@@ -100,6 +119,14 @@ export function responsesConvertResponse(response: OpenAIResponse): ChatCompleti
 
   const created = Math.floor(Date.now() / 1000);
 
+  // Typed as a Pick of the shared type, not built inline in the return statement below: excess
+  // property checking runs on a literal assigned to a typed target, but is bypassed for a
+  // literal merged into a wider object via spread — so a renamed key here (caught: confirmed by
+  // mutation) fails the build, while the same rename inside an inline spread would not have.
+  const reasoningTextField: Pick<ChatCompletionWithReasoning, "reasoningText"> = reasoningText
+    ? { reasoningText }
+    : {};
+
   return {
     id: response.id,
     object: "chat.completion",
@@ -113,6 +140,7 @@ export function responsesConvertResponse(response: OpenAIResponse): ChatCompleti
         logprobs: null,
       },
     ],
+    ...reasoningTextField,
     usage,
   };
 }
