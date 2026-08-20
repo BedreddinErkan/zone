@@ -205,6 +205,8 @@ export class ContextCompactor {
     args.onCompactionStarted?.(nextCount);
 
     let summaryText: string;
+    let compactionRawUsage: unknown;
+    let compactionModel: string | undefined;
     try {
       const output = await summarize({
         candidateTurns: candidates.map((c) => args.responseInput[c.index]),
@@ -214,6 +216,8 @@ export class ContextCompactor {
         compactionDepth: nextCount,   // J.4: tiered prompt
       });
       summaryText = output.summaryText;
+      compactionRawUsage = output.rawUsage;
+      compactionModel = output.model;
     } catch {
       return { compacted: false, reason: "summarizer_failed" };
     }
@@ -290,6 +294,8 @@ export class ContextCompactor {
       tokensBefore,
       tokensAfter,
       savedTokens,
+      rawUsage: compactionRawUsage,
+      model: compactionModel,
     };
 
     if (this.compactionCount === this.WARN_AT) {

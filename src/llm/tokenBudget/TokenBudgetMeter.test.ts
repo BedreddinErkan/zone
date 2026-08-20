@@ -549,4 +549,86 @@ describe("TokenBudgetMeter", () => {
       expect(meter.emitStatus(1)).toBeCloseTo(24_000 / cap, 4);
     });
   });
+
+  /**
+   * Items 254/255: the loop had five createChatCompletion sites feeding recordLLMCall at
+   * only two of them, so costUsd silently missed whole calls on runs that hit a terminal
+   * exit or compacted. The fix adds three more call sites (agentLoop.ts) plus a fourth via
+   * new compaction plumbing (ContextCompactor.ts/summarizer.ts) — all four go through this
+   * same recordLLMCall, so its own behaviour under the two conditions the fix depends on is
+   * pinned here rather than left to fall out of the call-site plumbing.
+   */
+  describe("recordLLMCall — missing/malformed usage is a safe no-op (item 255)", () => {
+    it("rawUsage: undefined leaves costUsd and tokenUsage unchanged, and does not throw", () => {
+      const meter = new TokenBudgetMeter({ baseTokens: 0, cap: 800_000, isSubagentLoop: false, runId: "r1" });
+      expect(() =>
+        meter.recordLLMCall({
+          rawUsage: undefined,
+          iter: 1, totalIter: 15, provider: "anthropic", model: "claude-sonnet-4-6",
+        })
+      ).not.toThrow();
+      expect(meter.snapshot().costUsd).toBe(0);
+      expect(meter.tokenUsage.total).toBe(0);
+      expect(meter.iterCostAccumulator.iter_count).toBe(0);
+    });
+
+    it("a malformed usage object (all-zero/missing fields) is the same safe no-op", () => {
+      const meter = new TokenBudgetMeter({ baseTokens: 0, cap: 800_000, isSubagentLoop: false, runId: "r1" });
+      expect(() =>
+        meter.recordLLMCall({
+          rawUsage: { not_a_real_field: 123 },
+          iter: 1, totalIter: 15, provider: "anthropic", model: "claude-sonnet-4-6",
+        })
+      ).not.toThrow();
+      expect(meter.snapshot().costUsd).toBe(0);
+    });
+
+    it("a real call recorded AFTER a malformed one is unaffected — the no-op does not corrupt the accumulator", () => {
+      const meter = new TokenBudgetMeter({ baseTokens: 0, cap: 800_000, isSubagentLoop: false, runId: "r1" });
+      meter.recordLLMCall({
+        rawUsage: undefined,
+        iter: 1, totalIter: 15, provider: "anthropic", model: "claude-sonnet-4-6",
+      });
+      meter.recordLLMCall({
+        rawUsage: makeRawUsage(1_000_000, 0), // $3.00 at claude-sonnet-4-6's $3/MTok input rate
+        iter: 2, totalIter: 15, provider: "anthropic", model: "claude-sonnet-4-6",
+      });
+      expect(meter.snapshot().costUsd).toBeCloseTo(3.0, 6);
+      expect(meter.iterCostAccumulator.iter_count).toBe(1); // the no-op never incremented it
+    });
+  });
+
+  describe("recordLLMCall — additive independence across sites (item 255's per-site attribution claim)", () => {
+    it("two calls' costs sum exactly — real rates, not fixture-model zero-cost", () => {
+      // claude-sonnet-4-6: input $3/MTok, output $15/MTok (src/usage/pricing.ts).
+      const meter = new TokenBudgetMeter({ baseTokens: 0, cap: 800_000, isSubagentLoop: false, runId: "r1" });
+      meter.recordLLMCall({
+        rawUsage: makeRawUsage(1_000_000, 0), // $3.00
+        iter: 1, totalIter: 15, provider: "anthropic", model: "claude-sonnet-4-6",
+      });
+      meter.recordLLMCall({
+        rawUsage: makeRawUsage(0, 1_000_000), // $15.00
+        iter: 2, totalIter: 15, provider: "anthropic", model: "claude-sonnet-4-6",
+      });
+      expect(meter.snapshot().costUsd).toBeCloseTo(18.0, 6);
+    });
+
+    it("simulates 'silencing one site': the total is exactly the sum minus the removed call's own contribution, not the whole run's cost", () => {
+      // The property the acceptance test's per-site mutation kill depends on: because the
+      // accumulator is additive, omitting one recordLLMCall removes exactly that call's
+      // delta and leaves every other site's contribution untouched — proven directly here
+      // rather than inferred from reading buildIterCostUpdate's accumulator shape.
+      const withBoth = new TokenBudgetMeter({ baseTokens: 0, cap: 800_000, isSubagentLoop: false, runId: "r1" });
+      withBoth.recordLLMCall({ rawUsage: makeRawUsage(1_000_000, 0), iter: 1, totalIter: 15, provider: "anthropic", model: "claude-sonnet-4-6" });
+      withBoth.recordLLMCall({ rawUsage: makeRawUsage(0, 1_000_000), iter: 2, totalIter: 15, provider: "anthropic", model: "claude-sonnet-4-6" });
+
+      const siteTwoSilenced = new TokenBudgetMeter({ baseTokens: 0, cap: 800_000, isSubagentLoop: false, runId: "r1" });
+      siteTwoSilenced.recordLLMCall({ rawUsage: makeRawUsage(1_000_000, 0), iter: 1, totalIter: 15, provider: "anthropic", model: "claude-sonnet-4-6" });
+      // site two's recordLLMCall omitted — simulating an unfed call site
+
+      expect(withBoth.snapshot().costUsd).toBeCloseTo(18.0, 6);
+      expect(siteTwoSilenced.snapshot().costUsd).toBeCloseTo(3.0, 6); // exactly site one's own cost, not 0 and not 18
+      expect(withBoth.snapshot().costUsd - siteTwoSilenced.snapshot().costUsd).toBeCloseTo(15.0, 6); // exactly the missing call's own cost
+    });
+  });
 });

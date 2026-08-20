@@ -170,6 +170,51 @@ describe("ContextCompactor.checkAndMaybeCompact", () => {
     expect(result.warning).toBeUndefined();
   });
 
+  it("item 254/255: threads summarize()'s rawUsage/model into CompactionResult when compacted", async () => {
+    // summarize() is module-mocked in this file (see the vi.mock at the top) — this tests
+    // ContextCompactor's OWN threading of whatever summarize() returns, not summarize()'s own
+    // extraction (that is summarizer.test.ts's job). The two are independent mutation targets:
+    // this catches ContextCompactor dropping the fields even if summarizer.ts still returns them.
+    const compactionUsage = { prompt_tokens: 4000, completion_tokens: 300 };
+    vi.mocked(summarize).mockResolvedValueOnce({
+      summaryText: "mocked summary",
+      rawUsage: compactionUsage,
+      model: "claude-sonnet-4-6",
+    });
+    const c = new ContextCompactor();
+    const history: ChatCompletionMessageParam[] = [
+      { role: "system", content: "sys" },
+      { role: "user", content: "task" },
+      { role: "assistant", content: BIG_CANDIDATE },
+      { role: "assistant", content: BIG_CANDIDATE },
+      { role: "assistant", content: "last-3" },
+      { role: "user", content: "last-2" },
+      { role: "assistant", content: "last-1" },
+    ];
+    const result = await c.checkAndMaybeCompact({
+      responseInput: history,
+      toolCallLog: [],
+      currentContextTokens: 160_000,
+      contextWindowLimit: 200_000,
+      client: stubClient,
+    });
+    expect(result.compacted).toBe(true);
+    expect(result.rawUsage).toEqual(compactionUsage);
+    expect(result.model).toBe("claude-sonnet-4-6");
+  });
+
+  it("item 254/255: a skipped (not compacted) result carries no rawUsage — summarize() was never called", async () => {
+    const c = new ContextCompactor();
+    const result = await c.checkAndMaybeCompact({
+      responseInput: [],
+      toolCallLog: [],
+      currentContextTokens: 10_000,
+      contextWindowLimit: 200_000,
+    });
+    expect(result.compacted).toBe(false);
+    expect(result.rawUsage).toBeUndefined();
+  });
+
   it("Compact.0: triggers when responseInput chars/4 >= contextWindow × threshold", async () => {
     const c = new ContextCompactor();
     // Large candidate so the skip-guard (Compact.0.1) also passes

@@ -15,6 +15,13 @@ export interface SummarizerOutput {
   summaryText: string;
   inputTokens?: number;
   outputTokens?: number;
+  /** Full response.usage, undiscarded — item 254/255: this call previously fed no
+   *  cost meter at all. Threaded up through CompactionResult so the caller (which
+   *  holds the run's TokenBudgetMeter) can record it; this module has no meter of
+   *  its own and no loop-iteration concept to attribute it to. */
+  rawUsage?: unknown;
+  /** The model actually used, since the caller's own model may differ. */
+  model?: string;
 }
 
 /**
@@ -126,6 +133,8 @@ export async function summarize(input: SummarizerInput): Promise<SummarizerOutpu
     summaryText: extractText(response),
     inputTokens: rawUsage?.prompt_tokens,
     outputTokens: rawUsage?.completion_tokens,
+    rawUsage,
+    model,
   };
 }
 

@@ -37,6 +37,12 @@ export interface CompactionResult {
   tokensBefore?: number;
   tokensAfter?: number;
   savedTokens?: number;
+  // item 254/255: the summarizer's own billed call, undiscarded, so the caller's cost
+  // meter can record it. Populated only when compacted === true — the three
+  // pre-summarize returns and both summarizer_failed branches never produced a
+  // response to attribute.
+  rawUsage?: unknown;
+  model?: string;
 }
 
 /**

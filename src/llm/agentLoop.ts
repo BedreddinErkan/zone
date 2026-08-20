@@ -3525,6 +3525,25 @@ Example:
         },
         { signal: input.abortSignal, effort: requestCtx?.effort }
       );
+      // Record wrapup cost/tokens so budget.snapshot() in finalizeRun is accurate —
+      // mirrors the continuation call site's own comment and reasoning (item 254/255:
+      // this call was previously unfed, so a token-budget exit under-reported cost by
+      // exactly this call's cache-write tokens).
+      budget.recordLLMCall({
+        rawUsage: (wrapupResponse as { usage?: unknown }).usage,
+        iter: iterNumber,
+        totalIter: iterationBudget.maxIterationsForRun,
+        provider: client.provider,
+        model: wrapupResponse.model || wrapupModel,
+        onStructuredEvent: input.onStructuredEvent,
+        tier: input.taskClassification?.tier ?? "",
+        archetype: input.taskClassification?.archetype ?? "",
+        pipelineApplied: inputIterCap !== null,
+        mode,
+        estimatedIterations: input.taskClassification?.estimatedIterations,
+        taskBlockedByBudget,
+        estimatedFiles: input.taskClassification?.estimatedFiles,
+      });
       const ae = extractResponsesApiOutputText(wrapupResponse);
       if (ae.ok && ae.text.trim()) finalSummary = ae.text.trim();
     } catch (err) {
@@ -5227,6 +5246,27 @@ Example:
         }
         throw err;
       }
+      if (compactionResult.compacted && compactionResult.rawUsage) {
+        // Record the summarizer's own billed call — item 254/255: this call was
+        // previously unfed. Guarded on compacted===true, matching the three
+        // pre-summarize returns and both summarizer_failed branches in
+        // ContextCompactor.ts, none of which produce a response to record.
+        budget.recordLLMCall({
+          rawUsage: compactionResult.rawUsage,
+          iter: iter + 1,
+          totalIter: iterationBudget.maxIterationsForRun,
+          provider: client.provider,
+          model: compactionResult.model ?? modelName,
+          onStructuredEvent: input.onStructuredEvent,
+          tier: input.taskClassification?.tier ?? "",
+          archetype: input.taskClassification?.archetype ?? "",
+          pipelineApplied: inputIterCap !== null,
+          mode,
+          estimatedIterations: input.taskClassification?.estimatedIterations,
+          taskBlockedByBudget,
+          estimatedFiles: input.taskClassification?.estimatedFiles,
+        });
+      }
       if (compactionResult.compacted && compactionResult.newResponseInput) {
         // In-place mutation preserves the array reference held by the outer scope.
         responseInput.splice(0, responseInput.length, ...compactionResult.newResponseInput);
@@ -5539,6 +5579,26 @@ Example:
         ],
         max_tokens: getMaxOutputTokens(chatAssessmentModel),
       }, { signal: input.abortSignal, effort: requestCtx?.effort });
+      // Record assessment cost/tokens — mirrors the continuation call site's own
+      // comment (item 254/255: this call was previously unfed). The loop's own `iter`
+      // is block-scoped to the `for` statement and unreachable here; this branch is
+      // only reached after the loop exhausts its full iteration count, so the cap
+      // itself IS the iteration count reached.
+      budget.recordLLMCall({
+        rawUsage: (assessmentResponse as { usage?: unknown }).usage,
+        iter: iterationBudget.maxIterationsForRun,
+        totalIter: iterationBudget.maxIterationsForRun,
+        provider: client.provider,
+        model: assessmentResponse.model || chatAssessmentModel,
+        onStructuredEvent: input.onStructuredEvent,
+        tier: input.taskClassification?.tier ?? "",
+        archetype: input.taskClassification?.archetype ?? "",
+        pipelineApplied: inputIterCap !== null,
+        mode,
+        estimatedIterations: input.taskClassification?.estimatedIterations,
+        taskBlockedByBudget,
+        estimatedFiles: input.taskClassification?.estimatedFiles,
+      });
       const ae = extractResponsesApiOutputText(assessmentResponse);
       if (ae.ok && ae.text.trim()) {
         finalSummary = ae.text.trim();
@@ -5643,6 +5703,25 @@ Example:
       ],
       max_tokens: getMaxOutputTokens(finalAssessmentModel),
     }, { signal: input.abortSignal, effort: requestCtx?.effort });
+    // Record assessment cost/tokens — mirrors the continuation call site's own
+    // comment (item 254/255: this call was previously unfed). Post-loop, so the
+    // loop's own block-scoped `iter` is unreachable; the cap itself is the
+    // iteration count reached, matching the sibling read-only site above.
+    budget.recordLLMCall({
+      rawUsage: (assessmentResponse as { usage?: unknown }).usage,
+      iter: iterationBudget.maxIterationsForRun,
+      totalIter: iterationBudget.maxIterationsForRun,
+      provider: client.provider,
+      model: assessmentResponse.model || finalAssessmentModel,
+      onStructuredEvent: input.onStructuredEvent,
+      tier: input.taskClassification?.tier ?? "",
+      archetype: input.taskClassification?.archetype ?? "",
+      pipelineApplied: inputIterCap !== null,
+      mode,
+      estimatedIterations: input.taskClassification?.estimatedIterations,
+      taskBlockedByBudget,
+      estimatedFiles: input.taskClassification?.estimatedFiles,
+    });
     const ae = extractResponsesApiOutputText(assessmentResponse);
       if (ae.ok && ae.text.trim()) {
         finalSummary = ae.text.trim();
