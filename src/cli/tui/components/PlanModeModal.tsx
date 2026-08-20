@@ -60,7 +60,7 @@ export function PlanModeModal({ dispatch }: Props): React.ReactElement {
         const marker = currentDepth === d ? glyph.radioSelected : glyph.radioUnselected;
         return (
           <Box key={d} backgroundColor={selected ? role.selectionBackground : undefined}>
-            <Text color={selected ? role.emphasis : undefined}>   {marker} {DEPTH_LABELS[d]}</Text>
+            <Text color={selected ? role.selectionForeground : undefined}>   {marker} {DEPTH_LABELS[d]}</Text>
           </Box>
         );
       })}

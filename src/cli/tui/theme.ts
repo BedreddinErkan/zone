@@ -16,6 +16,18 @@
  * structurally an informational/settings view like its `accent`-chrome siblings — extracted as-is
  * (byte-identical to before), flagged here rather than silently reclassified, which would change
  * what renders. Left for the palette pass.
+ *
+ * The palette pass (selection contrast): `selectionBackground` and `selectionForeground` are the
+ * only roles fixed to hex here, because they are the only pairing where two independently
+ * theme-relative colours are stacked and can collide — confirmed on a real terminal, six selected
+ * rows across five modals were unreadable. `accent`, `caution`, `danger`, `success`, `muted`, and
+ * `emphasis` were each individually checked for the same risk and found clear: the first four are
+ * either genuinely semantic (should follow the terminal's own convention, including a user's own
+ * accessibility remapping) or foreground-only with no app-painted background beneath them, where
+ * the terminal's own fg/bg design contract is what keeps text legible. `emphasis` specifically
+ * lost its selected-row-foreground job to the new `selectionForeground` rather than being fixed
+ * itself — see both roles' own comments below for why moving `emphasis` wholesale would have
+ * regressed its other two jobs (a modal section header, a bold diff line) on a light terminal.
  */
 
 export const role = {
@@ -35,11 +47,35 @@ export const role = {
    *  own role so the spinner's colour stays independently reasoned and independently revertible
    *  from the diff/banner treatment that introduced role.brand. */
   activity: "#22B3C4",
-  /** Stronger-than-default text: section headers within a modal, selected-row foreground,
-   *  a highlighted value. */
+  /** Stronger-than-default text with no app-painted background beneath it: a modal section
+   *  header, a highlighted value, a bold diff addition (DiffView.tsx). The terminal's own fg/bg
+   *  design contract is what keeps it legible, which is what makes theme-relative still correct
+   *  here. Selected-row foreground moved to role.selectionForeground (the selection-contrast
+   *  pass) once that specific pairing — this role stacked on role.selectionBackground's fill —
+   *  was confirmed to collide on a real terminal; this role no longer sits on any app-painted
+   *  background anywhere. */
   emphasis: "white",
-  /** Background fill for the selected row in a navigable list — never a text colour. */
-  selectionBackground: "blue",
+  /** Background fill for the selected row in a navigable list — never a text colour. Fixed hex,
+   *  not theme-relative: paired with role.emphasis (also theme-relative) it rendered unreadable
+   *  on a real terminal, the same defect class as role.surface's — two independently-resolved
+   *  colours stacked with no contrast guarantee. Equals role.brand/role.activity's value by
+   *  choice, not coincidence: the landing site's own CSS already pairs these two exact values
+   *  together (`.term{background:var(--ink)}` with `.acc{color:var(--signal-bright)}` nested
+   *  inside it — this hex as background, that one as foreground, shipping today), and it ties
+   *  the selected state to the same brand teal Composer.tsx's palette already uses to mean "this
+   *  is selected." Defined independently rather than as a reference to role.brand, per the
+   *  precedent role.activity already set for itself — so the two can diverge later without
+   *  coupling. */
+  selectionBackground: "#22B3C4",
+  /** The foreground for text rendered on top of role.selectionBackground's fill — never used
+   *  standalone, and deliberately not role.emphasis (see role.emphasis's own comment: that role
+   *  covers jobs with no app-painted background, and forcing it to a value chosen for this fill
+   *  would have regressed those). Fixed hex for the same reason selectionBackground is one: this
+   *  is the pairing that was confirmed colliding. Equals role.surface's value — 7.67:1 contrast
+   *  against role.selectionBackground by the WCAG relative-luminance formula, comfortably past
+   *  the 7:1 AAA floor for normal text — defined independently per the same role.activity
+   *  precedent. */
+  selectionForeground: "#0B0E0F",
   /** Quiet chrome borders, de-emphasized block text. */
   muted: "gray",
   /** Neutral background fill for a distinct content block. Fixed hex (the landing's `--ink`), not

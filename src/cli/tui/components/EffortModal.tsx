@@ -67,7 +67,7 @@ export function EffortModal({ dispatch }: Props): React.ReactElement {
         const marker = currentEffort === effort ? glyph.radioSelected : glyph.radioUnselected;
         return (
           <Box key={effort} backgroundColor={selected ? role.selectionBackground : undefined}>
-            <Text color={selected ? role.emphasis : undefined}>   {marker} {ALL_EFFORT_LABELS[effort]}</Text>
+            <Text color={selected ? role.selectionForeground : undefined}>   {marker} {ALL_EFFORT_LABELS[effort]}</Text>
           </Box>
         );
       })}

@@ -64,7 +64,7 @@ export function ModelModal({ dispatch }: Props): React.ReactElement {
       : `   ${marker} ${m.displayName}${m.costNote ? ` — ${m.costNote}` : ""}`;
     rows.push(
       <Box key={m.id} flexDirection="column" backgroundColor={bg}>
-        <Text color={selected ? role.emphasis : undefined}>{label}</Text>
+        <Text color={selected ? role.selectionForeground : undefined}>{label}</Text>
         {m.retention && !narrow && (
           <Text dimColor>
             {`      ⚠ Requires ${m.retention.minDays}-day data retention · ` +

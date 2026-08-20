@@ -59,7 +59,7 @@ export function SummaryModal({ dispatch }: Props): React.ReactElement {
         const marker = currentFormat === fmt ? glyph.radioSelected : glyph.radioUnselected;
         return (
           <Box key={fmt} backgroundColor={selected ? role.selectionBackground : undefined}>
-            <Text color={selected ? role.emphasis : undefined}>   {marker} {FORMAT_LABELS[fmt]}</Text>
+            <Text color={selected ? role.selectionForeground : undefined}>   {marker} {FORMAT_LABELS[fmt]}</Text>
           </Box>
         );
       })}

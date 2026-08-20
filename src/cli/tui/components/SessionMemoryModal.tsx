@@ -67,12 +67,12 @@ export function SessionMemoryModal({ dispatch, onSessionClear }: Props): React.R
         const marker = currentMemory === opt ? glyph.radioSelected : glyph.radioUnselected;
         return (
           <Box key={String(opt)} backgroundColor={selected ? role.selectionBackground : undefined}>
-            <Text color={selected ? role.emphasis : undefined}>   {marker} {MEMORY_LABELS[String(opt)]}</Text>
+            <Text color={selected ? role.selectionForeground : undefined}>   {marker} {MEMORY_LABELS[String(opt)]}</Text>
           </Box>
         );
       })}
       <Box backgroundColor={sel === 2 ? role.selectionBackground : undefined}>
-        <Text color={sel === 2 ? role.emphasis : role.caution}>   ⟳  Clear — start fresh next run</Text>
+        <Text color={sel === 2 ? role.selectionForeground : role.caution}>   ⟳  Clear — start fresh next run</Text>
       </Box>
       <Text> </Text>
       <Text dimColor> {glyph.navigateArrows} navigate · Enter select/clear · Esc cancel</Text>
