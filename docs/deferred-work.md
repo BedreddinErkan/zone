@@ -17,6 +17,16 @@ where the reference used to point.
 This is not a changelog, not a roadmap, and not a priority ordering. Items are numbered for
 reference, not ranked.
 
+An entry that records work already committed **names the commit that produced it**, and a range
+when there is more than one. This is not bookkeeping: an entry is often the only prose account of
+why a change was made, so one that cannot be traced to its diff has lost half its purpose — a
+reader who doubts the reasoning cannot see what was actually done, and a reader who finds the diff
+cannot get back to the reasoning. The requirement is written here because no instrument enforces
+it: the snapshot test checks that bucket counts match their lists and reports nothing about
+attribution, so a pass can omit every SHA and still see green. See item 234, which is the pass that
+did. Verify a SHA resolves before recording it, and do not assume the reverse either — hexadecimal
+in an entry is not necessarily a commit, since checksums and content hashes share the shape.
+
 ## 1. P1 — line-anchored marker recount, partially closed
 
 `[zone-apply-patch-marker-imbalance]`'s payload (emitted from the marker-imbalance rejection
@@ -18110,6 +18120,8 @@ defect with a specified remedy; it is built, mutation-tested, and the corrected 
 here. Against Actionable now: the work is done, not specified. Against Neither: a fix was proposed and
 built.
 
+**Commits.** `0d0fc39e` (selection contrast), `118be411` (the read-only group's italic) and `e601ff90` (the cherry-picked `read_file` sentinel), all in the range `ec8ae2c7..e601ff90`. Recorded because this entry originally described all three in prose without naming any of them — see item 234.
+
 **Where the code lived:** the `role` object in `cli/tui/theme.ts`; the selected-row ternaries in
 `ModelModal`, `EffortModal`, `SummaryModal`, `PlanModeModal` and `SessionMemoryModal`; the per-item
 detail line in `cli/tui/components/ToolCallGroup.tsx`; the sentinel check beside `read_file`'s
@@ -18151,6 +18163,14 @@ commit message states, and they therefore reproduce at any of the three non-zero
 level-zero run would have flattened them, and a level-zero run would have reported zero dim everywhere
 rather than a plausible percentage.
 
+**Corrected in place, and the correction is larger than the original claim.** The rule this entry stated — that the numeric value of the force-colour variable does not select the level, and that only a truecolor terminal declaration unlocks the top level — is **wrong**. Re-measured against the installed resolver: the force-colour variable sets a *floor*, and the documented mapping holds exactly when nothing short-circuits ahead of it. What actually capped the measurement at the middle level was the ambient terminal-type variable, which the original pass held constant and never named — the same mistake, one level up, as the pass it was auditing. **Every one of TTY-ness, terminal type, the truecolor declaration, a CI marker and an argv colour flag can return a constant before the floor is ever consulted**, and two of those were discovered only by varying them: a truecolor declaration makes even the lowest force-colour setting reach the top level, and a CI marker with no force-colour setting yields no colour at all on a truecolor terminal. The three-regime table this entry rested on also had **no TTY column**, which made its first row false under a real terminal — the suite is colourless because it is not a TTY, not because of any variable it names. The corrected ordered chain lives in `CLAUDE.md`; it is written as a chain precisely because the mapping form is what produced the false rule.
+
+**One phrase tightened.** This entry called the referenced commit's numbers "the recorded plan-gate figures". That commit records two rows and only the second is the plan gate; the first is the plan body. The sentence carries no digits so it could not propagate a wrong number, but it is the one durable wording from which a reader could re-derive the wrong attribution. Swept for the mislabelling across every record and every commit message: it exists **nowhere** durable — the figures appear exactly once, in their own commit, correctly labelled.
+
+**What survives unchanged.** The presence-shaped versus absence-shaped distinction, the second cause of the surface-role blindness, and the clearance of the dim measurement as level-independent. Those were argued from the shape of the claim rather than from the broken rule, and re-measurement did not touch them.
+
+**Commit.** Recorded by `f4168410`; corrected by the pass whose commits this entry now names.
+
 **Bucket: Neither.** This is a structural fact about the measuring apparatus, recorded so a future pass
 declares its regime before making a visual claim. No fix is proposed: nothing in the product is wrong,
 and pinning a regime into the test configuration would change what the whole suite measures for the sake
@@ -18162,7 +18182,7 @@ command in this repository's test script; and the ANSI-versus-Ink separation des
 `cli/tui/theme.ts`. Confirmed by rendering the same element across all three regimes and reading the
 emitted bytes.
 
-## 231. Actionable now — the startup banner hardcodes a 256-colour approximation of the brand teal, and does not match what Ink renders beside it on a truecolor terminal
+## 231. Closed — the startup banner hardcoded a 256-colour approximation of the brand teal, and did not match what Ink rendered beside it on a truecolor terminal
 
 **What it is.** The persistent startup banner is written straight to stdout, outside the Ink tree and
 outside the theme seam, so it cannot import the brand colour and carries a hardcoded escape instead. The
@@ -18191,9 +18211,13 @@ how much the banner should degrade on older terminals, and the owner has previou
 preferred leaving a colour alone over changing it to something wrong. The defect is recorded with both
 options costed rather than fixed in passing during an audit.
 
-**Bucket: Actionable now.** A remedy is specified in this entry and nothing further needs to be learned
-first; only a preference between two named shapes is outstanding. Against Blocked on data: the
-observation already exists and is recorded here. Against Neither: a fix is proposed, not merely a fact.
+**Closed, and the owner picked the third shape.** Neither costed option was taken: the banner now formats `role.brand` through chalk — the same library, the same hoisted instance and the same call Ink's own colorize makes for a hex-shaped colour — so its bytes match any brand-coloured element in the tree at *every* level, by construction rather than by maintaining an approximation of one level's output. Where the hardcoded escape was actually right, chalk reproduces it automatically. The construction moved into its own module so it could be asserted on byte-for-byte, on the precedent of the resize pair's own extraction.
+
+**The test found a divergence the obvious assertion would have hidden.** Comparing against a hand-rolled chalk call would have pinned an assumption rather than the behaviour; comparing against a real rendered element caught that Ink applies dim, then colour, then **bold outermost**, while the natural chalk chaining puts colour outermost. Identical on screen, different bytes. The module now mirrors Ink's composition order and the test keeps both instruments, asserting that the wrong order does *not* match.
+
+**Commit.** `7447678e`. The defect was recorded by `f4168410` and confirmed independently on a real pty before being fixed.
+
+**Bucket: Closed**, on the condition rather than on the size of the change. Against Actionable now: the work is done, not specified. Against Neither: a fix was proposed and built.
 
 **Where the code lives:** the banner writer near the top of `cli/tui/index.tsx`, and the brand role in
 `cli/tui/theme.ts` whose value it is approximating. See item 230 for why the original measurement read
@@ -18221,6 +18245,8 @@ attribute is a property that the next edit can remove without noticing.
 is nothing to repair, and the guard that would pin the property — an assertion that no coloured ancestor
 encloses an inverted span — is speculative work against a defect that does not exist yet. Against
 Actionable now: no remedy is specified. Against Closed: nothing was built.
+
+**Commit.** Recorded by `f4168410`. Re-established behaviourally by the following pass, which replaced this entry's original source-reading instrument with a rendered one and declared its colour regime — the conclusion held, the evidence changed.
 
 **Where the code lives:** the input cursors in `cli/tui/components/LimitsModal.tsx` and
 `cli/tui/components/ApiKeysView.tsx`. See item 229 for the stacked-pair class itself and item 230 for
@@ -18265,23 +18291,150 @@ line added during an audit.
 tree it was testing; that is fixed and pinned. Against Actionable now: the work is done. Against
 Neither: a fix was proposed and built.
 
+**Commit.** `9ccdc51e`, in the range `e601ff90..f4168410`. The build failure that exposed it was observed during the pass that produced `0d0fc39e..e601ff90`.
+
 **Where the code lived:** the staging flush helper and the absolute-path computation feeding
 `stagedWrite`, both in `tools/toolExecutor.ts`; the fixture in the command-memoization test beside it.
+
+## 234. Closed — five entries described four commits without naming any of them, in a document whose value is being the link between the two
+
+**What it was.** The pass that added items 229 through 233 named **zero** commit SHAs across all five
+entries, against a whole-document rate of roughly one entry in two and a rate of two in four in the
+immediately preceding entry-writing commit. Items 229 and 233 narrate four separate commits entirely
+in prose. Since a ledger entry is frequently the only prose record of why a change was made, an entry
+that cannot be traced to its diff has lost half of what it is for: a reader who disagrees with the
+reasoning has no way to see what was actually done, and a reader who finds the diff has no way back
+to the reasoning.
+
+**Why it is worth an entry rather than a silent stamping.** The omission is invisible to every
+instrument the document has. The snapshot test checks that declared bucket counts match their listed
+items; it says nothing about attribution. The pass that omitted the SHAs also ran that test, twice,
+green. A record defect that every guard reports as healthy is exactly the shape this document exists
+to catch, and it was found only because a later pass went looking for the range and could not
+reconstruct it from the entries.
+
+**What landed.** All five entries now carry the commits that produced them, and every SHA in them was
+verified to resolve against this repository's object database rather than merely being hex-shaped.
+The convention is stated where the discipline for these entries is stated, so the next pass inherits
+it rather than rediscovering it.
+
+**One adjacent claim investigated and dismissed, which matters because it nearly became an entry of
+its own.** A sweep flagged item 215 as carrying a SHA-shaped token that resolves to no commit. It
+does not resolve, and it is not a defect: the token is a **content checksum** of a verification
+module, written with a trailing ellipsis, and that entry's own prose calls it a checksum twice. An
+automated resolver that pattern-matches hexadecimal and tries every match as a commit will
+mis-classify every checksum, hash and digest in the document. Recorded so the next sweep does not
+re-raise it.
+
+**Also fixed in passing.** The Closed list had carried item 4 out of numeric order since the commit
+that closed it appended rather than inserted, which cost nothing mechanically but defeats a reader
+scanning for a number. The list is now sorted; the count was unchanged and independently
+re-verified against its declared figure.
+
+**Bucket: Closed**, on the condition rather than on the effort. The condition was a record defect
+with a specified remedy; the remedy is applied to every affected entry and the convention is written
+down. Against Actionable now: the work is done, not specified. Against Neither: a fix was proposed
+and built.
+
+**Where this lives:** entries 229 through 233 of this document, and the ledger-discipline note that
+now names the requirement.
+
+## 235. Closed — one relative staging key was the whole of its class, but a second class of in-repository test write was live and unguarded
+
+**What it was.** A fixture passed a repository-relative key to the staging flush helper, which
+resolves keys against the process working directory because it takes no repository path, so the test
+created a real source file inside the repository being tested. That was fixed. What was **not**
+established at the time was whether it was one instance or a sample.
+
+**It was the whole class, and that is the useful half of this entry.** Every other staging map in
+the suite that carries a relative-looking key was traced individually to its boundary: each is either
+consumed by a pure function that only hashes or compares keys, or supplied to a module whose test
+replaces the flush helper with a pass-through stub. None reaches a real filesystem write. Every map
+that does reach the real helper computes an absolute path from a temporary directory. So the earlier
+fix did not need extending — a conclusion that is only worth anything because it was checked rather
+than assumed.
+
+**A different class was live.** Tests that write into the repository working tree by other routes,
+anchored on their own directory rather than on a temporary one, so the relative-path bug does not
+apply but the outcome is the same. Two members. One writes a scratch file beside itself with cleanup
+inside a `finally`, and is safe. The other wrote a fixture file into its own **tracked** source
+directory with the unlink outside any `finally` at all — so a failing assertion between the write and
+the unlink left the file permanently inside the repository. That one now writes to a temporary
+directory removed in an `afterAll`, with an assertion pinning the containment so the path cannot
+quietly move back.
+
+**Historical damage: none outstanding.** No stray file exists at the repository root or directly
+under the source tree; no fixture-shaped path was ever added in any commit on any branch across the
+full history; and the build output's orphaned files were each traced to a real source-deletion commit
+rather than to phantom test output, so none required removing. An earlier count of those orphans was
+low and is corrected by the trace rather than by the count.
+
+**Bucket: Closed**, on the condition. The condition was an unguarded in-repository write with a
+specified remedy; it is fixed and pinned, and the class it belongs to is enumerated rather than
+sampled. Against Actionable now: the work is done. Against Neither: a fix was proposed and built. The
+structural gap that let both incidents happen is deliberately **not** closed here and is recorded
+separately as item 236, so that it stays visible to a bucket query instead of being buried inside a
+closed entry.
+
+**Commit.** The staging fixture was `9ccdc51e`; the in-repository write is `869ff1ed`.
+
+**Where the code lived:** the staging flush helper in `tools/toolExecutor.ts`, the shared executor
+mock under `test/fixtures/`, and the audit snapshot reader's own test.
+
+## 236. Actionable now — the test harness guards the user's home directory against stray writes and leaves the repository tree unguarded
+
+**What it is.** Two separate incidents have now put a file inside the repository during a test run:
+one created a source file at the repository root that a concurrent compile picked up and failed on,
+and one wrote a fixture into a tracked directory with no guaranteed cleanup. Both were found by
+accident — the first by a build that happened to run at the same moment, the second by a sweep
+looking for something else. Neither was found by an instrument, because no instrument is watching.
+
+**The asymmetry is the finding.** The harness already solves this problem once, thoroughly, for a
+different directory: the test environment redirects the home directory to a temporary one, a global
+setup re-asserts that redirection for forked workers and inventories the real directory before and
+after to fail the run on any change, and a setup file wraps the filesystem write surface to throw on
+a write inside the real home, naming the offending path. That machinery exists, works, and has a
+documented failure mode of its own about import style. **None of it covers the repository tree**,
+which is the directory a test is most likely to touch by accident, because the working directory
+already points at it and every relative path lands there.
+
+**The remedy, specified.** Mirror the existing home guard for the repository root: wrap the same
+write surface, throw on a write whose resolved path falls inside the repository, and name the path.
+The one decision it needs is the allowlist — the build output directory and the per-repository state
+directory are both written legitimately during some runs, and the temporary directories tests create
+are outside the tree and unaffected. That is a small enumeration against the existing guard's own
+shape, not a new mechanism, which is why this sits in this bucket rather than waiting on an
+observation.
+
+**Why it is not being built in the pass that records it.** It is a change to the setup surface every
+test in the suite loads, on a pass whose other changes are a colour seam and a record correction. A
+guard that throws on a legitimate write would fail the entire suite in a way unrelated to anything
+else that pass touched, and the allowlist decision deserves its own establish rather than being
+guessed at the end of an unrelated one.
+
+**Bucket: Actionable now.** A remedy is specified in this entry and nothing new needs to be learned
+first — the template exists in the repository and the only open question is an enumeration it can
+answer for itself. Against Blocked on data: two observations already exist and are recorded. Against
+Neither: a fix is proposed, not merely a structural fact. Against Closed: nothing was built.
+
+**Where this lives:** the test environment and global setup declared in the vitest configuration, and
+the home guard's own setup file. See item 235 for the two incidents and item 233 for the first of
+them in detail.
 
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 233 to find out which ones still need something. No index of
+reader the trouble of reading all 236 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (99): 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 4, 204, 210, 212, 218, 221, 223, 228, 229, 233
+**Closed** (102): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (1): 231
+first (1): 236
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (13): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196
 
