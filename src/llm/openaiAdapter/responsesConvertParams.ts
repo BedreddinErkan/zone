@@ -52,17 +52,19 @@ export function responsesConvertParams(
 
   // Effort → reasoning.effort, same xhigh/max→"high" narrowing as openaiAdapter.ts:63-65.
   //
-  // `reasoning` is gated on supportsEffort(model), NOT on whether an effort override
-  // resolved — those are different questions. supportsEffort is the same reasoning-capability
-  // check the sibling Chat Completions branch already uses in this file (openaiAdapter.ts) to
-  // decide whether to send reasoning_effort at all; gpt-5.4-nano is on the Responses branch
-  // (its id starts "gpt-5") but is deliberately excluded from EFFORT_SUPPORTED_MODELS, the
-  // same exclusion Haiku gets on the Anthropic side — "reasoning model in name, not in this
-  // catalog's capability model." Gating on whether the USER happened to pass --effort instead
-  // would send an unconditional `reasoning` object to a model this codebase already declares
-  // has no reasoning capability, for no product reason; gating on model capability is the
-  // narrower, correct condition and costs nothing normal callers would ever notice, since
-  // every effort-capable model reasons internally regardless of whether an override was sent.
+  // `reasoning` is gated on supportsEffort(model), NOT on whether an effort override resolved —
+  // those are different questions, and gating on the override would send the parameter to
+  // whatever the user happened to pass a flag for rather than to whatever can actually use it.
+  //
+  // An earlier version of this comment justified the gate with gpt-5.4-nano, calling it a
+  // "reasoning model in name, not in this catalog's capability model." That was a stipulation
+  // read off the catalog's own membership, never a measurement, and it was wrong: nano accepts
+  // reasoning.effort AND reasoning.summary at low/medium/high and returns real summary prose at
+  // every one (measured 2026-08-20). It is in EFFORT_SUPPORTED_MODELS now. The gate is still the
+  // right condition, but for a narrower reason than was claimed — what it excludes today is an
+  // UNLISTED gpt-5* id, which reaches this converter because the routing gate is a bare
+  // startsWith("gpt-5") on a string the OPENAI_MODEL / ZONE_LLM_MODEL_HIGH env vars set with no
+  // catalog validation, and which has no capability entry to authorise reasoning against.
   //
   // summary:"auto" is fixed, not configurable — no CLI flag/env/disk setting. The text this
   // requests is only ever displayed behind the existing investigation-mode + tool-call + runId

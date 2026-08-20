@@ -23,9 +23,23 @@ describe("modelRegistry", () => {
     expect(supportsEffort("gpt-5.4")).toBe(true);
     expect(supportsEffort("gpt-5.4-mini")).toBe(true);
     expect(supportsEffort("gpt-5.5")).toBe(true);
-    expect(supportsEffort("gpt-5.4-nano")).toBe(false);
+    // Corrected 2026-08-20 from false, on live evidence. nano's exclusion never stated a reason;
+    // measured against the real API it accepts reasoning.effort AND reasoning.summary at
+    // low/medium/high and returns real summary prose at every one.
+    expect(supportsEffort("gpt-5.4-nano")).toBe(true);
     expect(supportsEffort("gpt-4o")).toBe(false);
     expect(supportsEffort("gpt-4o-mini")).toBe(false);
+  });
+
+  it("a dated OpenAI id resolves like its base alias — the arm the old copy was missing", () => {
+    // Before the normalizer was unified, only -YYYYMMDD was stripped, so every dated OpenAI id
+    // fell through to no capability entry and silently received no reasoning object at all.
+    expect(supportsEffort("gpt-5.5-2026-04-23")).toBe(true);
+    expect(supportsEffort("gpt-5.4-2026-03-05")).toBe(true);
+    expect(effortLevelsFor("gpt-5.5-2026-04-23")).toEqual(effortLevelsFor("gpt-5.5"));
+    // An unlisted gpt-5* string (reachable via the unvalidated OPENAI_MODEL / ZONE_LLM_MODEL_HIGH
+    // env vars) is still correctly unknown — normalization widens nothing it should not.
+    expect(supportsEffort("gpt-5.9-unlisted")).toBe(false);
   });
 
   it("usesAdaptiveThinking: true for adaptive family, false for others", () => {

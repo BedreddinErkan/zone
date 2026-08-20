@@ -76,12 +76,35 @@ describe("responsesConvertParams — effort → reasoning", () => {
     expect(result.reasoning).toEqual({ summary: "auto" });
   });
 
-  it("a model excluded from supportsEffort (gpt-5.4-nano) → no reasoning field at all, even with effort requested", () => {
+  it("a model excluded from supportsEffort → no reasoning field at all, even with effort requested", () => {
+    // Was gpt-5.4-nano until 2026-08-20. Live measurement corrected that exclusion — nano accepts
+    // both reasoning parameters and returns real summary prose — so it is no longer an example of
+    // this branch. An UNLISTED gpt-5* id is: it reaches the Responses converter (the routing gate
+    // is a bare `startsWith("gpt-5")` on a string the OPENAI_MODEL / ZONE_LLM_MODEL_HIGH env vars
+    // set without any catalog validation) while having no capability entry to authorise reasoning.
+    const result = responsesConvertParams(
+      makeBase([{ role: "user", content: "hi" }], { model: "gpt-5.9-unlisted" }),
+      { effort: "high" }
+    );
+    expect(result.reasoning).toBeUndefined();
+  });
+
+  it("gpt-5.4-nano now gets a reasoning object, matching what the API actually accepts", () => {
     const result = responsesConvertParams(
       makeBase([{ role: "user", content: "hi" }], { model: "gpt-5.4-nano" }),
       { effort: "high" }
     );
-    expect(result.reasoning).toBeUndefined();
+    expect(result.reasoning).toEqual({ summary: "auto", effort: "high" });
+  });
+
+  it("a dated OpenAI id gets the same reasoning object as its base alias", () => {
+    // The defect the shared normalizer closed: a dated id used to resolve to no capability entry,
+    // so last pass's shipped summary:"auto" never reached anyone running one.
+    const dated = responsesConvertParams(
+      makeBase([{ role: "user", content: "hi" }], { model: "gpt-5.5-2026-04-23" }),
+      { effort: "high" }
+    );
+    expect(dated.reasoning).toEqual({ summary: "auto", effort: "high" });
   });
 });
 

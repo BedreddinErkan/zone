@@ -1,4 +1,5 @@
 import { MODEL_CATALOG } from "./models.js";
+import { normalizeModelId } from "./modelIdNormalize.js";
 import type { LLMProvider } from "./types.js";
 
 export type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max";
@@ -27,7 +28,17 @@ const EFFORT_SUPPORTED_MODELS = new Set([
   "gpt-5.5",
   "gpt-5.4",
   "gpt-5.4-mini",
-  // gpt-5.4-nano, gpt-4o, gpt-4o-mini excluded
+  // gpt-5.4-nano added 2026-08-20 on live evidence, correcting an exclusion that never stated a
+  // reason. It was excluded here, and that bare exclusion was then cited three times (the Responses
+  // params converter, ledger item 237, commit 64060503) as if it established a fact about the
+  // model. It did not. Measured against the real API: nano ACCEPTS reasoning.effort and
+  // reasoning.summary at low/medium/high, and returns a genuine reasoning item with readable
+  // summary prose at every one (35/37/40 reasoning tokens on the same prompt). An earlier probe
+  // that reported zero reasoning was an artifact of an easy prompt at low effort, not a property
+  // of the model — which is why the levels below are the accepted range, not the range that
+  // happened to produce output on one question.
+  "gpt-5.4-nano",
+  // gpt-4o, gpt-4o-mini excluded — not reasoning models.
 ]);
 
 // Models that use adaptive thinking only (thinking:{type:"adaptive"} + output_config.effort).
@@ -55,11 +66,11 @@ export function usesAdaptiveThinking(id: string): boolean {
 
 export const EFFORT_ORDER: EffortLevel[] = ["low", "medium", "high", "xhigh", "max"];
 
-/** Strip trailing -YYYYMMDD snapshot suffix so dated IDs hit the same map entries as their aliases.
- *  "claude-sonnet-4-6-20260219" → "claude-sonnet-4-6". No-op for non-snapshot IDs. */
-export function normalizeModelId(id: string): string {
-  return id.replace(/-\d{8}$/, "");
-}
+/** Re-exported so the many call sites here and in openaiAdapter.ts keep their existing import
+ *  path. The implementation moved to modelIdNormalize.ts when it was unified with pricing.ts's
+ *  own copy — which stripped BOTH snapshot spellings while this one stripped only Anthropic's,
+ *  so a dated OpenAI id silently resolved to no capability entry at all. See that module. */
+export { normalizeModelId };
 
 // Keys MUST exactly match model IDs in models.ts MODEL_CONTEXT_WINDOWS.
 // A missing entry ⇒ effortLevelsFor returns [] ⇒ effort silently disabled (the intended Haiku behavior).
@@ -83,6 +94,9 @@ const MODEL_EFFORT_LEVELS: Record<string, EffortLevel[]> = {
   "gpt-5.5":      ["low", "medium", "high"],
   "gpt-5.4":      ["low", "medium", "high"],
   "gpt-5.4-mini": ["low", "medium", "high"],
+  // Same accepted range as its siblings, confirmed live rather than assumed — see the
+  // EFFORT_SUPPORTED_MODELS comment above for the measurement that corrected its exclusion.
+  "gpt-5.4-nano": ["low", "medium", "high"],
 };
 
 export function effortLevelsFor(model: string): EffortLevel[] {

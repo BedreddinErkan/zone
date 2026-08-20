@@ -1,3 +1,4 @@
+import { normalizeModelId } from "../llm/modelIdNormalize.js";
 // BYOK pricing table. USD per million tokens.
 // Source: vendor pricing pages, May 2026 (verified against platform.claude.com/docs/en/about-claude/pricing and platform.openai.com/api/docs/pricing on 2026-05-08).
 // Anthropic cache_write rate is the documented 1.25x base. OpenAI cache writes were
@@ -89,9 +90,11 @@ export const PRICING_USD_PER_MTOK: Record<ProviderName, Record<string, ModelRate
 function resolveRates(provider: ProviderName, model: string): ModelRates | undefined {
   const exact = PRICING_USD_PER_MTOK[provider]?.[model];
   if (exact) return exact;
-  const baseModel = model
-    .replace(/-\d{8}$/, '')             // Anthropic snapshot: -YYYYMMDD
-    .replace(/-\d{4}-\d{2}-\d{2}$/, ''); // OpenAI snapshot: -YYYY-MM-DD
+  // Was two inline .replace() calls duplicating modelRegistry's normalizer. The two had already
+  // diverged — this one stripped both snapshot spellings, that one only Anthropic's — so the
+  // implementation is now shared. Only the transformation is imported; the exact-match-first
+  // lookup and the baseModel !== model short-circuit below are this function's own and unchanged.
+  const baseModel = normalizeModelId(model);
   return baseModel !== model ? PRICING_USD_PER_MTOK[provider]?.[baseModel] : undefined;
 }
 
