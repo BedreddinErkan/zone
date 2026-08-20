@@ -9126,8 +9126,13 @@ offered set was exactly the two tools the probe asserts, or it would have aborte
 the two arms differing by precisely the notice's own length; and every task's scored count was re-derived
 from the raw call list the same record carries and agreed with it. No refusals occurred.
 
-**What the arm cost, summed from the captures' own per-task fields rather than estimated.** Twenty-nine
-point two six cents in total — `$0.292629` — against the twenty-nine to thirty-six predicted. Per task,
+**What the arm cost. The capture-derived figure below is LOW, and the corrected total is `$0.4291`
+— see item 254.** The captures' own per-task fields sum to `$0.292629`, and that is what this entry
+reported; the daily ledger bills the same seven run identifiers at **`$0.4291`, 46.6% more**,
+because four of the seven tasks made an LLM call the loop's cost meter never saw. Ledger-derived per
+task, in order: **`$0.0707`, `$0.0327`, `$0.0607`, `$0.0504`, `$0.1173`, `$0.0819`, `$0.0154`** —
+T2, T3 and T7 match their capture figures to rounding and did not move; T1, T4, T5 and T6 did. The
+capture list is kept here because the rest of this entry reasons from it: per task,
 in order: `$0.036766`, `$0.032645`, `$0.060681`, `$0.033947`, `$0.069448`, `$0.043697`, `$0.015444`. The
 cheapest is the task that made no tool calls at all, at roughly a fifth of the dearest. Predictions
 committed at `7756e936`; the reading of the result against them committed at `6e0defed`. **This is the
@@ -9274,7 +9279,9 @@ its own bar. What this item waits on is unchanged and is a run.
 **Every figure in this entry re-derived from the surviving captures, through the committed scorer, at no
 cost — and all of them reproduce.** Per-task shell counts 1, 1, 2, 1, 3, 1, 0; discovery counts
 1, 1, 0, 1, 3, 1, 0; nine shell calls across seven tasks, six of seven using the shell; per-task costs
-matching this entry's own list to the cent and the arm total to `$0.292629` exactly. The third
+matching this entry's own list to the cent and the arm total to `$0.292629` exactly — an internal
+reconciliation of the capture sink against itself, which is why it agreed while the real billed
+total was `$0.4291` (item 254). The third
 instrument-is-wrong condition was re-checked in the same pass: every task's scored shell count agrees
 with the raw call list in its own record, seven of seven, zero disagreements. **This is the first entry
 tested in this arc whose own figures needed no correction.**
@@ -9745,7 +9752,7 @@ own description text, picked up because this command had no type filter, unlike 
 `--include`. Arm B's false negative on this task ("the symbol does not appear anywhere in the repository")
 did not reproduce.
 
-**T3, `$0.013854`, three iterations, token budget exceeded.** Reproduce-first confirmed: `npm test`
+**T3, `$0.013854` capture / **`$0.024600` ledger**, three iterations, token budget exceeded.** Reproduce-first confirmed: `npm test`
 succeeded, a chained `git diff --stat && git status --short` was blocked — see item 96 for the refusal
 itself — then the same request retried as bare `git diff --stat`, which succeeded. Zero discovery-shaped
 calls, matching arm A's own zero on this task. The final summary, reached via budget exhaustion rather than a
@@ -9761,7 +9768,7 @@ a re-derivation from outside the transcript nor a re-run: the transcript that re
 already held the original harness's own source, deriving the cap through the identical expression this one
 uses, and arm A's own runtime output stating the cap directly.
 
-**T4, `$0.008508`, three iterations, token budget exceeded.** Three tool calls: a wrong-path `read_file`
+**T4, `$0.008508` capture / **`$0.017800` ledger**, three iterations, token budget exceeded.** Three tool calls: a wrong-path `read_file`
 returning a plain file-not-found (not a whitelist refusal), a `find` locating the real file, then a
 successful read. The final answer correctly describes `checkWriteScope`'s actual same-dir/same-stem
 TypeScript-family tolerance, by name and line range. Arm B's false negative on this task ("cannot locate an
@@ -9885,7 +9892,17 @@ for its own history, the bug this run first surfaced, and the fix, and item 96 f
 See item 90 for the regression this measures around, and item 91 for the description fix it also concerns,
 and items 97 through 99 for the preamble those two cells ran under.
 
-**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
+**Two of the seven per-task costs above are low, and this arm is what confirmed why.** The capture
+sink misses whole LLM calls on runs that reach a terminal exit (item 254). Checked against the daily
+ledger, **exactly the two cells recorded here as `token budget exceeded` move** — T3 to `$0.024600`
+and T4 to `$0.017800` — while all five `natural completion` cells (T1, T2, T5, T6, T7) match the
+ledger to rounding. Seven of seven, on a different model and provider from the run that produced the
+mechanism, and **this arm was not used to derive it** — which is what made it the independent
+confirmation rather than a restatement. The narrative above reasons about search behaviour and
+citation quality, none of which the cost correction touches.
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed. **Verdict: BOUNDED** —
+two cost figures corrected; every behavioural finding stands.
 
 ## 95. Closed — the credit probe was the one path every run on either provider passes through, and it was not among the four parts a prior pass called pinned
 
@@ -13930,7 +13947,9 @@ searching cell, not in the direction: the interesting outcome was correctly pred
 
 **Every figure here re-derived from the captures through the committed scorer, and all of them
 reproduce.** Control: shell calls on zero of five. Post-fix: one of three. Cost: `$0.087522` against
-"just under nine cents". **And this entry's own claim that the prompt grew by ninety-eight characters
+"just under nine cents" — **capture-derived and therefore low; the ledger bills these three cells at
+`$0.127400`** (item 254), because the one searching cell ran to its iteration ceiling and made a
+terminal call the meter never saw. **And this entry's own claim that the prompt grew by ninety-eight characters
 and nothing else is corroborated by an instrument it did not use** — measured input tokens are 4,078 on
 every one of the five control cells and 4,095 to 4,097 on the three post-fix ones, a rise consistent
 with that growth and with no other change.
@@ -14067,8 +14086,10 @@ writer path is reachable without a model call, so this is the stronger instrumen
 **Cost, both bounds, no likelihood claim attached to either.** Item 251's N=6 ladder does not
 govern this arm — it was registered for item 90's seven-task CLEAR/FAIL/INDETERMINATE criterion, a
 different question from this two-arm A/B comparison; this arm follows its own already-registered
-design (five further control cells now). From this pass's own measured per-cell spread (declining
-$0.014544–$0.016119; searching $0.057957): **5 cells cost between $0.073 and $0.290.** Neither bound
+design (five further control cells now). From the measured per-cell spread, **corrected against the
+ledger** (item 254 — declining $0.014544–$0.016119 unchanged, since single-call cells were always
+priced right; searching $0.057957 → **$0.097800**): **5 cells cost between $0.073 and $0.489**, where
+this entry first recorded $0.073–$0.290. Neither bound
 is asserted as likelier — the historical 5/5-declining pattern belonged to a *different* memory
 condition than the frozen-memory arm this harness now runs, so that pattern cannot be assumed to
 carry over to the very comparison being built to test it.
@@ -14136,11 +14157,13 @@ is what keeps that visible rather than absorbed.
 
 **Cost, both instruments, and they disagree.** Captures' `costUsd` sums to **$0.658910**; the daily
 usage ledger's own rows sum to **$0.778900** — 18.2% higher. The ledger is the correct one: it
-reproduces to $0.0003 from the token counts at `pricing.ts`'s published rates, and `costUsd`
-reproduces under no obvious variant. Recorded as item 254. **Actual spend $0.778900 against a
-registered $0.436–$1.739** — inside the range, though the range itself was built from `costUsd`
-figures and is therefore ~18% low in real terms. The ~30 credit probes are separately billed and
-ledger-recorded at effectively nought.
+reproduces to $0.0003 from the token counts at `pricing.ts`'s published rates, and `costUsd` does
+not — because it never saw some of the calls. Recorded as item 254, whose mechanism was established
+in a later pass and is **not** the ~18% factor first written there. **Actual spend $0.778900 against
+a registered $0.436–$1.739; the ceiling corrects to $3.519** once the searching-cell figure is taken
+from the ledger. The spend was inside the range on both readings, and **the 2×-ceiling stop rule was
+never close to firing on either** — $1.56 under the original ceiling, $7.04 under the corrected one.
+The ~30 credit probes are separately billed and ledger-recorded at effectively nought.
 
 **The resolving N, registered against the measured rates rather than the assumed ones.** At 0.067
 vs 0.333 the design needs **40 cells/arm (80 cells) for 89.6% power**, ledger-corrected cost
@@ -19436,7 +19459,16 @@ to be model-specific behaviour, not a retry of the same fix.
 **Cost, at current pricing, not spent this pass.** claude-sonnet-5 arms: real sampled per-run costs
 ($0.196, $0.149, $0.094 across three files this pass read from `~/.zone/cost-logs/`) put the
 126-attempt large-effect design at roughly $18–25 and the 350-attempt moderate-effect design at
-roughly $50–70. The OpenAI arm: no sampled `gpt-5.5` run costs exist in this repository to measure
+roughly $50–70. **Those three figures are not run costs and the estimates built on them are low by
+roughly 1.2–2.1×.** Joined to the daily ledger by run identifier, the same three runs billed
+**$0.4085, $0.2405 and $0.1102** — 18, 11 and 8 calls against 11, 7 and 7 logged iterations. **Two
+distinct causes, and only one is the item 254 defect:** calls the loop's meter never saw
+(terminal exits, compaction), *and* calls made entirely outside the agent loop — plan generation,
+task classification, the final run report — which a per-**iteration** log correctly never held. Summing
+`~/.zone/cost-logs/` rows gives an agent-loop iteration total, not a run total, and using it as one
+was this entry's error. **Corrected against the ledger's own per-run spread: $14–52 for 126 attempts
+and $39–143 for 350**, computed rather than restated. A future pass should price from the ledger,
+never from cost-logs. The OpenAI arm: no sampled `gpt-5.5` run costs exist in this repository to measure
 from, so this is a scaled estimate, not a measurement — gpt-5.5's per-token rates are 1.7× (input) to
 2× (output) claude-sonnet-5's (`src/usage/pricing.ts`), suggesting roughly $0.20–0.40/run and
 $10–20 for 50 attempts. A future pass executing this protocol re-states these numbers against
@@ -19551,23 +19583,32 @@ for one.
 
 ### Escalation and stopping, with cost as a range because composition drives it
 
-**Cost is outcome-dependent by a factor of three, and the ladder is cheapest exactly when the fix
-fails.** Measured from the captures: a **declining** cell costs $0.014544–$0.016119 (n=7, mean
-$0.015071); a **searching** cell costs $0.032645–$0.069448 (n=7, mean $0.047877). Ratio of means
-**3.18×**, extremes **4.78×**. A cell that clears is a cell that mostly searched, so the closing
-scenario sits near the ceiling and the failing scenario near the floor. **Reporting a single
-per-cell average would have priced every rung at the outcome that does not close the item.**
+**Cost is outcome-dependent, and the ladder is cheapest exactly when the fix fails.** The figures
+below are **corrected against the daily ledger** (item 254 — the capture sink misses whole calls on
+runs that hit a terminal exit, which is every searching cell here). A **declining** cell costs
+**$0.014544–$0.016119 (n=7, mean $0.015069)** — these are single-call cells, verified against the
+ledger and **unchanged**. A **searching** cell costs **$0.0327–$0.1173 (n=7, mean $0.073071)**,
+where the capture sink reported $0.032645–$0.069448 (mean $0.047877). Ratio of means **4.85×**,
+where the capture-derived ratio read 3.18×. A cell that clears is a cell that mostly searched, so
+the closing scenario sits near the ceiling and the failing scenario near the floor. **Reporting a
+single per-cell average would have priced every rung at the outcome that does not close the item.**
 
-**The $0.0418/cell figure this rule replaces was reconciled, not discarded.** It is item 90's arm
-total divided by seven, and the arm total is exactly the sum of its seven cells' `costUsd`:
-$0.036766 (T1) + $0.255863 (T2–T7) = **$0.292629**, matching the recorded figure to the cent. **No
-instrument disagreement** — the mean is real, it is simply a mean over a 4.78× spread.
+**The $0.0418/cell figure this rule replaces is corrected to $0.0613/cell.** It is item 90's arm
+total divided by seven. The capture sink's own internal reconciliation was exact —
+$0.036766 (T1) + $0.255863 (T2–T7) = $0.292629 — but that checked the sink against itself; the
+ledger bills the same seven run identifiers at **$0.4291**, 46.6% more.
 
 | step | N | CLEARS | FAILS | P(CLEARS \| p=0.90) | cells (7 tasks) | all-decline floor | all-search ceiling | worst case |
 |---|---|---|---|---|---|---|---|---|
-| 1 | 6 | k≥5 | k≤1 | 0.886 | 42 | $0.63 | $2.01 | $2.92 |
-| 2 | 10 | k≥8 | k≤2 | 0.930 | 70 | $1.05 | $3.35 | $4.86 |
-| 3 (stop) | 16 | k≥13 | k≤3 | 0.932 | 112 | $1.69 | $5.36 | $7.78 |
+| 1 | 6 | k≥5 | k≤1 | 0.886 | 42 | $0.63 | $3.07 | $4.93 |
+| 2 | 10 | k≥8 | k≤2 | 0.930 | 70 | $1.05 | $5.11 | $8.21 |
+| 3 (stop) | 16 | k≥13 | k≤3 | 0.932 | 112 | $1.69 | $8.18 | $13.14 |
+
+**The rungs moved and the decision did not, which is the useful half.** Every ceiling roughly
+half-again higher; every floor unchanged, since floors are all-declining and declining cells were
+always priced right. **Step 1 is still N=6, step 2 still N=10, the stop still N=16** — because those
+were chosen on *power*, not on cost, and the power column is untouched. Nothing in this ladder would
+have been selected differently at the corrected figures.
 
 **Composition assumption, named:** the floor assumes every cell declines and the ceiling assumes
 every cell searches; a real run lands between, nearer the ceiling the closer it is to closing.
@@ -19695,10 +19736,30 @@ it is compared against by *every* change between the two commits, and only one o
 under test.
 
 **Measured, not argued.** Between `5ee8d842` and `f04490e9` — five days — **20 of the modules the
-per-task call actually traverses changed, ~800 lines**: `agentLoop.ts` +188/−21, `toolExecutor.ts`
-+145/−20, `archetypeDispatcher.ts` +121/−0, plus seventeen more including the adapter, the tool
-registry, the safety whitelist and the pricing table. A result from that comparison could not be
-attributed to the bullet by any argument.
+per-task call actually traverses changed: 845 insertions and 155 deletions, 1,000 lines** (this
+entry first said "~800", which counted insertions loosely and dropped the deletions):
+`agentLoop.ts` +188/−21, `toolExecutor.ts` +145/−20, `archetypeDispatcher.ts` +121/−0, plus
+seventeen more including the adapter, the tool registry, the safety whitelist and the pricing table.
+A result from that comparison could not be attributed to the bullet by any argument.
+
+**The finding reproduces from git history alone, with no worktree**, which is what makes the
+evidence disposable rather than the claim. Re-run:
+
+```
+git diff --name-only 5ee8d842..f04490e9 -- src/llm/agentLoop.ts src/llm/archetypeDispatcher.ts \
+  src/llm/toolAbsenceNotice.ts src/llm/factory.ts src/llm/openaiContext.ts \
+  src/llm/anthropicAdapter.ts src/llm/anthropicAdapter/convertParams.ts \
+  src/llm/anthropicAdapter/convertResponse.ts src/llm/types.ts src/llm/loopTelemetry.ts \
+  src/llm/modelRegistry.ts src/llm/tierLimits.ts src/llm/runCommandSafe.ts \
+  src/llm/withExponentialBackoff.ts src/llm/requestTimeouts.ts src/tools/toolExecutor.ts \
+  src/tools/toolDefinitions.ts src/tools/toolRegistry.ts src/tools/tierToolSubsets.ts \
+  src/tools/scopeGuard.ts src/tools/capabilities.ts src/memory/projectMemory.ts \
+  src/repo/detectFramework.ts src/usage/pricing.ts src/usage/usageTracker.ts \
+  src/utils/patchBlocks.ts | wc -l        # 20
+```
+
+Run this pass against the two pinned commits: **20**, reproducing exactly. Nothing in it touches
+`/dev/shm`, so the abandoned worktree is evidence of convenience, not of record.
 
 **How long it survived, which is the part worth recording.** The worktree was designed, approved,
 built, installed, built again, memory-frozen, content-verified, and written into this document as a
@@ -19735,10 +19796,13 @@ now: nothing further is proposed. Against Blocked on data: no observation is mis
 always available and simply was not run. Against Neither: a design was replaced, not merely
 described. **The `5ee8d842` worktree is deliberately kept as this entry's evidence.**
 
-**Where this lives:** the abandoned worktree at `/dev/shm/zone-notice-control-5ee8d842`; the
-corrected one at `/dev/shm/zone-control-head-revert`; both on tmpfs and neither surviving a reboot.
-See item 157 for the measurement this unblocked and item 254 for a second instrument disagreement
-found in the same run.
+**Where this lives:** the corrected worktree at `/dev/shm/zone-control-head-revert`, on tmpfs and not
+surviving a reboot. **The abandoned worktree at `/dev/shm/zone-notice-control-5ee8d842` has been
+disposed of, and that is a decision rather than a cleanup:** this entry's own reproducing command
+needs only git history, so it was checked to still return 20 before the 167 MB was released. Had it
+depended on the worktree, the prose would have been a claim rather than a reproducible finding and
+the worktree would have stayed. See item 157 for the measurement this unblocked and item 254 for a
+second instrument disagreement found in the same run.
 
 ## 254. Blocked on data — `costUsd` misses whole LLM calls rather than mispricing them, so there is no percentage to correct by
 
@@ -19806,6 +19870,31 @@ than its threshold intends. Bounded to compacting runs, but real.
 
 **Subagents add no new call sites** — they recurse through `runAgentLoop` — but they compound it: a
 subagent's own under-reported total is added verbatim to the parent through `recordSubagentResult`.
+
+**The full-class sweep, and most figures survive it.** This document carries **97 distinct dollar
+figures** (`command grep` and `git grep` agree at 97), spread across sixteen entries. Classified by
+source rather than sampled:
+
+| class | verdict | entries |
+|---|---|---|
+| priced per-call by `totalCost` with all four token buckets — **complete by construction** | **does not move** | 78, 79, 112, 113, 227, 237, 243 (plan generation, task classification, probes) |
+| read from the usage ledger already | **does not move** | 178, 193, and this entry's own figures |
+| per-**iteration** figures from `~/.zone/cost-logs/` | **does not move** — the defect drops rows, it does not distort them | 250's medians and means |
+| per-**run** totals covering a run that made an unfed call | **moves** | 90, 94, 157, 250, 251 |
+
+**So the correction is narrow and the reason is structural:** anything priced from a single
+response's own usage is right, because that path never goes through the loop's accumulator at all.
+Only totals *aggregated across a run* can miss a call.
+
+**Would any registered decision have gone differently? No — and the arithmetic is worth stating
+alongside the verdict rather than instead of it.** Item 251's ladder ceilings rise by roughly half
+again ($2.01→$3.07, $3.35→$5.11, $5.36→$8.18) and its per-cell mean corrects $0.0418→$0.0613, **but
+step 1 stays N=6, step 2 stays N=10 and the stop stays N=16**, because every rung was chosen on
+power and the power column is untouched. Item 157's ceiling corrects $1.739→$3.519, and its
+2×-ceiling stop rule was $1.56 under the old ceiling and $7.04 under the new — never close on either
+reading. Item 250's protocol estimates roughly triple, and that entry was already Blocked on data
+and unspent. **Every floor is unchanged**, because floors are all-declining and declining cells were
+always priced correctly.
 
 **A related structural silence, recorded here because the same run surfaced it.** The probe's
 `COST_GATE_USD` (1.5) projects task-1's cost over `tasks.length` and stops the run if the projection
