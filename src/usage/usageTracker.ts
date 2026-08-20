@@ -16,6 +16,24 @@ export interface UsageRecord {
   cache_write: number;
   cache_read: number;
   output: number;
+  /**
+   * Reasoning tokens, from OpenAI's completion_tokens_details.reasoning_tokens.
+   *
+   * Declared because it is already persisted: `recordFromResponse` spreads
+   * `extractUsage`'s whole `UsageBreakdown` into `recordExecution`, and a spread
+   * variable does not trigger excess property checking — so this field reached
+   * disk while being invisible to anyone reading this type. Commit `2abc9dac`
+   * concluded from that reading that reasoning counts never reach this ledger;
+   * they do. Optional, matching what the file already holds: older records
+   * predate the extractor field and stay valid.
+   *
+   * NOT billable, and this is load-bearing rather than a note: reasoning tokens
+   * are already counted inside `output`. `pricing.ts`'s `rateFor` once billed
+   * them a second time through a fallthrough that returned the cache-write rate
+   * for any unknown bucket. `TOKEN_TYPES` enumerates the four billable buckets
+   * and `recordExecution` passes those four explicitly — do not add this one.
+   */
+  output_reasoning?: number;
   /** Flat per-search count from Anthropic usage.server_tool_use.web_search_requests. */
   webSearchRequests?: number;
   est_cost_usd: number;
