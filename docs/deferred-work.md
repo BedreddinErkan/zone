@@ -19919,70 +19919,205 @@ corrected above rather than annotated.
 `scripts/notice-regression-probe.mjs`. See item 255 for the specified remedy, item 157 for the run
 that surfaced this, and item 94 for the independent dataset that confirmed the discriminator.
 
-## 255. Actionable now — the loop's cost meter is complete by discipline where the ledger is complete by construction, and the sample fix has already been applied once
+## 255. Closed — the four-site stopgap landed and is mutation-verified per site, including one real gap the mutation run itself found; the structural obstacle to the deeper fix is named rather than closed
 
-**The remedy item 254 needs, specified so a future pass executes rather than re-decides.** Nothing
-is built here, deliberately: landing it would move `costUsd` in the same pass that re-derives figures
-against it, and this document's own practice is to keep the measured thing and the measuring thing
-in separate passes.
-
-**The four unfed call sites, by shape** — each makes an LLM call that the ledger bills and the
-meter never sees:
+**What landed (`e4566edd`).** `budget.recordLLMCall` now fires at all four sites item 254 named:
 
 | site | shape | when |
 |---|---|---|
 | token-budget wrapup | `synthesizeTokenBudgetExit`'s `createChatCompletion` | terminal |
 | max-iteration chat answer | the "Max iterations reached — requesting final chat answer" call | terminal |
 | final assessment | the read-only-archetype final `createChatCompletion` | terminal |
-| **compaction summary** | `compaction/summarizer.ts`'s call, via `checkAndMaybeCompact` | **mid-loop** |
+| compaction summary | `compaction/summarizer.ts`'s call, via `checkAndMaybeCompact` | mid-loop |
 
-The fourth is the one that makes this a gating defect rather than a reporting one, and it lives in a
-different file from the other three — a site list drawn only from `agentLoop.ts` would miss it.
+The fourth needed a small plumbing extension rather than a local addition: `summarize()` already
+extracted `response.usage` and a resolved model locally and discarded both after narrowing to
+`{inputTokens, outputTokens}`; `SummarizerOutput` and `CompactionResult` each gained an optional
+`rawUsage`/`model` pair carrying the untouched values through. **Blast radius checked before the
+type change, not after:** `CompactionResult` has exactly one constructor
+(`ContextCompactor.ts`'s `checkAndMaybeCompact`) and one consumer (`agentLoop.ts`'s own call site);
+`SummarizerOutput` likewise has one constructor and is consumed only inside `ContextCompactor.ts`.
+Nothing outside the compaction path touches either type. The `agentLoop.ts` call site guards on
+`compactionResult.compacted && compactionResult.rawUsage`, which correctly excludes all three
+pre-`summarize()` returns and both `summarizer_failed` branches — none of them produce a response to
+record — without a separate check for that exclusion.
 
-**The stopgap, and why it is not the fix.** Adding `budget.recordLLMCall` at each site works, and
-the template already exists in the same file at the continuation path, whose own comment states the
-argument for all of them: *"Record continuation cost/tokens so `budget.snapshot()` in `finalizeRun`
-is accurate."* **That comment is the whole case, and it was applied to exactly one site.** Patching
-four more is the same sample fix again — the class this document already records for the two model-id
-normalizers, and for the marker-attribution mentions-versus-emissions confusion.
+**E1's obstacle, recorded precisely rather than left as an open question.** The real per-iteration
+consumer is not `antiThrash` (which reads a cumulative total) but `~/.zone/cost-logs/*.jsonl`
+(`appendIterCostRecord`, keyed on `iterCost`, the per-call delta) — confirming genuine per-iteration
+attribution matters to something. `RecordingLLMClient` records via `ZoneRequestContext`, which
+carries no `iter` field, and `withRequestContext` is entered once per run, not per call — so the
+seam that would need to drive a structural fix cannot attribute per-iteration today. A reconstruction
+path already exists in source for when that changes: `buildIterCostUpdateFromRecords`
+(`iterCostMeter.ts`) rebuilds the per-iteration payload from ledger rows filtered by `runId`, and has
+zero production callers. Wiring it up needs three changes — an `iter` field on the request context, a
+per-call-site nested scope carrying it, and a ledger schema addition to persist it — touching the two
+already-correct call sites along with the four broken ones. Disproportionate to a cost-accounting
+bugfix; named here as the starting point for whoever picks it up.
 
-**The actual remedy, and the reason it is structural.** `RecordingLLMClient` wraps
-`createChatCompletion` and records every call; `factory.ts` returns it unconditionally. **The ledger
-is therefore complete by construction and cannot be bypassed by forgetting.** The meter is a
-parallel, manual path with no coupling to the call it accounts for, so **a call site added tomorrow
-inherits the omission by default** — the question is not whether the current four are patched but
-whether the fifth is possible. The remedy is to derive the loop's cost view from the seam that
-already sees every call, rather than maintaining a second hand-fed accounting of the same events.
-A future pass should establish whether the meter can subscribe to that seam without losing the
-per-iteration attribution it also provides — that is the one design question this entry does not
-settle.
+**The checkable invariant, landed alongside the stopgap rather than only recorded as a risk.**
+`agentLoopCostMeterCoverage.test.ts` enumerates every `createChatCompletion(`/`checkAndMaybeCompact(`
+occurrence in `agentLoop.ts` and asserts each is paired with a `recordLLMCall(` before the next call
+starts, via a sequential state-machine walk (one pending call at a time; a second call starting before
+a record appears flags the first as unpaired). **A distance-window version of this test was tried
+first and produces a real false negative**: a mutation inserting an unpaired call landed inside the
+forward window of an unrelated, genuinely-paired call 41 lines later, and survived. Found by running
+the mutation, not by inspection — replaced with the sequential design, which caught the identical
+mutation on the next run. The enumeration is scoped to `agentLoop.ts` only: a full-tree sweep finds
+eight further `createChatCompletion` sites (plan generation, task classification, the run-report
+generator) with no `budget: TokenBudgetMeter` in scope at all — a different, already-correct
+accounting regime, self-priced via `totalCost()` directly. Asserting those "reach `recordLLMCall` or
+are declared exempt" would be incoherent; `recordLLMCall` is not reachable there.
 
-**Blast radius, measured before the work rather than discovered during it.** **15 test files
-reference `costUsd`; 22 touch the terminal exit paths.** Mocked calls that return a `usage` field
-would begin contributing to totals, so exact-value assertions may move. That is the exposure, and it
-is why this is its own pass.
+**Mutation table, kill set predicted by name before running, substitution only.**
 
-**The predicted kill set, by name.** Silence each site's new recording independently: the
-token-budget site's kill is a `token_budget_exceeded` cost assertion; the max-iteration site's is a
-`max_iterations` one; the compaction site's requires a test where compaction actually fires, which
-is the one that may not exist yet and would have to be written first. **A site whose silencing kills
-nothing is an untested site, not a safe one.**
+| mutation | predicted kill | actual result |
+|---|---|---|
+| silence wrapup site's `recordLLMCall` | its terminal-site integration test | killed, alone |
+| silence max-iter chat-answer site's `recordLLMCall` | its terminal-site integration test | killed, alone |
+| silence max-iter final-assessment site's `recordLLMCall` | its terminal-site integration test | killed, alone |
+| silence compaction site's `recordLLMCall` | — no behavioral test existed yet | **survived every behavioral test in `src/llm/` (2531 ran); killed only by the structural enumeration test** |
+| insert a 5th, unpaired `createChatCompletion` in `agentLoop.ts` | the enumeration test | killed |
+| `recordLLMCall` with `rawUsage: undefined` / malformed | safe no-op, `costUsd` unchanged, no throw | confirmed (`TokenBudgetMeter.test.ts`) |
 
-**The acceptance test, already in hand and re-runnable at no cost.** Post-fix, every cell whose
-ledger call count *exceeds* its loop iteration count must match the ledger to six decimals —
-exactly as the one equal-count cell already does. The thirty captured cells from item 157's arms are
-the fixture; no new spend is required to check the fix.
+**The compaction-site gap, found and closed rather than left as a caveat.** Running the fourth
+mutation across the whole `src/llm/` suite (2531 tests) found it killed nothing except the structural
+guard — `summarizer.test.ts` covers the raw extraction and `compaction.test.ts` covers
+`ContextCompactor`'s own threading, but neither drives `agentLoop.ts`'s own consumption of
+`CompactionResult.rawUsage`. `agentLoop.costMeterCompactionSite.test.ts` was written to close it,
+mocking `ContextCompactor` itself (constructed via `new` inside `agentLoop.ts`, mockable the same way
+`factory.js`/`toolExecutor.js` already are in this test suite) to return a controlled
+`compacted: true` result. Building it surfaced two bugs in the test itself, both fixed and worth
+naming since they are not source defects: the mock's first cut priced the compaction usage as
+`claude-sonnet-4-6` under the mocked client's own `"openai"` provider, an unpriceable combination that
+silently returns `$0` (`[zone-pricing] unknown model`) rather than throwing — corrected to price it
+under the same provider the rest of the run uses. The constructor mock's `.mockImplementation` also
+needs re-establishing inside `beforeEach`, not just once in the `vi.mock` factory, because
+`vitest.config.ts`'s `mockReset: true` wipes it before every test — the same ESM-mock-fixture class
+already on file from `toolExecutor.ts`'s own test fixture. With both fixed, re-running the mutation
+against the new test kills exactly the one compacted:true test — the gap is now covered behaviorally,
+not only structurally.
 
-**Bucket: Actionable now.** The remedy is specified, its exposure measured, its acceptance test
-written and its fixture already on disk; nothing new needs to be learned first except whether the
-meter can subscribe to the recording seam without losing per-iteration attribution. Against Blocked
-on data: no observation is missing — item 254 made it.
-Against Neither: a concrete fix is proposed. Against Closed: nothing is built.
+**Per-site attribution, proven rather than inferred from reading the accumulator.**
+`TokenBudgetMeter.test.ts` gained a direct unit test at real `claude-sonnet-4-6` rates: two
+`recordLLMCall`s with distinct `rawUsage` sum to exactly $18.00 ($3.00 + $15.00); silencing either
+in isolation leaves exactly the other's contribution ($3.00, or $15.00) — the accumulator is a plain
+additive sum, checked at the cent rather than assumed from the code shape. None of the 30 real
+captured cells below exercise two unfed sites in one run (compaction never fired in any of them), so
+this unit test is what actually backs the "silencing removes only that site's contribution" claim for
+this dataset.
 
-**Where this lives:** the four unfed call sites, in `src/llm/agentLoop.ts` and
-`src/llm/compaction/summarizer.ts`; the meter in `src/llm/tokenBudget/TokenBudgetMeter.ts` over
-`src/usage/iterCostMeter.ts`; the seam in `src/llm/recordingClient.ts`, wired at
-`src/llm/factory.ts`. See item 254 for the mechanism and its arithmetic.
+**E2 — the gating behaviour on the checkable dataset, a clean two-part negative.**
+`computeAntiThrashSignal`'s own first gate returns `null` for `archetype === "question" |
+"investigation"`, and the notice-regression probe hardcodes `archetype: "question"` at every
+`taskClassification` site — all 30 T7 cells below are structurally excluded from ever tripping the
+gate. Independently, scanning all 30 captures for any `"compact"` substring in `terminationReason`
+returns zero hits — the mid-loop site this pass fixes never executed in this dataset either. Both
+conditions must hold for the fix to change gating behaviour on a given run; neither held for any of
+the 30. The wider historical corpus has no "compaction fired" marker and would need a dedicated
+instrument this pass did not build — named as out of scope, not assumed clean.
+
+**E4 — acceptance, re-derived against the 30 captured cells (item 157's arms; no new spend).**
+Both arms' capture files were found by working around a confirmed instance of this repo's own known
+hazard: the shell's `grep` function is gitignore-aware and silently skips `.zone/` (gitignored)
+entirely — `command grep` was required to see any of them. The 15-control-arm captures live in the
+surviving `/dev/shm/zone-control-head-revert` worktree (`.zone/audits/control-bullet-ab/`); the
+15-post-fix-arm captures live in this repo's own `.zone/audits/postfix-bullet-ab/`. Neither capture
+stores a `runId`; both were correlated to the daily ledger via the probe's own deterministic pattern
+(`noticearm${ARM}-${t.id}-${Date.now()}`), pairing each arm's 15 files against the 15 chronologically
+nearest ledger `runId`s under the shared prefix — confirmed tight (max pairing gap 4.4 seconds against
+multi-second wall-clock runs) and confirmed correct by reproducing the already-published aggregate
+independently: capture sum **$0.658909** against ledger sum **$0.778900**, matching item 254's own
+$0.658910/$0.778900 to the fraction of a cent the two derivations' own rounding accounts for.
+
+**Corrected against the actual per-cell classification, not the preliminary "6 diverge" framing.**
+Of the 30 cells, 24 are single-call (`iter=1`) and all 24 already match the ledger to the ledger's own
+per-call rounding (`round4`, `Math.round(n*10_000)/10_000`, applied per row and then summed — which is
+why even matching cells show a residual of a few thousandths of a cent, not zero). Of the 6 multi-call
+(`iter=3`) cells, **5 diverge and 1 already matches** — not 6-of-6 as this entry's own preliminary
+framing had it. The 5 divergent cells are exactly item 254's own table (`$0.067691→$0.113000`,
+`$0.048810→$0.076600`, `$0.046228→$0.062200`, `$0.037421→$0.044800`, `$0.046076→$0.069500`), and every
+one of them is `token_budget_exceeded` — meaning **this dataset exercises only the wrapup-call site**;
+the max-iteration and compaction sites are validated by this pass's new unit/integration tests, not by
+this historical dataset, which never reached them (E2's own zero-compaction finding, and no
+`max_iterations` terminal reason appears in either arm).
+
+**Post-fix equality is established by construction, not by replay — replay would need new spend
+this pass does not take.** `recordLLMCall`'s cost contribution for a given `rawUsage` is
+`totalCost(usage, provider, model)`, the identical function `usageTracker.ts` calls to produce each
+ledger row's `est_cost_usd` (pricing is not duplicated — established in E1). Combined with the
+additive-sum property proven above, a fixed meter's `costUsd` for any of these runs is definitionally
+`Σ totalCost(call_i)` over exactly the calls the ledger recorded for that `runId` — which is the
+ledger sum already computed. **The "match to six decimals" bar this entry originally set is stricter
+than the ledger itself can represent for a multi-call cell** — the ledger's own per-call `round4`
+means even the one cell that already matches perfectly agrees only to four decimals
+(`$0.047175` vs. `$0.0472`), not six. The bar actually demonstrated, by the one pre-existing
+equal-count cell and now provable for the other five by the pricing/additivity identity just stated,
+is agreement to the ledger's own precision — restated here since the original wording overspecified
+what the fixture can show.
+
+**Item 94's cross-provider confirmation, restated with its qualifier attached rather than as a clean
+7/7.** Item 94's seven `gpt-5.6-luna` (OpenAI) cells are historical, pre-fix captures that cannot be
+re-run without spending. Re-reading them against the ledger repeats the reconciliation item 254
+already performed: five `natural_completion` cells match, two `token_budget_exceeded` cells
+(`T3 $0.013854→$0.024600`, `T4 $0.008508→$0.017800`) diverge by exactly the ledger's own delta. **What
+this confirms:** the diagnosis — `terminationReason` predicts divergence — generalises across
+providers, established last pass and unchanged by this one. **What it does not confirm:** the fix's
+post-fix behaviour on a non-Anthropic provider, which remains unverified live. This pass's own new
+integration tests do exercise the fix under a mocked `"openai"` provider at `gpt-4o` rates (both
+terminal-site and compaction-site tests use that mock), so the wiring is provider-agnostic by
+construction — but no *live* `gpt-5.6-luna` call has hit a terminal path post-fix. **Cost registered,
+not spent, grounded in this model's own two measured terminal-path figures rather than a cross-model
+multiplier:** T3 and T4 above are the only two real `gpt-5.6-luna` terminal-path costs on file, at
+$0.0246 and $0.0178 ledger-corrected — two fresh cells of the same shape would run **approximately
+$0.04–$0.05 total**, cheap enough for a future pass to decide in one line.
+
+**E5 — the five items' corrected figures, re-read against their own ledger source and reported by
+value, not by "confirmed as predicted."** Nothing about the ledger's own recording changed this pass,
+so no drift was expected; each was actually re-read rather than assumed:
+- Item 90: capture `$0.292629` → ledger `$0.4291` (46.6% higher) — unchanged.
+- Item 94: `T3 $0.013854→$0.024600`, `T4 $0.008508→$0.017800` — unchanged.
+- Item 157: capture `$0.658910` → ledger `$0.778900` (18.2% higher), ceiling corrected to `$3.519` —
+  unchanged, and independently reproduced to the cent by this pass's own E4 re-derivation above.
+- Item 250: three runs' capture `$0.196/$0.149/$0.094` → ledger `$0.4085/$0.2405/$0.1102`; estimates
+  `$14–52` (126 attempts) / `$39–143` (350 attempts) — unchanged.
+- Item 251: declining `$0.014544–$0.016119` unchanged; searching `$0.0327–$0.1173` (was
+  `$0.032645–$0.069448`); ladder ceilings `$3.07/$5.11/$8.18`; per-cell mean `$0.0613` (was
+  `$0.0418`) — unchanged.
+
+**Test fallout, measured against the actual result rather than assumed to match the prediction.**
+The pre-existing count of test files referencing `costUsd` was 15, exactly as predicted. The
+pre-existing count touching terminal exit paths was **31 by a `terminationReason`-field grep, or 41
+by a terminal-reason-string-literal grep — both well above the "22" this entry originally
+recorded**, under two different natural readings of "touch the terminal exit paths," neither of which
+can be confirmed as the original methodology. **The wider count did not translate into fallout**: the
+full suite (`env -u FORCE_COLOR npm test`) ran clean before and after at 478 files / 6127 tests / 0
+failed, with the only delta being the 4 files and 17 tests this pass added — none of the pre-existing
+terminal-path tests asserted a `costUsd` value sensitive to the fix.
+
+**Claims this pass made that turned out wrong, corrected rather than quietly fixed in place:** the
+first structural-test design (distance window) had a real, demonstrated false negative; an early
+assumption that `agentLoop.iterBudget.test.ts`'s existing 45-iteration `token_budget_exceeded` test
+exercised the ratio-triggered wrapup site was wrong — it exercises max-iterations exhaustion instead,
+per `runCompletion/composer.ts`'s own documented naming bug, and needed a separately-designed test
+for the real ratio path; three new integration tests initially failed for a forgotten `runId` (the
+accumulator's cost-update is silently gated on a truthy `runId`, unlike its token-total update); the
+compaction-site test's first failure was a test-fixture provider/model pricing mismatch, not a source
+defect; this entry's own preliminary "6 multi-call cells diverge" undercounted by one (5 diverge, 1
+already matches); and the blast-radius prediction for terminal-path files was low by 9–19 files
+depending on measure, though with no practical consequence.
+
+**Bucket: Closed.** The fix is landed, mutation-verified per site including the one gap the mutation
+run itself found and closed, the acceptance dataset is reconciled to the cent, and the cross-provider
+gap is named with its cost registered rather than left implicit.
+
+**Where this lives:** the four call sites, in `src/llm/agentLoop.ts` and
+`src/llm/compaction/summarizer.ts` (`e4566edd`); the meter in
+`src/llm/tokenBudget/TokenBudgetMeter.ts` over `src/usage/iterCostMeter.ts`; the seam in
+`src/llm/recordingClient.ts`, wired at `src/llm/factory.ts`; the structural guard in
+`src/llm/agentLoopCostMeterCoverage.test.ts`; the compaction-site behavioral test in
+`src/llm/agentLoop.costMeterCompactionSite.test.ts`. See item 254 for the mechanism and its
+arithmetic, unchanged by this pass.
 
 ## Status snapshot — a partition, not a priority ordering
 
@@ -19994,10 +20129,10 @@ priority ordering" cautions against ranking by importance, which this section do
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (112): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 237, 238, 240, 241, 242, 245, 246, 251, 252, 253
+**Closed** (113): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 237, 238, 240, 241, 242, 245, 246, 251, 252, 253, 255
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (3): 236, 239, 255
+first (2): 236, 239
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (14): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250
 
