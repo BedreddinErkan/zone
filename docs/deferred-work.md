@@ -9385,6 +9385,53 @@ only 110 and 143 undercounted by one. A single behavioural run designed against 
 mechanism could discharge more than one of the four, which is worth knowing before anyone budgets
 for one of them alone. See item 4 for the bucket's other two clusters and the same consequence.
 
+**The deferred rule now exists, and two of this entry's own claims do not survive it.** Item 251
+registers the stochastic-cell criterion this entry deferred. Applying it to the captures corrects
+this entry twice, and both corrections make the item further from closing rather than nearer.
+
+**First: "six of the seven tasks clear the revised criterion already" is withdrawn.** Re-derived
+through `scripts/rescoreAnswerCorrectness.ts`, T1–T6 have **exactly one pinned-model cell each, and
+every one of them is pre-fix** — no post-fix cell exists for any of the six, which this entry
+already says elsewhere without connecting it to the "six clear" sentence. At n=1 a cell's exact 95%
+interval is **[0.025, 1.000]**: a single success is consistent with a true rate of 2.5%. Under item
+251's threshold none of the six CLEARS; all six are **INDETERMINATE**, which blocks closure exactly
+as a FAIL does. **This entry is open on seven tasks, not on T7 alone**, and the earlier count of one
+was arithmetic over a criterion that had not yet been written.
+
+**Second: the closing scope and price are both larger than this entry records.** Closing needs six
+cells for each of seven tasks — 42 fresh cells, none poolable with the existing eight, because
+`.zone/memory.md` is read unconditionally into the prompt, is untracked, and changed after every
+existing cell ran (two of its lines are absent from the captured dumps). Priced from the captures
+rather than averaged: **$0.63 if every cell declines, $2.01 if every cell searches**, against the
+`$0.29` this entry's own arm cost. The closing scenario is the expensive one, since a task that
+clears is a task that mostly searched.
+
+**And a limit on what closing would mean, which the rule makes explicit rather than introducing.**
+Item 251's primary definition is SEARCHED, so **this item can close with zero correct answers** —
+and the only cell in the whole arc that ever searched post-fix is one that cited a real helper
+exactly and never named the file the frozen ground truth records. That is the right primary for a
+regression about *reaching for the shell*, and it is not a claim about answer quality. Item 252
+records the field that made this invisible until now.
+
+**The rebuild a future run must do first was checked for side effects, and it has none on this
+arm.** The probe compiles from `dist/`, refuses to start against a stale one, and `dist/` is
+currently behind `src/` by three non-test files: `tools/toolExecutor.ts`, `tools/toolDefinitions.ts`
+and the new `tools/patchMultiBlockExample.ts`. **None can reach this arm**, under two independent
+instruments. The tool-schema changes live on `apply_patch`'s `patch.description`, and the probe
+FATALs unless the offered set is exactly `[read_file, run_command_readonly]`, so that description is
+never sent. And every changed hunk in `toolExecutor.ts` falls inside the `apply_patch` handler's own
+line range; the two handlers this arm invokes are untouched. **So the rebuild introduces no second
+pooling confound** — `.zone/memory.md` remains the only one, and it is sufficient on its own.
+
+**Bucket, re-decided against the new rule rather than inherited a fourth time: it stays Blocked on
+data.** What this entry waits on is still a run, and the run is now larger (seven tasks at N=6, not
+one task at n=1) and its criterion is now written down. Against Closed: no task CLEARS under item
+251 — six are INDETERMINATE and T7's post-fix rate is 1/3. Against Actionable now: the remedy is an
+observation, not a change. Against Neither: a concrete design and its price are specified. **The
+correction that matters for a future reader is that this entry was never blocked on the credit its
+earlier revisions blamed, nor latterly on spend — it was blocked on a rule that did not exist, and
+that is now discharged in item 251.**
+
 ## 91. Closed — `run_command_readonly`'s description named no discovery binary, at either of the two sites that state its capability
 
 **What it is.** Across seventeen commands recovered from a session establish and re-checked directly
@@ -13922,6 +13969,40 @@ landing and nothing has landed; item 181 is Neither on no observation being miss
 selection; the directive is item 156's. See item 156 for the defect and the fix, item 153 for the control
 and the rule shape this follows, and item 90 for the criterion this does not answer.
 
+**This entry's headline result does not survive being scored on the field the captures already
+carried.** "One cell of three searched and cited exactly" is true under SEARCHED and false under
+either correctness definition: re-derived through `scripts/rescoreAnswerCorrectness.ts`, T7 post-fix
+is **1/3 SEARCHED, 0/3 CORRECT_BASENAME, 0/3 CORRECT_FULLPATH**, and the all-time pinned figure is
+**1/8 SEARCHED, 0/8 correct under both**. This entry's own prose already said so — it records that
+the searching cell "never named the component file this task's frozen ground truth records as its
+correct one" — and the metric never carried it, so the heading and the rule both read the cell as
+the arc's one success. Item 251 registers SEARCHED as the primary and the correctness figures
+alongside it, so both are now stated with their definitions rather than one standing unqualified.
+The exact interval on that 0/3 is **[0.000, 0.708]**, which is not a demonstration of absence
+either.
+
+**The blocker recorded in this entry is wrong, and the correction is the point rather than a
+detail.** This entry, and every sweep reading it, has treated the remaining eleven cells as a
+question of spend — a design "blocked on a decision to spend cents through a harness that works
+today", in item 90's own phrasing. Five of those eleven are **control** cells that must run on the
+**pre-fix prompt**, which no longer exists in the tree: reaching it needs a worktree at `5ee8d842`
+(the parent of item 156's fix `e0509485`), its own dependency install, and its own build, since the
+probe compiles from a build directory and refuses to start against a stale one. **That harness has
+never been built.** The blocker is a missing instrument, not a missing dollar, and the distinction
+matters because a pass budgeting cents for this would discover the gap only after committing to it.
+
+**What is genuinely spend-blocked here is the smaller half.** The six further *measured* cells need
+no new machinery — but this entry's own power paragraph already establishes that extending the
+measured arm alone cannot close it, because the control's count of five caps the achievable
+significance. So the cheap half cannot close the entry and the half that could is not cheap.
+
+**Bucket, re-decided rather than inherited: it stays Blocked on data, on a corrected blocker.** The
+observation that would settle the question still does not exist. Against Closed: three in eight is
+not an answer, and under the correctness definitions there is no post-fix signal at all. Against
+Actionable now: the control arm requires an instrument that must be built first, which is not a
+remedy this entry specifies. Against Neither: a design is specified and priced. **The correction a
+future reader needs is that "blocked on spend" was never true of this entry's control arm.**
+
 ## 158. A local suite can pass because the compiled build it partly reads is stale, so a source change breaks a test the changing pass cannot see
 
 **What happened, and nothing in it was done carelessly.** A pass changed prompt-assembly source, ran the
@@ -16503,6 +16584,27 @@ sink under the user's home directory. The attribution instrument that corrected 
 `scripts/markerAttribution.ts` (test: `scripts/markerAttribution.test.ts`), runnable directly with
 `npx tsx scripts/markerAttribution.ts`. See item 190 for the gate and item 194 for the message the denial
 renders.
+
+**The denominator has grown and the numerator has not, which strengthens this entry's reading without
+changing its verdict.** `[zone-plan-investigation-complete]` now stands at **34** across both sink
+generations, against the twenty-six this entry records; `[zone-investigation-command-denied]` is still
+at **zero**. Eight further investigation runs, still no denial. The zero remains a zero observed
+across a larger denominator rather than a smaller one, and the entry stays Blocked on data on exactly
+the reading it already carries.
+
+**A counting hazard this entry's own method is exposed to, found while re-deriving those figures.**
+`command grep -c` over the sink counts *lines containing the marker name*, not *records emitting it*.
+Measured: `grep -c "zone-tier-grant-unusable"` returns **5** on the rotated generation where a reader
+keying on the `.name` field returns **1** — the other four are `[zone-agent-tool-result]` records whose
+payload text quotes the name. **This is `markerAttribution.ts`'s mentioned-versus-emitted distinction
+one level down, in the sink rather than the source tree**, and it is the same defect this entry was
+originally corrupted by. Every load-bearing sink figure in this document was re-derived against a
+`.name` reader as a result — the 6,205 record total, the 102 distinct names, the 125 apply_patch
+records, items 245–248's 13 imbalance and 54 parity counts, the 23.2% same-window and 19.4% blended
+rates, and the 165.5 KB/day write rate — and **not one moves.** The hazard is real and this document's
+committed figures survive it. **The asymmetry worth keeping is that grep over-counts, never under-counts,
+so a grep-derived zero is a true zero** — which is why this entry's own zero, and item 170's, needed no
+re-derivation at all.
 
 ## 197. The probe that closed item 193, its two design decisions, and the join it could not use
 
@@ -19382,17 +19484,64 @@ captures under the per-repo audits directory. See item 90 for the entry that def
 now inherits it, item 252 for the unread field that forced the outcome-variable decision, and item
 157 for the measurement whose headline the re-scoring changes.
 
+## 252. Closed — the frozen ground truth was copied into every capture and read by nothing, while a criterion rested on its absence
+
+**The defect.** Each notice-regression task carries a `correctFile` — the file its frozen ground
+truth records as the correct answer. The probe copies it into every result record it writes. **No
+scoring function ever read it.** The committed scorer reads the shell-call list and nothing else,
+so every figure this arc produced measured whether the agent *searched* and nothing about whether
+it *answered*.
+
+**This is the family `--max-budget-usd`, `--max-turns`, `--add-dir`, `--fork-session` and
+`supportsVision` belong to — declared, populated, consumed nowhere — and it is worse than any of
+them.** Those are inert: a flag that does nothing changes no recorded conclusion. This one sat
+underneath a live criterion. Item 157's heading called its one searching cell "cited exactly", item
+90 counted that same cell as its only post-fix success, and both readings survived because the
+instrument that would have contradicted them was a field nobody read. **An unread field that
+nothing depends on is dead weight; an unread field a verdict rests on is a wrong verdict waiting to
+be found.**
+
+**What reading it changes, measured rather than asserted.** Across the eight pinned T7 cells the
+figure is **1/8 under SEARCHED and 0/8 under both correctness definitions** — checked against five
+name variants of `src/cli/tui/components/ApiKeysView.tsx`, case-insensitively, in every cell of both
+phases, with no hit anywhere. The single searching cell located a real masking helper and cited it
+precisely; it never reached the component the ground truth names.
+
+**Two gaps the field itself has, recorded rather than smoothed.** `correctFile` is **null for T3**,
+so that task has no ground truth at all and is unscoreable under any correctness definition — item
+251 registers it as unscoreable rather than as a failure, and confines the consequence to the
+secondary definitions, since searching needs no ground truth. And **two tasks (T2, T5) name their
+file without its path**, so a basename match and a full-path match disagree on them; item 251
+registers the basename convention as the secondary and keeps the full path as a stricter third
+figure rather than collapsing them.
+
+**Bucket: Closed.** The field is read now: `scripts/rescoreAnswerCorrectness.ts` (landed at
+`a291421b`) scores every capture under all three definitions, reports the two ambiguity classes
+instead of forcing verdicts on them, and is pinned by twenty tests including a mutation that
+reproduces this pass's own filename-versus-field selection error. Against Actionable now: nothing
+further is proposed. Against Blocked on data: no observation was missing — the data had been on
+disk in all 34 captures the whole time. Against Neither: an instrument was built, not merely a fact
+recorded. **One thing is deliberately not done and is named so it is not read as an oversight:** the
+live probe still does not emit these fields on future runs. Teaching it to is a change to a
+cost-bearing instrument mid-arc, which item 90 warns is how a measurement pass becomes a feature
+pass; it is a separate, named step.
+
+**Where this lives:** `correctFile` is written by `scripts/notice-regression-probe.mjs` into each
+result record; the reader is `scripts/rescoreAnswerCorrectness.ts`. See item 251 for the rule this
+field's absence was distorting, item 157 for the heading it corrects, and item 144 for the scorer
+that read the other half of the record.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 251 to find out which ones still need something. No index of
+reader the trouble of reading all 252 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (110): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 237, 238, 240, 241, 242, 245, 246, 251
+**Closed** (111): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 237, 238, 240, 241, 242, 245, 246, 251, 252
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (2): 236, 239
