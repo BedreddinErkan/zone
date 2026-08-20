@@ -18841,131 +18841,384 @@ Closed: nothing was built.
 guard whose source it mirrors. Recorded in `CLAUDE.md` alongside the other search-tool hazards. See
 item 243 for the guard whose real behaviour this fixture misreports.
 
-## 245. Actionable now — the "no valid blocks" rejection is four different failures wearing one message, and it emits nothing
+## 245. Closed — the "no valid blocks" rejection was four different failures wearing one message, and each now emits its own record
 
-**What it is.** `apply_patch`'s handler runs three ordered gates before per-block matching: a
-marker-count imbalance check, a content-before-first-FIND check, and then the segmentation walk. If
-the walk returns zero blocks the call is rejected with "No valid --- FIND --- / --- REPLACE ---
-blocks found in patch." That rejection is reached by **at least four distinct input shapes**,
-established by driving each through the real compiled handler: a patch with no FIND marker at all;
-a patch whose markers are lowercased (the walk matches by exact substring, so case is significant);
-an empty patch string; and a whitespace-only patch. All four produce the identical message.
+**What was built.** Each of the four input shapes that collapsed into "No valid --- FIND --- /
+--- REPLACE --- blocks found in patch" — established last pass by driving each through the real
+compiled handler: no FIND marker at all; markers present but lowercased (matching is exact-substring,
+so case is significant); an empty patch string; a whitespace-only patch — now writes a dedicated,
+unconditional record. `[zone-apply-patch-no-valid-blocks]` (previously silent, no `log`/`debugLog`
+call at all) carries a discriminator for which of the four shapes produced it: case-insensitive
+FIND/REPLACE marker presence and trimmed patch length. `[zone-apply-patch-find-block-empty]`,
+`[zone-apply-patch-replace-block-empty]`, and `[zone-apply-patch-find-not-found]` (previously
+reaching only a shared, generic `debugLog` marker gated behind `ZONE_VERBOSE_LOGS=1` — a
+module-level const evaluated once at import and never set in normal operation, so in real
+production telemetry these three were exactly as invisible as the branch with no call at all, for a
+different structural reason) each gained a second, dedicated, always-on record beside their existing
+diagnostic, which was left untouched. All four returned `ToolResult`s now carry `error`/
+`rejectionReason` fields, matching the two sibling gates (`marker_imbalance`, `content_before_find`)
+that already had them.
 
-**And unlike its two sibling gates, it is silent.** The imbalance gate returns
-`error:"apply_patch_marker_imbalance"` and emits a record carrying four count fields. The
-content-before-FIND gate returns its own error code and emits a record carrying the model. This one
-returns `success:false` and an output string — **no error code, no rejection reason, no marker**.
-Confirmed twice over: behaviourally, by capturing everything the call logged and finding no
-apply_patch record; and by attribution, which knows of no such marker name in the tracked tree.
+**The second, narrower gap closed in the same edit.** The imbalance marker's own payload was
+missing `model` while its content-before-FIND sibling carried it. Fixed as one line, as specified.
+The genuinely new finding this pass: `[zone-apply-patch-marker-split]`, a related marker in the
+same handler, had the identical gap at both of its own call sites (the multi-block-detected record
+and its rejected/accepted variants) — found while auditing this marker family for the same
+asymmetry, confirmed to be one line at each site, and closed alongside the imbalance fix rather than
+left as a second open item.
 
-**So its incidence is unmeasurable, and must never be written down as zero.** The sink cannot see
-this branch at all. A count of zero from it would be a property of the instrument, not of the world
-— the same vacuity that makes another entry's structural zero permanently unreadable. What can be
-said is only that the branch is silent, and therefore that the owner's recollection of seeing it
-cannot be checked against recorded data in either direction.
+**Verified with a positive control first.** Twelve tests drive the real compiled `executeTool`. One
+well-formed patch is confirmed to emit none of the four new markers before any malformed shape is
+trusted, then each of the four shapes and their discriminator fields, then the model-field retrofit
+on both the imbalance and marker-split records.
 
-**A second, narrower gap in the same family.** The imbalance marker's payload carries the two count
-pairs, the patch size and a rejected flag, but **not the model** — while the content-before-FIND
-marker beside it does carry one. Recovering which model produced the thirteen recorded imbalances
-therefore required joining their run identifiers against the daily usage ledger. That join worked,
-so this is a friction rather than a blocker, but the asymmetry is arbitrary and the sibling already
-sets the precedent.
+**The write-rate question, given a real threshold rather than "negligible."** The marker sink
+rotates at a fixed 2 MiB cap (`MARKER_SINK_MAX_BYTES`, `src/utils/markerSink.ts`) with two
+generations retained. Measured against the currently-active generation's real span
+(2026-08-16T17:25:36Z to 2026-08-19T23:11:00Z, 549,024 bytes over 3.240 days): today's write rate is
+165.5 KB/day, giving 12.38 days per generation and a 24.75-day total retained window. A real
+four-marker JSON line, measured from the actual payload shapes these branches emit, averages 240
+bytes. Shortening the retained window by even one full day requires an added 14,897 bytes/day —
+about 62 new-marker records/day, or **15.5× marker-imbalance's own currently-measured rate of
+4.01/day** (13 events over that same 3.240-day span; the other three branches have no historical
+rate to compare against, since they were structurally invisible before this pass). Stress-tested at
+10× a deliberately generous combined estimate for all four markers (4× marker-imbalance's rate,
+16/day estimated, 160/day stressed): the retained window shortens by 19%, not lost. These four
+markers would need to run at a rate with no precedent anywhere in this family's own recorded
+history before retention becomes a real question.
 
-**The remedy, specified.** Emit a record from the zero-blocks branch carrying a discriminator for
-which of the four shapes produced it — marker presence, marker count, patch length after trimming —
-and give it an error code, so the branch is as legible from records as the two gates ahead of it.
-Add the model field to the imbalance payload in the same edit, matching its sibling. Neither
-changes which patches are accepted.
+**Bucket: Closed.** Built and verified this pass — commit `542d40d9`. Against Actionable now:
+nothing further is proposed for the four branches or the two model-field gaps. Against Blocked on
+data: the observation that was missing (a record from each branch) now exists going forward;
+whether it changes the future incidence read is a separate question — see item 248. Against Neither:
+work was built, not merely recorded.
 
-**Why it is not built in the pass that records it.** That pass was scoped to establishment, and its
-own rule was that no fix lands unless the establishment is unambiguous and the change is one line.
-The model field is one line; the zero-blocks record is not, and splitting them would land the
-smaller half of one coherent edit.
+**Where this lives:** the `apply_patch` handler's rejection gates and the marker-imbalance/
+marker-split call sites, all in the tool executor; the new test file
+`src/tools/toolExecutor.applyPatchSilentGates.test.ts`. See item 246 for the prompt-side fix these
+branches' own incidence motivated, item 248 for what the historical "54" denominator turns out to
+mean now that these branches are separable, and item 1 for the false-positive question the count
+fields were originally added to answer.
 
-**Bucket: Actionable now.** A remedy is specified in this entry and nothing new needs to be learned
-first — the two sibling gates in the same handler are the template, down to the emission helper.
-Against Blocked on data: no missing observation blocks it; the observation it would create is the
-point. Against Neither: a fix is proposed. Against Closed: nothing was built.
+## 246. Closed — the worked multi-block example now lives in the tool description, imported from one shared source
 
-**Where this lives:** the `apply_patch` handler's three rejection gates in the tool executor, and the
-segmentation walk under the utils directory that the third gate reads. See item 246 for what the
-recorded imbalances turn out to be, and item 1 for the false-positive question the count fields
-were added to answer.
+**The evidence that motivated this fix, carried forward from the item that recorded it.** Eleven of
+thirteen historical marker-imbalance records were one FIND marker and two REPLACE markers — the
+shape a model would produce by appending a second REPLACE to the one-block template the tool
+description showed it, having been separately instructed to batch N edits into one call with N
+blocks. Thirteen distinct run identifiers across three languages (Rust, Python, TypeScript) argue
+against anything language-specific; all thirteen recovered on retry, with no failed run in the
+sample. All thirteen ran on one model, so the historical records alone cannot separate a prompt-side
+cause from a model-side one — item 250 specifies the live comparison that would. Item 248 corrects
+the window and the denominator this evidence was originally read against; the shape-specificity
+above is unaffected by that correction and is restated here rather than re-derived, since it comes
+from the count fields themselves, not from the window or denominator in question.
 
-## 246. Actionable now — every recorded marker imbalance is the shape a missing worked example would produce, and no worked example exists
+**What was built.** The exact text already proven effective in the marker-imbalance rejection
+message — two `--- FIND --- / --- REPLACE ---` blocks plus one sentence of guidance — is now
+`PATCH_MULTI_BLOCK_EXAMPLE`, one exported constant in `src/tools/patchMultiBlockExample.ts`,
+imported at both the rejection message (unchanged output — the pre-existing pinned fragment
+assertion in `toolExecutor.markerBalance.test.ts` still passes against the same text, now sourced
+from the constant) and the `patch` parameter's own description in the tool schema (new: one
+proactive sentence plus the constant, appended after the existing guidance rather than replacing
+it). Measured directly rather than carried forward from planning: the extracted text is 264 bytes,
+not the 346 estimated before extraction — the earlier figure did not survive contact with the real
+string and is superseded here, not silently dropped. `function.description` was not touched — it is
+separately capped under 300 characters with 55 characters of headroom, confirmed too narrow for a
+264-byte addition; `patch.description` carries no such cap.
 
-**The recorded shape is strikingly specific.** Thirteen imbalance records exist across both marker-sink
-generations, spanning 2026-07-29 to 2026-08-19, under two independent instruments agreeing exactly.
-**Eleven of the thirteen are one FIND marker and two REPLACE markers.** Two are one FIND and zero
-REPLACE. **None is the reverse**, and none has a count above two. The line-anchored recount agrees
-with the substring count in every one of the thirteen, so none of them is the quoted-or-mid-line
-false positive those fields were added to expose.
+**The single-source property is pinned, not assumed — and shown to catch what it exists to catch.**
+A structural test scans tracked source for the example's distinctive fragment
+(`<second region from file>`) and asserts it appears in exactly one implementation file.
+Demonstrated, not just written: the rejection message's own call site was mutated to a re-authored
+duplicate — same FIND/REPLACE skeleton, a reworded trailing sentence — and confirmed first to pass
+every one of 117 pre-existing behavioural tests across three files (`toolExecutor.markerBalance.
+test.ts`, `toolExecutor.applyPatchSilentGates.test.ts`, the column-zero sweep in
+`agentLoop.prompts.test.ts`) plus a clean `tsc --noEmit`, before confirming the structural test was
+what caught it. The reworded duplicate was invisible to every test that predates this pass; only
+this pass's own guard saw it.
 
-**They are not one run retrying.** Thirteen distinct run identifiers, across three languages — Rust,
-Python and TypeScript — which argues against anything language-specific. All thirteen ran on the same
-model, recovered by joining run identifiers against the daily usage ledger because the marker itself
-does not record one.
+**The column-zero sweep's own plausibility-floor comment was re-derived, not hand-incremented.**
+`agentLoop.prompts.test.ts`'s block-shaped-marker-line count moved from 16 to 20 across the same 24
+sources — confirmed by running the sweep's own counting function with a temporary diagnostic print,
+removed before landing, not by adding 4 to the prior recorded number by hand. The floor itself
+(`MIN_BLOCK_SHAPED_LINES=12`) was not touched; it remains a lower bound with margin.
 
-**The prompt never demonstrates the shape it demands.** The assembled system prompt contains exactly
-**one FIND marker and zero REPLACE markers**, and that single occurrence is prose — "Nothing may
-precede `--- FIND ---`". It describes the patch format entirely in words and shows no worked example
-at all. The tool description shows exactly **one balanced pair**, while instructing "N edits to a
-file → ONE call with N blocks". So a model asked to batch two edits has been told to emit two blocks,
-given a template containing one, and shown no example of what two look like. Appending a second
-REPLACE to the single template it was given is the failure that instruction predicts, and it is what
-eleven of thirteen records are.
+**Bucket: Closed.** Built and verified this pass — commit `283bd285`. Against Actionable now:
+nothing further is proposed for the two call sites this pass unifies. Against Blocked on data:
+whether the fix changes the live incidence rate is a live-measurement question, specified but not
+run — see item 250. Against Neither: work was built, not merely recorded.
 
-**This is correlation with a mechanism, not proof of causation.** Every recorded instance comes from
-one model, so the records cannot discriminate a prompt-side cause from a model-side one; a run on a
-second model would. What can be stated without a live call is the structural fact — that the format
-is specified in prose and demonstrated only in the single-block case — and that the observed failures
-are exactly the shape that omission would produce.
+**Where this lives:** `src/tools/patchMultiBlockExample.ts` and its test, `src/tools/
+toolDefinitions.ts`'s `patch` parameter description, and the marker-imbalance rejection message in
+the tool executor. See item 245 for the silent sibling branches instrumented in the same pass, item
+247 for the third site — the PATCH RULES block in the assembled system prompt — that still carries
+its own, un-unified copy of this format, item 250 for the live measurement this fix's causal claim
+still needs, and item 2 for the embedded-pair defect that is a different mechanism entirely.
 
-**The cost is one iteration, not a failed run.** All thirteen recovered: every imbalance is followed
-by a retry and then a successful staging, with no exception in the recorded window. The rejection
-message works as a teacher, and the reason it works is worth naming — **it contains the very
-multi-block example the tool description omits**. Zone demonstrates the correct shape only after the
-model has already got it wrong.
+## 247. Neither — the worked multi-block example is unified at two of three sites; the third is a protected zone, not an oversight
 
-**The remedy, specified.** Move that example forward: give the tool description the two-block form it
-already teaches in the rejection message. The text exists and is proven effective by the thirteen
-recoveries; this changes where it appears, not what it says.
+**The fact.** Three places in this codebase describe the `apply_patch` multi-block format: the
+`patch` parameter's tool-schema description, the PATCH RULES block inside
+`assembleAgentSystemPrompt` (`src/llm/agentLoop.ts`), and the marker-imbalance rejection message.
+Item 246 unified the first and third onto one shared constant. The second was not touched.
 
-**Bucket: Actionable now.** A remedy is specified and nothing new needs to be learned first — the
-replacement text is already in the repository and already demonstrated to work. Against Blocked on
-data: the cross-model observation would strengthen the causal claim but is not needed to justify
-showing an example of a format the prompt demands. Against Neither: a fix is proposed. Against
-Closed: nothing was built.
+**Why not.** PATCH RULES is a block this repository's own CLAUDE.md names explicitly as protected:
+"do not trim without commit-recency check + behavioral sweep." That is the actual reason, stated
+directly rather than left for a future reader to infer from an empty diff — not that restructuring
+the block was awkward, and not that a worked example was judged unnecessary there. The block's
+relevant bullet is one fragment inside a single large conditional string-concatenation expression,
+gated by `isOffered(...)`/`input.answerOnly` checks; extracting a literal from it means restructuring
+that expression, which is the kind of change the protection rule exists to slow down until it has
+been checked against recent commits and swept for behavioural effect. Neither check was done this
+pass, because this pass was not scoped or budgeted for it.
 
-**Where this lives:** the `apply_patch` tool description in the tool definitions, the PATCH RULES
-block in the agent loop's assembled system prompt, and the imbalance rejection message in the tool
-executor that carries the example today. See item 245 for the silent sibling branch, item 1 for the
-false-positive question these records also answer, and item 2 for the embedded-pair defect that is a
-different mechanism entirely.
+**What this means for item 246's own claim.** The tool description and the rejection message now
+agree by construction. The system prompt's own bullet is unchanged: prose-only, one FIND marker and
+zero REPLACE markers total, no worked example. Item 246's fix does not depend on the system prompt
+also carrying the example — the tool schema and the rejection message are what a model sees at the
+moment of formatting a patch and at the moment of correcting one — but a reader of PATCH RULES
+alone, without ever triggering the rejection message, still sees prose only, unchanged by this pass.
+
+**Bucket: Neither.** A structural fact recorded, with no fix proposed this pass. Against Actionable
+now: a fix is not queued, because CLAUDE.md's own protection rule requires a check this pass did not
+do — recording it as ready-to-build would misstate what "actionable" means for a protected zone.
+Against Blocked on data: no observation is missing; what's missing is the commit-recency check and
+behavioural sweep the protection rule itself requires. Against Closed: nothing was built.
+
+**Where this lives:** the PATCH RULES block inside `assembleAgentSystemPrompt`,
+`src/llm/agentLoop.ts`. See item 246 for the two sites that are unified, and CLAUDE.md's own
+protected-zones note for the rule this entry defers to.
+
+## 248. Neither — the recorded "19.4%" rate understates rather than overstates, by two independent, converging measurements
+
+**Re-established under two independent instruments.** `jq` filtering on the sink's `.name` field and
+a `node`/`JSON.parse` line reader agree exactly, across both marker-sink generations: 13
+`[zone-apply-patch-marker-imbalance]` records (7 + 6) and 54 `[zone-apply-patch-normalization-parity]`
+records (21 + 33). `13/(13+54) ≈ 19.4%` is arithmetically correct. Two separate problems make it the
+wrong number to call "the rate."
+
+**First: the two markers do not share a window.** Timestamped precisely: the 13 imbalance records
+span 2026-08-16T17:18:06Z to 2026-08-19T23:06:55Z — 3.240 days. The 54 parity records span
+2026-08-05T20:44:09Z to 2026-08-19T23:07:37Z — roughly 14 days. Nine parity records fall entirely
+before the first imbalance record in the retained data, in a span with zero recorded imbalances.
+Both markers' logging code predates 2026-08-05 by months (first introduced 2026-05-06, confirmed by
+`git log -S` against the tracked history), so this is not an instrumentation-availability gap — the
+code was live and able to fire throughout. Restricting the denominator to parity records that
+actually fall inside the imbalance window (43 of the 54) gives **13/(13+43) ≈ 23.2%**, not 19.4%.
+
+**Second: 54 was never a success count.** `[zone-apply-patch-normalization-parity]`'s own doc
+comment states its population precisely: calls that "reached block-level normalization — survived
+every earlier rejection ... and produced blocks.length > 0." That log call fires before the
+per-block loop's own empty-FIND, empty-REPLACE, and FIND-not-found checks — confirmed again this
+pass by line position in the real source, not assumed from the comment alone. Item 245's new
+instrumentation makes those three separable going forward; historically, they are not — some
+unknown fraction of the 54 are not successes at all, and there is no way to recover which. A smaller
+true-success count in the same denominator position only ever raises the fraction: true rate =
+13/(13+true_successes) ≥ 13/(13+54).
+
+**Both effects point the same direction.** Window misalignment raises the estimate to 23.2%.
+Denominator contamination raises it further, by an amount this data cannot separate out. Neither
+effect lowers it. The natural first guess — treat 19.4% as an upper bound, since it blends two
+imperfect signals — does not survive being checked against the data: on the evidence gathered this
+pass, **19.4% is better described as a floor than a ceiling**, and 23.2% is a closer, though still
+not exact, same-window estimate.
+
+**A related absence, checked fresh rather than carried forward.** No dedicated `apply_patch` success
+marker exists anywhere in this codebase — confirmed directly by reading both `success: true` return
+sites in the handler; neither is preceded by any `log`/`debugLog` call of its own (the nearest
+neighbours are the conditional semantic-smell markers, which do not fire on the ordinary accept
+path). Every historical "success" figure in this family, including 54 and including the 23.2%
+correction above, is an absence-shaped inference — the call reached a point in the code, not a
+positive record saying so. Not built this pass, by design: a dedicated success marker would close
+this gap, but adding one raises a design question of its own (what "success" means for a staged,
+not-yet-flushed write) that this pass did not scope. Recorded here as its own gap rather than folded
+silently into either correction above.
+
+**Bucket: Neither.** A structural fact about what the historical data can and cannot support, with
+no code fix proposed. Against Actionable now: no remedy is specified — the success-marker absence is
+named, not queued as a one-line fix, for the reason stated above. Against Blocked on data: the live
+measurement that would settle the current rate, rather than the historical one, is specified in item
+250 — this entry is the reason that measurement does not lean on 19.4%, 23.2%, or 54 as ground
+truth. Against Closed: nothing was built.
+
+**Where this lives:** `[zone-apply-patch-marker-imbalance]` and
+`[zone-apply-patch-normalization-parity]`, both in the tool executor, and
+`~/.zone/markers.jsonl`/`.jsonl.1`. See item 245 for the four branches that make the contamination
+in this entry's second finding traceable going forward, and item 250 for the live protocol that
+measures success directly instead of through this marker.
+
+## 249. Neither — three parallel vocabularies name the same apply_patch rejection causes, and the new ToolResult fields should become the one they converge onto
+
+**The fact, verified fresh rather than carried forward from an earlier read.** Three independent
+naming systems describe the same set of `apply_patch` rejection causes. `classifyFailure`
+(`src/llm/agentLoop.ts`) regex-matches the human-readable `output` string and returns a
+`SelfCorrectTrigger`. `applyPatchRetryReason` switches on that trigger to produce a third, shorter
+string for compact JSONL diagnostics (S.2.1). Item 245 added a second machine-checkable pair —
+`error`/`rejectionReason` fields directly on the four affected `ToolResult`s, populated from each
+branch's own local knowledge of what happened, independent of the other two.
+
+**Where they agree and where they don't, checked against the real source.** For the four causes
+item 245 instruments:
+
+| cause | item 245's `error` field | `classifyFailure`'s trigger | `applyPatchRetryReason`'s short form |
+|---|---|---|---|
+| zero blocks | `apply_patch_no_valid_blocks` | `apply_patch_no_valid_blocks` — match | `no_valid_blocks` — match |
+| empty FIND | `apply_patch_find_block_empty` | `apply_patch_find_block_empty` — match | `find_block_empty` — match |
+| empty REPLACE | `apply_patch_replace_block_empty` | `apply_patch_empty_replace_no_intent` — mismatch | `empty_replace_no_intent` — mismatch, same root cause |
+| FIND not found | `apply_patch_find_not_found` | `apply_patch_find_not_found` — match | `find_mismatch` — mismatch, independent of item 245 |
+
+Three of four agree at the trigger-name level. The empty-REPLACE mismatch is item 245's own naming
+choice against a pre-existing trigger name that is arguably more precise than the new one —
+`apply_patch_empty_replace_no_intent` encodes the condition (fires only when `intent !== 'delete'`)
+that `apply_patch_replace_block_empty` does not. The FIND-not-found mismatch, between the trigger
+name and its own short form, predates item 245 entirely and has nothing to do with the fields it
+added — a third vocabulary can diverge from a second even when neither has changed recently.
+
+**The verdict.** The `error`/`rejectionReason` fields should become authoritative going forward, for
+a reason specific to this exact pass: `classifyFailure` matches by regex against human-readable
+prose, and item 246, in this same pass, edited that prose. A structured field cannot be broken by a
+wording change; a regex match can, silently, every time the message it targets is reworded — which
+is precisely the kind of change item 246 just made once and could plausibly make again. The
+convergence path is not to rename either vocabulary today, but for a future pass to thread the
+`ToolResult`'s own `rejectionReason` into `classifyFailure`'s call sites (which already receive the
+full result, not just extracted `output`/`error` strings) so it can prefer the structured field when
+present and fall back to regex only where a branch doesn't yet emit one — and for
+`applyPatchRetryReason` to derive from that same field directly, retiring its own separate switch
+rather than adding a fourth hand-maintained mapping.
+
+**Bucket: Neither.** A structural fact recorded, with a stated direction for convergence — migration
+itself is out of scope this pass. Against Actionable now: the convergence step touches call sites
+this pass did not audit for downstream effect (coaching, retry, the antiThrash tests item 245's own
+summary named as a wide consumer surface) and needs its own scoped pass. Against Blocked on data: no
+observation is missing — the mismatch is a source-code fact, checked directly. Against Closed:
+nothing was built.
+
+**Where this lives:** `classifyFailure` and `applyPatchRetryReason`, both in `src/llm/agentLoop.ts`;
+the `error`/`rejectionReason` fields on the four `ToolResult`s from item 245, in the tool executor.
+See item 245 for where the new fields originate.
+
+## 250. Blocked on data — the live measurement that would confirm or retract item 246's causal claim, specified in full and not run
+
+**What would close this.** Item 246's claim — that a missing worked example is a dominant cause of
+marker-imbalance rejections — rests on 11 of 13 historical incidents matching the predicted shape,
+all on one model, which cannot separate a prompt-side cause from a model-side one. A live, controlled
+two-arm comparison, run after item 245's telemetry went live so both arms are equally and fully
+instrumented, would.
+
+**Design.** Arm 1 (control): the pre-item-246 tool description, checked out into a scratch worktree
+rather than reintroduced as a runtime toggle — no permanent flag is built for a one-time experiment.
+Arm 2 (treatment): the current tool description, carrying item 246's worked example. Task template: a
+small real source file in a scratch repo copy, with a task shaped to require 2–4 edits to named
+functions in one file — the shape PATCH RULES' own "N edits to a file → ONE call with N blocks"
+instruction turns into a natural multi-block `apply_patch` call.
+
+**The outcome variable, defined now because item 245 changes what there is to measure.** Two
+outcomes are recorded per attempt, not one:
+- **Primary — marker-imbalance-specific rejection**, per call: did this attempt trigger
+  `[zone-apply-patch-marker-imbalance]` specifically. This is the outcome item 246's mechanism (a
+  missing worked example, addressed by adding one) directly targets, and it is the one comparable to
+  the historical figures — the 13/(13+54)≈19.4% blended estimate and the 13/(13+43)≈23.2%
+  same-window estimate from item 248 — with item 248's own correction in mind: both undercount the
+  true historical rate, so a live rate meaningfully below 19.4% is still conservative evidence of an
+  effect, and a live rate compared against 23.2% is the fairer test.
+- **Secondary — any-rejection-shaped first attempt**, per call: did this attempt fail via any of item
+  245's four branches, not only marker-imbalance. This is **not comparable to any historical
+  figure** — the marker sink could never separate all four before item 245 landed, so no historical
+  baseline exists for it. It is recorded because item 246's fix should not move it (the worked
+  example targets marker counts specifically, not empty blocks or FIND mismatches), and an
+  unexpected shift there would be worth a note — not because it is this protocol's decision
+  criterion.
+
+The decision rule below is stated against the primary outcome only.
+
+**Sample sizes, re-derived this pass via `statistics.NormalDist`, one-sided α=0.05, power=0.80**
+(differs slightly from an earlier planning-time pass of the same formula — 63/175 here against a
+previously stated 61/173; the earlier figures were not reproduced from a shown command in this pass
+and are superseded by these):
+
+| p1 scenario | target (effect) | n/arm | total |
+|---|---|---|---|
+| 0.194 — blended, full window (conservative: smallest gap to target, largest n) | 0.05 (large) | 63 | 126 |
+| 0.194 | 0.10 (moderate) | 175 | 350 |
+| 0.232 — same-window re-derivation, item 248 | 0.05 (large) | 45 | 90 |
+| 0.232 | 0.10 (moderate) | 98 | 196 |
+| 0.10 — plausible-lower robustness check | 0.05 (large) | 343 | 686 |
+| 0.10 | 0.10 (moderate) | not a reduction — target ≥ assumed baseline | — |
+
+**Which p1 governs planning, and why.** 0.194, not 0.232 — specifically because it is the more
+conservative of the two real candidates (it demands the larger sample for the same power), even
+though item 248 found the true rate is more likely close to or above 0.232. Planning to the smaller,
+harder-to-detect gap means a true rate at 0.232 yields comfortable extra power rather than an
+underpowered study; planning to 0.232 and being wrong in the other direction would not. The 0.10 row
+answers this document's own standing question directly: if the true baseline were as low as 10%, the
+126-attempt design sized for 0.194 would be meaningfully undersized against a large-effect target
+(343 vs 63, 5.4×) and could not test a moderate-effect target at all, since 10% would no longer be a
+reduction from itself.
+
+**The OpenAI arm is underpowered by design, with the number stated rather than gestured at.** A
+25-attempts-per-arm exploratory run on `gpt-5.5` (50 total), computed this pass via the same
+instrument solved for achieved power rather than required n: **46% power against the large-effect
+target (p2=0.05), 24% against the moderate target (p2=0.10)**. What this arm can conclude: a
+dramatic, obvious reduction is suggestive and would justify a fully-powered follow-up on that model
+specifically. What it cannot conclude: a null result at this n is not evidence the fix fails to
+generalize — at 46% power, a real large effect goes undetected more often than not, so "no
+significant difference" and "underpowered miss of a real effect" are not distinguishable from this
+arm alone. Reporting this arm's result without this paragraph attached is how "both providers were
+tested" becomes an overclaim in a later summary.
+
+**Statistical test.** Fisher's exact test on the 2×2 (arm × primary-outcome) table for the actual
+analysis — the normal approximation above is a planning instrument, not the test the real counts
+should be read through.
+
+**Decision rule.** Confirm the effect if Fisher's exact test gives p<0.05 one-sided against the
+primary outcome, and the observed reduction is not a bare statistical whisker against the 0.232
+comparator. Otherwise retract the causal claim rather than soften it; the next hypothesis would need
+to be model-specific behaviour, not a retry of the same fix.
+
+**Cost, at current pricing, not spent this pass.** claude-sonnet-5 arms: real sampled per-run costs
+($0.196, $0.149, $0.094 across three files this pass read from `~/.zone/cost-logs/`) put the
+126-attempt large-effect design at roughly $18–25 and the 350-attempt moderate-effect design at
+roughly $50–70. The OpenAI arm: no sampled `gpt-5.5` run costs exist in this repository to measure
+from, so this is a scaled estimate, not a measurement — gpt-5.5's per-token rates are 1.7× (input) to
+2× (output) claude-sonnet-5's (`src/usage/pricing.ts`), suggesting roughly $0.20–0.40/run and
+$10–20 for 50 attempts. A future pass executing this protocol re-states these numbers against
+then-current pricing and real sampled costs before running, and gets explicit sign-off first, per
+this session's own spending discipline.
+
+**Bucket: Blocked on data.** Closing this entry requires the live two-arm run described above;
+nothing here is a code change. Against Actionable now: the protocol is specified but deliberately
+not executed — real money, not queued as a default next step. Against Neither: a concrete plan is
+committed, not just a fact recorded. Against Closed: nothing was run.
+
+**Where this lives:** no code. The protocol depends on item 245's telemetry being live (it is, as of
+commit `542d40d9`) and item 246's fix being live (it is, as of commit `283bd285`). See item 248 for
+why this protocol's outcome variable and comparator are defined the way they are, and item 246 for
+the claim this measurement would confirm or retract.
 
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 246 to find out which ones still need something. No index of
+reader the trouble of reading all 250 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (107): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 237, 238, 240, 241, 242
+**Closed** (109): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 237, 238, 240, 241, 242, 245, 246
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (4): 236, 239, 245, 246
+first (2): 236, 239
 
-**Blocked on data** — closing requires an observation that doesn't exist yet (13): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196
+**Blocked on data** — closing requires an observation that doesn't exist yet (14): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250
 
-**Neither — a structural fact recorded, with no fix proposed** (122): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (125): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152, 154, 155, 158,
 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199, 200, 201, 202, 205,
-206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230, 232, 243, 244
+206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230, 232, 243, 244, 247, 248, 249
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.

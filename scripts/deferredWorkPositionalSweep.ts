@@ -57,8 +57,16 @@ export const POSITIONAL_MAX_WORDS = 4;
  * (e.g. "...a clean sweep bounds the rate from below and never means..." — a
  * statistical/binomial-bound phrase, not a document cross-reference). Not filtered out of this
  * absolute — see sweep()'s own doc comment for why no denylist exists.
+ *
+ * Re-locked from 112 to 114 by the apply_patch silent-gates pass (items 245-250): two new
+ * same-item backward references, "the reason stated above" (item 248) and "the normal
+ * approximation above" (item 250), each pointing at the immediately preceding paragraph within
+ * its own entry. Checked individually before re-locking, per this module's own header comment —
+ * both have a clear, close antecedent and are not the shape this sweep exists to flag. Confirmed
+ * by the same three independent instruments as the original lock: Node RegExp, `grep -E -o`, and
+ * `git grep -E -o -h` all returned 114 against the same commit.
  */
-export const POSITIONAL_LINE_BASED_ABSOLUTE = 112;
+export const POSITIONAL_LINE_BASED_ABSOLUTE = 114;
 
 /**
  * Wrap-normalized count, same commit. NOT required to equal the line-based figure — see
@@ -73,8 +81,13 @@ export const POSITIONAL_LINE_BASED_ABSOLUTE = 112;
  * this module's own JS matcher exactly. Two of the three share no regex engine with it, so
  * POSIX-ERE-vs-JS divergence on `([a-z]+ ){1,4}` followed by an alternation, which is a real
  * possibility for this shape, is ruled out by measurement rather than assumed away.
+ *
+ * Re-locked from 126 to 128 alongside the line-based absolute above — see its own comment for
+ * the two new references. Confirmed by the same paragraph-join cross-check as the original lock:
+ * `awk 'BEGIN{RS=""}' + gsub` piped to `grep -E -o`, and `perl -00 -pe 's/\n/ /g'` piped to the
+ * same, both agree with this module's own JS matcher at 128.
  */
-export const POSITIONAL_WRAP_NORMALIZED_ABSOLUTE = 126;
+export const POSITIONAL_WRAP_NORMALIZED_ABSOLUTE = 128;
 
 /**
  * Built from POSITIONAL_MIN_WORDS/POSITIONAL_MAX_WORDS. Every alternative uses a literal space,
