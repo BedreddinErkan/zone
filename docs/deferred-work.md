@@ -18421,20 +18421,179 @@ Neither: a fix is proposed, not merely a structural fact. Against Closed: nothin
 the home guard's own setup file. See item 235 for the two incidents and item 233 for the first of
 them in detail.
 
+## 237. Actionable now — OpenAI's reasoning summary is never asked for, so the discard the record points at is discarding an opaque blob
+
+**What the record says.** Commit `2abc9dac` (2026-08-19) records that on the Responses API branch the
+response converter "collects reasoning items into an explicitly discarded `_`-prefixed variable", and
+leaves open "whether the discarded items would carry human-readable summary text ... undetermined
+without a live call, since Zone's own request never opts into a summary mode". Both halves are
+accurate. What no record separates is that the two halves describe **two different defects with two
+different fixes**, and only one of them is a discard.
+
+**The three-way distinction, settled.** For the human-readable summary, reasoning is **never
+requested**: the params converter builds its reasoning object out of the resolved effort level alone
+and sends no `summary` key at all. For the encrypted blob, reasoning is **requested and then
+dropped**: the same converter asks for `reasoning.encrypted_content` in its `include` array, and the
+response converter pushes every returned reasoning item into the discarded variable. The discard is
+therefore real, but what it discards is an opaque base64 string carrying no prose and rendering to
+nothing. **Deleting the discard on its own would narrate nothing at all** — which is why the two
+defects must not be described as one.
+
+**Confirmed by live call, not by reading.** Four requests against `gpt-5.4-mini` (2026-08-20, about
+$0.0015 of spend). Sent with Zone's exact parameter shape, the response carried one reasoning item
+whose summary array was **empty**, whose `encrypted_content` was a 1,292-character string, and whose
+usage reported 17 reasoning tokens — billing without content, from the identical request shape that
+produced every record counted in item 238. Adding `summary: "auto"` to an otherwise byte-identical
+request returned a populated `summary_text` part of readable prose. The reasoning item's other text
+field, `content`, was empty on all four calls, so the summary array is the only usable source of
+narratable text. Neither the `auto` nor the `detailed` setting produced an organisation-verification
+error, so no account capability is blocking.
+
+**A quality caveat found in passing.** At `effort: "low"` — a 15-token reasoning budget — the summary
+that came back described a different question from the one asked. At `effort: "high"` the summaries
+were on topic. Narration built on summaries will therefore occasionally show prose unrelated to the
+task at the lowest effort setting. Worth deciding about deliberately rather than meeting it in front
+of a user.
+
+**The remedy, specified: two files, both inside the adapter.** First, the params converter gains a
+`summary` key on its reasoning object. One branch needs care rather than a one-line edit: the
+reasoning object is constructed **only** when an effort level resolves, so a run with no effort set
+sends no reasoning object whatever and would still receive no summary; asking for a summary
+independent of effort means constructing the object on a second condition. Second, the response
+converter extracts the summary parts' text out of the items it currently discards and attaches the
+joined string to its returned object under the same extra field the Anthropic converter already
+uses, widening its return type the same way the Anthropic converter widens its own.
+
+**Nothing downstream changes, and the reason is structural.** The emitter in the agent loop reads
+that extra field off the response generically, with no provider test anywhere in the expression, and
+every stage after it — the investigation forwarder, the progress-event normaliser, the event-to-action
+translation, the store reducer, the transcript renderer's own branch — keys on the event's type, never
+on which provider produced it. Commit `2abc9dac` already exercised that chain end to end against
+real, unmocked conversion output. The seam is content-shaped, not provider-shaped, so the fix does
+not grow past the adapter.
+
+**One gate to keep in mind when scoping it.** The emitter fires only in investigation mode, on
+iterations that carry real tool calls, with a live run identifier. The fix therefore buys OpenAI
+parity exactly where Anthropic already has it, and nowhere wider — which is the intended outcome, not
+a shortfall, but it does mean a verification plan has to drive an investigation-mode run rather than
+any OpenAI run.
+
+**Who is affected.** The Responses branch is selected for the `openai` provider on any model whose
+identifier begins `gpt-5`. Plan mode's default path runs an investigation for any task that is not a
+clear pure addition, and the investigation inherits the user's own provider and model. An OpenAI user
+in plan mode is therefore the exact population that sees tool names and no reasoning, which is the
+symptom `2abc9dac` was opened against.
+
+**Bucket: Actionable now.** A remedy is specified in this entry and nothing new needs to be learned
+first — the live call that was the open question has been made and its answer is recorded here.
+Against Blocked on data: the observation that was missing now exists. Against Neither: a fix is
+proposed, not merely a structural fact. Against Closed: nothing was built, on a pass whose brief was
+establish-only.
+
+**Where this lives:** the two Responses-API converter modules under the OpenAI adapter directory, the
+reasoning-text extractor and response converter under the Anthropic adapter directory for the shape
+to mirror, and the thinking-event emitter in the agent loop. See item 238 for the token figure and
+item 239 for the ledger field that made the figure easy to misread.
+
+## 238. Closed — the 218-of-1,966 reasoning figure is right at its vintage, counts two different populations, and measures billing rather than content
+
+**What the figure is and where it lives.** Commit `2abc9dac` (2026-08-19) states that "218 of 1,966
+real per-run cost-log records carry a non-zero reasoning count". The pair appears in that commit
+message and **nowhere else** — not in this document, not in any other doc, not in the per-repository
+or user state directories. Every `218` occurrence in this document refers to ledger item 218, an
+unrelated entry about bucket assertions; shape-matching a bare number is the same trap item 215's
+content checksum set when a hex-shaped token was read as a commit identifier.
+
+**Re-derived, two instruments agreeing exactly.** Restricted to per-run cost-log files written
+strictly before 2026-08-19, the numerator is **218** and the total line count is **1,966** — both
+figures reproduce to the record. The commit is therefore numerically correct at the moment it was
+written. Today the same directory holds 1,995 lines across 241 files: 1,767 per-iteration records,
+228 run-summary records, and the same 218 with a non-zero reasoning count. The numerator has not
+moved because every run since has been Anthropic-backed.
+
+**The mismatch is the populations, not the arithmetic.** The numerator is drawn from per-iteration
+records only, of which 1,741 existed before the cutoff. The denominator counts per-iteration **and**
+run-summary lines together, which is how it reaches 1,966. Like for like the ratio is **218 of
+1,741**; the run-summary rows in the denominator cannot carry the field the numerator counts. Both
+figures also silently exclude two subdirectories: an archive of 13 files holding 133 lines with 56
+non-zero counts, and a quarantine of 342 files holding 1,026 lines with none. Counting the archive in
+gives **274 of 1,874** per-iteration records.
+
+**A second claim in the same sentence is wrong.** The commit says the token count reaches a sink
+"just not the persisted daily usage ledger". The persisted daily usage ledger **does** carry it:
+2,913 of its 7,991 records carry the reasoning field and 340 carry a non-zero value. Item 239 records
+why the mistake is an easy one to make from the type alone.
+
+**All of it is OpenAI, by construction and by measurement.** Every one of the 340 daily-ledger
+records with a non-zero count is `openai`; the models are the three `gpt-5.x` identifiers, all of
+which select the Responses branch. Anthropic cannot contribute: its response converter never
+populates the completion-token detail object that the usage extractor reads the field out of, so an
+Anthropic record's value is structurally zero rather than merely unobserved. The source reading and
+the 340-record measurement are independent instruments agreeing.
+
+**What the figure actually measures.** Reasoning tokens billed — not reasoning content returned. Item
+237 records the live confirmation: the identical request shape returns a reasoning item with an empty
+summary array and a non-zero reasoning-token count. So the figure is an **upper bound on recoverable
+content, and not a count of it**; at Zone's current request shape the recoverable content is zero
+regardless of how large the figure grows.
+
+**Bucket: Closed.** The figure has been re-derived, its populations separated, its scope stated, and
+the daily-ledger clause corrected — the entry is the correction, and nothing about it is left to do.
+Against Actionable now: no fix is proposed here, because the number was never wrong at its vintage.
+Against Blocked on data: every observation needed has been made. Against Neither: a defect in a
+durable record was corrected rather than merely noted.
+
+**Where this lives:** the per-run cost logger and the daily usage tracker under the usage directory,
+and the usage extractor in the recording client. See item 237 for the discard the figure is usually
+cited alongside.
+
+## 239. Actionable now — the daily usage ledger persists a token field its own record type does not declare
+
+**What it is.** The usage extractor in the recording client returns a breakdown that includes a
+reasoning-token field. The post-call hook spreads that breakdown wholesale into the function that
+appends a usage record. The record type that function is declared against lists an output-token field
+but **no reasoning field**. Spreading a variable into an object literal does not trigger excess
+property checking, so the field type-checks, is written to disk, and is invisible to anyone reading
+the type.
+
+**It is not theoretical.** 2,913 of the 7,991 records in the daily ledger carry the field, 340 of them
+with a non-zero value, across four distinct key-set shapes that also differ in whether they carry
+web-search, subagent, or latency fields. The type declares one of those shapes and the file holds six.
+
+**The cost is a misread that already happened.** Commit `2abc9dac` states the reasoning token count
+does not reach "the persisted daily usage ledger". Reading the record type is enough to reach that
+conclusion and the conclusion is wrong — item 238 records the measurement. A type that under-declares
+what it persists will keep producing that answer for anyone who trusts it.
+
+**The remedy, specified.** Declare the reasoning field on the usage record type as optional, matching
+what the extractor already returns and the file already holds. Purely additive: no writer changes, no
+migration, and existing records without the field stay valid under an optional declaration. The
+adjacent web-search field is already declared in exactly the shape being proposed, so the entry is
+asking for consistency with the type's own precedent rather than for a new convention.
+
+**Bucket: Actionable now.** A remedy is specified in this entry and nothing new needs to be learned
+first — the field name, its type, and the precedent for declaring it all exist in the repository.
+Against Blocked on data: the measurement exists and is recorded. Against Neither: a fix is proposed,
+not merely a structural fact. Against Closed: nothing was built, on a pass whose brief was
+establish-only.
+
+**Where this lives:** the usage record type in the usage tracker, the usage breakdown type and the
+post-call hook in the recording client. See item 238 for the record defect the shape produced.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 236 to find out which ones still need something. No index of
+reader the trouble of reading all 239 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (102): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235
+**Closed** (103): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 238
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (1): 236
+first (3): 236, 237, 239
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (13): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196
 
