@@ -50,7 +50,7 @@ import {
 import { checkConfidenceGate, renderConfidenceGateBlock } from "../core/confidenceGate.js";
 import { runHeadless, runHeadlessResume } from "./dispatch.js";
 import { latestResumableEnvelope, resolveEnvelopeId } from "../api/diskRunEnvelope.js";
-import { parseTrustFlag } from "./config.js";
+import { parseTrustFlag, type CliFlags } from "./config.js";
 const execFileAsync = promisify(execFile);
 const ANSI_ENABLED = process.env.VITEST !== "true" && process.env.NO_COLOR !== "1";
 const CLI_LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
@@ -81,8 +81,10 @@ type CliOptions = {
   effort?: string;
   forceTier?: string;
   yes?: boolean;
-  noRevision?: boolean;
-  noColor?: boolean;
+  /** commander's own naming for a `--no-x` flag: `revision`/`color`, never `noRevision`/`noColor`
+   *  — see cliOptionsIntrospection.ts and ledger item 258. */
+  revision?: boolean;
+  color?: boolean;
   trust?: boolean;
   noTrust?: boolean;
   // TUI.1 new flags
@@ -97,6 +99,38 @@ type CliOptions = {
   addDir?: string[];
   forkSession?: boolean;
 };
+
+/**
+ * Maps commander's parsed options onto `CliFlags`. Extracted as its own exported, pure function —
+ * not left inline — so `index.optionsBoundary.test.ts` can call the exact code this file's own
+ * entry point calls, against a real parsed `options` object, rather than asserting a
+ * reimplementation of this mapping that could carry the identical wrong-property-name bug and
+ * still pass. `isHeadless` and `argv` are parameters rather than read from `process` internally so
+ * this stays a pure function callable with fully controlled inputs.
+ *
+ * `options.revision === false` / `options.color === false`, not a bare `!options.x`: commander
+ * guarantees a boolean here (never `undefined`) for a registered `--no-x` flag, so the two forms
+ * are behaviourally identical today — verified, not assumed (see the test file's own mutation
+ * covering this). `=== false` is kept because it reads as "was this flag explicitly passed",
+ * rather than relying on JS truthy/falsy coercion of a value this function does not itself
+ * guarantee is a strict boolean at the type level.
+ */
+export function buildCliFlags(options: CliOptions, isHeadless: boolean, argv: string[]): CliFlags {
+  return {
+    model: options.model,
+    effort: options.effort as string | undefined,
+    repo: options.repo,
+    forceTier: options.forceTier,
+    yes: options.yes,
+    noRevision: options.revision === false,
+    verbose: options.verbose,
+    quiet: isHeadless,
+    noColor: options.color === false,
+    resume: options.resume,
+    permissionMode: options.permissionMode,
+    trust: parseTrustFlag(argv),
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Audit helpers
@@ -1236,20 +1270,7 @@ export async function run(): Promise<void> {
   const options = program.opts<CliOptions>();
 
   const isHeadless = options.print === true || !process.stdout.isTTY;
-  const cliFlags = {
-    model: options.model,
-    effort: options.effort as string | undefined,
-    repo: options.repo,
-    forceTier: options.forceTier,
-    yes: options.yes,
-    noRevision: options.noRevision,
-    verbose: options.verbose,
-    quiet: isHeadless,
-    noColor: options.noColor,
-    resume: options.resume,
-    permissionMode: options.permissionMode,
-    trust: parseTrustFlag(process.argv),
-  };
+  const cliFlags = buildCliFlags(options, isHeadless, process.argv);
 
   // TUI.1 entry-point fork
   const queryArgs = program.args as string[];
