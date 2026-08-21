@@ -174,6 +174,18 @@ describe("fixture-driven: the {1,4} bound is a named boundary, not an accident",
  * grows by — has to update seven coverage assertions that express no boundary of THIS pattern;
  * that is not done here.
  *
+ * A qualification added when buildPositionalPattern gained \b anchors (item 257): candidates 2
+ * and 7 are deliberately left unanchored, so "holds by construction" is no longer quite exact for
+ * their own coverage tests below — an unanchored candidate CAN match a boundary-violating span
+ * (a word ending in "the" supplying a phantom opening, or "above"/"below" matching as a prefix of
+ * a longer word) that the now-anchored stored pattern correctly excludes, which breaks the subset
+ * relationship rather than merely shifting a count. This already happened once, harmlessly, during
+ * this same pass: a worked example in the ledger prose itself quoted a boundary-violating phrase
+ * and briefly failed both coverage tests below until the prose was rewritten. The two tests now
+ * pass because the live document does not currently contain such a phrase, not because the
+ * relationship is structurally guaranteed the way it was before the anchors — a future boundary
+ * violation anywhere in the document will fail these two tests again, correctly.
+ *
  * Candidates 3, 5, and 6 have no "the" anchor at all and so can catch real content the stored
  * pattern structurally excludes by design (a deliberate exclusion — see
  * buildPositionalPattern's own doc comment on why anchoring on "the" is the right trade). That

@@ -20402,44 +20402,75 @@ measurement is complete; what is missing is a decision, not an observation.
 item 107 for the excluded-tree error count this adds a named cost to, and item 239 for the guard
 placement that surfaced it.
 
-## 257. Neither — the positional sweep carries the same unanchored-boundary class the anaphor sweep was just hardened against
+## 257. Closed — the positional sweep's two open boundary edges are anchored, and neither locked absolute moved
 
-**What it is.** `deferredWorkAnaphorSweep.ts`'s `buildAnaphorPattern()` had no word boundary after
+**What it was.** `deferredWorkAnaphorSweep.ts`'s `buildAnaphorPattern()` had no word boundary after
 `there`, so one of the six locked verbs directly followed by `there` also matched inside that same
 verb followed by `therefore` — a real false positive this document's own drafting produced once
 (a locked verb immediately preceding an unrelated `there`-prefixed word, with only a space between
 them) and caught only by rewriting the sentence, not the pattern. Fixing it meant sweeping all four
 open edges of that pattern (left of the verb group, right of `there`, left of `the`, right of
-`above`) rather than patching the one edge that had bitten.
+`above`) rather than patching the one edge that had bitten. Noticed while sweeping, and deliberately
+not fixed in the same pass: `deferredWorkPositionalSweep.ts`'s own pattern —
+`` `the ([a-z]+ ){1,4}(above|below)` `` — carried the identical class of gap, and widening a fix's
+scope to a second stored instrument without that instrument's own establish pass is exactly the
+kind of unrequested expansion this document's own practice argues against.
 
-**Noticed while sweeping, not fixed here.** `deferredWorkPositionalSweep.ts`'s own pattern —
-`` `the ([a-z]+ ){1,4}(above|below)` `` — has the identical class of gap on its own `the`/
-`above|below` edges: nothing anchors the left side of `the` or the right side of `above`/`below`,
-so the same two failure shapes apply (a word ending in `"the"` supplying a phantom match; `above`
-or `below` matching as a prefix of a longer word). Not checked against the live document for
-current contamination — that establish belongs to whoever picks this up, the same way the anaphor
-sweep's own check was a span-diff against the real file, not an assumption.
+**The enumeration, by construction rather than by analogy to the anaphor pattern.** This pattern has
+**two** open edges, not four — it is one alternative construction (`the ... above|below`), not two
+independent ones. Every zero-width position in the regex source was walked: the space after `the`
+and every space inside the `{1,4}` word-run are already boundaries (a literal space is non-word), so
+only two positions lack one — left of `the`, and right of the closing `(above|below)` group, the
+latter shared by both alternation members at once.
 
-**Why this is recorded separately rather than folded into the anaphor fix.** Widening a fix's scope
-to a second stored instrument without that instrument's own establish pass is exactly the kind of
-unrequested expansion this document's own practice argues against — item 254's original version is
-the standing example of a fix's scope outrunning what was actually checked. This entry exists so
-the finding is not lost to a report that nobody reads again, which is the fate the "claims that
-turned out wrong" sections of several passes have already caught once.
+**Both swept for live contamination, separately from whether each is structurally exploitable.**
+Zero instances either direction (`/([a-zA-Z])the ([a-z]+ ){1,4}(above|below)/g` and
+`/the ([a-z]+ ){1,4}(above|below)([a-zA-Z])/g`). Both edges are real, proven exploitable with three
+isolated fixtures whose matched **span** — not just count — was checked before being written: the
+left-edge fixture's unanchored match starts mid-word, inside the seven-letter verb the fixture opens
+with, consuming its trailing three letters plus the two words that follow — not the sentence's
+other, later occurrence of the same three-letter word (which precedes neither `above` nor `below`
+and never matches under either pattern) — so the phantom disappears entirely under the hardened
+pattern rather than relocating to a different span. Same discipline for both right-edge fixtures,
+each a real word extended by a longer word sharing its first five letters.
 
-**Bucket: Neither.** A structural fact is recorded with no fix proposed — the boundary gap is real
-by construction (mirrors the anaphor sweep's own, already demonstrated to be exploitable), but
-whether it is currently contaminating `POSITIONAL_LINE_BASED_ABSOLUTE`/
-`POSITIONAL_WRAP_NORMALIZED_ABSOLUTE` (114/128) is unestablished. Against Actionable now: no remedy
-is specified, because the remedy is only the boundary anchors — trivial — and the actual work is
-the establish (does it move the count, the same span-diff discipline the anaphor fix used), which
-has not been done. Against Blocked on data: the observation is reachable in minutes by the same
-method already demonstrated; nothing is waiting on an external event.
+**Span-diff, not count-diff, both counters.** Hardened pattern (`` \bthe ([a-z]+
+){1,4}(above|below)\b ``) against current, compared by match span (start index + matched text):
+byte-identical **114-element** and **128-element** span lists, zero removed, zero added.
+**`POSITIONAL_LINE_BASED_ABSOLUTE` (114) and `POSITIONAL_WRAP_NORMALIZED_ABSOLUTE` (128) do not
+move.**
 
-**Where this lives:** the pattern in `scripts/deferredWorkPositionalSweep.ts`'s
-`buildPositionalPattern`; the precedent fix in `scripts/deferredWorkAnaphorSweep.ts`'s
-`buildAnaphorPattern`. See item 126 for the anaphor sweep's own convention and the boundary fix
-this entry's finding came from.
+**The module's own "mirrors grep" claim re-verified on the hardened pattern, not inherited from the
+original lock.** Adding `\b` to a `{1,4}`-quantified group is exactly where POSIX ERE
+(leftmost-longest) and JS RegExp (leftmost-first, backtracking) can diverge — the module's own prior
+comment already names this risk. Re-ran all five instruments the two original locks used: Node
+RegExp, `command grep -E -o`, `git grep -E -o -h` (line-based), and `awk 'BEGIN{RS=""}'`+`gsub` /
+`perl -00 -pe 's/\n/ /g'` piped to `grep -E -o` (wrap-normalized, reproduced outside Node twice, as
+the original lock's own comment requires). **All five agree exactly** at 114/128. No divergence to
+correct or soften.
+
+**Why establish and fix landed in the same pass, stated rather than left for a reader to infer —
+this is a departure from the split this session has used repeatedly, and the departure needs its own
+reason, not just a plan that assumed it.** Three conditions held together, not one: the remedy was
+already proven safe on a sibling instrument two passes ago (the identical `\b` addition, on the
+anaphor pattern, already mutation-verified there); the span-diff establishing zero contamination was
+performed and its result known **before** the fix was written, so the fix did not precede its own
+justification; and no spend, no new instrument, and no scope beyond this one module's two edges was
+involved. Absent any one of those three, this would have been recorded and left for a following pass,
+matching every other establish-then-fix split this document has used.
+
+**Bucket: Closed.** Both edges enumerated with an explicit completeness argument, both swept clean
+on the live document, both absolutes confirmed unmoved by span-diff across five independent
+instruments, the fix landed and mutation-verified per edge (the right-edge mutation predicted, by
+name, to kill both alternation members' fixtures at once — one anchor guards both — and it did).
+Against Actionable now: the work is done. Against Blocked on data: nothing was missing. Against
+Neither: a fix was proposed and built. **Commit `43808cc4`.**
+
+**Where this lives:** the pattern and its two boundary anchors in
+`scripts/deferredWorkPositionalSweep.ts`'s `buildPositionalPattern`; the fixtures in
+`scripts/deferredWorkPositionalSweep.test.ts`; the precedent fix in
+`scripts/deferredWorkAnaphorSweep.ts`'s `buildAnaphorPattern`. See item 126 for the anaphor sweep's
+own convention and the boundary fix this entry's finding came from.
 
 ## Status snapshot — a partition, not a priority ordering
 
@@ -20451,7 +20482,7 @@ priority ordering" cautions against ranking by importance, which this section do
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (115): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255
+**Closed** (116): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (0):
@@ -20463,12 +20494,12 @@ better read as "nothing currently specified", which is a weaker and more accurat
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (14): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250
 
-**Neither — a structural fact recorded, with no fix proposed** (128): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (127): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152, 154, 155, 158,
 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199, 200, 201, 202, 205,
-206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230, 232, 243, 244, 247, 248, 249, 254, 256, 257
+206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230, 232, 243, 244, 247, 248, 249, 254, 256
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
