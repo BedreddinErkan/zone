@@ -145,6 +145,15 @@ export function _isInRepoTreeForTest(target: unknown): boolean {
   return isInRepoTree(target);
 }
 
+/** Test-only: whether observe mode is active, so a self-test can assert the
+ *  mode-appropriate outcome instead of hardcoding "always throws" — which is
+ *  only true under enforce mode. `REPO_OBSERVE` is read once at module load
+ *  (see its own comment), so this reflects the value for this whole process,
+ *  not a live re-read. */
+export function _repoGuardObserveModeForTest(): boolean {
+  return REPO_OBSERVE;
+}
+
 function isInRealZone(target: unknown): boolean {
   if (typeof target !== "string" && !Buffer.isBuffer(target) && !(target instanceof URL)) {
     return false;
