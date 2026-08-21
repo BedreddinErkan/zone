@@ -20790,9 +20790,12 @@ first (1): 259
 
 That bucket had returned to empty when items 236 and 239 were built in one pass, after sitting at
 zero for months before they were opened. It returned to 2 when 258 and 259 were both opened in the
-same pass, and 258 closes here in the very next pass — its own remedy specified and now built. One
-item remains specified and unbuilt: 259, whose own ordering note records that 258 closed with the
-guard rather than derivation, confirmed rather than changed by that outcome.
+same pass, and 258 closed in the very next pass — its own remedy specified and now built. One item
+remains: 259, and it is **partially** built rather than untouched — three of its five members
+landed at `dfa733be`, leaving `--max-budget-usd` specified and unbuilt. It stays in this bucket for
+exactly that reason: a remedy is still specified and still waiting, which is what the bucket means.
+Worth noting that the count alone cannot express this — 1 reads the same whether the entry is
+whole or nearly finished — so the entry's own text is the place that distinction lives.
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (14): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250
 
