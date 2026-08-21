@@ -20633,7 +20633,7 @@ files / 6163 tests, 0 failures) both green. Against: Actionable now requires an 
 is made; Blocked on data requires a missing observation, and none is outstanding; Neither requires
 no fix proposed, and one was both proposed and executed.
 
-## 259. Actionable now — five CLI flags are parsed and never read, and two of them point at a milestone that already shipped without them (three handled; `--max-budget-usd` still unbuilt)
+## 259. Closed — five CLI flags are parsed and never read, and two of them point at a milestone that already shipped without them
 
 **The neighbouring half of item 258.** These five are declared, parsed by commander, and read
 nowhere — distinct from item 258's two, which *are* read, under a name that does not exist.
@@ -20750,12 +20750,80 @@ enforcement point is already established: the daily gate fires once before the l
 `getUsage` does filesystem I/O, whereas `snapshot()` is two in-memory adds — so a per-run cap can
 check every iteration for free, which is exactly the weakness a once-per-run check would inherit.
 
-**Bucket: Actionable now → Actionable now**, unchanged and deliberately so. For: three members are
-built and two remain specified and unbuilt, which is what this bucket means; a partially-built entry
-whose remainder is still specified has not become Closed. Against Closed: `--max-turns`'s siblings
-`--max-budget-usd` and the two relabelled-but-unimplemented flags still have proposed fixes
-outstanding. Against Blocked on data: nothing here waits on an observation — the remaining cost is
-measured. Against Neither: fixes are proposed and three are executed.
+**`--max-budget-usd` built at `6e128cef`, and the blocker that deferred it was a false figure.**
+The previous pass recorded "13 `terminationReason` consumers, 22 sites" as the cost of a new member.
+Two instruments disagreed — `git grep` found 13 files, an AST scan 11 — and **both were wrong**:
+`postToolUseHook.ts`'s only reference is a comment, and `diskRunEnvelope.ts` uses an indexed access
+type the AST did not cover. Classifying all **90** production references (30 read/pass-through, 22
+type declarations, 22 literal comparisons, 9 comment-only, 6 writes, 1 derived type) and checking
+every literal comparison for what a new member falls through to left exactly **three** consumers
+that change behaviour, one of them a defect:
+
+- **`patchUserFacingReason.ts`** answered `canResume: false` and "Run ended unexpectedly" from its
+  `default` — wrong on both counts for a stop the user asked for, and the wrong value reaches
+  agentLoop's graceful-degrade telemetry and `metricsAggregator`'s resumable count. Fixed.
+- **`investigationFlow.ts`**'s `hitMaxIter` fallback would have labelled a budget stop "max
+  iterations".
+- **`runLlmPatchFlow.ts`**'s title would have read "ended with issues" for a deliberate stop.
+
+Everything else is a pass-through, a counter with an `?? 0` fallback, or a comparison a new member
+does not match. Real cost: **4 files, not 13.** The third fan-out reader named above,
+`checkDailyCap.ts`, is **not** live — established with both instruments as imported only by its own
+test, and already recorded as one of item 84's nine unreachable mechanisms rather than a new finding.
+
+**The envelope cost nothing, and the reason is stronger than its own comment.** `EnvelopeStatus`
+derives via `Exclude<NonNullable<AgentLoopResult["terminationReason"]>, "natural_completion">`, and
+`isResumable` is `env.status !== "running" || !isPidAlive(env.pid)` — a **denylist of one**, so any
+new status is resumable by construction with no allowlist to update, and nothing switches on
+`EnvelopeStatus` anywhere. **But the stamp is a cast** (`terminationReasonForEnvelope as
+EnvelopeStatus`), item 258's "an assertion, not a check" class, and it is not theoretical here:
+`composer.ts` sets `success: trigger === "natural_completion" && outcome.kind !==
+"applied_with_warnings"` alongside `terminationReason: "natural_completion"`, so an
+`applied_with_warnings` run yields `natural_completion` **with `success: false`**, takes the
+stamping branch, and writes the one value the type deliberately excludes. Behaviourally benign today
+— such a run *should* be resumable — but the `Exclude` is doing no work at that site. **The checked
+replacement is reachable**: a total `Record<NonNullable<TerminationReason>, EnvelopeStatus>` would
+force every future member to declare its envelope status and would surface this case immediately.
+Not taken here because deciding what `natural_completion` maps to is a behaviour change needing its
+own thought; recorded so the cast is a known instance rather than an oversight, with a test pinning
+the exclusion so a future mapping cannot silently admit it.
+
+**Two scope decisions, both deliberate.** The cap is **CLI-only** — no env var, no `tier-limits.json`
+key, no org-policy field. Item 259 is about making a flag work, not about designing a configuration
+surface, and every layer added brings its own precedence question; the widening path, if real demand
+appears, is env first and then `tier-limits.json`, mirroring `dailyUsdCap`'s existing chain. And
+**subagent spend counts against the cap**, the deliberate opposite of `--max-turns`'s parent-only
+scope: turns are per-loop, dollars are per-run. It costs nothing to include, because
+`snapshot().costUsd` already returns `_iterCostAccumulator.total_cost + _subagentCostTotal`; the gate
+is skipped for subagent loops *because* the parent's total already contains the child's spend, so
+gating both would double-enforce one budget.
+
+**Enforcement point, and why it is not the daily gate's.** Checked **every iteration**, before the
+LLM call — free, because `snapshot()` is two in-memory adds. The daily gate is once-per-run only
+because its input, `getUsage`, reads the filesystem; nothing forces that trade on a per-run cap, and
+a once-per-run per-run cap would inherit the exact weakness it exists to remove. Checking before the
+call means no iteration is left half-done. A cap below one iteration's cost cannot fire before any
+work — spend is `$0` at iter 0 — so the run does **one** iteration and stops, deliberately rather
+than by rounding: per-iteration cost is not knowable in advance, so refusing at startup would need a
+number nobody has. The summary says so, because a message reading as though nothing ran would be
+false. Headless exits **1** through the existing `process.exit(success ? 0 : 1)`.
+
+**Gap 12 was not absorbed.** Iter-cap reporting `token_budget_exceeded` is a different misnomer on a
+different path, acknowledged in `composer.ts`'s own `LATENT BUG` comment; this change neither depends
+on it nor worsens it.
+
+**Bucket: Actionable now → Closed**, two-way check. For: every member of the five now has its
+verdict executed — two implemented, one removed, two relabelled — at `dfa733be` and `6e128cef`, with
+a full local suite (488 files / 6222 passing / 0 failed) and a clean-clone run both green. Against:
+Actionable now requires a specified fix still unmade, and none remains; Blocked on data requires a
+missing observation, and none is outstanding; Neither requires no fix proposed, and five were
+proposed and executed.
+
+**This bucket returns to zero, and the movement is the ledger's own signal.** Actionable now has gone
+0 → 2 → 1 → 0 across four passes, and every one of those movements came from findings this session
+generated rather than from inherited backlog: 258 and 259 were opened by an enumeration pass, closed
+by the two passes that followed. Empty here means "nothing currently specified and unbuilt", the
+weaker and more accurate reading — not "nothing to do".
 
 **A method finding from the enumeration that produced this list, recorded because it nearly produced
 a wrong one.** Two textual and AST instruments **agreed** on a five-member list that included
@@ -20773,29 +20841,76 @@ instrument**; recorded in `CLAUDE.md` as well, since it generalises past this en
 258 for the two flags that are read under a name that does not exist, and item 256 for the
 assertion-that-cannot-fail class.
 
+## 260. Closed — a safety net documented as exception-only is load-bearing on two ordinary returns, and its own count was stale by two
+
+**The behaviour was correct; the explanation was not, and that is the whole finding.**
+`runAgentLoopScoped` ends in a `finally` that runs
+`if (!stagingFinalized) await persistStagingOnError(...)`. The comment above it said
+`stagingFinalized` is set "before every explicit staging exit (all 9 paths: 3 new Part-A gaps + 3
+existing persistStagingOnError sites + 3 finalizeRun calls)" and that the block "fires ONLY when an
+exception propagates (abort, uncaught error)".
+
+**Both halves are false, measured rather than argued.** `grep -c 'stagingFinalized = true'` returns
+**11** on the commit before this pass, 12 after it added one — never 9. And an AST enumeration of
+every `return` inside the function carrying a `terminationReason` found **10**, of which **two reach
+the finally with the flag still false**: the pre-execution `synthesizeLoopDetectedExit` and
+`synthesizeStallExit`, which build a result object and return it without persisting first. Their
+staged work survives only because the finally runs on the way out. The net is therefore load-bearing
+on ordinary control flow, not a rare backstop.
+
+**Why a wrong explanation is worth an entry when the code is right.** "Only fires on exceptions"
+invites exactly two future edits that would create a bug: dropping the block as dead weight, or
+adding a new early return in the belief that the net does not cover it. Two exits are already
+depending on the thing the comment says is not happening.
+
+**How it was nearly filed as a bug instead, which is the transferable part.** The AST scan that found
+those two exits reported them as unguarded, and the obvious reading was "staged work is silently lost
+on a pre-exec loop detection". Reading the enclosing `finally` is what turned a false bug report into
+a true documentation finding. The scan was also wrong once before that: pointed at `runAgentLoop`, a
+thin wrapper, it found **zero** returns, because the body is `runAgentLoopScoped`. An instrument that
+returns zero deserves the same suspicion as one that returns a surprise.
+
+**What was NOT established, stated because the gap is the honest part.** A mutation dropping
+`persistStagingOnError` from this pass's own new cap exit **survived** the suite — but that survival
+proves only that no test observes staging persistence on that path, not that the finally covers it.
+Three attempts to build a decisive behavioural check all failed on the harness rather than the
+claim: a `withStagingTempFlush` mock that never invokes its body, a staging key that must be
+absolute, and mocking `finalizeStaging` breaking unrelated paths. The inertness claim therefore rests
+on `finally` semantics plus the two sites calling the same function — reasoning, not measurement —
+and the explicit call was **kept** in the new exit precisely because the claim is unproven.
+
+**Bucket: Closed**, two-way check. For: the defect was a comment, and the comment is corrected at
+`c0d61455` with the measured figures. Against Actionable now: nothing specified remains unbuilt;
+Blocked on data: no observation is outstanding for the correction itself, though the un-built
+behavioural pin above is named rather than hidden; Neither: a fix was both proposed and made.
+
+**Where this lives:** the `finally` at the end of `runAgentLoopScoped` in `src/llm/agentLoop.ts`,
+`persistStagingOnError` in the same file, and the `synthesize*Exit` helpers whose call sites are the
+two that rely on the net. See item 259 for the pass that found it and item 236 for the
+enforced-by-construction-versus-by-discipline distinction it turns on.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 259 to find out which ones still need something. No index of
+reader the trouble of reading all 260 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (117): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258
+**Closed** (119): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (1): 259
+first (0):
 
-That bucket had returned to empty when items 236 and 239 were built in one pass, after sitting at
-zero for months before they were opened. It returned to 2 when 258 and 259 were both opened in the
-same pass, and 258 closed in the very next pass — its own remedy specified and now built. One item
-remains: 259, and it is **partially** built rather than untouched — three of its five members
-landed at `dfa733be`, leaving `--max-budget-usd` specified and unbuilt. It stays in this bucket for
-exactly that reason: a remedy is still specified and still waiting, which is what the bucket means.
-Worth noting that the count alone cannot express this — 1 reads the same whether the entry is
-whole or nearly finished — so the entry's own text is the place that distinction lives.
+Empty again. The full arc, worth a line because this bucket's movement is the ledger's own signal
+about whether anything is specified and waiting: it sat at zero for months, went to 2 when an
+enumeration pass opened items 258 and 259 together, dropped to 1 when 258 closed in the very next
+pass, and returns to 0 here with 259's last member built. Every one of those movements came from a
+finding this session generated rather than from inherited backlog. Empty reads as "nothing to do"
+and is better read as **"nothing currently specified"** — the weaker and more accurate claim, and
+the same correction this section made the last time the bucket emptied.
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (14): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250
 
