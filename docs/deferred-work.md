@@ -20889,17 +20889,167 @@ behavioural pin above is named rather than hidden; Neither: a fix was both propo
 two that rely on the net. See item 259 for the pass that found it and item 236 for the
 enforced-by-construction-versus-by-discipline distinction it turns on.
 
+## 261. Neither — the unmeasurable set, enumerated for the first time: four kinds, not one, and the instrument that found them under-counts twice over
+
+**What it is.** Across this document a recurring outcome is "this could not be measured with what
+exists". Each instance was recorded honestly where it arose and moved past. The set had never been
+enumerated, so nobody could see that its members are **not equivalent** — some are missing a harness,
+some are structurally impossible, some are outside the machine, and some have no obstacle at all.
+The remedies differ per kind, which is the reason the enumeration is worth having.
+
+**The measurement, and a prediction that was wrong by more than double.** The count was predicted at
+**30** (range 22–38) before running. Sweeping all 260 entry bodies — split by the ledger's own
+`entryBodiesByNumber`, bucketed by `extractBucketFromEntryBody`, never a hand parser — a phrase set
+for the shape matched **64**. Reading all 64 puts roughly **45** as genuine, the remainder being
+false positives of three recognisable kinds: prose about *test* vacuity rather than an unmeasured
+fact (items 71, 117, 155, 228), "no tool" in its ordinary sense of tool-signatures or tool-selection
+(17, 53, 100, 112), and cases that *were* unmeasured and have since been measured (113, 221, 241).
+The genuine/false boundary is a reading judgment, not a measurement, and is reported as such.
+
+**The instrument under-counts, demonstrated twice rather than suspected once.** A phrase set is a
+single shared derivation, so a gap in it is invisible to anything built on it. Cross-checking against
+a genuinely different input — bucket membership rather than prose — found three Blocked-on-data
+entries the phrases missed entirely (**23**, **75**, **250**), and a second gap surfaced separately:
+items **245/246**, which `CLAUDE.md` itself calls unmeasurable, phrase their own version as a
+"live-measurement question, specified but not run" and match none of the patterns. Both gaps are
+under-counts in the same direction, so **64 is a floor, not a total.**
+
+**A second instrument limitation, sized rather than noted.** `extractBucketFromEntryBody` returns
+null for **13 of the 64** — a fifth of the matched set — because a bucket word can sit further into
+an entry than its extraction window reaches. That is the documented weaker-than-`hasInEntryMarker`
+behaviour, not a defect, but it means bucket counts taken from that function alone under-count: it
+finds 13 Blocked-on-data entries where the index lists 14, and the missing one is item **90**.
+
+**Four categories, because three did not fit.** The classification was drafted with three and needed
+a fourth, which is the finding rather than an inconvenience:
+
+1. **Instrument absent but buildable.** Someone could write the harness; nobody has, or an attempt
+   failed on a named obstacle. Item 260's staging-persistence check is the sharpest instance — three
+   attempts failed on a mock that never invoked its body, a staging key that must be absolute, and a
+   `finalizeStaging` mock that broke unrelated paths. **The obstacle is the reusable part**; "it
+   could not be done" is not.
+2. **Structurally impossible with the data that exists.** Nothing recovers what was never stored.
+   Item 243's empty-versus-absent `filesLikely` (both reconstruction sites strip the empty array
+   before anything is written), item 157's historical `memory.md` (untracked, no history), item 75's
+   rehydrated entries carrying no staged-files signal. The only remedy is to **start storing it** —
+   and item 75 already names exactly where.
+3. **Outside the machine.** What a terminal actually paints (items 229/230): frame capture proves
+   which SGR code is emitted, never what the screen shows.
+4. **No obstacle at all — specified, and simply not run.** Item 250 is the clearest: a two-arm
+   comparison designed in full, down to the worktree and the task template, and never executed. Item
+   246 carries the same shape for its own live-incidence question. This category is what three could
+   not hold, and it matters because it is the only one whose remedy is neither engineering nor new
+   storage but **spending the run**. Item 91 is its cost-blocked variant, unmeasured because
+   Anthropic credit was exhausted at the time rather than because anything was hard.
+
+**Load-bearing, and the reassuring answer.** The test that matters is whether any live decision rests
+on an unmeasured claim *without saying so*. Checked across the load-bearing candidates, the answer is
+**no** — and the acknowledgements are specific rather than ritual. Item 260 states outright that its
+explicit `persistStagingOnError` call was kept *because* the inertness is unproven. Item 243's
+fail-open branch is commented as pre-existing and cross-referenced from `CLAUDE.md` before anyone
+treats it as a bug. Item 126 names its own sweep's inability to tell a positional referent used from
+one quoted, which is the limitation sitting underneath this document's locked 114/128 absolutes.
+Item 79 goes furthest and says no criterion is drawn from the distribution at all. The habit this
+document built — recording the unmeasurable where it arises — turns out to have held.
+
+**Two members were found with no entry anywhere**, both cited only in `CLAUDE.md`, and each gets its
+own: item **262** (a read-only filter branch described as "apparently unreachable", now measured) and
+item **263** (the system prompt's `~12K` figure, whose basis that file says is unrecorded).
+
+**Bucket: Neither.** A structural fact is recorded — the set exists, has four kinds, and its
+instrument under-counts — and no single fix is proposed, because there is nothing here to fix: each
+member keeps its own bucket and its own remedy. Against Actionable now: no fix is specified for *this*
+entry. Against Blocked on data: the enumeration itself needed no missing observation; it was run.
+Against Closed: nothing was built.
+
+**Where this lives:** every entry this enumeration cites; `scripts/deferredWorkSnapshot.test.ts` for
+`entryBodiesByNumber` and `extractBucketFromEntryBody`, whose null-return behaviour is documented at
+`hasInEntryMarker`. See item 126 for the use-versus-mention limitation under the positional
+absolutes, and item 236 for the observe-mode wrap that became an instrument when none existed.
+
+## 262. Closed — a read-only filter branch called "apparently unreachable" is unreachable, for a stronger reason than the one recorded, and the record miscounted its callers
+
+**What it is.** `CLAUDE.md` states that three definitions of read-only coexist and are not unified,
+and describes the third — `modeDefaultFilter(investigate)`, which allows `fs.read` and no shell — as
+"apparently unreachable, since the one caller setting `mode:"investigation"` passes its own
+`capabilityFilter`". The hedge was honest and the claim was never verified. It is now, and two things
+in that sentence are wrong.
+
+**There are two such callers, not one.** `investigationFlow.ts` passes
+`capabilityFilter: { allow: new Set<Capability>(["fs.read"]) }`; `planInvestigation.ts` passes
+`capabilityFilter: { allowToolNames: new Set(INVESTIGATION_TOOLS) }`. Both were found by the same
+search; the record's "the one caller" simply undercounts.
+
+**And the recorded reason is the weaker of two independent ones.** The reason given — that
+`capabilityFilter` wins the precedence chain — is true, and would suffice. But the branch is not
+reached at all, because `hasExplicitMode` tests the **raw** input against `"chat" | "investigate" |
+"patch"`, while every production caller spells it `"investigation"`, which `normalizeAgentLoopMode`
+maps to `"investigate"` only *after* that test. So `hasExplicitMode` is false for both callers,
+`modeDefault` is `undefined`, and `modeDefaultFilter` is never called for an investigation run at
+all. No production site sets the normalized `"investigate"` spelling — confirmed by searching for it
+directly, which is the check that would have falsified this if one existed.
+
+**Why the stronger reason is worth having.** Under the recorded reason, adding a caller that forgot
+its `capabilityFilter` would reach the branch. Under the real one, a caller would additionally have
+to spell the mode `"investigate"` — so the branch is guarded twice, and a future unification pass
+weighing whether the third definition is worth keeping is weighing something deader than the record
+said.
+
+**Bucket: Closed.** For: the claim is now measured, both errors in the recorded sentence are
+corrected here and in `CLAUDE.md` at `0bebece3`, and nothing further is outstanding. Against Actionable now: no
+unmade fix remains. Against Blocked on data: the observation existed and was taken. Against Neither:
+a correction was proposed and made.
+
+**Where this lives:** `modeDefaultFilter` and `hasExplicitMode` in `src/llm/agentLoop.ts`, the two
+`mode: "investigation"` call sites in `src/llm/investigationFlow.ts` and
+`src/llm/planInvestigation.ts`, and the read-only-definitions paragraph in `CLAUDE.md`. See item 261
+for the enumeration that surfaced it.
+
+## 263. Blocked on data — the system prompt's `~12K` figure is cited with its basis recorded as unrecorded, and nothing in this document measures it
+
+**What it is.** `CLAUDE.md` describes `assembleAgentSystemPrompt()` as "~12K static, **basis
+unrecorded** — not reproduced this pass". The parenthetical is honest, and it is the whole problem:
+a size figure is being carried forward, used to frame how much prompt there is to protect, with no
+recorded derivation and nothing that would reproduce it.
+
+**Established as genuinely absent, not merely unsearched.** `assembleAgentSystemPrompt` appears 26
+times in this document, so the function is discussed at length — but `basis unrecorded` appears zero
+times, and so do `12K`, `12,000` and `12000`, under both `command grep` over the file and `git grep`
+over `docs/`. The figure exists in exactly one place and is sourced nowhere.
+
+**Why it is Blocked on data rather than a quick fix.** Reproducing it is not simply calling the
+function: its output varies with the archetype preamble, and the four runtime blocks concatenated
+after it (`projectMemoryBlock`, `importContextSummary`, `planAnnotationsBlock`,
+`backgroundCommandBlock`) are excluded from "static" by that same sentence without the boundary being
+stated anywhere. So the observation that would close this is a measurement someone must define
+before taking — which archetype, with which blocks excluded, measured in what unit — and no such
+definition exists yet.
+
+**What rests on it, which is less than it looks.** The figure supports no gate and no threshold; the
+protected-zones guidance beside it turns on commit recency and behavioural sweeps, not on size. It is
+context for cost reasoning rather than an input to a decision, which is why this is Blocked on data
+and not a correction to something live.
+
+**Bucket: Blocked on data.** For: closing requires an observation that does not exist — a defined,
+reproducible measurement of the static prompt. Against Actionable now: no fix is specified, because
+the measurement's own definition is the missing piece. Against Neither: a closing condition is named.
+Against Closed: nothing was measured.
+
+**Where this lives:** `assembleAgentSystemPrompt` in `src/llm/agentLoop.ts` and the system-prompt
+assembly paragraph in `CLAUDE.md`. See item 261 for the enumeration that surfaced it, and item 96 for
+the shape where knowing an event and knowing what it settles turned out to be different things.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 260 to find out which ones still need something. No index of
+reader the trouble of reading all 263 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (119): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260
+**Closed** (120): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260, 262
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (0):
@@ -20912,14 +21062,14 @@ finding this session generated rather than from inherited backlog. Empty reads a
 and is better read as **"nothing currently specified"** — the weaker and more accurate claim, and
 the same correction this section made the last time the bucket emptied.
 
-**Blocked on data** — closing requires an observation that doesn't exist yet (14): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250
+**Blocked on data** — closing requires an observation that doesn't exist yet (15): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250, 263
 
-**Neither — a structural fact recorded, with no fix proposed** (127): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (128): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152, 154, 155, 158,
 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199, 200, 201, 202, 205,
-206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230, 232, 243, 244, 247, 248, 249, 254, 256
+206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230, 232, 243, 244, 247, 248, 249, 254, 256, 261
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
