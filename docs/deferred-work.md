@@ -18661,7 +18661,7 @@ closed entry.
 **Where the code lived:** the staging flush helper in `tools/toolExecutor.ts`, the shared executor
 mock under `test/fixtures/`, and the audit snapshot reader's own test.
 
-## 236. Actionable now — the test harness guards the user's home directory against stray writes and leaves the repository tree unguarded
+## 236. Closed — the repository tree is guarded in both halves, and this entry's own specified remedy was the weaker one
 
 **What it is.** Two separate incidents have now put a file inside the repository during a test run:
 one created a source file at the repository root that a concurrent compile picked up and failed on,
@@ -18678,28 +18678,94 @@ documented failure mode of its own about import style. **None of it covers the r
 which is the directory a test is most likely to touch by accident, because the working directory
 already points at it and every relative path lands there.
 
-**The remedy, specified.** Mirror the existing home guard for the repository root: wrap the same
-write surface, throw on a write whose resolved path falls inside the repository, and name the path.
-The one decision it needs is the allowlist — the build output directory and the per-repository state
-directory are both written legitimately during some runs, and the temporary directories tests create
-are outside the tree and unaffected. That is a small enumeration against the existing guard's own
-shape, not a new mechanism, which is why this sits in this bucket rather than waiting on an
-observation.
+**The remedy this entry specified was falsified by measurement, and that is the useful half of its
+closure.** It asked to mirror the home guard's write-interception half: wrap the same surface, throw
+on a repository-internal path. **That wrap is structurally incomplete.** Measured with two agreeing
+instruments, 41 files import fs by name, and **13 of them are test files importing write functions by
+name** — `rmSync`, `writeFileSync`, `mkdirSync`, `unlinkSync`. A named function import snapshots the
+binding at evaluation and never sees a later property assignment, so the wrap cannot see any of them.
+The home guard survives this only because `homeWriterImportStyle.test.ts` requires namespace imports
+in files containing `homedir()`, and that rule **deliberately skips `src/test` and every `*.test.ts`**
+— precisely the files likeliest to write into the tree by accident. The entry mirrored the weaker
+half of the template it cited.
 
-**Why it is not being built in the pass that records it.** It is a change to the setup surface every
-test in the suite loads, on a pass whose other changes are a colour seam and a record correction. A
-guard that throws on a legitimate write would fail the entire suite in a way unrelated to anything
-else that pass touched, and the allowlist decision deserves its own establish rather than being
-guessed at the end of an unrelated one.
+**Its allowlist guess was wrong in both directions, which is worth more than the count.** It named
+the build output directory and the per-repository state directory as legitimately written. A full
+clean run, inventoried at 5,840 files before and after, **wrote to neither** — so exempting them
+would have blinded the guard in exactly the two directories an accidental write lands in. Meanwhile
+`node_modules/.vite/vitest/results.json` **is written on every run** by vitest itself and the entry
+never mentions it. The allowlist that shipped is `node_modules` and `.git`, one stated reason each.
 
-**Bucket: Actionable now.** A remedy is specified in this entry and nothing new needs to be learned
-first — the template exists in the repository and the only open question is an enumeration it can
-answer for itself. Against Blocked on data: two observations already exist and are recorded. Against
-Neither: a fix is proposed, not merely a structural fact. Against Closed: nothing was built.
+**What was built (`cf631311`): both halves, because each covers the other's blind spot.** The
+interception half refuses a repository write at the call and sees a file created and deleted inside
+one run. The inventory half — the existing home-guard machinery extended to a second root — is immune
+to import style, sees child processes and native addons, and catches everything the wrap cannot. The
+allowlist is held once, as bare directory names, so the two halves cannot drift into disagreeing.
 
-**Where this lives:** the test environment and global setup declared in the vitest configuration, and
-the home guard's own setup file. See item 235 for the two incidents and item 233 for the first of
-them in detail.
+**Observe before enforce, with the observer proven able to speak.** The wrap ran in a record-only
+mode across a full suite first. A deliberate out-of-allowlist write was planted to confirm the
+instrument produces a positive before its silence was trusted — it recorded the path, the fs
+function, and the exact test name. **The real suite's transient write set measured empty.** Records
+append incrementally to a temp directory, never into the tree, so an aborted run cannot yield a
+partial measurement that reads as a clean one. **The empty transient set is a finding about the
+design, stated rather than used as reassurance: on today's tree the inventory half alone would
+suffice**, and the wrap earns its place prospectively, against the write-then-delete shape item 235
+explicitly blesses.
+
+**The complementarity was proven in a single run, not argued.** A namespace-import transient write
+was caught by the wrap, which threw before the write, so the file never existed and the inventory
+correctly reported nothing. A by-name persisting write passed the wrap untouched and was caught only
+by the inventory, in the same run. **So the inventory's silence on the first is a genuine blind spot
+and not an instrument that never speaks**, because it demonstrably killed the second alongside it.
+
+**Guard interaction, asked and answered by measurement.** The wrap suppresses its partner's
+*evidence* — a prevented write leaves nothing to inventory — but not its *execution*: teardown still
+runs, proven by that same run, where it independently reported the by-name file. **A caught write
+fails the run once, not twice**, and the two failures are told apart by which message carries the
+marker.
+
+**Mutation, aimed at the guards' own detection logic rather than only at what they guard.** An
+unreachable wrap prefix kills 4 tests; a diff that reports no changes kills 4; a broadened allowlist
+kills 3 across both halves; and a teardown comparing a **stale snapshot** lets a real persisting
+write through **entirely undetected on a passing run** — the failure mode a guard-detection mutation
+exists to find.
+
+**Cost, measured per component with the real implementation rather than by a proxy or an
+end-to-end delta.** 36–52 ms per inventory walk over ~5,847 files, two walks per run, plus 680 ns per
+guarded fs call — so the inventory half costs ~72–104 ms per run and the interception half costs
+under 7 ms at ten thousand guarded calls. An earlier 28 ms per-walk figure came from timing `find`
+with the same prune list, which understates a JS readdir/stat walk; it was replaced rather than
+carried forward.
+
+**The end-to-end figure is withdrawn rather than repeated, and the reason generalises.** Commit
+`cf631311`'s own message records the suite moving 49.54 s to 50.01 s and reads that 0.47 s as the
+guards' cost. **It is not.** The identical tree was subsequently timed at 27.62 s, 27.77 s and
+28.60 s, against 49.54 s, 50.01 s, 50.03 s and 50.15 s during the implementation window — a **±22 s
+between-run spread on unchanged code**, driven by machine load from suites and `tsc --listFiles`
+invocations running back to back. A wall-clock comparison cannot resolve a ~0.1 s effect through
+that, so the two numbers in the commit message are a real measurement of the wrong thing. The
+component figures stand because each was measured directly against the code that does the work; the
+end-to-end pair is superseded here, since the commit message cannot be edited after pushing.
+
+**The residual gap, named as a choice rather than left as an oversight.** The 13 by-name importers
+stay invisible to the wrap. Checked individually: **every one writes only to a temp directory**, so
+none writes into the tree today — corroborated independently by the observe run and by the inventory
+diff, both empty. The named alternative, not built: extend `homeWriterImportStyle.test.ts`'s rule
+past its `homedir()` trigger and its test-file skip. That is a far larger constraint than the home
+case, since the trigger for a repository guard would be "writes anywhere" rather than one resolvable
+predicate, and the inventory half already covers the gap — so it is recorded as available rather than
+required.
+
+**Bucket: Closed.** Both halves are built, the allowlist is measured rather than guessed, the
+complementarity and the guard interaction are demonstrated rather than asserted, and this entry's own
+specified remedy is corrected rather than quietly replaced. Against Actionable now: the work is done.
+Against Blocked on data: the two observations already existed. Against Neither: a fix was proposed
+and built. **Commit `cf631311`.**
+
+**Where this lives:** the interception half in `src/test/setup/homeGuard.ts`, the inventory half in
+`src/test/setup/globalHome.ts`, the shared allowlist in `src/test/testHome.ts`, and their self-tests
+in `src/test/setup/homeGuard.test.ts` and `src/test/setup/repoInventoryGuard.test.ts`. See item 235
+for the two incidents and item 233 for the first in detail.
 
 ## 237. Closed — OpenAI's reasoning summary is now requested and surfaced, gated on model capability rather than on the condition this entry originally specified
 
@@ -18863,38 +18929,74 @@ durable record was corrected rather than merely noted.
 and the usage extractor in the recording client. See item 237 for the discard the figure is usually
 cited alongside.
 
-## 239. Actionable now — the daily usage ledger persists a token field its own record type does not declare
+## 239. Closed — the ledger's undeclared reasoning field is declared, and the recurrence class is guarded rather than the instance patched
 
-**What it is.** The usage extractor in the recording client returns a breakdown that includes a
+**What it was.** The usage extractor in the recording client returns a breakdown including a
 reasoning-token field. The post-call hook spreads that breakdown wholesale into the function that
-appends a usage record. The record type that function is declared against lists an output-token field
-but **no reasoning field**. Spreading a variable into an object literal does not trigger excess
-property checking, so the field type-checks, is written to disk, and is invisible to anyone reading
-the type.
+appends a usage record. The record type that function is declared against listed an output-token
+field but **no reasoning field**. Spreading a variable into an object literal does not trigger excess
+property checking, so the field type-checked, was written to disk, and was invisible to anyone
+reading the type.
 
-**It is not theoretical.** 2,913 of the 7,991 records in the daily ledger carry the field, 340 of them
-with a non-zero value, across four distinct key-set shapes that also differ in whether they carry
-web-search, subagent, or latency fields. The type declares one of those shapes and the file holds six.
+**The measurement, refreshed with its instrument, and one figure of it corrected.** **2,990 of 8,098
+records** in the daily ledger carry the field, **340 with a non-zero value** — the record counts have
+simply accreted since this entry was written (2,913 of 7,991) and the non-zero count is unchanged.
+Six distinct key-set shapes exist in the file, as recorded. But the field appears **across two of
+them, not the four this entry originally claimed** — checked under every reading available: all
+records carrying the field, non-zero records only, and the union across all five files in the usage
+directory. The correction is safe to make rather than a matter of interpretation, because
+`local-dev.jsonl` is a single append-only file with no rotation, so a shape present when the figure
+was written could not have vanished from it. Instrument: `command grep` and a JSON key scan, agreeing
+independently; `git grep` is structurally invalid on this path, which is gitignored.
 
-**The cost is a misread that already happened.** Commit `2abc9dac` states the reasoning token count
-does not reach "the persisted daily usage ledger". Reading the record type is enough to reach that
-conclusion and the conclusion is wrong — item 238 records the measurement. A type that under-declares
-what it persists will keep producing that answer for anyone who trusts it.
+**The remedy landed, and it is complete for its class rather than a sample.** `output_reasoning?:
+number` is declared on the record type (`bc85b8d1`), matching the adjacent web-search field's own
+optional precedent. Complete, measured rather than asserted: two independent instruments — a
+JSON-parsing key collector and a pure text scan with no parser — **both return 17 distinct keys on
+disk**, the record type declared **16**, the single gap was this field, and no declared field is
+absent from disk. There is exactly one production caller of the appending function.
 
-**The remedy, specified.** Declare the reasoning field on the usage record type as optional, matching
-what the extractor already returns and the file already holds. Purely additive: no writer changes, no
-migration, and existing records without the field stay valid under an optional declaration. The
-adjacent web-search field is already declared in exactly the shape being proposed, so the entry is
-asking for consistency with the type's own precedent rather than for a new convention.
+**The declaration carries a warning that is load-bearing, not decorative.** Reasoning tokens are
+already counted inside the output field, and `pricing.ts`'s `rateFor` once billed them a second time
+through a fallthrough returning the cache-write rate for any unknown bucket. The four billable
+buckets are enumerated separately and the appending function passes them explicitly, so declaring
+this field cannot re-introduce that bug — but a future reader seeing a token field on a priced record
+could, which is why the comment says so at the declaration.
 
-**Bucket: Actionable now.** A remedy is specified in this entry and nothing new needs to be learned
-first — the field name, its type, and the precedent for declaring it all exist in the repository.
-Against Blocked on data: the measurement exists and is recorded. Against Neither: a fix is proposed,
-not merely a structural fact. Against Closed: nothing was built, on a pass whose brief was
-establish-only.
+**The guard, because the declaration alone would leave the class open.**
+`scripts/usageRecordFieldParity.test.ts` asserts every breakdown field is declared on the record type.
+**Placement was forced by measurement, not preference**: `tsc --noEmit --listFiles` loads **zero**
+`src` test files under the main project and **16** under the scripts project, whose config sets an
+empty exclude list that replaces the parent's — so a guard written as a `src` test would have
+inherited exactly the inertness it exists to prevent. See item 256, which this measurement opened.
 
-**Where this lives:** the usage record type in the usage tracker, the usage breakdown type and the
-post-call hook in the recording client. See item 238 for the record defect the shape produced.
+**Mutation, and one result is the whole argument for the guard's existence.** Removing the
+declaration kills it, naming the field; removing a *different* shared field kills it too, so it is
+general rather than keyed to this one. **Adding a new field to the breakdown — the actual recurrence
+— kills the guard while `tsc --noEmit` passes completely clean**, which is the defect shape
+reproduced on demand and the proof that the guard is not redundant with the type checker. Pointing
+its scan at an unreachable path kills two tests. **Breaking its field pattern to a line-end form
+leaves the parity assertion GREEN**, passing by comparing two empty lists, and kills only the
+anti-vacuity tests — the same false-negative shape found by running last pass's first coverage-guard
+design, which is why those tests exist and why a guard is checked by mutating its own detection logic
+rather than only the code it guards.
+
+**One thing worth recording for whoever reads the field next: nothing consumes it.** Every reader of
+the name is on the separate per-iteration cost-log path (`iterCostMeter`, `costLogger`,
+`runLlmPatchFlow`); the usage tracker never references it and the metrics aggregator does not read
+it. It is **write-only** — persisted, now declared, never read back. That is not an argument against
+declaring it, since the file already holds it either way; it is a question this entry does not
+answer, and item 256's sweep is the neighbouring shape.
+
+**Bucket: Closed.** The remedy is built, its class is measured as complete, the guard is
+mutation-verified in both directions and against its own detection logic, and one of this entry's own
+figures is corrected rather than annotated. Against Actionable now: the work is done. Against Blocked
+on data: nothing was missing. Against Neither: a fix was proposed and built. **Commit `bc85b8d1`.**
+
+**Where this lives:** the usage record type in `src/usage/usageTracker.ts`, the breakdown type and
+post-call hook in `src/llm/recordingClient.ts`, the guard in
+`scripts/usageRecordFieldParity.test.ts`. See item 238 for the record defect the shape produced, and
+item 256 for the inert-assertion class the placement measurement uncovered.
 
 ## 240. Closed — the positional-reference sweep is now a stored module; the "46" five passes carried forward was never recorded anywhere
 
@@ -20119,29 +20221,92 @@ gap is named with its cost registered rather than left implicit.
 `src/llm/agentLoop.costMeterCompactionSite.test.ts`. See item 254 for the mechanism and its
 arithmetic, unchanged by this pass.
 
+## 256. Neither — eleven type-level assertions sit in files the type checker never loads, so they are tests that cannot fail
+
+**What it is, and why it is not a restatement of item 107.** Item 107 records that `tsc --noEmit`
+loads no test file in this repository and that 593 type errors stand unseen in the excluded tree —
+errors nobody sees. This is the complementary shape: **assertions that assert nothing**. A
+`@ts-expect-error` directive or a `satisfies` clause is evaluated only by the type checker. In a file
+the checker never loads, it is not a weak check; it is inert, and it reads in the source exactly like
+a live one.
+
+**Found while deciding where to put an unrelated guard**, which is the honest provenance: item 239
+needed a guard that could not itself be inert, so the boundary was measured rather than assumed.
+
+**The boundary, established mechanically.** `tsc --noEmit --listFiles` under `tsconfig.json` loads
+**zero** files matching `*.test.ts`/`*.test.tsx`. Under `tsconfig.scripts.json` it loads **16** — that
+config sets an empty `exclude` array, which **replaces** the parent's exclusions rather than adding to
+them, so `scripts/**/*.ts` sweeps its own test files in. Two projects, opposite answers, and the
+difference is one line of configuration that reads like a formality.
+
+**The count, split by which side of that boundary each sits on.**
+
+| construct | in `src/**/*.test.ts` — inert | in `scripts/` — live |
+|---|---|---|
+| `@ts-expect-error` | **4** | 1 |
+| `satisfies` | **7** | 1 |
+| hand-rolled `extends` type trick | **1** | 0 |
+
+**Eleven inert members**, plus the hand-rolled case. `expectTypeOf` and `assertType` return zero
+across the tree, so vitest's own type-testing API is not in use anywhere and is not part of this.
+
+**The `@ts-expect-error` members are the ones with teeth, and they carry a cost item 107 needs.**
+Three of the four state in their own comments that they suppress a real union narrowing — a legacy
+mode literal no longer in `RunAgentMode`. Those directives are load-bearing **in intent** and inert
+**in fact**. The consequence for item 107 is concrete and belongs to its accounting: if the exclusion
+were lifted, each directive resolves one of two ways — it suppresses a real error, in which case the
+narrowing it names is genuinely still there and the file needs the fix rather than the directive; or
+the error no longer occurs, in which case the directive itself becomes an *unused-directive* error
+and adds to the count being cleared. Either way, **fixing the exclusion surfaces work at these four
+sites specifically**, and a plan that budgets only for the 593 already counted will meet them
+unannounced.
+
+**Why this is Neither rather than Actionable now.** No fix is proposed, and the obvious ones are not
+obviously right. Deleting the inert assertions removes documentation of real intent. Moving the files
+into a checked project is item 107's problem, at item 107's scale, not a separate task. Relocating
+individual tests to `scripts/` to gain checking would scatter tests by their type-checking needs
+rather than by subject. What this entry contributes is the measurement and the named cost, so that
+whoever attempts item 107 knows these exist and which four bite.
+
+**Bucket: Neither.** A structural fact is recorded with no fix proposed. Against Closed: nothing was
+built and nothing was decided. Against Actionable now: no remedy is specified, deliberately — the
+candidates conflict and the choice belongs with item 107's own attempt. Against Blocked on data: the
+measurement is complete; what is missing is a decision, not an observation.
+
+**Where this lives:** the exclusion in `tsconfig.json`, the replacing empty exclude in
+`tsconfig.scripts.json`; the four directives in `src/apply/canApplyDecision.test.ts`,
+`src/cli/index.tui1.test.ts`, and `src/core/decision/buildDecisionReasonCodes.test.ts` (two). See
+item 107 for the excluded-tree error count this adds a named cost to, and item 239 for the guard
+placement that surfaced it.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 255 to find out which ones still need something. No index of
+reader the trouble of reading all 256 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (113): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 237, 238, 240, 241, 242, 245, 246, 251, 252, 253, 255
+**Closed** (115): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (2): 236, 239
+first (0):
+
+That bucket is empty again, as it was for months before items 236 and 239 were opened. Both were
+built in one pass, and item 236's own specified remedy was falsified by measurement and replaced
+rather than followed — worth noting because an empty bucket here reads as "nothing to do" and is
+better read as "nothing currently specified", which is a weaker and more accurate claim.
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (14): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250
 
-**Neither — a structural fact recorded, with no fix proposed** (126): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (127): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152, 154, 155, 158,
 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199, 200, 201, 202, 205,
-206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230, 232, 243, 244, 247, 248, 249, 254
+206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230, 232, 243, 244, 247, 248, 249, 254, 256
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
