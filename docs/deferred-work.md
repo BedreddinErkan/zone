@@ -21479,17 +21479,111 @@ checked set; `src/tools/toolDefinitions.ts` for the char counts. See item 161 fo
 chars-per-token ratio the derived figure rests on, item 253 for the stale-from-creation shape the
 count shares, and item 111 for the deleted gate one of the nine paths names.
 
+## 267. Closed — the payload stratum is exhausted under a detector that failed twice in the same pass, and that caveat is the finding
+
+**What it is.** The misattributed-instrument class had zero known instances across three verified
+entries. This pass widened the sweep. **Sixteen payload-field claims were read against their emitters
+and all sixteen are correct** — but the more transferable result is that the stratifier which chose
+those sixteen was **caught missing entries twice, both times by accident**, so the exhaustion claim is
+conditional on an instrument with two known blind spots.
+
+**Two independent instruments agree at 43 entries, and their agreement is evidence because they do not
+share a derivation.** Instrument A regexes entry bodies for marker-*shaped* text; instrument B is driven
+by the code inventory, asking for each of the 413 marker names `scripts/markerAttribution.ts` finds in
+the tree which entries contain it. A would surface a phantom marker that exists only in prose; B would
+surface a marker the ledger names by a spelling the regex misses. **Zero entries appear in only one, and
+zero ledger-named markers are absent from the code inventory.** Separately and by emitter count rather
+than name existence: **zero of 43 entries name a marker with no emitter**, so that class — which this
+pass was asked to keep distinct from misattribution — is empty.
+
+**The denominator moved because this session wrote in it.** Last pass measured 42; this pass measures 43,
+and the difference is **item 265**, written last pass, which names four markers. A figure recorded
+mid-sweep goes stale against its own document — the same class as the positional sweep tripping on this
+session's own prose, and a reason to re-derive rather than carry any count across passes.
+
+**Stratification, with both numbers kept.** Committed prediction: **12** payload-claim entries, range
+6–20. A loose detector (`carries`/`records`/`field`) returned **33**, over-broad on ordinary prose. A
+camelCase-field detector returned **21**, *outside* the predicted range. Removing eight identifiers that
+name **functions** rather than payload fields — `debugLog`, `deriveVerdict`, `runOneShotInner`,
+`buildDiskSession`, `registerFatalSignalHandlers`, `emitRequestedToolsGranted`, `recordRunSummary`/
+`recordRunRetry`, `logSubagentDispatched`, `trimSink`, each confirmed a real declaration rather than
+assumed one — leaves **16** genuine, *inside* it. Both figures belong in the record: the prediction was
+outside the range against one reading and inside it against another, and reporting only the flattering
+one would be the choice this document exists to prevent.
+
+**Twelve verdicts this pass, all correct**, joining four already verified (79, 225, 259, 265): the
+imbalance marker carries both count pairs (1) and its line-anchored recount feeds nothing else (2); the
+multi-edit anomaly fires on absent `filesStaged` (12); `segmentPatchBlocks` returns exactly
+`{blocks, sqFindTotal, sqReplaceTotal}` (16); the parity marker carries its four named fields (18); the
+save-failed marker carries a `phase` distinguishing build from write, with both call sites present (24);
+`inferredFrom` appears on both final-assessment variants (61); marker-split is gated by
+`isMultiBlockPatch` at both emits (62); the args-parse marker carries `tool`, `argsLen` and a
+`parseErrorClass` whose classifier returns **exactly five** values (63); `triggeredBy: "max_iterations"`
+is a real variant (70); and the investigation-complete record carries `fallbackUsed` (228).
+
+**Item 4 nearly became a false finding, which is now a three-instance pattern with its own rule.** Its
+"counts exist only in the marker payload" reads as falsified — `findMarkerCount` *is* interpolated into
+the model-facing rejection message and *does* appear in two other emit payloads. Finishing the sentence
+settles it: the continuation is "threading them into the coaching text the model sees … requires carrying
+the counts through `ToolResult`", so the "only" is about the coaching pipeline, and the two other
+payloads belong to a **different** marker. That is the third such near-miss this session, after item
+225's "that gate" and the summary-of-a-summary that had to be retracted, and it is now recorded in
+`CLAUDE.md` at `da65eda5` as a standing rule rather than left inside one entry.
+
+**What the negative rests on, stated because it rests on less than it appears to.** "The payload stratum
+is exhausted" is true **under this detector**, and the detector has two named blind spots, both found by
+luck rather than design:
+
+- a file glob of `src/**/*.ts` that **excluded `.tsx`**, hiding two identifiers whose declarations live
+  in `index.tsx`;
+- a **camelCase** field pattern that cannot see lowercase single-word fields, which hid three entries
+  (4, 70, 228) naming `phase`, `triggeredBy` and `fallbackUsed`.
+
+The second was caught only because the first sent me looking at item 24 for an unrelated reason. **A
+third, undetected gap would have produced the same clean "16 of 16" report**, which is exactly why the
+boundary is written as conditional rather than absolute. A shape-driven detector is built from guesses
+about field shapes and will always miss shapes nobody guessed; the only instrument without that failure
+mode is reading.
+
+**What closing the gap would cost, measured rather than estimated: 27 entries, not 19.** Of the 43,
+sixteen have been read. Nineteen fall outside the union detector entirely, and a further **eight** sit
+inside it but were only skimmed far enough to confirm their identifier was a function name — never read
+for what they claim about their marker. The intuitive figure, the difference between 24 and 43, is
+**19 and is wrong**. Not proposed now; recorded so a future pass prices it correctly.
+
+**The other 27 entries make existence claims only, and their confirmation is collective rather than
+individual.** No one read them. What was established is a property of the two instruments — every marker
+they name exists in the code inventory and every one has at least one emitter — which retires the
+phantom-marker and zero-emitter classes across all 43 at once. **A future reader should not count those
+27 as verified entries**; they are covered by a structural check, not by having been read.
+
+**Bucket: Closed.** For: the sweep's question — does the zero-misattribution negative hold at a larger
+denominator — is answered at 16 payload-field claims against the previous 3, with the boundary and its
+instrument-conditionality stated. Against Actionable now: nothing specified remains unbuilt; widening is
+priced and explicitly not proposed. Against Blocked on data: every check ran and none waited on a missing
+observation. Against Neither: no fix was needed, because nothing was found wrong — the deliverable is the
+negative and its caveat.
+
+**The class stays unpromoted.** `recorded-instrument-does-not-measure-the-claim` still has **zero**
+instances and is not added to item 261's five, under the standing rule that one instance does not promote
+a category and zero certainly does not.
+
+**Where this lives:** no code. `scripts/markerAttribution.ts` supplied attribution for every verdict —
+never a text scan, because a marker name in a comment was once mistaken for an emitter and corrupted item
+196. See item 265 for the sweep this widens, item 261 for the categories this class was tested against and
+did not join, and `CLAUDE.md`'s finish-the-sentence rule for the near-miss pattern this pass completed.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 266 to find out which ones still need something. No index of
+reader the trouble of reading all 267 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (123): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260, 262, 264, 265, 266
+**Closed** (124): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260, 262, 264, 265, 266, 267
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (0):
