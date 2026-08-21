@@ -5881,10 +5881,21 @@ Example:
     // live PID isResumable reads that as "a run is in progress" and hides the
     // envelope for the rest of the session.
     await checkpointWriter.drain();
-    // DF-17b: emergency flush for AbortError and any other uncaught exception.
-    // stagingFinalized is set true before every explicit staging exit (all 9 paths:
-    // 3 new Part-A gaps + 3 existing persistStagingOnError sites + 3 finalizeRun calls)
-    // so this block fires ONLY when an exception propagates (abort, uncaught error).
+    // DF-17b: flush for AbortError, any other uncaught exception, AND the ordinary returns that
+    // do not set the flag themselves.
+    //
+    // This comment used to say `stagingFinalized` is set "before every explicit staging exit (all
+    // 9 paths)" and that this block "fires ONLY when an exception propagates". Both halves were
+    // wrong, and measured rather than argued (ledger item 260): there are 12 assignment sites, not
+    // 9, and at least two ordinary `return`s reach here with the flag still false — the pre-exec
+    // `synthesizeLoopDetectedExit` and `synthesizeStallExit`, which build a result and return it
+    // without persisting first. Their staging survives only because this block runs on their way
+    // out, which is `finally` semantics rather than anything either site does.
+    //
+    // Kept as written; the correction is to the explanation, not the behaviour. It matters because
+    // "only fires on exceptions" invites someone to treat this as a rare safety net and drop it, or
+    // to add a normal exit believing the net does not apply — and the two exits above are already
+    // depending on it.
     // .catch(() => {}) prevents a FS error from replacing the original exception.
     if (!stagingFinalized) {
       await persistStagingOnError(stagingFiles, ownsStagingFiles, input.repoPath).catch(() => {});
