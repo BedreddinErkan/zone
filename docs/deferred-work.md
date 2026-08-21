@@ -8128,6 +8128,84 @@ Blocked on data: the observation this correction turned up already exists, so no
 one; analysing those nine records is work, not a missing measurement. Against Actionable now: no fix
 is specified. Against Closed: nothing was built.
 
+**THE NINE READ — this entry moves from *unmeasured* to *measured and degenerate*, which is a
+different state even though the bucket does not change.** The sentence this entry used to rest on
+("the distribution is now observable and still unmeasured") is superseded: it has been measured, and
+the measurement is that these records cannot answer the question they were built for. That
+distinction matters enough to state, because "unmeasured" invites a future pass to go and measure,
+and this records that someone did.
+
+**They are not one population — 1 + 8, with a duplicate inside the eight.** Five commits landed
+strictly between the lone 2026-08-09 record (22:08:56Z) and the earliest of the eight from 2026-08-19
+(14:34:02Z), and each changes exactly what the record measures: `afb8487a` made the grep pattern
+entity-shaped and `b1027a41` ordered the grep draw by match count — both altering `grepMatchedPaths`;
+`87047d27` touched the ranker's term cap and `d812dc50` matched its skip tokens against path segments
+rather than substrings — altering `rankedFileScores`; and `ed5754b7` stopped an anchor-defeat in
+`isPureAddition`, **altering the gate predicate itself**. The ordering was checked in UTC rather than
+by date, and the margin is why: `afb8487a` is `2026-08-10T02:15:18+03:00`, which is 23:15Z on
+2026-08-09 — sixty-six minutes after the record it must post-date. A date-only comparison would have
+hidden how close that is. The 2026-08-09 record's inputs came from a different matcher and ranker and
+its branch from a different predicate; it is pooled with nothing.
+
+**Two of the eight are one observation.** Payload signatures hash to eight distinct values across nine
+records: `41de3bba` and `6652a1d5` are byte-identical across all four fields — the same task run
+twice. **Both also carry the same plan decision (`reject`)**, so identical recorded inputs produced an
+identical recorded outcome. That is a small determinism confirmation the record does not otherwise
+have; had the two decisions differed, the more interesting reading would be that the outcome varies on
+something the instrument cannot see at all. It does not. **Effective independent post-change
+population: seven.**
+
+**Why seven cannot answer this entry's question, and it is not for want of N.** The outcome variable
+is `mode`, and `mode` has **zero variance** across every instrumented record — all nine are
+`investigate-first`. Across all 28 `[zone-plan-mode]` records ever written, `mode` takes its other
+value (`quick-lexical`) exactly twice, and both predate the widening: inputs and outcome-variance live
+in disjoint record sets. **And it is not a statistical question in the first place** — `mode` is
+`shouldInvestigate ? "investigate-first" : "quick-lexical"` with `shouldInvestigate = !isPureAddition(task)`
+whenever the env override is unset, so the branch is a deterministic function of the task's first
+word. There is no noisy relationship to estimate, only the design question of whether a signal-aware
+gate *should* decide differently, which no volume of these records settles.
+
+**A criterion was reachable and is deliberately not registered, because the predictor is confounded.**
+All nine join to `[zone-plan-decision]` by `runId`. On the seven, the top ranked score separates the
+decision perfectly — three `accept_all` at 950, 954 and 950 against four `reject` at 916, 571, 119 and
+57, Fisher one-sided **p = 0.0286**. It is not registrable: sorting the same seven by time gives
+`R R R R A A A` where sorting by score gives `A A A R R R R`, and **the top three by score are the
+identical set to the last three by time** — every reject before 17:00, every accept after 22:00 on one
+day. A threshold on the score and a threshold on which evening block are the same predicate here, with
+the same p, and nothing in the data separates them. **A second and deeper reason the outcome is the
+wrong one:** `[zone-plan-decision]` records one person's approval of a plan, not whether investigation
+was necessary. Nothing recorded anywhere measures whether the branch taken was the right one, which is
+the ground truth a gate criterion needs.
+
+**What is missing, as a design requirement rather than as more N.** (1) Instrumented records on the
+**`quick-lexical`** branch, currently zero — produced by a task whose first word matches a
+pure-addition lead verb (`add`, `create`, `implement`, `build`, `scaffold`, `introduce`, `generate`,
+`write`, `set up`, `new`), run after `dc8a1e60`; named concretely so a future pass does not re-derive
+it. (2) Signal **decorrelated from session block** — high- and low-score runs interleaved within a
+block rather than sorted by it. (3) An outcome measuring **whether investigation was needed**. The
+third is the blocker; the first two are cheap (a run costs a median of $0.0867, p90 $0.4004 across 698
+ledger runs) and worthless without it.
+
+**`gatedBy` reads like the decision and is not, and one entry has already misread it.** The field is
+`investigationFlag === undefined ? "default-non-additive" : "env"` — provenance, recording whether the
+env override was set, not what the gate decided. It is `default-non-additive` in **all 28** records,
+including the two whose `leadVerb` is `add` and whose `mode` is `quick-lexical`. **Item 225 attributes
+it to the wrong gate**, saying the `gatedBy` field belongs to `shouldInvestigate`; that gate's field is
+`mode`. The conclusion item 225 draws is recoverable from `mode` rather than retracted — both branches
+do appear across the 28 — but its stated instrument is misattributed. Nothing in production *reads*
+`gatedBy`: the only non-test reference is the write site, so this is a naming hazard rather than a live
+code defect. **It is deliberately not renamed**: 28 recorded payloads carry the old key, and a rename
+either orphans them or requires rewriting recorded history, which is a worse trade than a documented
+warning. The decision is recorded so the next reader inherits the warning rather than the ambiguity —
+the same class as an iteration cap reporting `token_budget_exceeded` and an envelope status written
+through a cast.
+
+**Bucket still Neither, re-decided rather than carried.** For: the entry records a structural fact and
+proposes no fix, and this pass changed what is known without changing what is blocked. Against Closed:
+a partial answer is not a closure — the question the instrument was built for remains unanswered.
+Against Blocked on data: no *missing* observation blocks it; the observations exist and are degenerate,
+which is a different condition. Against Actionable now: nothing here is a specified, unbuilt fix.
+
 ## 80. The scope-revision approval surface is wired end to end and cannot fire, and the document that justified keeping it names a surface that has since been deleted
 
 **What it is:** a complete approval surface — proposer, pending queue, resolver, TUI modal, and a
