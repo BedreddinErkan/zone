@@ -64,6 +64,52 @@ describe("fixture-driven: known shapes", () => {
   });
 });
 
+/**
+ * One fixture per boundary edge buildPositionalPattern's own comment names (item 257), each
+ * verified by matched SPAN — not just count — before being written here, so each one provably
+ * pins the edge it claims rather than an accidental match elsewhere in the same string. Mirrors
+ * deferredWorkAnaphorSweep.test.ts's own equivalent block.
+ */
+describe("fixture-driven: the two word-boundary edges are real boundaries, not accidents", () => {
+  it("left of 'the': a word ending in 'the' does not supply a phantom referent", () => {
+    // Under the OLD (unanchored) pattern this matches "the deeply above" starting at index 11 --
+    // the "the" carved out of "breathe" (b-r-e-a-[t-h-e], positions 11-13), not the sentence's
+    // other, later "the" (in "above the noise", which is followed by no above/below and so never
+    // matches under either pattern). Confirmed by inspecting the match's own .index and [0], not
+    // assumed from the count: the phantom match disappears entirely under the new pattern rather
+    // than relocating to a different span.
+    const fixture = "Please breathe deeply above the noise before deciding.";
+    expect(countLineBased(fixture)).toBe(0);
+    expect(countWrapNormalized(fixture)).toBe(0);
+  });
+
+  it("right of 'above': 'the item above' does not also match inside 'the item abovementioned'", () => {
+    // Under the OLD pattern this matches "the item above" starting at index 4 -- the real "the
+    // item" opening, illegitimately closed five letters into the fourteen-letter
+    // "abovementioned" rather than requiring a full word boundary after "above".
+    const fixture = "See the item abovementioned for the full argument.";
+    expect(countLineBased(fixture)).toBe(0);
+    expect(countWrapNormalized(fixture)).toBe(0);
+  });
+
+  it("right of 'below': 'the tunnel below' does not also match inside 'the tunnel belowground'", () => {
+    // Under the OLD pattern this matches "the tunnel below" starting at index 26 -- same shape as
+    // the above-variant, on the alternation's other member, confirming one \b guards both.
+    const fixture = "Construction continues in the tunnel belowground next spring.";
+    expect(countLineBased(fixture)).toBe(0);
+    expect(countWrapNormalized(fixture)).toBe(0);
+  });
+
+  it("the boundaries narrow false positives without narrowing real matches -- existing positive fixtures still count", () => {
+    // Guards the guard the other direction, same discipline as the anaphor sweep's own equivalent
+    // test: a \b placement aggressive enough to reject a legitimate match (e.g. requiring a
+    // boundary the real sentence structure can't supply) would silently zero these out too.
+    expect(countLineBased("Nothing new here -- the paragraph just above already covers it.")).toBe(1);
+    expect(countLineBased("as covered in the paragraph just cited right above, nothing more to add")).toBe(1);
+    expect(countLineBased("the note below explains it")).toBe(1);
+  });
+});
+
 describe("fixture-driven: the {1,4} bound is a named boundary, not an accident", () => {
   it("a 4-word gap is inside the bound", () => {
     const fixture = "as covered in the paragraph just cited right above, nothing more to add";

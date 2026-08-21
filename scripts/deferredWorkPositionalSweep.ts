@@ -65,6 +65,13 @@ export const POSITIONAL_MAX_WORDS = 4;
  * both have a clear, close antecedent and are not the shape this sweep exists to flag. Confirmed
  * by the same three independent instruments as the original lock: Node RegExp, `grep -E -o`, and
  * `git grep -E -o -h` all returned 114 against the same commit.
+ *
+ * Re-verified unchanged at 114 after buildPositionalPattern gained \b anchors on both open edges
+ * (ledger item 257) — by span-diff (start index + matched text), not count alone: old and new
+ * patterns produced byte-identical 114-element span lists on the live document, zero removed,
+ * zero added. Cross-checked on the HARDENED pattern by the same three instruments as every prior
+ * lock — Node, `command grep -E -o`, `git grep -E -o -h` — all three still agree at 114; the
+ * POSIX-ERE-vs-JS divergence risk `\b` on a `{1,4}` group raises did not materialise.
  */
 export const POSITIONAL_LINE_BASED_ABSOLUTE = 114;
 
@@ -86,6 +93,10 @@ export const POSITIONAL_LINE_BASED_ABSOLUTE = 114;
  * the two new references. Confirmed by the same paragraph-join cross-check as the original lock:
  * `awk 'BEGIN{RS=""}' + gsub` piped to `grep -E -o`, and `perl -00 -pe 's/\n/ /g'` piped to the
  * same, both agree with this module's own JS matcher at 128.
+ *
+ * Re-verified unchanged at 128 after the same \b hardening (item 257), by the identical
+ * span-diff discipline (per-paragraph spans, not just the total) and the same two outside-Node
+ * cross-checks re-run against the hardened pattern — both still agree at 128.
  */
 export const POSITIONAL_WRAP_NORMALIZED_ABSOLUTE = 128;
 
@@ -103,10 +114,29 @@ export const POSITIONAL_WRAP_NORMALIZED_ABSOLUTE = 128;
  * "verify" this pattern by summing per-length counts; that sum is a different instrument, not
  * this one, by construction. (Confirmed with a minimal fixture in the test file — see the test
  * named for exactly this shape.)
+ *
+ * WHAT THIS COVERS: two word-boundary-anchored edges — `\bthe` and `(above|below)\b` — enumerated
+ * by walking every zero-width position in the pattern, not guessed by analogy to the anaphor
+ * pattern. Only two, not four like that pattern's own two-alternative construction, because this
+ * is one alternative: every position between `the` and the closing group is already bounded by a
+ * mandatory literal space (see the paragraph above). Each `\b` closes a real, swept gap, checked
+ * on the live document rather than assumed clean by construction:
+ *  - Left of `the`: unanchored, a word ending in "the" ("breathe") directly preceding a
+ *    legitimate word-run and `above`/`below` supplies a phantom match — swept via
+ *    `/([a-zA-Z])the ([a-z]+ ){1,4}(above|below)/g`, zero live instances.
+ *  - Right of `(above|below)`: unanchored, matches as a prefix of a longer word
+ *    ("abovementioned", "belowground") — swept via
+ *    `/the ([a-z]+ ){1,4}(above|below)([a-zA-Z])/g`, zero live instances. One anchor guards both
+ *    alternation members at once, since they share the same closing position.
+ *
+ * WHAT IT DELIBERATELY DOES NOT COVER: capitalized `The`, already a named exclusion above, not
+ * reopened by this hardening; any additional false-positive filtering for the two known "the rate
+ * from below" idiom matches — sweep()'s own doc comment already declines a denylist and this
+ * change does not revisit that.
  */
 export function buildPositionalPattern(): RegExp {
   return new RegExp(
-    `the ([a-z]+ ){${POSITIONAL_MIN_WORDS},${POSITIONAL_MAX_WORDS}}(above|below)`,
+    `\\bthe ([a-z]+ ){${POSITIONAL_MIN_WORDS},${POSITIONAL_MAX_WORDS}}(above|below)\\b`,
     "g"
   );
 }
