@@ -20485,7 +20485,7 @@ Neither: a fix was proposed and built. **Commit `43808cc4`.**
 `scripts/deferredWorkAnaphorSweep.ts`'s `buildAnaphorPattern`. See item 126 for the anaphor sweep's
 own convention and the boundary fix this entry's finding came from.
 
-## 258. Actionable now — two CLI flags are read under a property name the parser never produces, and an unchecked generic cast is why nothing caught it
+## 258. Closed — two CLI flags are read under a property name the parser never produces, and an unchecked generic cast is why nothing caught it
 
 **These are not inert declarations. They are live defects.** Everything about `--no-revision` and
 `--no-color` is correct — the option is declared, commander parses it, a typed field carries it
@@ -20562,6 +20562,77 @@ the consumers in `src/cli/config.ts`, `src/cli/approvals.ts` and `src/cli/sink.t
 cannot fail in `src/cli/config.test.ts`. See item 256 for the assertion-that-cannot-fail class those
 tests belong to, and item 259 for the neighbouring flags that are never read at all.
 
+**Closure.** Fixed at `9861fccc` (`src/cli/index.ts`): `CliOptions` now declares `revision?`/`color?`
+— the names commander actually produces — and the `cliFlags` literal reads
+`options.revision === false` / `options.color === false`. The construction was extracted into its
+own exported `buildCliFlags(options, isHeadless, argv)` specifically so a boundary test could call
+the real mapping rather than a reimplementation of it.
+
+**Part A — a correction to this entry's own framing, established before the fix.** `--no-color`
+does not run through chalk; every consumer (`approvals.ts`, `sink.ts`, `dispatch.ts`) is a
+hand-rolled `noColor ? "" : "\x1b[NNm"` gate on literal ANSI escapes, confirmed by a full sweep of
+every `noColor` reference in `src/` — none touches `chalk` or `FORCE_COLOR`. This session's chalk
+short-circuit findings govern the TUI (Ink), which never reads `noColor`; this flag governs only
+the headless/print path, a separate and simpler mechanism. `NO_COLOR=1` and `--no-color` were
+already provably convergent by construction before the fix — `loadCliConfig` computes
+`noColor: flags.noColor === true || envStr("NO_COLOR") === "1"`, one boolean OR both routes feed —
+so fixing the boundary closes the live defect without opening a second one.
+`src/cli/index.optionsBoundary.test.ts` (5 tests) parses argv through a real `commander.Command`
+built from the repository's own 38 declarations, never a hand-built object — the exact gap
+`config.test.ts` could not close.
+
+**Part B — the class fix took the guard form, not derivation, and the obstacle is load-bearing.**
+Verified directly in the shipped types, not assumed: `node_modules/commander/typings/index.d.ts` —
+every `.option()` overload returns `this` (the same `Command` type), with no accumulating generic
+or template-literal mechanism to thread flag strings into a derived properties type. Deriving
+`CliOptions` from the declarations would mean a bespoke type-level parser or a codegen step,
+separately-scoped infrastructure a bug fix should not carry. `src/cli/cliOptionsCoverage.test.ts`
+lands the guard this entry predicted instead: AST-scans every receiver-scoped `options.X` read in
+`index.ts`, asserts each is in the produced-key set from a live `Command` built off
+`extractDeclaredOptionStrings()` — the same declaration list the boundary test uses, shared as one
+function in `cliOptionsIntrospection.ts` because what's shared is the literal source text, not a
+hand-derived interpretation of it (a corrupted or incomplete shared extraction is itself
+mutation-tested and does not silently pass). The guard's own detection logic is mutation-tested
+separately from the code it guards: defeating its receiver-scoping check is caught by two
+independent tests (its own anti-vacuity fixture and the production check itself); making
+`producedOptionKeys` ignore an incomplete declaration list is caught in isolation by the fixture
+built for exactly that failure mode.
+
+**`options.trust`/`options.noTrust` — confirmed structurally absent, not exempted.** The guard's
+own AST scan finds zero occurrences of either name in the read set — `parseTrustFlag(process.argv)`
+is `index.ts`'s own documented sole authoritative source for trust, bypassing `options` entirely.
+There is no read here for the guard to fire on; `cliOptionsCoverage.test.ts` asserts this absence
+directly rather than carrying it as an assumption.
+
+**Part C — the runtime advice is confirmed true on the path where the fix is observable, and
+unchanged-but-no-longer-self-contradictory on the other.** `src/cli/approvals.noRevision.test.ts`
+traces `promptScopeRevision`'s exact branches. On the **TTY path**, the outcome changes: before the
+fix `noRevision` was always falsy regardless of the flag, so a TTY session always reached the
+interactive prompt; after the fix, `--no-revision` short-circuits to `decision:"reject"` without
+ever prompting — this is where a user actually observes the fix. On the **non-TTY path**, the
+outcome was already `decision:"reject"` either way (the early-return branch and the non-TTY
+fallthrough branch both reject); what changes is that the `"Use --yes to approve or --no-revision
+to suppress"` warning no longer prints when the user has already passed the flag it recommends.
+Before the fix, a user who followed the advice saw the advice anyway, on every run, forever — the
+message was self-contradictory rather than false. Both findings are measured with `resolveRevisionApproval`
+mocked, not inferred from the branch structure alone.
+
+**Predicate-form mutation, run and found genuinely inert.** `options.revision === false` weakened
+to `!options.revision` kills nothing across either test file, including the previously-untested
+empty-argv case. This is not a test gap: commander guarantees a strict boolean for a registered
+`--no-x` flag (verified empirically — an unset flag parses to `true`, never `undefined`), and
+`buildCliFlags` has exactly one production call site, which always supplies a real parsed `options`
+object. The two forms are behaviourally identical today; `=== false` is kept for readability, not
+because a weaker form is observably wrong — recorded in the test file's own comment alongside the
+mutation that empirically settled it.
+
+**Bucket: Actionable now → Closed**, two-way check. For: both one-line fixes and the class fix
+have landed, mutation-verified, at `9861fccc`, with a full local suite (484 files / 6171 relevant
+tests, 1 pre-existing unrelated flake confirmed by isolated re-run) and a clean-clone run (484
+files / 6163 tests, 0 failures) both green. Against: Actionable now requires an unmade fix, and it
+is made; Blocked on data requires a missing observation, and none is outstanding; Neither requires
+no fix proposed, and one was both proposed and executed.
+
 ## 259. Actionable now — five CLI flags are parsed and never read, and two of them point at a milestone that already shipped without them
 
 **The neighbouring half of item 258.** These five are declared, parsed by commander, and read
@@ -20604,6 +20675,15 @@ these two did not come with it, so the labels now point at a completed phase as 
 future work. `--name`'s is the worse of the two: "stored for TUI.6" asserts the value *is* stored,
 and nothing stores it. Relabelling costs one line each and is not gated on implementing either.
 
+**Ordering update — item 258 closed with the guard, not derivation.** Item 258's own text was
+written when type derivation was still a live option and reasoned that the two hypothetical class
+fixes leave this entry independent either way: a removal deletes the read along with the
+declaration, so the guard has nothing to fire on regardless of which shape landed. Derivation
+turned out not to be reachable in commander 12.1.0 (every `.option()` overload returns `this`, no
+accumulating generic), so the guard is what actually shipped. That confirms — rather than changes —
+this entry's remedy for `--add-dir`: removing the declaration and its (nonexistent) read still
+leaves the guard with nothing to fire on, exactly as the independent-either-way reasoning predicted.
+
 **Bucket: Actionable now.** Per-member verdicts are specified and nothing new needs to be learned
 first. Against Blocked on data: the enumeration is complete and recorded. Against Neither: fixes are
 proposed. Against Closed: nothing is built.
@@ -20634,17 +20714,16 @@ priority ordering" cautions against ranking by importance, which this section do
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (116): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257
+**Closed** (117): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (2): 258, 259
+first (1): 259
 
 That bucket had returned to empty when items 236 and 239 were built in one pass, after sitting at
-zero for months before they were opened. It returns to 2 here — worth a line, because this bucket's
-movement is the ledger's own signal about whether anything is specified and waiting. Note also what
-an empty reading meant then and what a non-empty one means now: empty read as "nothing to do" and was
-better read as "nothing currently specified", the weaker and more accurate claim; 2 means two
-remedies are specified and unbuilt, in a deliberate order (258 before 259, for the reason 258 gives).
+zero for months before they were opened. It returned to 2 when 258 and 259 were both opened in the
+same pass, and 258 closes here in the very next pass — its own remedy specified and now built. One
+item remains specified and unbuilt: 259, whose own ordering note records that 258 closed with the
+guard rather than derivation, confirmed rather than changed by that outcome.
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (14): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250
 
