@@ -195,6 +195,17 @@ export interface AgentLoopInput {
    * per-run. Pinned by `agentLoop.userMaxTurns.test.ts`, not left to prose.
    */
   userMaxTurns?: number;
+  /**
+   * `--max-budget-usd`: a USER ceiling on this RUN's spend, in dollars.
+   *
+   * Scope is the deliberate opposite of `userMaxTurns`. Subagent spend counts against it, and costs
+   * nothing extra to count, because `TokenBudgetMeter.snapshot().costUsd` already returns
+   * `_iterCostAccumulator.total_cost + _subagentCostTotal`. Turns are per-loop — a subagent's
+   * iterations are its own; dollars are per-run — a subagent's dollars are the user's. Gated on
+   * `!isSubagentLoop` for that reason and not despite it: the parent's total already contains the
+   * child's spend, so gating the parent alone still bounds the whole run.
+   */
+  runUsdCap?: number;
   coachingBudgetOverride?: number;
   excludeTools?: ReadonlySet<string>;
   pipelineApplied?: boolean;
@@ -412,7 +423,7 @@ export interface AgentLoopResult {
   /** Phase H.7: how the loop ended. Used by upstream flows (investigation /
    *  patch) to surface "Token budget reached" vs "Iteration budget reached"
    *  distinctly in the UI. Optional for backward-compat with older callers. */
-  terminationReason?: "natural_completion" | "max_iterations" | "token_budget_exceeded" | "compaction_exhausted" | "loop_detected" | "daily_usd_cap_exceeded" | "upstream_unavailable" | "phase1_handoff" | "hook_blocked" | "scope_block_circuit_breaker" | "staged_rejected" | "staged_refine_requested" | "semantic_stall" | "awaiting_user_input";
+  terminationReason?: "natural_completion" | "max_iterations" | "token_budget_exceeded" | "compaction_exhausted" | "loop_detected" | "daily_usd_cap_exceeded" | "run_usd_cap_exceeded" | "upstream_unavailable" | "phase1_handoff" | "hook_blocked" | "scope_block_circuit_breaker" | "staged_rejected" | "staged_refine_requested" | "semantic_stall" | "awaiting_user_input";
   /** Phase Q.2: populated when terminationReason === "loop_detected". The
    *  offending tool name + observed count in the sliding-window detector. */
   loopDetected?: { toolName: string; count: number };
@@ -4057,6 +4068,57 @@ Example:
       timestamp: new Date().toISOString(),
     });
     throwIfAborted("iter_start");
+
+    // `--max-budget-usd` (item 259). Checked EVERY iteration, before the LLM call — free, because
+    // `snapshot()` is two in-memory adds. The daily cap is checked once per run only because its
+    // input, `getUsage`, reads the filesystem; nothing forces that trade here, and a once-per-run
+    // per-RUN cap would inherit the exact weakness it exists to remove.
+    //
+    // `!isSubagentLoop` matches the daily gate, and for a reason rather than by imitation: the
+    // parent's `snapshot().costUsd` already includes `_subagentCostTotal`, so gating the parent
+    // alone still bounds the child's spend. Gating subagents too would double-enforce one budget.
+    //
+    // Before the LLM call, so nothing is half-done: no partial patch, no unflushed tool result.
+    // At iter 0 spend is $0, so a cap smaller than a single iteration's cost cannot fire before any
+    // work happens — the run does one iteration and then stops here. That is deliberate; per-iteration
+    // cost is not knowable in advance, so refusing at startup would need a number nobody has.
+    if (!isSubagentLoop && typeof input.runUsdCap === "number" && input.runUsdCap > 0) {
+      const spentUsd = budget.snapshot().costUsd;
+      if (spentUsd >= input.runUsdCap) {
+        log("[zone-run-usd-cap]", JSON.stringify({
+          runId: input.runId ?? null,
+          capUsd: input.runUsdCap,
+          spentUsd,
+          iter,
+          tier: input.taskClassification?.tier ?? "medium",
+        }));
+        emitRunBreakdownSummary();
+        emitCacheSummary();
+        emitWebSearchSummary();
+        emitSelfValidationSummary();
+        await persistStagingOnError(stagingFiles, ownsStagingFiles, input.repoPath);
+        stagingFinalized = true;
+        return {
+          success: false,
+          summary:
+            `Run stopped at the --max-budget-usd ceiling: spent $${spentUsd.toFixed(4)} of ` +
+            `$${input.runUsdCap.toFixed(2)} after ${iter} iteration${iter === 1 ? "" : "s"}. ` +
+            `Staged changes were kept; resume to continue, or raise the cap.`,
+          toolCallLog,
+          filesModified: Array.from(filesModified),
+          patchValidatedByAgent: false,
+          verificationReason: "no_verification_attempted",
+          terminationReason: "run_usd_cap_exceeded",
+          tokenUsage: budget.tokenUsage,
+          costUsd: spentUsd,
+          iterCount: iter,
+          promotedFromArchetype,
+          promotionTrigger,
+          promotedAtIter,
+        };
+      }
+    }
+
     input.onProgress?.(
       `[agent_loop] Iteration ${iter + 1}/${iterationBudget.maxIterationsForRun}`
     );

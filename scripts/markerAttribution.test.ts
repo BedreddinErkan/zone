@@ -322,7 +322,7 @@ describe("self-exclusion — the tool does not inventory its own fixtures", () =
  * shifts these numbers should make this test fail and prompt a review, not silently drift.
  */
 describe("drift check — today's figures against the real tree", () => {
-  it("412 marker names; emitter-count distribution zero=42 one=350 several=20; 24 hazards", () => {
+  it("413 marker names; emitter-count distribution zero=42 one=351 several=20; 24 hazards", () => {
     // Re-derived via this file's own scanTree/hazards, not hand-added to the prior 410/349 —
     // the repository-tree write guard (ledger item 236) landed one new marker,
     // `[zone-repo-guard]`, so the total moved 410->411. It lands in `several`, not `one`:
@@ -338,8 +338,16 @@ describe("drift check — today's figures against the real tree", () => {
     // does land in `one` (`src/llm/agentLoop.ts` alone) so `one` moves 349->350 — re-derived from
     // the scan rather than reasoned from the single-emitter assumption that misled the earlier
     // comment, and `hazards()` still agrees at 24 with no row for it.
+    //
+    // 412->413: item 259's `--max-budget-usd` added `[zone-run-usd-cap]`, emitted at the one site
+    // where the per-run ceiling binds, so `one` moves 350->351. Hazards stay 24 — but only after a
+    // correction worth recording: the first draft of that fix's own source comment NAMED
+    // `[zone-graceful-degrade]` inside `patchUserFacingReason.ts`, a file that does not emit it,
+    // which created a 25th hazard row out of prose alone. The referent was rewritten rather than
+    // the constant bumped, which is this document's standing rule and, here, the difference between
+    // recording a real attribution hazard and inventing one.
     const result = scanTree(readTrackedFiles());
-    expect(result.size).toBe(412);
+    expect(result.size).toBe(413);
 
     const dist = { zero: 0, one: 0, several: 0 };
     for (const attr of result.values()) {
@@ -348,7 +356,7 @@ describe("drift check — today's figures against the real tree", () => {
       else if (c === 1) dist.one++;
       else dist.several++;
     }
-    expect(dist).toEqual({ zero: 42, one: 350, several: 20 });
+    expect(dist).toEqual({ zero: 42, one: 351, several: 20 });
     expect(hazards(result)).toHaveLength(24);
   });
 

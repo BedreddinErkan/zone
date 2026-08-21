@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import ts from "typescript";
 import { Command } from "commander";
-import { buildCliFlags, parseMaxTurns } from "./index.js";
+import { buildCliFlags, parseMaxTurns, parseMaxBudgetUsd } from "./index.js";
 import { buildRealCommand, extractDeclaredOptionStrings } from "./cliOptionsIntrospection.js";
 
 /**
@@ -130,6 +130,69 @@ describe("--max-turns reaches CliFlags through the real parser (item 259)", () =
     };
     visit(sf);
     expect(parserArg).toBe("parseMaxTurns");
+  });
+});
+
+describe("--max-budget-usd reaches CliFlags through the real parser (item 259)", () => {
+  const DECL = extractDeclaredOptionStrings().find((d) => d.startsWith("--max-budget-usd"))!;
+
+  function parseBudget(argv: string[]): unknown {
+    const program = new Command();
+    program.exitOverride();
+    program.option(DECL, "x", parseMaxBudgetUsd);
+    program.parse(argv, { from: "user" });
+    return program.opts()["maxBudgetUsd"];
+  }
+
+  it("--max-budget-usd 2.50 arrives as the number 2.5 — fractional dollars are valid", () => {
+    expect(parseBudget(["--max-budget-usd", "2.50"])).toBe(2.5);
+  });
+
+  it("a sub-cent cap is accepted — unlike --max-turns, non-integers are meaningful here", () => {
+    expect(parseBudget(["--max-budget-usd", "0.005"])).toBe(0.005);
+  });
+
+  it("unset leaves maxBudgetUsd undefined — no accidental default ceiling", () => {
+    expect(parseBudget([])).toBeUndefined();
+  });
+
+  it.each(["0", "-1", "abc", "", "NaN", "Infinity"])(
+    "--max-budget-usd %s is rejected at parse rather than silently ignored",
+    (bad) => {
+      expect(() => parseBudget(["--max-budget-usd", bad])).toThrow(/positive number of dollars/);
+    }
+  );
+
+  it("reaches CliFlags.maxBudgetUsd through buildCliFlags", () => {
+    expect(buildCliFlags({ maxBudgetUsd: 3 }, false, ["node", "zone"]).maxBudgetUsd).toBe(3);
+  });
+
+  it("index.ts's own --max-budget-usd declaration passes parseMaxBudgetUsd as its parser", () => {
+    const src = fs.readFileSync(path.resolve(import.meta.dirname, "index.ts"), "utf8");
+    const sf = ts.createSourceFile("index.ts", src, ts.ScriptTarget.Latest, true);
+    let parserArg: string | null = null;
+    const visit = (node: ts.Node) => {
+      if (
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        node.expression.name.text === "option" &&
+        node.arguments.length >= 3 &&
+        ts.isStringLiteral(node.arguments[0]!) &&
+        node.arguments[0].text.startsWith("--max-budget-usd")
+      ) {
+        parserArg = node.arguments[2]!.getText();
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sf);
+    expect(parserArg).toBe("parseMaxBudgetUsd");
+  });
+
+  it("its description no longer claims the flag is unimplemented", () => {
+    expect(DECL).toBe("--max-budget-usd <n>");
+    const src = fs.readFileSync(path.resolve(import.meta.dirname, "index.ts"), "utf8");
+    const line = src.split(/\r?\n/).find((l) => l.includes("--max-budget-usd"))!;
+    expect(line).not.toContain("not implemented");
   });
 });
 

@@ -4374,6 +4374,10 @@ export async function runLlmPatchFlow(input: {
    *  `maxIterationsOverride` — that field is the dispatcher's channel and disables escalation as a
    *  side effect, and soft promotion is allowed to relax it. See ledger item 259. */
   userMaxTurns?: number;
+  /** `--max-budget-usd`: user ceiling on THIS RUN's spend. Subagent spend counts against it,
+   *  because the parent's meter already includes it — the deliberate opposite of `userMaxTurns`'s
+   *  parent-loop-only scope. See ledger item 259. */
+  runUsdCap?: number;
   /** Phase AS: pre-computed classification from server.ts audit gate. Skips re-classification. */
   preClassifiedTask?: TaskClassification;
   /** dispatch.ts's plan-mode gate decision — forwarded to agentLoopBaseInput so
@@ -5833,6 +5837,7 @@ const initializeTodosFromPlan = (): void => {
       gateMode: input.gateMode,
       forceTier: input.forceTier,
       userMaxTurns: input.userMaxTurns,
+      runUsdCap: input.runUsdCap,
       // J.5: thread the prior run's rollback summary (if any) so the
       // agent reads APPLY_ROLLED_BACK markers from previous attempts
       // before re-investigating. Empty string is treated as no-op
@@ -6203,7 +6208,11 @@ const initializeTodosFromPlan = (): void => {
           ? "Agent tool loop complete"
           : loop.terminationReason === "token_budget_exceeded"
             ? "Agent stopped at token budget"
-            : "Agent tool loop ended with issues",
+            // A budget stop is deliberate, not "issues" — the generic arm would read as a
+            // malfunction for the one exit the user explicitly asked for.
+            : loop.terminationReason === "run_usd_cap_exceeded"
+              ? "Agent stopped at the run budget"
+              : "Agent tool loop ended with issues",
         detail: loop.summary.slice(0, MAX_FINAL_ANSWER_CHARS),
         status: loop.success ? "success" : "warning",
       });

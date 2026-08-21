@@ -30,6 +30,8 @@ export interface CliConfig {
   trust?: boolean;
   /** --max-turns: user ceiling on MAIN-loop iterations (parent loop only). */
   maxTurns?: number;
+  /** --max-budget-usd: user ceiling on this run's total spend, subagent spend included. */
+  maxBudgetUsd?: number;
 }
 
 export interface CliFlags {
@@ -51,6 +53,9 @@ export interface CliFlags {
   /** --max-turns: user ceiling on MAIN-loop iterations. Subagents keep their own type-sized
    *  budgets and do not inherit this — see ledger item 259. */
   maxTurns?: number;
+  /** --max-budget-usd: user ceiling on THIS RUN's spend, subagent spend included. The deliberate
+   *  opposite of maxTurns's parent-only scope — turns are per-loop, dollars are per-run. */
+  maxBudgetUsd?: number;
 }
 
 type ZoneConfigFile = {
@@ -160,6 +165,7 @@ export function loadCliConfig(
     summaryFormat: diskModel?.summaryFormat,
     trust: flags.trust,
     maxTurns: flags.maxTurns,
+    maxBudgetUsd: flags.maxBudgetUsd,
   };
 }
 

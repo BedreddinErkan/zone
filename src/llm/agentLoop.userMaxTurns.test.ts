@@ -232,7 +232,7 @@ describe("nothing downstream may raise the ceiling past the cap (item 259)", () 
  * class item 258 closed and this entry continues, so the threading gets a guard rather than trust.
  */
 describe("every dispatch path forwards the cap (item 259)", () => {
-  it("all runLlmPatchFlow call sites in dispatch.ts pass userMaxTurns", () => {
+  function dispatchSitesMissing(field: string): { total: number; missing: number[] } {
     const file = path.resolve(import.meta.dirname, "../cli/dispatch.ts");
     const sf = ts.createSourceFile(file, fs.readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true);
     const missing: number[] = [];
@@ -246,16 +246,31 @@ describe("every dispatch path forwards the cap (item 259)", () => {
         ts.isObjectLiteralExpression(node.arguments[0]!)
       ) {
         total += 1;
-        const forwards = node.arguments[0].properties.some(
-          (p) => p.name?.getText() === "userMaxTurns"
-        );
+        const forwards = node.arguments[0].properties.some((p) => p.name?.getText() === field);
         if (!forwards) missing.push(sf.getLineAndCharacterOfPosition(node.getStart()).line + 1);
       }
       ts.forEachChild(node, visit);
     };
     visit(sf);
+    return { total, missing };
+  }
+
+  it("all runLlmPatchFlow call sites in dispatch.ts pass userMaxTurns", () => {
+    const { total, missing } = dispatchSitesMissing("userMaxTurns");
     expect(total).toBe(3); // anti-vacuity: the scan must actually find the call sites
     expect(missing).toEqual([]);
+  });
+
+  it("all runLlmPatchFlow call sites in dispatch.ts pass runUsdCap (item 259)", () => {
+    const { total, missing } = dispatchSitesMissing("runUsdCap");
+    expect(total).toBe(3);
+    expect(missing).toEqual([]);
+  });
+
+  it("detector: a field no call site passes is reported missing at all three — the scan is not vacuous", () => {
+    const { total, missing } = dispatchSitesMissing("noSuchFieldAnywhere");
+    expect(total).toBe(3);
+    expect(missing).toHaveLength(3);
   });
 });
 

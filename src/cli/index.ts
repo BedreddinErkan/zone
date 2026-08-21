@@ -129,6 +129,7 @@ export function buildCliFlags(options: CliOptions, isHeadless: boolean, argv: st
     permissionMode: options.permissionMode,
     trust: parseTrustFlag(argv),
     maxTurns: options.maxTurns,
+    maxBudgetUsd: options.maxBudgetUsd,
   };
 }
 
@@ -142,6 +143,26 @@ export function buildCliFlags(options: CliOptions, isHeadless: boolean, argv: st
  * Bare `parseInt` as the parser — what this replaced — returns `NaN` for `abc` and accepts `0` and
  * negatives, all three of which then vanish into that same silent-ignore branch.
  */
+/**
+ * Commander parser for `--max-budget-usd`. Same reject-at-parse discipline as `parseMaxTurns`, and
+ * for the same reason: the internal gate ignores a non-positive cap, which is right for an internal
+ * caller and wrong for a user flag.
+ *
+ * Differs from `parseMaxTurns` in one way that matters: a fractional value is VALID here. `$0.05` is
+ * a meaningful per-run ceiling, where `2.5` turns is not — so this checks finite-and-positive rather
+ * than integer-and-positive. What it replaced, bare `parseFloat`, returned `NaN` for `abc` and
+ * accepted `0` and negatives, all three of which then vanished into the gate's silent-ignore branch.
+ */
+export function parseMaxBudgetUsd(value: string): number {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) {
+    throw new InvalidArgumentError(
+      `--max-budget-usd must be a positive number of dollars (got "${value}").`
+    );
+  }
+  return n;
+}
+
 export function parseMaxTurns(value: string): number {
   const n = Number(value);
   if (!Number.isInteger(n) || n < 1) {
@@ -1220,7 +1241,7 @@ export async function run(): Promise<void> {
     .option("-n, --name <name>", "Name this session (not implemented — currently ignored)")
     .option("--output-format <fmt>", "Output format: text | json", "text")
     .option("--max-turns <n>", "Maximum agent turns for the main loop; subagents keep their own budgets", parseMaxTurns)
-    .option("--max-budget-usd <n>", "Maximum spend in USD (not implemented — currently ignored)", parseFloat)
+    .option("--max-budget-usd <n>", "Maximum spend in USD for this run, including subagent spend", parseMaxBudgetUsd)
     .option("--permission-mode <mode>", "Permission mode: plan starts the TUI in plan mode (investigate → approve → execute)")
     .option("--fork-session", "Fork current session (not implemented)")
     .option("--task <text>", "Task or change request to analyze [deprecated: use positional arg]")

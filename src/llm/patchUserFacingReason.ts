@@ -68,6 +68,25 @@ export function getPatchUserFacingReason(input: {
       };
     }
 
+    case "run_usd_cap_exceeded": {
+      // Without this case the `default` below would answer `canResume: false` and "Run ended
+      // unexpectedly" for a stop the user explicitly asked for — wrong on both counts, and the
+      // wrong value fans out to agentLoop's graceful-degrade telemetry and metricsAggregator's
+      // resumable count.
+      const spent =
+        typeof context.costUsd === "number" ? `$${context.costUsd.toFixed(2)}` : null;
+      const cap =
+        typeof context.capUsd === "number" ? `$${context.capUsd.toFixed(2)}` : null;
+      const budgetPart = spent && cap ? ` (${spent} of ${cap})` : "";
+      return {
+        reason: terminationReason,
+        userFacingMessage: `Run budget reached${budgetPart}. Staged changes were kept.`,
+        canResume: true,
+        resumeHint: "Raise --max-budget-usd or resume to continue",
+        category: "warning",
+      };
+    }
+
     case "compaction_exhausted":
       return {
         reason: terminationReason,

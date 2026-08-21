@@ -246,9 +246,12 @@ export async function runInvestigationFlow(input: {
   const terminationReason = loop.terminationReason;
   const hitCompactionExhausted = terminationReason === "compaction_exhausted";
   const hitTokenBudget = terminationReason === "token_budget_exceeded";
+  const hitRunUsdCap = terminationReason === "run_usd_cap_exceeded";
   const hitMaxIter =
     terminationReason === "max_iterations" ||
-    (!loop.success && !hitTokenBudget && !hitCompactionExhausted);
+    // The fallback arm catches "failed for some other reason" — but a budget stop is a named
+    // reason, and letting it fall in here would label a --max-budget-usd exit "max iterations".
+    (!loop.success && !hitTokenBudget && !hitCompactionExhausted && !hitRunUsdCap);
   const responseText = String(loop.summary || "").trim() || "I could not produce an investigation answer.";
   emitStructuredProgress({
     type: "agent_loop_complete",
@@ -258,7 +261,9 @@ export async function runInvestigationFlow(input: {
         ? "Investigation aborted — context exhausted"
         : hitTokenBudget
           ? "Investigation ended at token budget"
-          : "Investigation ended with partial findings",
+          : hitRunUsdCap
+            ? "Investigation stopped at the run budget"
+            : "Investigation ended with partial findings",
     detail: responseText.slice(0, MAX_FINAL_ANSWER_CHARS),
     status: loop.success ? "success" : "warning",
   });
