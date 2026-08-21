@@ -8096,8 +8096,37 @@ folds into it and the wrapper that seeds it off the investigation's repaint are 
 `runOneShotInner`, `cli/dispatch.ts`; and the two dollar figures, with the token suffix that hides at
 zero beside the cost that does not, are composed in the status-bar component. See item 77 for the
 cycle this gate sits in, item 78 for what the plan says once this context has produced it, item 76
-for the shared-name class this entry's second dollar figure is checked against and is not, and item
-73 for why sink counts are upper bounds.
+for the shared-name class this entry's second dollar figure is checked against and is not, item
+73 for why sink counts are upper bounds, and item 261 for the failure mode this entry's own
+correction turned out to share with item 170.
+
+**CORRECTED — "the instrument has not fired once" is false, and so is the baseline it justifies.**
+This entry recorded, read on 2026-08-09, that the gate marker "holds nineteen records spanning
+2026-07-31 to 2026-08-08, and all nineteen carry the four widened fields as absent, because every one
+of them predates `dc8a1e60`", concluding that "the baseline for the inputs is empty, not thin". The
+sink now holds **28** `[zone-plan-mode]` records, and **9 of them carry all four widened fields
+populated** — `grepMatchedPaths`, `rankedFileScores`, `relevantFileCount` and `totalFileCount` —
+across **9 distinct runIds**, dated 2026-08-09 and 2026-08-19. Every one of the nine post-dates
+`dc8a1e60` (2026-08-09, *"make the gate's decision inputs measurable against its outcome"*), which is
+exactly the commit the entry named as the boundary. **The instrument has fired nine times.**
+
+**Identified empirically rather than by name, because the entry names it only in prose.** The marker
+was recovered by asking which marker holds exactly nineteen records in the stated window: two do
+(`[zone-plan-mode]` and `[zone-plan-decision]`), and the payload keys separate them — only
+`[zone-plan-mode]` widens from five keys to nine at the boundary, and the four added keys are the
+four the entry names. A count alone would not have identified it; the key-set diff did.
+
+**What this does and does not change.** The narrower claim the entry rests on — that no criterion is
+drawn from the distribution — still stands, and the honest position it states ("now observable and
+still unmeasured") is now true in a stronger sense: the observations exist and remain unanalysed. What
+is retracted is the supporting fact. A pass changing the gate today would **not** be "setting a window
+without the inputs against a window with them"; it would have nine runs of real input data to compare
+against, which is the opposite of the hazard this entry warned about.
+
+**Bucket unchanged: Neither.** A structural fact is still recorded and no fix is proposed. Against
+Blocked on data: the observation this correction turned up already exists, so nothing here waits on
+one; analysing those nine records is work, not a missing measurement. Against Actionable now: no fix
+is specified. Against Closed: nothing was built.
 
 ## 80. The scope-revision approval surface is wired end to end and cannot fire, and the document that justified keeping it names a surface that has since been deleted
 
@@ -15332,12 +15361,63 @@ the half item 166 lacks, and folding it in would bury it. **Against Actionable n
 because which fix applies depends on which quantity comes back low. **Against Neither:** this is a
 registered prediction awaiting data rather than a structural fact.
 
+**CORRECTED — "zero of zero" was false, and the entry was wrong about its own dates rather than
+blocked.** This entry justified an empty denominator with two dates: the marker shipped 2026-08-15,
+and "the last run that could have carried a request ran on 2026-08-09, six days earlier". The marker
+sink holds **8 distinct runIds** reaching `[zone-plan-investigation-complete]` on **2026-08-19** —
+after the emitter shipped at `253ced1e` (2026-08-15) *and* after the call site moved to loop entry at
+`82cc1acb` (2026-08-16) — with zero grant records anywhere in the sink. The real figure is **0 of 8**.
+
+**The denominator is justified, not assumed, and the justification is a contrast.** All 8 runs saw
+the invitation, because the `requestedTools` field and its rule sit in the investigation prompt
+**unconditionally**. The field beside it, `answerOnlyReason`, *is* gated on `allowAnswerOnly` in the
+same template — so the template demonstrably can gate a field, and this one is not gated. That is what
+makes 8 a denominator rather than an upper bound on one.
+
+**Exact interval, computed rather than asserted:** 0/8 gives a Clopper-Pearson two-sided 95% bound of
+**[0, 0.3694]** (one-sided **[0, 0.3123]**).
+
+**What 0/8 licenses and what it does not.** It bounds the rate at roughly **37%** upper, which is
+weak. It does **not** establish that the mechanism cannot fire. Item 262 is the contrast worth naming
+precisely: unreachability there was *proven by measurement* — two independent guards, one of them a
+predicate that never admits the spelling production uses — not inferred from a null. A null bounds; a
+measurement settles.
+
+**The positive control already exists and is green, which this entry never said.** Twelve passing
+tests in `src/llm/agentLoop.grantAtLoopEntry.test.ts` filter on this marker and inspect its payload.
+That omission is the specific thing that made the question look unmeasurable: an instrument never
+observed firing in production reads as untrustworthy, when in fact its emission path is pinned. With
+the control green, a null is attributable to model behaviour rather than to a broken marker.
+
+**What would close it — four sizings, none of which existed before, priced from 698 ledger runs**
+(median $0.0867, p75 $0.1825, p90 $0.4004):
+
+| target upper bound | total n | additional runs | median | p75 | p90 |
+|---|---|---|---|---|---|
+| < 0.20 | 17 | 9 | $0.78 | $1.64 | $3.60 |
+| < 0.15 | 23 | 15 | $1.30 | $2.74 | $6.01 |
+| < 0.10 | 36 | 28 | $2.43 | $5.11 | $11.21 |
+| < 0.05 | 72 | 64 | $5.55 | $11.68 | $25.63 |
+
+**This table is the durable gain, and the reason is arithmetic rather than effort: before this pass
+no n was computable at all.** A sizing needs a base rate, and "zero of zero" supplies none — every row
+above exists only because the denominator turned out to be 8. **Which row a future pass should take:**
+only `< 0.20` sits under a $3.00 bar at the median, and **no row is affordable at p90**, so closing
+this entry is honestly a p90 gamble rather than a budgeted purchase. A pass that wants certainty about
+cost should raise the bar deliberately rather than plan to the median and hope.
+
+**Bucket unchanged: Blocked on data**, but for a different reason than the entry gave. It is no longer
+blocked on *any* observation — one exists — but on an observation large enough to bound the rate
+usefully. Against Closed: 0/8 does not close it. Against Actionable now: the remedy is spending, not a
+specified code fix. Against Neither: a closing condition is named, now with four priced options.
+
 **Where the code lives:** the marker is in the loop telemetry module, one emitter by the attribution tool;
 the drop reasons are assigned in the grant function beside the dispatcher's filter builder. The redirection
 that invites the request is gated in the agent loop on investigation mode **and** an explicit per-caller
 opt-in, added after this entry was written because the mode alone also selected a caller that emits no
 plan. See item 166 for the channel, item 167 for the
-ceiling that bounds the second quantity, and item 168 for the vocabulary that bounds the first.
+ceiling that bounds the second quantity, item 168 for the vocabulary that bounds the first, and item
+261 for the failure mode this correction turned out to share with item 79.
 
 ## 171. Closed — a probe transcript that reads some of an enumerated set never terminates naturally, and the coverage rule that fixes it was validated in the same pass
 
@@ -20920,8 +21000,9 @@ an entry than its extraction window reaches. That is the documented weaker-than-
 behaviour, not a defect, but it means bucket counts taken from that function alone under-count: it
 finds 13 Blocked-on-data entries where the index lists 14, and the missing one is item **90**.
 
-**Four categories, because three did not fit.** The classification was drafted with three and needed
-a fourth, which is the finding rather than an inconvenience:
+**Five categories, because three did not fit and then four did not either.** The classification was
+drafted with three, needed a fourth on the pass that wrote it, and gained a fifth on the pass after —
+the growth is the finding rather than an inconvenience:
 
 1. **Instrument absent but buildable.** Someone could write the harness; nobody has, or an attempt
    failed on a named obstacle. Item 260's staging-persistence check is the sharpest instance — three
@@ -20952,11 +21033,54 @@ one quoted, which is the limitation sitting underneath this document's locked 11
 Item 79 goes furthest and says no criterion is drawn from the distribution at all. The habit this
 document built — recording the unmeasurable where it arises — turns out to have held.
 
+**AMENDED — a fifth category, and it was found by an entry being wrong rather than blocked.**
+
+5. **Recorded-as-unmeasured, actually answerable.** The entry is not waiting on an instrument, on
+   storage, on the world, or on a run. The data is already on disk and the entry is wrong about its
+   own facts — usually its own dates. This is a different failure mode from the other four, and the
+   only one where the remedy is *reading* rather than building, storing, waiting or spending.
+
+**Two instances, which is what promotes it from an anecdote.** The rule committed before the sweep
+was that a fifth category needed more than one; it has two.
+
+- **Item 170** claimed a "zero of zero" denominator, justified by the last eligible run predating the
+  marker's ship date by six days. Eight distinct runIds reached the boundary four days *after* it.
+  The real figure was 0/8 all along.
+- **Item 79** claimed "the instrument has not fired once" and a baseline that is "empty, not thin",
+  justified by all nineteen records predating `dc8a1e60`. Nine records carry the four widened fields
+  populated, all post-dating that same commit.
+
+**Both were falsified by the same asymmetry, which is what makes the sweep cheap.** An entry claiming
+*activity* the sink does not show may simply predate retention — unfalsifiable, and not worth
+checking. An entry claiming *absence* where the sink holds records is falsified outright. **Only
+absence claims need checking**, and there are few: seven entries carry a date-anchored absence claim,
+of which four (78, 169, 179, 189) name no marker and assert something about a code path rather than a
+record, leaving three checkable — 79 and 170 falsified, and 196 confirmed.
+
+**The confirmations matter as much as the falsifications, and three were verified rather than waved
+through.** Item **196** names `[zone-investigation-command-denied]` and claims it has never fired:
+**0 records**, correct — though its stated denominator of "3792 records" is now 6205, a stale figure
+inside a claim that still holds. Items **175/178** claim no marker records a plan's marks: **0 records
+carry `subagentEligible`** and no `subagentType` value appears anywhere in the sink. Item **18**
+looked live — 54 parity records against the "42 runs" in its prose — but had already re-measured
+itself in place ("zero gaps in 46 calls, and the denominator recorded here is superseded"), which is
+this document's anti-staleness pattern working; it is worth naming, because three entries this
+session went stale without doing it.
+
+**The sweep's own instrument and its constraints, recorded because both bit.** Entry bodies were split
+on headings **with an explicit stop at the status snapshot** — without that boundary the last entry
+absorbs the file's tail and reports matches from prose belonging to no entry, which it did on the
+first run. Membership came from the index rather than `extractBucketFromEntryBody`, which returns null
+for some entries and finds 13 Blocked where the index lists 14. And `~/.zone/` is gitignored, so
+`git grep` is structurally invalid there and bare `grep` — a ugrep function with `--ignore-files` —
+skips it silently; **`command grep` is required**. The sink keeps one rotated generation, so anything
+answerable from it is answerable **now** and possibly not after the next rotation.
+
 **Two members were found with no entry anywhere**, both cited only in `CLAUDE.md`, and each gets its
 own: item **262** (a read-only filter branch described as "apparently unreachable", now measured) and
 item **263** (the system prompt's `~12K` figure, whose basis that file says is unrecorded).
 
-**Bucket: Neither.** A structural fact is recorded — the set exists, has four kinds, and its
+**Bucket: Neither.** A structural fact is recorded — the set exists, has **five** kinds, and its
 instrument under-counts — and no single fix is proposed, because there is nothing here to fix: each
 member keeps its own bucket and its own remedy. Against Actionable now: no fix is specified for *this*
 entry. Against Blocked on data: the enumeration itself needed no missing observation; it was run.
@@ -21039,17 +21163,71 @@ Against Closed: nothing was measured.
 assembly paragraph in `CLAUDE.md`. See item 261 for the enumeration that surfaced it, and item 96 for
 the shape where knowing an event and knowing what it settles turned out to be different things.
 
+## 264. Closed — category 4 priced from 698 runs instead of three, and the one member inside the budget turned out to be answerable for nothing
+
+**What it is.** Item 261's category 4 — "specified, designed, and simply not run" — was triaged to
+decide what to spend. **Nothing was run and $0.00 was spent**, and the reason is the finding rather
+than the budget: the only member inside the bar was answerable from data already on disk.
+
+**The bar, committed before any figure arrived**, because a bar set after the numbers is not a bar:
+$3.00 total, per-member ceiling $2.00, so that no single member could consume the budget and leave
+nothing for a control.
+
+**Per-run cost, re-derived from the daily ledger — 698 runs, not three.** Median **$0.0867**, p25
+$0.0445, p75 $0.1825, p90 $0.4004, max $3.6691, across 8,098 records with none unparseable. Item 250's
+126-attempt design therefore costs **$5.61–$50.45** (p25–p90) — 3–25× the per-member ceiling, decisive
+on its own.
+
+**And the repricing confirms item 250 rather than overturning it, which is the part worth stating with
+arithmetic.** That entry originally priced from three sampled runs and read as affordable; it had
+already corrected itself against the ledger to $14–52 for 126 attempts, implying $0.111–$0.413 per
+attempt. That interval sits between this pass's median ($0.0867) and p90 ($0.4004) — so the corrected
+range was sound and only its floor was optimistic. **The class was swept and nothing else moves.**
+Eighteen entries carry dollar figures; all but item 250 are *observations* of specific runs rather
+than projections, and observations cannot be repriced. Item 251's ladder is the one with teeth and it
+holds: its per-cell figures are n=7 and explicitly "verified against the ledger", and its population —
+one task shape — is **narrower and more appropriate** than a whole-population median, which would have
+priced single-call cells ($0.015) and searching cells ($0.073) at the same number. Items 178, 193 and
+157 are joined-to-ledger observations, and item 178's $0.17 medium-run mean sits within a cent of this
+pass's p75.
+
+**Item 90 reclassified: category 4 → category 1.** It was listed as the cost-blocked variant of "just
+run it", but item 91 records its blockers as a missing referent, a moved prompt and an unscored
+instrument. Those are instrument obstacles, which is category 1 by definition. Calling it category 4
+overstated how ready it is — money alone would not run it.
+
+**Item 253's worktree is gone, and the finding survived by design.** That entry kept
+`/dev/shm/zone-control-head-revert` "deliberately… as this entry's evidence" while noting it sat on
+tmpfs and would not survive a reboot. It has not: `/dev/shm` holds no zone directories at all. The
+finding is intact anyway, because 253 made its evidence a git-history command rather than the
+artifact — `git diff --name-only 5ee8d842..f04490e9` scoped to the 26 traversed modules, piped to
+`wc -l`, still returns **20**. **That is the transferable property**: prose backed by a reproducible
+command survives the disposal of what produced it, and prose backed by an artifact does not. Disposal
+was safe because of a decision taken before it, not by luck.
+
+**Bucket: Closed.** For: the triage's own question — what each member costs now, and what to spend —
+is answered, with the decision made and its reasoning recorded. Against Actionable now: nothing here
+is specified-and-unbuilt; the members keep their own buckets. Against Blocked on data: the pricing
+needed no missing observation and was taken. Against Neither: a decision was proposed and executed,
+even though the execution was to spend nothing.
+
+**Where this lives:** no code. The figures come from the daily ledger under the user-level usage
+directory, which is gitignored and therefore reachable only with `command grep` and direct reads. See
+item 261 for the enumeration and the fifth category this triage produced, item 170 for the member that
+turned out answerable, item 250 for the member that is genuinely unaffordable, and item 253 for the
+worktree whose disposal this pass confirmed was safe.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 263 to find out which ones still need something. No index of
+reader the trouble of reading all 264 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (120): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260, 262
+**Closed** (121): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260, 262, 264
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (0):
