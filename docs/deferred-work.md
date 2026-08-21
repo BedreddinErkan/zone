@@ -21378,17 +21378,118 @@ emitters. See item 225 for the entry confirmed correct, item 115 for the reading
 for the retraction of the accusation, and item 261 for the four-plus-one categories this class was
 tested against and did not join.
 
+## 266. Closed — `CLAUDE.md` audited against the tree: one figure was never right, three drifted from a single commit, and the rest holds
+
+**What it is.** This document is validated from five directions — a snapshot test, two prose sweeps,
+marker attribution, and a bucket partition. `CLAUDE.md` has one test guarding **two strings**, and
+every line in it gates future work. This pass verified its checkable claims. **Four corrections
+landed at `a3fc072a`**, which is under the threshold that would have made mechanisation the finding.
+
+**Never right, which is a sharper category than drifted.** `~403 lastFrame() sites` is **243**. Two
+instruments with different engines agree today — `git grep -o` and `command grep -roh` — on 243 calls
+and 467 total mentions; neither is 403. Counting at `f4168410`, the commit that *introduced* the
+figure, gives **241 calls / 465 mentions**, so it matched neither quantity at the moment it was
+written. Both counts have since grown by exactly two, from this session's own test additions. The same
+shape item 253 records: stale from creation rather than by decay. **A first count of 218 was also
+wrong**, from a narrower glob — the figure took three attempts and two agreeing instruments before it
+was trustworthy.
+
+**Drifted, all three from one commit.** `3ed5bc33` (2026-08-13) wrote them, in a commit whose own
+subject reads *"accuracy repair — … six drifted figures"*. Exactly one commit has touched
+`toolDefinitions.ts` since: `283bd285`, importing the worked multi-block example into `apply_patch`'s
+**`patch` parameter** description. `apply_patch` is one of the five simple-tier tools, so both totals
+moved identically: `ZONE_TOOLS` 16,151 → **16,465** chars and the simple-tier five 5,395 → **5,709**,
+both +314.
+
+**The token figure is derived and is now labelled so, which matters more than the number.** `~3879` →
+**~3,954**, being 16,465 chars over **4.1637** chars/token — a ratio recovered from `CLAUDE.md`'s own
+original pair (16,151 / 3,879) that reproduces item 161's independently measured "four point one six"
+to two decimals. That agreement is what makes the correction principled rather than arithmetic on a
+guess. No tokenizer is installed and measuring directly needs a billed call, so the derivation stands
+**with its provenance written into the line**: a derived figure carrying no label reads as freshly
+counted, and if the chars-per-token ratio ever shifts — a tokenizer change, a different model — nobody
+re-derives it.
+
+**Units, stated because the denominator was blurred.** Category one was sized at **124 path-shaped
+spans plus 37 distinct multi-digit figures ≈ 161**. Those are **lexical spans, not claims**: one
+sentence can carry several and one claim can span several, so a claim count would be materially lower
+— nearer ninety. The prediction that missed (60) was denominated in claims, so part of that miss is a
+units mismatch rather than pure misestimation. The committed rule — more than a handful wrong makes
+mechanisation the finding — was about the **numerator**, and four is four under either denominator.
+
+**What holds, verified rather than assumed.** 20 tools and 5 simple-tier definitions; **17** cases in
+`toolCallIdentifyingArg`; **19** `RejectionClass` values; **40** `BLACKLIST_PATTERNS`; `eslint` and
+`typescript-eslint` both absent; chalk a **single** hoisted copy at **5.6.2**; both intentional root
+artifacts present. **Both named hazards are still live**, which is the check that matters in the
+opposite direction — a fixed hazard still reading as live costs a future pass caution it does not
+need: `rankerBaseline.snapshot.json` still shadows real source (`checkWriteScope` ×2, `filesLikely`
+×13) and `src/cli/index.ts` is still CRLF in HEAD at **1,396** CRLF lines.
+
+**The toolExecutor fixture's "50 test files" holds as written, at 56 today, and the reason is a
+template worth reusing: a hedged, dated claim is not falsified by growth it predicted.** Its own
+wording — "as of `3ad4d1a5` … read as a magnitude rather than a fixed figure" — is how a figure should
+be written when it counts an open set that grows with the suite, and it is why this one needed no
+correction while three unhedged char counts did.
+
+**Zero shared figures with this document.** None of `403`, `16,151`, `5,395` or `3879` appears here.
+The two files do not duplicate numbers, so neither can go stale against the other — a structural
+property rather than a lucky absence, and the reason the both-corrected rule never fired.
+
+**What the quotations test guards, since nothing had said.** `claudeMdQuotations.test.ts` checks
+**exactly two** byte-exact expressions — `taskBlockedByBudget`'s predicate and `isHeadless`'s
+assignment — asserting each appears in `CLAUDE.md` and in the file it is attributed to, four
+assertions in total. Its header states this is the entire checked set, under `CLAUDE.md`'s own
+convention that only attributed backtick quotations are byte-exact. **Every correction this pass made
+falls outside that convention**: a count, three figures and a derivation are not quoted expressions,
+so no care in that test could have caught any of them. It was run before and after the edits and was
+green both times, and **no diff line touches either guarded string** — which is what makes it
+confirmation rather than coincidence.
+
+**Mechanisation specified and deliberately not built, with the obstacle enumerated rather than
+counted.** The candidate is a guard asserting every path-shaped backtick span resolves: **124 spans,
+115 resolve**, and an exception list would have to contain exactly these nine, each verified this pass
+to still serve a live purpose —
+
+- `src/extension.ts` — still listed in `tsconfig.json`'s exclude, which is the no-op the prose exists
+  to explain;
+- `src/api/server.ts` — `scripts/sweep.ts` still contains `localhost:3000` twice, the vestigial target
+  the prose exists to warn about;
+- `auditMode.ts` — named inside the bullet recording that the scope-audit gate was deleted (item 111);
+- `.zone/audits/final-summary-recovery-examples.md` — a deliberate record that the pointer was removed
+  and no example file is referenced today;
+- `.zone/../src/x.ts` — an illustrative path in the scope-guard bullet, never a real file;
+- `.zone/keys.json`, `config.json`, `tier-limits.json`, `keys.json` — user-level runtime files
+  (`tier-limits.json` and `keys.json` exist on this machine; `config.json` is optional and absent).
+
+**That list is the specification, and it is also the argument against building it**: every one is a
+deliberate mention-of-absence, so the exception list is a denylist that grows silently as the file
+legitimately references more removed things. This repository already declined that exact trade in the
+positional sweep's own doc comment — "a growing denylist is unauditable and fragile in a way a
+documented, quoted false positive is not" — and the same reasoning applies. The figures are the harder
+half and are not mechanisable at all without executing the code that produces them.
+
+**Bucket: Closed.** For: the audit's question — which of `CLAUDE.md`'s checkable claims are still true
+— is answered, with four corrections landed at `a3fc072a` and the rest verified. Against Actionable
+now: nothing specified remains unbuilt; mechanisation is recorded as declined with its reason, not
+deferred. Against Blocked on data: every check ran and none waited on a missing observation. Against
+Neither: corrections were proposed and made.
+
+**Where this lives:** `CLAUDE.md` itself; `scripts/claudeMdQuotations.test.ts` for the two-string
+checked set; `src/tools/toolDefinitions.ts` for the char counts. See item 161 for the measured
+chars-per-token ratio the derived figure rests on, item 253 for the stale-from-creation shape the
+count shares, and item 111 for the deleted gate one of the nine paths names.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 265 to find out which ones still need something. No index of
+reader the trouble of reading all 266 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (122): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260, 262, 264, 265
+**Closed** (123): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260, 262, 264, 265, 266
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (0):
