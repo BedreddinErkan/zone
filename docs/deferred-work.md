@@ -8186,19 +8186,39 @@ block rather than sorted by it. (3) An outcome measuring **whether investigation
 third is the blocker; the first two are cheap (a run costs a median of $0.0867, p90 $0.4004 across 698
 ledger runs) and worthless without it.
 
-**`gatedBy` reads like the decision and is not, and one entry has already misread it.** The field is
-`investigationFlag === undefined ? "default-non-additive" : "env"` — provenance, recording whether the
-env override was set, not what the gate decided. It is `default-non-additive` in **all 28** records,
-including the two whose `leadVerb` is `add` and whose `mode` is `quick-lexical`. **Item 225 attributes
-it to the wrong gate**, saying the `gatedBy` field belongs to `shouldInvestigate`; that gate's field is
-`mode`. The conclusion item 225 draws is recoverable from `mode` rather than retracted — both branches
-do appear across the 28 — but its stated instrument is misattributed. Nothing in production *reads*
-`gatedBy`: the only non-test reference is the write site, so this is a naming hazard rather than a live
-code defect. **It is deliberately not renamed**: 28 recorded payloads carry the old key, and a rename
-either orphans them or requires rewriting recorded history, which is a worse trade than a documented
-warning. The decision is recorded so the next reader inherits the warning rather than the ambiguity —
-the same class as an iteration cap reporting `token_budget_exceeded` and an envelope status written
-through a cast.
+**`gatedBy` reads like the decision and is not, and the one reader it has misled is this pass.** The
+field is `investigationFlag === undefined ? "default-non-additive" : "env"` — provenance, recording
+whether the env override was set, not what the gate decided. It is `default-non-additive` in **all 28**
+records, including the two whose `leadVerb` is `add` and whose `mode` is `quick-lexical`. Nothing in
+production *reads* it: the only non-test reference is the write site, so this is a naming hazard rather
+than a live code defect. **It is deliberately not renamed**: 28 recorded payloads carry the old key, and
+a rename either orphans them or requires rewriting recorded history, which is a worse trade than a
+documented warning — the same class as an iteration cap reporting `token_budget_exceeded` and an
+envelope status written through a cast.
+
+**RETRACTED — the accusation this paragraph originally carried was wrong, and the retraction is the
+evidence the warning is worth keeping.** As first written at `e7653fae`, this paragraph asserted that
+**item 225** "attributes it to the wrong gate". It does not. Item 225 says the `[zone-plan-mode]` gate
+*is* `shouldInvestigate` — which is true, since that marker is emitted at exactly that decision — and
+its "nothing closed it" is precisely what `gatedBy` measures, because `ZONE_PLAN_INVESTIGATION_FIRST=0`
+would force the gate off and the field would read `"env"`. **Item 115, which 225 summarises, reads the
+field correctly and explicitly**: "the plan-mode gate records what decided it, and across all twenty
+runs it reports `default-non-additive` — the environment override was never once set", and it reads the
+decision separately and correctly as "investigated eighteen times out of twenty". Both entries are
+right; neither needs correcting.
+
+**The cause, which is the transferable part:** the accusation came from checking item 225's
+one-sentence summary of item 115 without reading item 115. Compressing "the gate whose marker this is,
+is `shouldInvestigate`" into "this field is `shouldInvestigate`'s output" is a reading error, not a
+recording error. **A summary of a summary is where attribution drifts.**
+
+**And it strengthens rather than weakens the case for the warning.** The obvious way to write this
+retraction is "a naming hazard with no recorded victim" — but that would invite a future reader to
+treat the hazard as theoretical, and it is not. **There is exactly one victim: this pass, one commit
+earlier.** A field misread by a careful reader working only from the record is precisely what a naming
+hazard predicts, and it happened. The rename decision is unchanged and its justification is now an
+observed misreading rather than a hypothesised one. See item 265 for the sweep that established item
+225 is correct, and item 115 for the reading that was right all along.
 
 **Bucket still Neither, re-decided rather than carried.** For: the entry records a structural fact and
 proposes no fix, and this pass changed what is known without changing what is blocked. Against Closed:
@@ -21295,17 +21315,80 @@ item 261 for the enumeration and the fifth category this triage produced, item 1
 turned out answerable, item 250 for the member that is genuinely unaffordable, and item 253 for the
 worktree whose disposal this pass confirmed was safe.
 
+## 265. Closed — the misattributed-instrument class was swept and has zero instances; the one claimed instance was this session's own reading error
+
+**What it is.** A pass opened to correct **item 225** — recorded as naming an instrument that does not
+measure what it claims — and to sweep for others of its kind. The premise was wrong. Item 225 is
+correct, the misattribution was in this session's own prose one commit earlier, and the sweep found no
+instances at all. The negative is the deliverable.
+
+**Item 225 verified, clause by clause.** It says the `[zone-plan-mode]` gate "is `shouldInvestigate`,
+one level *inside* plan mode; nothing closed it". The marker is emitted at exactly that decision, so
+the identification holds; and "nothing closed it" is what `gatedBy` measures, since an
+`ZONE_PLAN_INVESTIGATION_FIRST=0` override would force the gate off and the field would read `"env"`
+rather than the `default-non-additive` it carries in all 28 records. **Item 115, which item 225
+summarises, states the same reading outright** — "records what decided it… the environment override was
+never once set" — and reads the decision separately as "investigated eighteen times out of twenty",
+which reconciles with the sink today (28 records, 26 `investigate-first`, the same 2 `quick-lexical`).
+Verdict: **correct as written**, needing neither correction nor re-derivation.
+
+**The sweep, with its boundary and its denominator.** Prediction committed before running: **2**
+misattributions, range 1–5. **Measured: 0.** The full population is too large for one pass, so the
+boundary is the load-bearing one — entries cited by `CLAUDE.md`. That is **15 entries, of which 3 name
+a marker in their own body**: 236, 245 and 259, all three verified against the code. Item 236's
+`[zone-repo-guard]` is emitted in exactly the two files it names, matching "active in two halves".
+Item 245's five rejection markers all emit from the tool executor, and its claim that the
+no-valid-blocks record carries "case-insensitive FIND/REPLACE marker presence and trimmed patch length"
+matches the payload field for field. Item 259's `[zone-user-iter-cap]` sits inside the binding branch,
+as claimed.
+
+**The denominator a future pass needs, stated so widening is a decision rather than a guess: 42 of the
+264 entries name a marker at all, and 3 of those 42 were checked — 7%.** What is unchecked is the other
+39 marker-citing entries plus every entry whose instrument is a script or a plain field rather than a
+marker. The boundary was chosen for load-bearing-ness, not convenience, and a wider sweep is a separate
+pass.
+
+**A failed detector, with its two failure modes kept separate because conflating them would overstate
+the negative.** Constancy looked like the natural detector — `gatedBy` is constant, so scan for payload
+fields with many records and one distinct value. It returns **862 fields**, because `event`
+discriminators are constant *by design*; `gatedBy` would have been buried rather than surfaced. That is
+a fact about the class: **constancy does not detect it, reading does.** Separately and unrelatedly, the
+scan carried its own bug — `[zone-api-perf]`'s payload is a **string**, and `Object.entries` split it
+into one pseudo-field per character, inflating the count with entries like `::0 = r`. The second is a
+defect in the instrument, not evidence about the class.
+
+**The reading error, recorded because the mechanism outlives it.** The accusation against item 225 came
+from checking its one-sentence summary of item 115 without reading item 115 itself. **A summary of a
+summary is where attribution drifts.** The fix is procedural and cheap: read the entry being summarised
+before accusing the summary.
+
+**No category added.** The standing rule is that one instance does not promote a category; here there
+are **zero**, and `gatedBy` has two recorded *correct* readings against one incorrect one that this
+session wrote and has now retracted. `recorded-instrument-does-not-measure-the-claim` is therefore not
+added to item 261's five.
+
+**Bucket: Closed.** For: the question this entry asks — is item 225 wrong, and is it one of many — is
+answered in both halves, with the boundary of the answer stated. Against Actionable now: nothing
+specified remains unbuilt. Against Blocked on data: the sweep needed no missing observation and was
+run. Against Neither: a correction was proposed and made, in item 79.
+
+**Where this lives:** no code. `gatedBy` is assigned once in `cli/dispatch.ts` beside the
+`[zone-plan-mode]` emit; the verification used `scripts/markerAttribution.ts` and direct reads of the
+emitters. See item 225 for the entry confirmed correct, item 115 for the reading it summarises, item 79
+for the retraction of the accusation, and item 261 for the four-plus-one categories this class was
+tested against and did not join.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 264 to find out which ones still need something. No index of
+reader the trouble of reading all 265 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (121): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260, 262, 264
+**Closed** (122): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260, 262, 264, 265
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (0):
