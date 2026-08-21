@@ -67,3 +67,43 @@ describe("fixture-driven: known shapes", () => {
     expect(result.gap, "the divergence is the finding — it must not be zero here").not.toBe(0);
   });
 });
+
+/**
+ * One fixture per boundary edge buildAnaphorPattern's own comment names, each pinning a
+ * regression this document itself hit once ("landed there" also matching inside "landed
+ * therefore" — the exact shape of the second fixture below) rather than a hypothetical.
+ */
+describe("fixture-driven: the four word-boundary edges are real boundaries, not accidents", () => {
+  it("left of the verb group: 'closed' inside 'disclosed' does not count as the anaphor", () => {
+    const fixture = "The finding was disclosed there, in the same paragraph.";
+    expect(countLineBased(fixture)).toBe(0);
+    expect(countWrapNormalized(fixture)).toBe(0);
+  });
+
+  it("right of 'there': 'landed there' does not also match inside 'landed therefore' — this document's own drafting hit this once", () => {
+    const fixture = "Only the first change landed therefore the second needed its own fix.";
+    expect(countLineBased(fixture)).toBe(0);
+    expect(countWrapNormalized(fixture)).toBe(0);
+  });
+
+  it("left of 'the' on the above arm: a word ending in 'the' does not supply a phantom referent", () => {
+    const fixture = "Please breathe deeply above the noise before deciding.";
+    expect(countLineBased(fixture)).toBe(0);
+    expect(countWrapNormalized(fixture)).toBe(0);
+  });
+
+  it("right of 'above': 'the item above' does not also match inside 'the item abovementioned'", () => {
+    const fixture = "See the item abovementioned for the full argument.";
+    expect(countLineBased(fixture)).toBe(0);
+    expect(countWrapNormalized(fixture)).toBe(0);
+  });
+
+  it("the boundaries narrow false positives without narrowing real matches — the original three fixtures still count", () => {
+    // Guards the guard the other direction: \b additions that are too aggressive
+    // (e.g. requiring a boundary INSIDE "there" itself) would silently zero out
+    // the legitimate cases above, and every existing test in this file would
+    // still need to keep passing for that regression to be caught here too.
+    expect(countLineBased("The bug was fixed there, in the same commit that introduced it.")).toBe(1);
+    expect(countLineBased("the anomaly branch the hazard above would drive every downstream check.")).toBe(1);
+  });
+});
