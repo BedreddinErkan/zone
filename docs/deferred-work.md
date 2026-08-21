@@ -21573,17 +21573,98 @@ never a text scan, because a marker name in a comment was once mistaken for an e
 196. See item 265 for the sweep this widens, item 261 for the categories this class was tested against and
 did not join, and `CLAUDE.md`'s finish-the-sentence rule for the near-miss pattern this pass completed.
 
+## 268. Closed — the autofix sub-loops rendered fifteen of seventeen tool calls with an empty tail, and the claim was accurate but recorded nowhere
+
+**The claim was true in every clause, which is worth stating after a session that falsified four
+older ones.** Two `onToolCall` handlers in the verification-autofix sub-loops built their transcript
+title from `args.filePath || args.command` — **two** of the seventeen cases `toolCallIdentifyingArg`
+covers. Exactly two sites, byte-identical, in `runLlmPatchFlow.ts`. Fixed at `c4e9238d`.
+
+**It arrived in the handoff record, not in this document — and that is itself a finding about how
+claims travel.** `dirPath` and `onToolCall` both return **zero** hits here under `command grep`, and
+`CLAUDE.md` carries only the general note that "empty-args bugs live there, not in `formatToolArgs`".
+So there was no entry to re-verdict; this one opens the record. A claim that is accurate, specific and
+actionable can live entirely outside the mechanically-validated document, where none of the five
+instruments that police this file can see it — which is the opposite failure from the drifted figures
+of item 266, and equally real.
+
+**Severity is the middle one of the three, established rather than assumed.** The consumer is
+`emitStructuredProgress({ type: "tool_call", title })` → the TUI transcript line. Because the event
+carries a **pre-rendered title rather than the arguments**, the renderer cannot recover what the
+handler dropped: a `list_files` call during autofix rendered as `[fix] list_files: ` with an empty
+tail. Visible degradation — not silent, and not a wrong result, since nothing downstream branches on
+it. **Reachable**: neither sub-loop passes `mode`, `allowedTools` or `capabilityFilter`, so both get
+the default toolset and can call the affected tools. **Unmeasurable in the sink, stated as such rather
+than as zero**: `emitStructuredProgress` writes no marker, so nothing records these calls and a zero
+would mean "nothing counts it", not "it never happens".
+
+**The pre-rendered title is the deeper shape, and this entry records which it is rather than leaving
+it to be rediscovered.** Passing a formatted string instead of `(name, args)` is what makes a
+handler-level omission permanently invisible downstream — no renderer can repair it, and each new
+handler must re-derive the mapping. Five handlers across the tree now hand-roll or delegate that
+mapping four different ways. **Whether the event should instead carry the arguments is not decided
+here and is not built**; it is recorded so a future reader knows the four extraction points are a
+consequence of the event's shape rather than accumulated carelessness. The two-line fix was the right
+scope for one pass.
+
+**The class swept with both instruments, and two of its four members are deliberate.** `command grep`
+and `git grep` agree on **18** `onToolCall` lines in production source, resolving to five handler
+definitions and four distinct extractions: the main flow handler (via the shared helper, 17 cases),
+the two fix loops (2 cases each), `planInvestigation` and `investigationFlow` (their own chains).
+**The last two are excluded on evidence, not taste** — they additionally accumulate context files, and
+they display *different* arguments of `find_references`: one `sourceFile`, one `symbolName`. The tool
+definition settles it, because `find_references` **requires both**, so each is a valid choice of which
+required argument to show, and the shared helper itself prefers `symbolName ?? sourceFile`. A guard
+covering them would assert something untrue. **So the class of "should use the shared helper and does
+not" is exactly the two recorded sites**, and the sweep that could have widened the fix did not.
+
+**Extracted rather than fixed in place, because the inline form is why it stayed wrong.** The sites
+sit roughly 6,900 lines inside one function, where an arrow expression cannot be reached from a test.
+`fixLoopToolCallTitle` makes the rendered string assertable: seven tests pin that `dirPath` and
+`pattern` now appear, and that the two cases the old expression **did** handle are unchanged —
+compared against the old expression's own recomputed output, so "unchanged" is a comparison rather
+than a claim. The mapping's correctness comes free from the helper's existing 23 tests.
+
+**A structural guard was reachable here where one was declined last pass, and the contrast is the
+judgement.** `runLlmPatchFlowToolCallTitles.test.ts` asserts every `onToolCall` handler in that file
+routes through the shared mapping, plus transitivity that the wrapper defers to it. It is file-scoped
+and needs **no exception list at all** — every handler in its scope qualifies. Item 266 declined a
+path-existence guard over `CLAUDE.md` precisely because that one required a denylist which grows
+silently as the file legitimately names more removed things. Same idiom, opposite verdict, decided by
+whether an exception list is needed rather than by appetite.
+
+**Mutation, four aimed in two directions.** Reverting either site is caught, and the two are
+**distinguished by line** — 9903 against 10174 — rather than collapsing, which is the outcome the
+plan predicted and the contrast with the `Math.min`/`Math.max` pair whose collapse was arithmetic.
+Two detector mutations target the guard's own logic: making the finder ignore its property-name
+parameter kills the unmatchable-name fixture, and making it return an empty list kills the
+anti-vacuity fixture — the case where the routing assertion would otherwise pass **vacuously**, since
+an empty handler list trivially satisfies it. That is the failure mode this session has twice found in
+guards that could not fail.
+
+**Bucket: Closed.** For: the omission was real, reachable and consumed; it is fixed at `c4e9238d`,
+pinned behaviourally and structurally, and mutation-verified in both directions. Against Actionable
+now: nothing specified remains unbuilt — the deeper pre-rendering question is recorded as a fact, not
+as a proposed fix. Against Blocked on data: the sink cannot measure incidence, but nothing about the
+defect or its remedy waited on that observation. Against Neither: a fix was proposed and made.
+
+**Where this lives:** `fixLoopToolCallTitle` and `toolCallIdentifyingArg` in
+`src/core/toolCallIdentifyingArg.ts`; the two handlers in `src/core/runLlmPatchFlow.ts`; the guard in
+`src/core/runLlmPatchFlowToolCallTitles.test.ts`. See item 266 for the guard declined on the
+exception-list ground this one clears, and item 261 for the inert-declaration class this defect was
+tested against and did **not** join, since its arguments are genuinely consumed.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 267 to find out which ones still need something. No index of
+reader the trouble of reading all 268 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (124): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260, 262, 264, 265, 266, 267
+**Closed** (125): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260, 262, 264, 265, 266, 267, 268
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (0):
