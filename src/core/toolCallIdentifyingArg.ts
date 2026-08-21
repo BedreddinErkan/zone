@@ -55,3 +55,19 @@ export function toolCallIdentifyingArg(name: string, args: Record<string, unknow
       return "";
   }
 }
+
+/**
+ * The transcript title for a tool call inside a verification-autofix sub-loop.
+ *
+ * Extracted rather than left inline at its two call sites, for two reasons. The sites sit ~6,900
+ * lines deep inside `runLlmPatchFlow`, where an inline arrow cannot be exercised without running the
+ * whole flow — so what it renders was untestable, and stayed wrong. And both sites previously
+ * hand-rolled `args.filePath || args.command`, covering **two** of the seventeen cases
+ * `toolCallIdentifyingArg` knows: a `list_files` call rendered as `[fix] list_files: ` with an empty
+ * tail, and so did `search_in_files` and thirteen others. The `[fix] ` prefix is what distinguishes
+ * these lines from the main loop's, which is why this wraps the shared helper instead of callers
+ * concatenating the prefix themselves.
+ */
+export function fixLoopToolCallTitle(name: string, args: Record<string, unknown>): string {
+  return `[fix] ${name}: ${toolCallIdentifyingArg(name, args)}`;
+}

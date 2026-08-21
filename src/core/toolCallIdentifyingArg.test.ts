@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { toolCallIdentifyingArg } from "./toolCallIdentifyingArg.js";
+import { toolCallIdentifyingArg, fixLoopToolCallTitle } from "./toolCallIdentifyingArg.js";
 import { ZONE_TOOLS } from "../tools/toolDefinitions.js";
 
 // Confirmed by reading agentLoop.ts's control flow: every branch for these
@@ -90,5 +90,48 @@ describe("toolCallIdentifyingArg — search_in_files' legitimate empty case", ()
 describe("toolCallIdentifyingArg — unrecognized tool", () => {
   it("returns empty for a tool name the switch doesn't recognize", () => {
     expect(toolCallIdentifyingArg("totally_unknown_tool", {})).toBe("");
+  });
+});
+
+/**
+ * The verification-autofix sub-loops previously built this title inline as
+ * `args.filePath || args.command`, covering two of the seventeen cases the shared helper knows.
+ * These assert what the fixed line RENDERS, not merely that it routes — the structural guard in
+ * `runLlmPatchFlowToolCallTitles.test.ts` proves the routing, and routing alone has twice this
+ * session been green while the rendered output diverged.
+ */
+describe("fixLoopToolCallTitle — the two cases the old inline expression dropped", () => {
+  it("list_files carries dirPath, where the old expression rendered an empty tail", () => {
+    expect(fixLoopToolCallTitle("list_files", { dirPath: "src/llm" })).toBe("[fix] list_files: src/llm");
+  });
+
+  it("search_in_files carries pattern, where the old expression rendered an empty tail", () => {
+    expect(fixLoopToolCallTitle("search_in_files", { pattern: "TODO" })).toBe("[fix] search_in_files: TODO");
+  });
+});
+
+describe("fixLoopToolCallTitle — the two cases the old inline expression DID handle, unchanged", () => {
+  it("filePath still renders identically to the old expression", () => {
+    expect(fixLoopToolCallTitle("read_file", { filePath: "src/a.ts" })).toBe("[fix] read_file: src/a.ts");
+  });
+
+  it("command still renders identically to the old expression", () => {
+    expect(fixLoopToolCallTitle("run_command", { command: "npm test" })).toBe("[fix] run_command: npm test");
+  });
+
+  /** The old expression's own output, recomputed here, so "unchanged" is a comparison rather than a claim. */
+  it.each([
+    ["read_file", { filePath: "src/a.ts" }],
+    ["run_command", { command: "npm test" }],
+  ] as const)("%s matches what the replaced expression produced", (name, args) => {
+    const old = String((args as Record<string, unknown>).filePath || (args as Record<string, unknown>).command || "");
+    expect(fixLoopToolCallTitle(name, args as Record<string, unknown>)).toBe(`[fix] ${name}: ${old}`);
+  });
+});
+
+describe("fixLoopToolCallTitle — the prefix is what distinguishes these from main-loop lines", () => {
+  it("prefixes [fix] and delegates the argument to the shared helper", () => {
+    const args = { dirPath: "src" };
+    expect(fixLoopToolCallTitle("list_files", args)).toBe(`[fix] list_files: ${toolCallIdentifyingArg("list_files", args)}`);
   });
 });

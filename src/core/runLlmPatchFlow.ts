@@ -131,7 +131,7 @@ import { indexRepoFiles } from "../embeddings/indexRepository.js";
 import { logger, debugLog, errorLog, log } from "../utils/logger.js";
 import { attachRunIdentity } from "../llm/openaiContext.js";
 import { buildToolCallPatch } from "./toolCallPatch.js";
-import { toolCallIdentifyingArg } from "./toolCallIdentifyingArg.js";
+import { toolCallIdentifyingArg, fixLoopToolCallTitle } from "./toolCallIdentifyingArg.js";
 
 const MAX_FINAL_ANSWER_CHARS = 100_000;
 
@@ -9903,7 +9903,7 @@ const initializeTodosFromPlan = (): void => {
           onToolCall: (name, args) => {
             emitStructuredProgress({
               type: "tool_call",
-              title: `[fix] ${name}: ${String((args as any)?.filePath || (args as any)?.command || "")}`,
+              title: fixLoopToolCallTitle(name, args),
               status: "active",
             });
           },
@@ -10174,7 +10174,7 @@ const initializeTodosFromPlan = (): void => {
           onToolCall: (name, args) => {
             emitStructuredProgress({
               type: "tool_call",
-              title: `[fix] ${name}: ${String((args as any)?.filePath || (args as any)?.command || "")}`,
+              title: fixLoopToolCallTitle(name, args),
               status: "active",
             });
           },
