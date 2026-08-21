@@ -18691,8 +18691,10 @@ half of the template it cited.
 
 **Its allowlist guess was wrong in both directions, which is worth more than the count.** It named
 the build output directory and the per-repository state directory as legitimately written. A full
-clean run, inventoried at 5,840 files before and after, **wrote to neither** — so exempting them
-would have blinded the guard in exactly the two directories an accidental write lands in. Meanwhile
+local run, inventoried at 5,840 files before and after, **wrote to neither** — so exempting them
+would have blinded the guard in exactly the two directories an accidental write lands in. (That run
+was described here as "clean". It was clean of *this pass's* changes and not a clean checkout; the
+re-verdict later in this entry is what that distinction cost.) Meanwhile
 `node_modules/.vite/vitest/results.json` **is written on every run** by vitest itself and the entry
 never mentions it. The allowlist that shipped is `node_modules` and `.git`, one stated reason each.
 
@@ -18705,12 +18707,69 @@ allowlist is held once, as bare directory names, so the two halves cannot drift 
 **Observe before enforce, with the observer proven able to speak.** The wrap ran in a record-only
 mode across a full suite first. A deliberate out-of-allowlist write was planted to confirm the
 instrument produces a positive before its silence was trusted — it recorded the path, the fs
-function, and the exact test name. **The real suite's transient write set measured empty.** Records
-append incrementally to a temp directory, never into the tree, so an aborted run cannot yield a
-partial measurement that reads as a clean one. **The empty transient set is a finding about the
-design, stated rather than used as reassurance: on today's tree the inventory half alone would
-suffice**, and the wrap earns its place prospectively, against the write-then-delete shape item 235
-explicitly blesses.
+function, and the exact test name. **The real suite's transient write set measured empty**, on the
+tree it ran on. Records append incrementally to a temp directory, never into the tree, so an aborted
+run cannot yield a partial measurement that reads as a clean one.
+
+### Re-verdict: the measurement was sound and its generality was not, and CI proved it two commits later
+
+**What happened.** CI runs #341 (`cf631311`) and #342 (`ad0a4d0d`) both failed on the guard this entry
+records — `[zone-repo-guard] promises.mkdir tried to write inside the repository tree:
+/home/runner/work/zone/zone/.zone` — as an **unhandled rejection**, while every test still passed.
+The guard was right. A test really does write there, and the local measurements that said otherwise
+were taken on a tree where the write does not happen.
+
+**The cause is not the one it looks like, and the distinction is the whole lesson.** The natural
+reading is that `.zone/` already existed locally, so the write was a no-op an inventory could not
+see. **That reading is wrong**, and both halves of it were checked. The writer is
+`ApprovalModal.tsx`'s `void addDiskTrustPrefix(process.cwd(), prefix)` on the T keypress, and
+`addDiskTrustPrefix` **returns early when the prefix is already trusted**. This machine's
+`.zone/trust.json` has carried `find` — the exact prefix the T.5 approval-modal test trusts — since
+2026-05-23, months before this guard existed. So locally **no write is attempted at all**. The gate is
+file *content*, not directory existence: had `.zone/` existed without that entry, the write would have
+fired locally too. The instruments were not blind; production genuinely behaved differently.
+
+**The inventory's blind spots, measured rather than assumed — and the suspected one does not exist.**
+Three cases run directly against the real walk: a file written into a **pre-existing** directory is
+**caught**; a file written into a **new** directory is **caught**; a **bare `mkdir` with no file inside
+it is invisible**, because the walk records files and never directories. So the inventory half has
+exactly one blind spot beyond the write-then-delete shape already recorded, and it is narrower than
+the obvious guess. A pre-existing directory hides nothing.
+
+**The true clean-tree write set, captured by re-running the observer on a real clone.** Three records,
+all one chain from one test: `mkdir <repo>/.zone`, `writeFile <repo>/.zone/trust.json.tmp`, `rename`
+onto `trust.json` — a completed 151-byte file, not a stray directory. The enforcing wrap aborts that
+chain at its first call, so `.zone/` is never created and the inventory half has nothing to report:
+the "wrap suppresses its partner's evidence" behaviour this entry already records, now demonstrated
+on a real incident rather than a planted control.
+
+**A defect in the observe mechanism itself, found by running it again.** Observe mode suppresses the
+refusal, and this entry's own guard self-tests assert that a repository write **throws**. Running the
+observer on a tree that already carries those self-tests fails three of them and leaves two probe files
+(`__repo_guard_probe__.tmp` at the root and under `src/`) persisted in the tree — the observer
+creating the class of artefact the guard exists to prevent. **Observe mode is not safe to run on a
+tree carrying the self-tests**, and that is a property of how it was built, not of the tree.
+
+**The fix (`e0b1bc35`) is the test, not an exclusion.** `approvalModal.test.tsx` now mocks
+`addDiskTrustPrefix` alone. `.zone/` stays guarded: an exclusion would have blinded the guard to the
+directory production actually writes, which is what the M10 mutation was written to kill. Reproduced
+and verified on a true CI-equivalent clone — `git clone` into `/dev/shm`, `.zone/` absent — with the
+negative control run on that same clone: unfixed the guard fires, fixed it does not, full suite
+480/6137/0.
+
+**Why a linked worktree was not sufficient, recorded because it produced a false positive.** The first
+reproduction used `git worktree`, which shares the main checkout's `.git` — including
+`.git/info/exclude`, a local, never-pushed file that ignores `.claude/scheduled_tasks.lock`. That made
+`gitignoreTrackedFiles.test.ts` fail in the worktree and **not** on CI, an artefact of the instrument
+rather than a defect. A real clone does not inherit it. **A worktree is not a clean checkout.**
+
+**The general defect, which outlives this incident: an allowlist derived from a working tree does not
+describe a clean checkout.** Accumulated local state can change what production *does*, not merely
+mask what it leaves behind — so a measurement can be correctly performed, correctly reported, and
+still wrong about every other machine. **Two of this guard's measurements shared that precondition**:
+the 5,840-file inventory and the observe run's empty transient set. Neither was an arithmetic error;
+both were unrepresentative. Recorded in `CLAUDE.md` as well, because it generalises past this guard to
+any local measurement used as the basis for enforcement.
 
 **The complementarity was proven in a single run, not argued.** A namespace-import transient write
 was caught by the wrap, which threw before the write, so the file never existed and the inventory
