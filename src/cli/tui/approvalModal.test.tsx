@@ -11,6 +11,20 @@ vi.mock("../../api/commandApprovals.js", () => ({
 vi.mock("../../llm/revisionApprovals.js", () => ({ resolveRevisionApproval: vi.fn() }));
 vi.mock("../../llm/planApprovals.js", () => ({ resolvePlanApproval: vi.fn().mockReturnValue({ ok: true }) }));
 
+// The T keypress is a real disk writer: ApprovalModal fires
+// `void addDiskTrustPrefix(process.cwd(), prefix)`, which mkdirs <repo>/.zone. See ledger
+// item 236 for why this surfaced on CI and not locally. Mirrors
+// ModelModal.retention.test.tsx isolating saveDiskModel.
+//
+// Only the writer is replaced. That is defensive rather than load-bearing, measured:
+// replacing the whole module still passes all 12 tests here, because the one read path
+// (loadDiskTrust) is reached only by Composer's `/permissions` branch, which these tests
+// never type. Kept so a future test in this file that does type it still gets the real one.
+vi.mock("../../api/diskTrust.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../api/diskTrust.js")>();
+  return { ...actual, addDiskTrustPrefix: vi.fn().mockResolvedValue(undefined) };
+});
+
 function makeEvt(type: ZoneStructuredProgressEvent["type"], extra: Partial<ZoneStructuredProgressEvent> = {}): ZoneStructuredProgressEvent {
   return { runId: "test-run", ts: Date.now(), type, title: type, ...extra } as ZoneStructuredProgressEvent;
 }
