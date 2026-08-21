@@ -179,6 +179,22 @@ export interface AgentLoopInput {
    * bonus logic is disabled so restricted runtimes stay bounded.
    */
   maxIterationsOverride?: number;
+  /**
+   * `--max-turns`: a USER ceiling on this loop's iterations, distinct from `maxIterationsOverride`.
+   *
+   * Kept as its own field on purpose. `maxIterationsOverride` is the dispatcher's channel: it
+   * disables escalation as a side effect, and soft promotion is *designed* to relax it (that is
+   * what promotion is for). A user who types `--max-turns 3` and gets 45 because promotion fired
+   * has been given a flag that parses, reads honestly and means nothing — the exact class ledger
+   * item 258 closed. So this one binds after the tier block AND bounds promotion.
+   *
+   * Scope is this loop only. Subagents keep their own `subagentTypeMaxIterations` budgets and do
+   * not inherit it — a deliberate asymmetry against the deferred `--max-budget-usd`, where subagent
+   * spend *does* count against the parent because `TokenBudgetMeter.snapshot().costUsd` already
+   * returns `_iterCostAccumulator.total_cost + _subagentCostTotal`. Turns are per-loop; dollars are
+   * per-run. Pinned by `agentLoop.userMaxTurns.test.ts`, not left to prose.
+   */
+  userMaxTurns?: number;
   coachingBudgetOverride?: number;
   excludeTools?: ReadonlySet<string>;
   pipelineApplied?: boolean;
@@ -2713,6 +2729,30 @@ async function runAgentLoopScoped(input: AgentLoopInput, stats: LoopRunStats): P
       input.maxIterationsOverride > 0 &&
       input.maxIterationsOverride < iterationBudget.maxIterationsForRun) {
     iterationBudget = { ...iterationBudget, maxIterationsForRun: input.maxIterationsOverride };
+  }
+
+  // `--max-turns` (item 259). Applied to the budget itself rather than only to the loop condition,
+  // so every display and telemetry site downstream (`Iteration N/M`, `totalIter`) reports the real
+  // ceiling instead of a computed one the run will never reach.
+  //
+  // Clamp-down only, matching the override guard directly above: a value at or above the computed
+  // budget lowers nothing. `parseMaxTurns` already rejects 0, negatives and non-numerics at the CLI
+  // boundary, so the `> 0` shape that guard needs for internal callers is not repeated here; the
+  // `<` comparison is what makes this a ceiling rather than an override upward.
+  if (typeof input.userMaxTurns === "number" &&
+      input.userMaxTurns < iterationBudget.maxIterationsForRun) {
+    // Emitted only when the user cap actually BINDS, so its presence answers "which constraint
+    // ended this run" without a second reason code. `terminationReason` deliberately stays
+    // `max_iterations`: the loop exits because `iter >= maxIterationsForRun`, which is exactly what
+    // that reason means, and a new union member would touch 13 production consumers for no
+    // semantic gain.
+    log("[zone-user-iter-cap]", JSON.stringify({
+      runId: input.runId ?? null,
+      userMaxTurns: input.userMaxTurns,
+      computedMaxIterations: iterationBudget.maxIterationsForRun,
+      tier: input.taskClassification?.tier ?? "medium",
+    }));
+    iterationBudget = { ...iterationBudget, maxIterationsForRun: input.userMaxTurns };
   }
 
   const effectiveTokenBudgetCap = tierLimits?.tokenBudgetCap ?? TOKEN_BUDGET_CAP;
@@ -5301,7 +5341,15 @@ Example:
           promotedAtIter = iter + 1;
           iterationBudget = {
             ...iterationBudget,
-            maxIterationsForRun: input.maxIterations ?? BASE_MAX_ITERATIONS,
+            // Bounded by `--max-turns` (item 259). Promotion exists to relax a *dispatcher*-sized
+            // cap when a run turns out harder than its archetype predicted; it is not licence to
+            // exceed a ceiling the user asked for explicitly. Without this Math.min, `--max-turns 3`
+            // on a targeted_fix task legitimately runs to `iterBudgetComputed` — 45 at the default
+            // medium tier.
+            maxIterationsForRun: Math.min(
+              input.maxIterations ?? BASE_MAX_ITERATIONS,
+              input.userMaxTurns ?? Number.POSITIVE_INFINITY,
+            ),
           };
           effectiveMaxCoachingAttempts = MAX_SELF_CORRECTION_ATTEMPTS;
           emitArchetypePromoted({

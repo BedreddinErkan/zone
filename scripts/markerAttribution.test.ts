@@ -322,18 +322,24 @@ describe("self-exclusion — the tool does not inventory its own fixtures", () =
  * shifts these numbers should make this test fail and prompt a review, not silently drift.
  */
 describe("drift check — today's figures against the real tree", () => {
-  it("411 marker names; emitter-count distribution zero=42 one=349 several=20; 24 hazards", () => {
+  it("412 marker names; emitter-count distribution zero=42 one=350 several=20; 24 hazards", () => {
     // Re-derived via this file's own scanTree/hazards, not hand-added to the prior 410/349 —
     // the repository-tree write guard (ledger item 236) landed one new marker,
-    // `[zone-repo-guard]`, so the total moves 410->411. It lands in `several`, not `one`:
+    // `[zone-repo-guard]`, so the total moved 410->411. It lands in `several`, not `one`:
     // BOTH halves of that guard emit it — homeGuard.ts refuses the write at the call and
-    // globalHome.ts reports the inventory diff at teardown — so `several` moves 19->20 and
-    // `one` is unchanged. That is deliberate co-emission of one marker by one guard, not a
+    // globalHome.ts reports the inventory diff at teardown — so `several` moved 19->20 and
+    // `one` was unchanged. That is deliberate co-emission of one marker by one guard, not a
     // hazard, and hazards() agrees at 24 with no row for this marker. An earlier version of
     // this comment predicted `one` moving to 350 by assuming a single emitter; the scan
     // corrected it, which is the reason these figures are re-derived rather than reasoned.
+    //
+    // 411->412: ledger item 259's `--max-turns` added `[zone-user-iter-cap]`, emitted at the one
+    // site where the user's ceiling actually binds. Unlike `[zone-repo-guard]` above this one
+    // does land in `one` (`src/llm/agentLoop.ts` alone) so `one` moves 349->350 — re-derived from
+    // the scan rather than reasoned from the single-emitter assumption that misled the earlier
+    // comment, and `hazards()` still agrees at 24 with no row for it.
     const result = scanTree(readTrackedFiles());
-    expect(result.size).toBe(411);
+    expect(result.size).toBe(412);
 
     const dist = { zero: 0, one: 0, several: 0 };
     for (const attr of result.values()) {
@@ -342,7 +348,7 @@ describe("drift check — today's figures against the real tree", () => {
       else if (c === 1) dist.one++;
       else dist.several++;
     }
-    expect(dist).toEqual({ zero: 42, one: 349, several: 20 });
+    expect(dist).toEqual({ zero: 42, one: 350, several: 20 });
     expect(hazards(result)).toHaveLength(24);
   });
 

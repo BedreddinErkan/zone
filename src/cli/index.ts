@@ -1,6 +1,6 @@
 #!/usr/bin/env -S node --enable-source-maps
 
-import { Command } from "commander";
+import { Command, InvalidArgumentError } from "commander";
 import path from "node:path";
 import process from "node:process";
 import { promises as fs } from "node:fs";
@@ -96,7 +96,6 @@ type CliOptions = {
   maxTurns?: number;
   maxBudgetUsd?: number;
   permissionMode?: string;
-  addDir?: string[];
   forkSession?: boolean;
 };
 
@@ -129,7 +128,28 @@ export function buildCliFlags(options: CliOptions, isHeadless: boolean, argv: st
     resume: options.resume,
     permissionMode: options.permissionMode,
     trust: parseTrustFlag(argv),
+    maxTurns: options.maxTurns,
   };
+}
+
+/**
+ * Commander parser for `--max-turns`. Rejects at parse rather than silently ignoring, which is what
+ * the internal ceiling guard in `agentLoop.ts` does with a non-positive override (deliberately, and
+ * commented there — a caller/config bug must not pull the budget to 0 and end the run with no LLM
+ * call). That is right for an internal caller and wrong for a user flag: a person who types
+ * `--max-turns 0` has made a mistake and should be told, not silently given the tier default.
+ *
+ * Bare `parseInt` as the parser — what this replaced — returns `NaN` for `abc` and accepts `0` and
+ * negatives, all three of which then vanish into that same silent-ignore branch.
+ */
+export function parseMaxTurns(value: string): number {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 1) {
+    throw new InvalidArgumentError(
+      `--max-turns must be a positive whole number (got "${value}").`
+    );
+  }
+  return n;
 }
 
 // ---------------------------------------------------------------------------
@@ -1197,13 +1217,12 @@ export async function run(): Promise<void> {
     .option("-p, --print", "Headless one-shot mode (non-interactive, no TUI)")
     .option("-c, --continue", "Resume the most recently interrupted run (envelope-first)")
     .option("-r, --resume [id]", "Resume a run by session ID or prefix; bare flag resumes most recent")
-    .option("-n, --name <name>", "Name this session (stored for TUI.6)")
+    .option("-n, --name <name>", "Name this session (not implemented — currently ignored)")
     .option("--output-format <fmt>", "Output format: text | json", "text")
-    .option("--max-turns <n>", "Maximum agent turns", parseInt)
-    .option("--max-budget-usd <n>", "Maximum spend in USD", parseFloat)
+    .option("--max-turns <n>", "Maximum agent turns for the main loop; subagents keep their own budgets", parseMaxTurns)
+    .option("--max-budget-usd <n>", "Maximum spend in USD (not implemented — currently ignored)", parseFloat)
     .option("--permission-mode <mode>", "Permission mode: plan starts the TUI in plan mode (investigate → approve → execute)")
-    .option("--add-dir <path...>", "Additional writable root directories")
-    .option("--fork-session", "Fork current session (coming in TUI.6)")
+    .option("--fork-session", "Fork current session (not implemented)")
     .option("--task <text>", "Task or change request to analyze [deprecated: use positional arg]")
     .option("--repo <path>", "Target repository path", process.cwd())
     .option("-m, --model <id>", "Model override (e.g. claude-sonnet-4-6)")

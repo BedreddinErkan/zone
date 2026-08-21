@@ -28,6 +28,8 @@ export interface CliConfig {
   webSearchEnabled?: boolean;
   /** --trust (true) / --no-trust (false) / neither (undefined) */
   trust?: boolean;
+  /** --max-turns: user ceiling on MAIN-loop iterations (parent loop only). */
+  maxTurns?: number;
 }
 
 export interface CliFlags {
@@ -46,6 +48,9 @@ export interface CliFlags {
   permissionMode?: string;
   /** --trust (true) / --no-trust (false) / neither (undefined) */
   trust?: boolean;
+  /** --max-turns: user ceiling on MAIN-loop iterations. Subagents keep their own type-sized
+   *  budgets and do not inherit this — see ledger item 259. */
+  maxTurns?: number;
 }
 
 type ZoneConfigFile = {
@@ -154,6 +159,7 @@ export function loadCliConfig(
     webSearchEnabled: diskModel?.webSearchEnabled ?? true,
     summaryFormat: diskModel?.summaryFormat,
     trust: flags.trust,
+    maxTurns: flags.maxTurns,
   };
 }
 

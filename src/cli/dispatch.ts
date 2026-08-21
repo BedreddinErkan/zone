@@ -711,6 +711,7 @@ export async function runOneShotInner(
             userApiKey,
             provider: effectiveConfig.provider,
             forceTier: effectiveConfig.forceTier,
+            userMaxTurns: effectiveConfig.maxTurns,
             mode: "patch",
             summaryFormat: effectiveConfig.summaryFormat,
             priorSessionSummary: opts.priorSessionSummary,
@@ -771,6 +772,7 @@ export async function runOneShotInner(
         userApiKey,
         provider: effectiveConfig.provider,
         forceTier: effectiveConfig.forceTier,
+        userMaxTurns: effectiveConfig.maxTurns,
         mode: "patch",
         preGeneratedPlan: planForExecution ?? opts.preGeneratedPlan,
         gateLeadVerb,
@@ -874,7 +876,7 @@ export async function runHeadless(
       const ac = new AbortController();
       process.once("SIGINT", () => { rejectPendingApprovalsForRun(runId); rejectPendingRevisionsForRun(runId); clearTrustedCommandsForRun(runId); ac.abort(); });
       const userApiKey = config.provider === "openai" ? config.openaiApiKey : config.anthropicApiKey;
-      result = await runLlmPatchFlow({ task, repoPath: config.repoPath, runId, sessionId, onProgress: nullSink.onProgress, abortSignal: ac.signal, userApiKey, provider: config.provider, forceTier: config.forceTier, mode: "patch" }).finally(() => { rejectPendingApprovalsForRun(runId); rejectPendingRevisionsForRun(runId); clearTrustedCommandsForRun(runId); });
+      result = await runLlmPatchFlow({ task, repoPath: config.repoPath, runId, sessionId, onProgress: nullSink.onProgress, abortSignal: ac.signal, userApiKey, provider: config.provider, forceTier: config.forceTier, userMaxTurns: config.maxTurns, mode: "patch" }).finally(() => { rejectPendingApprovalsForRun(runId); rejectPendingRevisionsForRun(runId); clearTrustedCommandsForRun(runId); });
     } else {
       result = await runOneShotInner(task, config, runId, { sessionId });
     }

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildCliFlags } from "./index.js";
-import { buildRealCommand } from "./cliOptionsIntrospection.js";
+import fs from "node:fs";
+import path from "node:path";
+import ts from "typescript";
+import { Command } from "commander";
+import { buildCliFlags, parseMaxTurns } from "./index.js";
+import { buildRealCommand, extractDeclaredOptionStrings } from "./cliOptionsIntrospection.js";
 
 /**
  * The regression test for ledger item 258, and the reason it exists rather than extending
@@ -63,5 +67,74 @@ describe("the real commander boundary reaches CliFlags correctly (item 258)", ()
     expect(flags.noRevision).toBe(true);
     expect(flags.noColor).toBe(true);
     expect(flags.verbose).toBe(true);
+  });
+});
+
+/**
+ * `--max-turns` (ledger item 259). `buildRealCommand` registers every declaration without its
+ * parser, so a value would arrive as a raw string there; these cases pair index.ts's OWN declaration
+ * string with index.ts's OWN exported parser, so neither is a reimplementation. The pairing itself —
+ * that the declaration actually passes `parseMaxTurns` — is the one thing those two facts cannot
+ * establish between them, so it is asserted structurally over the AST below rather than assumed.
+ */
+describe("--max-turns reaches CliFlags through the real parser (item 259)", () => {
+  const MAX_TURNS_DECL = extractDeclaredOptionStrings().find((d) => d.startsWith("--max-turns"))!;
+
+  function parseTurns(argv: string[]): unknown {
+    const program = new Command();
+    program.exitOverride();
+    program.option(MAX_TURNS_DECL, "x", parseMaxTurns);
+    program.parse(argv, { from: "user" });
+    return program.opts()["maxTurns"];
+  }
+
+  it("the declaration still exists in index.ts and is the one under test", () => {
+    expect(MAX_TURNS_DECL).toBe("--max-turns <n>");
+  });
+
+  it("--max-turns 5 arrives as the number 5, not the string \"5\"", () => {
+    expect(parseTurns(["--max-turns", "5"])).toBe(5);
+  });
+
+  it("unset leaves maxTurns undefined — no accidental default ceiling", () => {
+    expect(parseTurns([])).toBeUndefined();
+  });
+
+  it.each(["0", "-1", "abc", "2.5", ""])(
+    "--max-turns %s is rejected at parse rather than silently ignored",
+    (bad) => {
+      expect(() => parseTurns(["--max-turns", bad])).toThrow(/positive whole number/);
+    }
+  );
+
+  it("reaches CliFlags.maxTurns through buildCliFlags", () => {
+    expect(buildCliFlags({ maxTurns: 7 }, false, ["node", "zone"]).maxTurns).toBe(7);
+  });
+
+  it("index.ts's own --max-turns declaration passes parseMaxTurns as its parser (the pairing)", () => {
+    const src = fs.readFileSync(path.resolve(import.meta.dirname, "index.ts"), "utf8");
+    const sf = ts.createSourceFile("index.ts", src, ts.ScriptTarget.Latest, true);
+    let parserArg: string | null = null;
+    const visit = (node: ts.Node) => {
+      if (
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        node.expression.name.text === "option" &&
+        node.arguments.length >= 3 &&
+        ts.isStringLiteral(node.arguments[0]!) &&
+        node.arguments[0].text.startsWith("--max-turns")
+      ) {
+        parserArg = node.arguments[2]!.getText();
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sf);
+    expect(parserArg).toBe("parseMaxTurns");
+  });
+});
+
+describe("--add-dir is gone (item 259)", () => {
+  it("no longer appears in index.ts's declared options", () => {
+    expect(extractDeclaredOptionStrings().some((d) => d.includes("--add-dir"))).toBe(false);
   });
 });

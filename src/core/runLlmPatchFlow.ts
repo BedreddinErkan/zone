@@ -4370,6 +4370,10 @@ export async function runLlmPatchFlow(input: {
   preGeneratedPlan?: ExecutionPlan;
   /** L.4.1: per-request tier override forwarded from API body. Beats ZONE_FORCE_TIER env. */
   forceTier?: TaskTier;
+  /** `--max-turns`: user ceiling on MAIN-loop iterations. Deliberately NOT routed onto
+   *  `maxIterationsOverride` — that field is the dispatcher's channel and disables escalation as a
+   *  side effect, and soft promotion is allowed to relax it. See ledger item 259. */
+  userMaxTurns?: number;
   /** Phase AS: pre-computed classification from server.ts audit gate. Skips re-classification. */
   preClassifiedTask?: TaskClassification;
   /** dispatch.ts's plan-mode gate decision — forwarded to agentLoopBaseInput so
@@ -5828,6 +5832,7 @@ const initializeTodosFromPlan = (): void => {
       gateLeadVerb: input.gateLeadVerb ?? null,
       gateMode: input.gateMode,
       forceTier: input.forceTier,
+      userMaxTurns: input.userMaxTurns,
       // J.5: thread the prior run's rollback summary (if any) so the
       // agent reads APPLY_ROLLED_BACK markers from previous attempts
       // before re-investigating. Empty string is treated as no-op
