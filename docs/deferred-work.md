@@ -18821,9 +18821,73 @@ specified remedy is corrected rather than quietly replaced. Against Actionable n
 Against Blocked on data: the two observations already existed. Against Neither: a fix was proposed
 and built. **Commit `cf631311`.**
 
+### The observer's own self-defeat, fixed
+
+**The defect the CI re-verdict recorded above stayed open until this pass.** Observe mode never
+throws, so the three self-tests that write a probe file and assert a throw failed under it — and
+two of those failures left the probe file behind, the guard's own tests creating exactly the
+artefact class the guard exists to prevent.
+
+**One cause, established rather than assumed.** All three failures trace through the identical
+path: `wrap()`/`wrapAsync()` → `handleRepoWrite()` → the `if (REPO_OBSERVE)` branch records and
+returns, never reaching `refuseRepo`. Not two causes wearing one symptom — one branch, three call
+sites.
+
+**The fix makes each write-attempting self-test branch on the real mode rather than hardcoding
+"always throws."** A new test-only export, `_repoGuardObserveModeForTest()`, lets each test assert
+what is actually true in whichever mode it runs under; the write itself always executes (so the
+cleanup path is genuinely exercised, not skipped), wrapped in `try/finally` so
+`fs.existsSync`/`fs.unlinkSync` on the probe path run unconditionally. This makes the file green in
+**both** modes rather than accepting three unexplained failures as a documented cost of running
+observe mode at all.
+
+**Verified behaviourally, across a real process boundary, not by tracing the source.**
+`REPO_OBSERVE` is read once at module load, so no in-process toggle can exercise both branches in
+one vitest worker. `repoGuardObserveMode.test.ts` spawns `homeGuard.test.ts`'s own "repo guard"
+tests as a real subprocess (`spawnSync`, the same pattern `item138Guards.test.ts`'s own subprocess
+test already uses) with `ZONE_REPO_GUARD_OBSERVE=1`, then checks the repository tree directly from
+the parent process — independent of whatever the child process's own assertions report, the same
+discipline as checking a script's real stdout rather than trusting its self-description. This is
+also what proves the cleanup's own `fs.unlinkSync` genuinely reaches the real filesystem under
+observe mode (recorded-then-allowed, per `handleRepoWrite`'s own branch) rather than being silently
+absorbed somewhere in the wrap: the file is gone afterward, which only a real delete produces.
+
+**A masking bug the mutation testing found, not merely a mutation it caught.** The predicted
+mutation — delete the `finally` from one self-test, confirm the file survives — was first run
+against the test whose target (`__repo_guard_probe__.tmp`) is shared with a third, unrelated test
+in the same block. It **survived**: the third test's own later write-and-cleanup to the identical
+path silently absorbed the missing cleanup, and the automated check reported clean. Diagnosed
+before being called inert, per the standing rule: the shared target was the cause, not a flaw in
+the check. Fixed by giving that third test its own distinct probe name
+(`__repo_guard_probe_named__.tmp`); the identical mutation on the now-unmasked test then killed
+cleanly. Recorded because the survival was a genuine coupling defect in the test suite, found by
+running the mutation rather than by reading the tests.
+
+**A second thing the same mutation run surfaced: the cleanup fallback can itself be blocked.**
+`repoGuardObserveMode.test.ts`'s own best-effort cleanup (in case the invariant it tests ever
+regresses) calls the same guarded `fs.unlinkSync` — and the *outer* process running this file is
+itself normally enforcing, so that fallback call throws too. Left unguarded, that throw replaced
+the real assertion failure as what the test reported. Wrapped in its own try/catch, matching
+`observeRepoWrite`'s own "never let bookkeeping fail a test run" convention — confirmed by running
+the regression: the clean assertion failure surfaces, and `globalHome.ts`'s own teardown inventory
+independently catches and names the same stray file in the same run, so nothing is silently lost
+even though the in-test fallback cannot always act on it.
+
+**Whether observe mode should exist at all, decided rather than defaulted.** Kept, hardened, rather
+than removed. It has been used twice — to set this entry's allowlist, and to re-derive the true
+write set during the CI fix — and is gated behind an unset-by-default env var, zero cost to a
+normal run. The measurement it produces is not reconstructible from this document alone if what
+writes into `.zone/` during tests ever changes; rebuilding the mechanism from scratch would be
+low-cost (both revisions of this entry carry the full rationale) but not free, and the try/finally fix is
+small enough that the reusable-instrument value wins the trade.
+
+**Bucket: still Closed**, the defect this section fixes was itself recorded in this entry's own
+prior revision, not a new item. **Commit `4378dd72`.**
+
 **Where this lives:** the interception half in `src/test/setup/homeGuard.ts`, the inventory half in
-`src/test/setup/globalHome.ts`, the shared allowlist in `src/test/testHome.ts`, and their self-tests
-in `src/test/setup/homeGuard.test.ts` and `src/test/setup/repoInventoryGuard.test.ts`. See item 235
+`src/test/setup/globalHome.ts`, the shared allowlist in `src/test/testHome.ts`, their self-tests in
+`src/test/setup/homeGuard.test.ts` and `src/test/setup/repoInventoryGuard.test.ts`, and the
+cross-process observe-mode invariant in `src/test/setup/repoGuardObserveMode.test.ts`. See item 235
 for the two incidents and item 233 for the first in detail.
 
 ## 237. Closed — OpenAI's reasoning summary is now requested and surfaced, gated on model capability rather than on the condition this entry originally specified
@@ -20338,11 +20402,50 @@ measurement is complete; what is missing is a decision, not an observation.
 item 107 for the excluded-tree error count this adds a named cost to, and item 239 for the guard
 placement that surfaced it.
 
+## 257. Neither — the positional sweep carries the same unanchored-boundary class the anaphor sweep was just hardened against
+
+**What it is.** `deferredWorkAnaphorSweep.ts`'s `buildAnaphorPattern()` had no word boundary after
+`there`, so one of the six locked verbs directly followed by `there` also matched inside that same
+verb followed by `therefore` — a real false positive this document's own drafting produced once
+(a locked verb immediately preceding an unrelated `there`-prefixed word, with only a space between
+them) and caught only by rewriting the sentence, not the pattern. Fixing it meant sweeping all four
+open edges of that pattern (left of the verb group, right of `there`, left of `the`, right of
+`above`) rather than patching the one edge that had bitten.
+
+**Noticed while sweeping, not fixed here.** `deferredWorkPositionalSweep.ts`'s own pattern —
+`` `the ([a-z]+ ){1,4}(above|below)` `` — has the identical class of gap on its own `the`/
+`above|below` edges: nothing anchors the left side of `the` or the right side of `above`/`below`,
+so the same two failure shapes apply (a word ending in `"the"` supplying a phantom match; `above`
+or `below` matching as a prefix of a longer word). Not checked against the live document for
+current contamination — that establish belongs to whoever picks this up, the same way the anaphor
+sweep's own check was a span-diff against the real file, not an assumption.
+
+**Why this is recorded separately rather than folded into the anaphor fix.** Widening a fix's scope
+to a second stored instrument without that instrument's own establish pass is exactly the kind of
+unrequested expansion this document's own practice argues against — item 254's original version is
+the standing example of a fix's scope outrunning what was actually checked. This entry exists so
+the finding is not lost to a report that nobody reads again, which is the fate the "claims that
+turned out wrong" sections of several passes have already caught once.
+
+**Bucket: Neither.** A structural fact is recorded with no fix proposed — the boundary gap is real
+by construction (mirrors the anaphor sweep's own, already demonstrated to be exploitable), but
+whether it is currently contaminating `POSITIONAL_LINE_BASED_ABSOLUTE`/
+`POSITIONAL_WRAP_NORMALIZED_ABSOLUTE` (114/128) is unestablished. Against Actionable now: no remedy
+is specified, because the remedy is only the boundary anchors — trivial — and the actual work is
+the establish (does it move the count, the same span-diff discipline the anaphor fix used), which
+has not been done. Against Blocked on data: the observation is reachable in minutes by the same
+method already demonstrated; nothing is waiting on an external event.
+
+**Where this lives:** the pattern in `scripts/deferredWorkPositionalSweep.ts`'s
+`buildPositionalPattern`; the precedent fix in `scripts/deferredWorkAnaphorSweep.ts`'s
+`buildAnaphorPattern`. See item 126 for the anaphor sweep's own convention and the boundary fix
+this entry's finding came from.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 256 to find out which ones still need something. No index of
+reader the trouble of reading all 257 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -20360,12 +20463,12 @@ better read as "nothing currently specified", which is a weaker and more accurat
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (14): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250
 
-**Neither — a structural fact recorded, with no fix proposed** (127): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (128): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152, 154, 155, 158,
 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199, 200, 201, 202, 205,
-206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230, 232, 243, 244, 247, 248, 249, 254, 256
+206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230, 232, 243, 244, 247, 248, 249, 254, 256, 257
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
