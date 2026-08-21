@@ -20391,6 +20391,19 @@ individual tests to `scripts/` to gain checking would scatter tests by their typ
 rather than by subject. What this entry contributes is the measurement and the named cost, so that
 whoever attempts item 107 knows these exist and which four bite.
 
+**Two amendments from the pass that enumerated the wider inert class (items 258/259), recorded here
+rather than duplicated into a new entry.** First, **`COST_GATE_USD` is not a peer of these eleven**
+and had been listed alongside them undifferentiated: it lives in
+`scripts/notice-regression-probe.mjs`, a probe rather than production, so its structural silence
+costs a measurement's confidence and never a user's. Second, **`supportsVision` is three things at
+once, not the two the enumeration's own scheme allowed for.** It is a field declared on the model
+type and set on **zero** catalog entries, and it is read exactly once, as
+`entry.supportsVision !== false` — so the predicate structurally always returns `true`. That makes it
+an inert field *and* an assertion that cannot fail *and* — the reading the scheme missed — **a
+capability check that silently grants the capability to every model**. If anything ever gates on it,
+it is not merely inert; it is permissive by construction. That third reading is why the
+three-category scheme the enumeration started with was revised rather than forced to fit.
+
 **Bucket: Neither.** A structural fact is recorded with no fix proposed. Against Closed: nothing was
 built and nothing was decided. Against Actionable now: no remedy is specified, deliberately — the
 candidates conflict and the choice belongs with item 107's own attempt. Against Blocked on data: the
@@ -20472,11 +20485,150 @@ Neither: a fix was proposed and built. **Commit `43808cc4`.**
 `scripts/deferredWorkAnaphorSweep.ts`'s `buildAnaphorPattern`. See item 126 for the anaphor sweep's
 own convention and the boundary fix this entry's finding came from.
 
+## 258. Actionable now — two CLI flags are read under a property name the parser never produces, and an unchecked generic cast is why nothing caught it
+
+**These are not inert declarations. They are live defects.** Everything about `--no-revision` and
+`--no-color` is correct — the option is declared, commander parses it, a typed field carries it
+through `loadCliConfig`, a consumer acts on it, and a unit test asserts that consumer works. One
+line at the boundary reads a property name commander does not set, and the whole chain silently
+carries `undefined`.
+
+| read | at | what commander actually sets |
+|---|---|---|
+| `options.noRevision` | `src/cli/index.ts`, in the `cliFlags` literal | `revision: false` |
+| `options.noColor` | same literal | `color: false` |
+
+**Established empirically, not from commander's documentation.** Building a `Command` from the
+repository's own 38 declared option strings and parsing `--no-revision --no-color --no-trust`
+returns `{"revision":false,"color":false,"trust":false}` — all three `no*` properties are
+`undefined`. Commander's rule for a `--no-x` flag is to set `x` to `false`, never to create `noX`.
+
+**The sweep is complete in both directions, and the negative half is a positive result rather than a
+scan that stopped at its first two hits.** Comparing the 37 keys commander produces against the 31
+distinct properties read off `options` (AST, receiver-scoped): **29 reads confirmed produced, each
+one individually named in the pass record; exactly 2 orphaned.** No third orphan exists today.
+
+**The class, which is larger than the two symptoms.** `program.opts<CliOptions>()` is an unchecked
+generic cast against a **hand-written** `CliOptions` interface that declares `noRevision?: boolean`,
+`noColor?: boolean` and `noTrust?: boolean` — none of which commander produces. A generic type
+argument is an assertion, not a check, so any property name typechecks whether the parser produces
+it or not. That is why `tsc` sees nothing, review sees nothing, and the defect survives indefinitely.
+**The per-flag one-line fix is a stopgap; the class fix is making the cast checkable** — either by
+deriving the option type from the declarations rather than hand-writing it, or by a structural guard
+asserting every property read off `options` is in the produced set. The guard is straightforwardly
+reachable (this entry's own sweep is that guard, minus a test wrapper); the derivation is the
+stronger of the two because it also deletes a removed flag's type field automatically.
+
+**Why the unit tests cannot catch it, which is the same defect class one level up.**
+`config.test.ts` has `--no-revision sets noRevision=true` and `NO_COLOR=1 sets noColor=true`; both
+call `loadCliConfig({ noRevision: true })` / `({ noColor: true })` with a **hand-built object**,
+bypassing commander entirely. They correctly assert the plumbing works given the right input, and
+never assert the input arrives — assertions structurally incapable of failing on the actual defect,
+which is item 256's own shape appearing inside the tests meant to guard this one.
+
+**Why `--no-trust` escaped, and it is evidence rather than luck.** The same file reads
+`trust: parseTrustFlag(process.argv)`, parsing argv directly, under a comment calling that "the sole
+authoritative source for the three-state value." Someone hit this class before and fixed exactly one
+flag without generalising it.
+
+**Severity, measured per flag rather than assumed equal.**
+- `--no-revision` is a **confusing no-op, not a wrong outcome.** With the suppression branch dead,
+  a TTY user is prompted (`Apply revision? [y/N]`, defaulting to reject) and a non-TTY user hits the
+  next branch, which rejects anyway. A user who follows Zone's own advice never ends up with a
+  revision they tried to suppress — they get asked instead of obeyed. **The advice is real and
+  user-facing**: the non-TTY branch prints `Use --yes to approve or --no-revision to suppress`,
+  recommending a flag that does nothing, at the exact moment it has already done the thing the flag
+  would have done.
+- `--no-color` **is a wrong outcome**: every hand-rolled ANSI path in `sink.ts` and `approvals.ts`
+  keeps emitting colour. It is saved only by an undocumented back door — `loadCliConfig` reads
+  `flags.noColor === true || envStr("NO_COLOR") === "1"`, so **`NO_COLOR=1` works while `--no-color`
+  does not**, and the test suite covers the half that works.
+
+**Bucket: Actionable now.** The remedy is specified — two one-line boundary fixes, plus the class
+fix — and nothing new needs to be learned first. Against Blocked on data: the observation is made and
+recorded here. Against Neither: a fix is proposed. Against Closed: nothing is built, deliberately —
+this is a behaviour change (`--no-color` reaches every ANSI-emitting CLI path) and the pass that
+found it was an enumeration pass.
+
+**Ordering, and it matters.** This entry lands **before** item 259. If the class fix takes the
+type-derivation form, item 259's removal of `--add-dir` becomes safe by construction: deleting the
+declaration deletes its type field, so no leftover read can survive. Under the weaker guard form
+(read ⊆ produced) the two entries are independent, because a removal deletes the read along with the
+declaration and the guard has nothing to fire on. **Neither ordering is unsafe; the type-derivation
+form simply makes 259 cheaper**, which is the reason to do this one first.
+
+**Where this lives:** the `cliFlags` literal and the `CliOptions` interface in `src/cli/index.ts`;
+the consumers in `src/cli/config.ts`, `src/cli/approvals.ts` and `src/cli/sink.ts`; the tests that
+cannot fail in `src/cli/config.test.ts`. See item 256 for the assertion-that-cannot-fail class those
+tests belong to, and item 259 for the neighbouring flags that are never read at all.
+
+## 259. Actionable now — five CLI flags are parsed and never read, and two of them point at a milestone that already shipped without them
+
+**The neighbouring half of item 258.** These five are declared, parsed by commander, and read
+nowhere — distinct from item 258's two, which *are* read, under a name that does not exist.
+
+| flag | its own description | verdict |
+|---|---|---|
+| `--max-budget-usd <n>` | "Maximum spend in USD" | **implement** |
+| `--max-turns <n>` | "Maximum agent turns" | **implement — near-free** |
+| `--add-dir <path...>` | "Additional writable root directories" | **remove** |
+| `--fork-session` | "Fork current session (coming in TUI.6)" | leave, but relabel |
+| `-n, --name <name>` | "Name this session (stored for TUI.6)" | leave, but relabel |
+
+**`--max-budget-usd` → implement, and a per-run ceiling is the right shape even though a daily gate
+exists.** They answer different questions: `resolveDailyUsdCap` protects the account across a day,
+where a per-run cap protects against one runaway task consuming the whole day's budget. The daily
+gate is also checked **once, before the iteration loop opens**, so it structurally cannot stop a run
+that goes wrong mid-flight. The plumbing is far closer than when the flag was written:
+`budget.snapshot().costUsd` is read at four sites in `agentLoop.ts` and is *accurate at all of them*
+only since this session's cost-meter fix (items 254/255), and the daily-cap check is the exact shape
+to mirror.
+
+**`--max-turns` → implement; this is wiring, not a feature.** `maxIterationsOverride` already exists
+on `AgentLoopInput`, is already consumed, and already has a ceiling guard applied after the tier
+block.
+
+**`--add-dir` → remove, and the reasoning is the part worth keeping.** Both instruments confirm the
+only reference anywhere in `src/` is its own field in `CliOptions` — **no attachment point exists.**
+Write scope is governed by `checkWriteScope` against the plan's `filesLikely`, so "implementing"
+`--add-dir` does not mean wiring a value into an existing mechanism; it means designing a second,
+directory-shaped scope mechanism that competes with the file-shaped one already enforcing writes.
+The flag promises a capability the architecture does not have, and adding one to satisfy a flag is
+the wrong direction.
+
+**`--fork-session` and `--name` are lies by attrition, which is the finding this pair contributes.**
+Both are honestly labelled — "coming in TUI.6", "stored for TUI.6" — and an honest label is not a
+lie. **But TUI.6 is "Session persistence + resume", and it shipped**: `--resume` and `--continue` are
+implemented and heavily read, on top of the durable run-envelope system. The milestone arrived and
+these two did not come with it, so the labels now point at a completed phase as though it were
+future work. `--name`'s is the worse of the two: "stored for TUI.6" asserts the value *is* stored,
+and nothing stores it. Relabelling costs one line each and is not gated on implementing either.
+
+**Bucket: Actionable now.** Per-member verdicts are specified and nothing new needs to be learned
+first. Against Blocked on data: the enumeration is complete and recorded. Against Neither: fixes are
+proposed. Against Closed: nothing is built.
+
+**A method finding from the enumeration that produced this list, recorded because it nearly produced
+a wrong one.** Two textual and AST instruments **agreed** on a five-member list that included
+`--no-revision` — and the agreement was false, because both took the option→property mapping from
+the same derivation step, so they shared a common-mode error and could not disagree. It surfaced
+only because a test's *name* referenced a property that derivation had never produced. Separately, a
+whole-tree AST sweep for a property named `name` is unreliable by construction — `.name` collides
+with countless unrelated accesses — which is how `--name` was missed on the first pass and found only
+by scoping the sweep to its receiver. **Two instruments sharing an input assumption are one
+instrument**; recorded in `CLAUDE.md` as well, since it generalises past this enumeration.
+
+**Where this lives:** the `.option()` declarations and `CliOptions` in `src/cli/index.ts`;
+`maxIterationsOverride` in `src/llm/agentLoop.ts`; the daily-cap gate via `resolveDailyUsdCap`;
+`checkWriteScope` in `src/tools/scopeGuard.ts` for why `--add-dir` has nowhere to attach. See item
+258 for the two flags that are read under a name that does not exist, and item 256 for the
+assertion-that-cannot-fail class.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 257 to find out which ones still need something. No index of
+reader the trouble of reading all 259 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -20485,12 +20637,14 @@ first.
 **Closed** (116): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (0):
+first (2): 258, 259
 
-That bucket is empty again, as it was for months before items 236 and 239 were opened. Both were
-built in one pass, and item 236's own specified remedy was falsified by measurement and replaced
-rather than followed — worth noting because an empty bucket here reads as "nothing to do" and is
-better read as "nothing currently specified", which is a weaker and more accurate claim.
+That bucket had returned to empty when items 236 and 239 were built in one pass, after sitting at
+zero for months before they were opened. It returns to 2 here — worth a line, because this bucket's
+movement is the ledger's own signal about whether anything is specified and waiting. Note also what
+an empty reading meant then and what a non-empty one means now: empty read as "nothing to do" and was
+better read as "nothing currently specified", the weaker and more accurate claim; 2 means two
+remedies are specified and unbuilt, in a deliberate order (258 before 259, for the reason 258 gives).
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (14): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250
 
