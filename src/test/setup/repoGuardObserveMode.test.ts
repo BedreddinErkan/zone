@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 /**
@@ -55,9 +56,25 @@ describe("observe mode cannot leave a file in the repository tree (ledger item 2
   });
 
   it("running homeGuard.test.ts's repo-guard tests under ZONE_REPO_GUARD_OBSERVE=1 leaves neither probe path behind", () => {
+    // JSON reporter, not the human-readable default: a text reporter's exact
+    // spacing/wording is an implementation detail of vitest's own formatting,
+    // not a contract this test should depend on. This shape failed once on CI
+    // and not on two independent, faithful local reproductions (fresh clone,
+    // fresh install, fresh build, same command sequence) — the JSON reporter
+    // sidesteps that whole fragility class rather than chasing the exact byte
+    // that differed under whatever CI's environment did differently.
+    const jsonOut = path.join(os.tmpdir(), `zone-repo-guard-observe-${process.pid}.json`);
     const result = spawnSync(
       process.execPath,
-      ["node_modules/.bin/vitest", "run", TARGET_FILE, "-t", "repo guard"],
+      [
+        "node_modules/.bin/vitest",
+        "run",
+        TARGET_FILE,
+        "-t",
+        "repo guard",
+        "--reporter=json",
+        `--outputFile=${jsonOut}`,
+      ],
       {
         cwd: REPO_ROOT,
         env: { ...process.env, ZONE_REPO_GUARD_OBSERVE: "1" },
@@ -93,12 +110,20 @@ describe("observe mode cannot leave a file in the repository tree (ledger item 2
     // Confirms the subprocess actually ran a nonzero set of tests, so a silent
     // "0 tests collected" (a typo in TARGET_FILE, a filter matching nothing)
     // cannot pass by leaving no probe files because nothing ever tried to
-    // write one. The default reporter does not print describe-block names for
-    // a passing run — checked directly rather than assumed, after this
-    // assertion first failed here against a literal "repo guard" match, which
-    // does not appear in this reporter's actual output shape.
-    const passedMatch = /Tests\s+(\d+) passed/.exec(result.stdout);
-    expect(passedMatch, `expected a "Tests N passed" line in stdout, got: ${result.stdout}`).not.toBeNull();
-    expect(Number(passedMatch![1])).toBeGreaterThan(0);
+    // write one. Reads the structured result file rather than parsing stdout —
+    // this is the assertion that regressed to a fragile text-regex once and
+    // was replaced, not patched, per the comment above.
+    let summary: { numTotalTests?: number } | null = null;
+    try {
+      summary = JSON.parse(fs.readFileSync(jsonOut, "utf8"));
+    } catch (err) {
+      throw new Error(
+        `expected a JSON reporter result at ${jsonOut}; child exit=${result.status} ` +
+          `signal=${result.signal} stderr=${result.stderr}: ${String(err)}`
+      );
+    } finally {
+      if (fs.existsSync(jsonOut)) fs.unlinkSync(jsonOut);
+    }
+    expect(summary?.numTotalTests ?? 0).toBeGreaterThan(0);
   });
 });
