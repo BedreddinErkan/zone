@@ -20499,7 +20499,7 @@ carries `undefined`.
 | `options.noColor` | same literal | `color: false` |
 
 **Established empirically, not from commander's documentation.** Building a `Command` from the
-repository's own 38 declared option strings and parsing `--no-revision --no-color --no-trust`
+repository's own 38 declared option strings (37 since item 259 removed `--add-dir`) and parsing `--no-revision --no-color --no-trust`
 returns `{"revision":false,"color":false,"trust":false}` — all three `no*` properties are
 `undefined`. Commander's rule for a `--no-x` flag is to set `x` to `false`, never to create `noX`.
 
@@ -20578,7 +20578,7 @@ already provably convergent by construction before the fix — `loadCliConfig` c
 `noColor: flags.noColor === true || envStr("NO_COLOR") === "1"`, one boolean OR both routes feed —
 so fixing the boundary closes the live defect without opening a second one.
 `src/cli/index.optionsBoundary.test.ts` (5 tests) parses argv through a real `commander.Command`
-built from the repository's own 38 declarations, never a hand-built object — the exact gap
+built from the repository's own 38 declarations (37 since item 259 removed `--add-dir`), never a hand-built object — the exact gap
 `config.test.ts` could not close.
 
 **Part B — the class fix took the guard form, not derivation, and the obstacle is load-bearing.**
@@ -20633,7 +20633,7 @@ files / 6163 tests, 0 failures) both green. Against: Actionable now requires an 
 is made; Blocked on data requires a missing observation, and none is outstanding; Neither requires
 no fix proposed, and one was both proposed and executed.
 
-## 259. Actionable now — five CLI flags are parsed and never read, and two of them point at a milestone that already shipped without them
+## 259. Actionable now — five CLI flags are parsed and never read, and two of them point at a milestone that already shipped without them (three handled; `--max-budget-usd` still unbuilt)
 
 **The neighbouring half of item 258.** These five are declared, parsed by commander, and read
 nowhere — distinct from item 258's two, which *are* read, under a name that does not exist.
@@ -20684,9 +20684,78 @@ accumulating generic), so the guard is what actually shipped. That confirms — 
 this entry's remedy for `--add-dir`: removing the declaration and its (nonexistent) read still
 leaves the guard with nothing to fire on, exactly as the independent-either-way reasoning predicted.
 
-**Bucket: Actionable now.** Per-member verdicts are specified and nothing new needs to be learned
-first. Against Blocked on data: the enumeration is complete and recorded. Against Neither: fixes are
-proposed. Against Closed: nothing is built.
+**Partial closure — three of five built at `dfa733be`.** The five-flag list was re-derived rather
+than adopted: 38 declarations → 37 produced keys → 31 receiver-scoped `options.X` reads leaves
+exactly `{addDir, forkSession, maxBudgetUsd, maxTurns, name}` plus the known-intentional `trust`.
+Two instruments with genuinely different inputs agreed (`command grep` over `src/`+`scripts/`;
+`git grep` over the whole tracked tree).
+
+**`--add-dir` removed, and item 258's prediction about the guard held — measured twice.** First in
+memory, by stripping the declaration and the type field from the source text and re-running the
+guard's own functions (invariant `[]`, reads 31, produced 36, both above the `> 20` anti-vacuity
+thresholds); then on the real edit, where `cliOptionsCoverage.test.ts` stayed green at 6/6. A
+removal takes the read away with the declaration, so the guard has nothing to fire on. Absence
+confirmed afterwards with both instruments.
+
+**`--fork-session` and `--name` relabelled; `--max-budget-usd` too.** No roadmap document defines
+TUI.6 — the only references anywhere were the two flag strings and this entry. The shipped half is
+confirmed by the same instrument that found item 258's orphans: `-c, --continue` and
+`-r, --resume [id]` are both declared *and* read. The honest labels invent no date: "not
+implemented — currently ignored". This entry's verdict for `--max-budget-usd` is **refined, not
+overturned**: still implement, but its old label ("Maximum spend in USD") was a lie by the identical
+standard while unbuilt, so it is relabelled now and implemented later.
+
+**`--max-turns` was not the wiring job this entry called it.** Routing it onto `maxIterationsOverride`
+alone would have shipped a flag that does not hold. Soft promotion sets
+`maxIterationsForRun: input.maxIterations ?? BASE_MAX_ITERATIONS` with `input.maxIterations` supplied
+as the tier-sized `iterBudgetComputed`, so `--max-turns 3` on a `targeted_fix` task would have run to
+45 — item 258's class exactly. It is therefore its own `AgentLoopInput.userMaxTurns`, deliberately
+not `maxIterationsOverride`: that field is the dispatcher's channel, disables escalation as a side
+effect, and promotion is *designed* to relax it. Clamped after the tier block (so every display and
+telemetry site reports the real ceiling) and again at the promotion site.
+
+**Completeness of a two-site clamp, and why it is pinned rather than argued.** A structural AST pass
+over all of `src/` — not grep — found **6 production writers** of `maxIterationsForRun` and **5**
+whole-object `iterationBudget = …` reassignments, all in `agentLoop.ts`. It also found the second
+path a grep would have missed: `iterationBudget = coachingDecision.newIterationBudget`, which reaches
+`maybeGrantEscalationBonus` inside `CoachingController`. That path is gated on `escalationEnabled`,
+captured by value at construction, after the tier block sets it false "for EVERY main loop" — three
+linked source-read claims, so it is verified behaviourally instead, by driving a main loop into
+repeated same-file failures until the controller's own repeat-detection fires and asserting the
+ceiling still holds. `agentLoopCeilingWriters.test.ts` locks the writer counts so a seventh writer
+fails loudly; its own detection logic is mutation-tested separately, and a mutation adding a
+behaviourally-dead seventh writer was caught by it when no behavioural test could have been.
+
+**Two user-facing ceilings with opposite subagent semantics — deliberate, recorded here so the pair
+is not later mistaken for an inconsistency.** `--max-turns` is **parent-loop only**: subagents keep
+their own `subagentTypeMaxIterations` budgets, stated in the flag's own description and pinned by a
+test at the spawn site. The deferred `--max-budget-usd` takes the **opposite** default — subagent
+spend *does* count against the parent — because `TokenBudgetMeter.snapshot().costUsd` already returns
+`_iterCostAccumulator.total_cost + _subagentCostTotal`, so it costs nothing to include and excluding
+it would take extra work. Turns are per-loop; dollars are per-run.
+
+**A committed decision that measurement corrected.** This pass planned to have the user cap surface
+under `terminationReason: "max_iterations"`. It does not: exhausting the iteration budget reports
+`token_budget_exceeded`, one of the three naming inconsistencies recorded as preserved verbatim
+(Gap 12). The decision it served still stands — no new union member, no new consumer surface across
+the 13 files that read `terminationReason` — but the premise about the existing name was wrong, and
+that is precisely why `[zone-user-iter-cap]`, emitted only when the cap actually binds, is what
+identifies the binding constraint. Attribution checked with `scripts/markerAttribution.ts`, not a
+text scan: one emitter, no hazard row.
+
+**`--max-budget-usd` stays open, with its cost measured rather than guessed.** A per-run ceiling
+needs a terminal state that `token_budget_exceeded` does not honestly describe, and
+`terminationReason` is read by 13 production files with 22 sites for the closest analogue. The
+enforcement point is already established: the daily gate fires once before the loop because
+`getUsage` does filesystem I/O, whereas `snapshot()` is two in-memory adds — so a per-run cap can
+check every iteration for free, which is exactly the weakness a once-per-run check would inherit.
+
+**Bucket: Actionable now → Actionable now**, unchanged and deliberately so. For: three members are
+built and two remain specified and unbuilt, which is what this bucket means; a partially-built entry
+whose remainder is still specified has not become Closed. Against Closed: `--max-turns`'s siblings
+`--max-budget-usd` and the two relabelled-but-unimplemented flags still have proposed fixes
+outstanding. Against Blocked on data: nothing here waits on an observation — the remaining cost is
+measured. Against Neither: fixes are proposed and three are executed.
 
 **A method finding from the enumeration that produced this list, recorded because it nearly produced
 a wrong one.** Two textual and AST instruments **agreed** on a five-member list that included
