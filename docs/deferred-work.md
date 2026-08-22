@@ -22121,17 +22121,172 @@ that establishment and construction land in separate passes. See item 272 for th
 something tracked and inert since before a rename — and item 244 for a document that answers
 confidently from a stale source, which is what `DESIGN-web-search.md` now does.
 
+## 274. Closed — the unused search tool is correctly targeted, not broken; the counter that proves it now has a positive control; and the placement finding is recorded in the three places that were silent
+
+**Bucket: Closed.** Item 273 established *that* Zone's web capabilities go unused. This establishes
+*why*, closes the instrument gap both entries rest on, and corrects the records. Nothing is specified
+beyond costing.
+
+### Why 82 runs used web search zero times — the task population, not a defect
+
+Four hypotheses were committed before measuring. Three are answerable from the tree and the sink.
+
+**Hypothesis 1, "the model is never told it exists" — falsified.** `WEB_SEARCH_DIRECTIVE`
+(`agentLoop.ts`) is injected on **all four** prompt branches — `answerOnly`, `question`,
+`investigation`, and the patch/else branch. Its own comment records the reason it is unconditional:
+present "regardless of `webSearchEnabled`, so toggling the feature never changes the cached
+system-prompt prefix."
+
+**Hypothesis 3, "something suppresses it" — ruled in, but as correct scoping rather than
+suppression.** The same directive is both invitation and limit: use it "only for current or external
+information you cannot get from the codebase or your own knowledge — recent library versions, current
+API signatures, unfamiliar errors. Do not search for general knowledge or anything in the repository."
+That is a deliberately narrow licence, and it is the right one.
+
+**Hypothesis 2, "the tasks never needed it" — confirmed, and it is the answer.** The sink records a
+`task` field, read with the same `.name`/`payload` JSON reader used throughout: **80 runs carry a
+task, and they are only 19 distinct task texts.** The distribution is dominated by repetition — **41**
+runs are one synthetic benchmark fixture ("One test in this repository is failing. Find the defect in
+the source and fix it"), 15 are `"hi"`, 4 are one loop-detector question, 3 are one
+readdir/cleanupOldSnapshots question. The remainder are marker-sink paths, StatusBar layout, the
+`read_file` lineRange defect, the snapshot store, `CLAUDE.md` edits. **Not one of the 19 distinct
+tasks needs information from outside this repository.** Against a directive that explicitly forbids
+searching "for anything in the repository", zero is the correct output. The tool is well-targeted, not
+ignored.
+
+**Two corrections to item 273's own framing, both this pass's own figure and both worth carrying.**
+First, "82 runs" overstates the diversity of the evidence considerably: it decomposes as **41
+synthetic benchmark + 19 task-unrecorded + 22 real distinct tasks**. Second, a suspicion that turned
+out unfounded and is recorded as such rather than dropped — the 15 `"hi"` runs short-circuit before any
+LLM call, so they looked like they might be padding the denominator; **measured, 0 of the 15 emitted a
+web-search summary.** The denominator is clean and the chitchat short-circuit behaves exactly as
+`CLAUDE.md` documents.
+
+### Hypothesis 4 — the counter, and the gap that made the whole thing provisional
+
+The committed decision rule was severe: if the counter cannot be shown capable of reporting non-zero,
+every conclusion resting on it is retracted, item 273 included. The chain has five links. Three
+already had non-zero tests — `convertResponse.webSearch.test.ts` and `convertStream.webSearch.test.ts`
+assert extraction at 2 and 3, `usageTracker.test.ts` asserts 3, `pricing.test.ts` asserts the fee at 1
+and 1000. **The two links with no test were exactly the two that produce the recorded number:**
+`agentLoop`'s `webSearchRequestsTotal +=` accumulator, and its emission into the marker payload.
+`runCompletion/parity.test.ts` asserts that `emit.webSearchSummary` was *called*, but through a
+`vi.fn()` mock — the real closure never ran, so no payload value had ever been asserted anywhere.
+
+`agentLoop.webSearchCounter.test.ts` (`7bad9850`) closes it, and pins three properties rather than one,
+because the first alone would have left the load-bearing one untested:
+
+- **non-zero reporting**, and its pricing into `feeUsd`;
+- **accumulation across iterations** — two calls of 1 each must report 2. A single-iteration test
+  cannot distinguish `+=` from `=`, and a per-run total is the counter's entire purpose;
+- **emission at zero** — the property both entries actually depend on. The emitter's own comment says
+  it is unconditional "so dashboards show 'ran, $0' not silence", and nothing pinned it. Had a later
+  change made zero silent, every "0 searches" record would have become indistinguishable from "no
+  record at all", and the evidence base for two ledger entries would have evaporated without a single
+  test failing.
+
+All four cases pass on first run, so **the decision rule did not fire and nothing is retracted.**
+
+**Mutations, predicted by name before running, all five exact.** Reading the wrong usage field, `+= 0`,
+and emitting a literal `0` each kill the same three non-zero cases and leave `parity.test.ts` alive —
+the vacuous survivor, named in advance and confirmed. An emitter that returns early at zero kills
+**only** the zero case. `+=` replaced by `=` kills **only** the accumulation case. Those last two are
+the argument for both cases existing: before they were written, either mutation would have passed the
+entire suite.
+
+### Origin-tracking is unreachable, and the obstacle is the finding
+
+There is no provenance anywhere on the path. `ToolResult` (`toolExecutor.ts`) carries `success`,
+`exitCode`, `output`, `error`, `truncated`, `rejectionReason`, `contentLength`, `metadata`,
+`filesStaged` — **no origin field**. A fetch's output is a plain string pushed as `role:"tool"`, which
+`translateMessages` then renders as a `role:"user"` `tool_result` block; once in the message array it
+is byte-indistinguishable from any other tool output. No per-message taint bit, no run-level flag. So
+attributing a *specific tool call* to fetched text needs new plumbing, and **the mitigation set is
+therefore limited to placement and approval changes** — recorded as a limitation, per the rule.
+
+One weaker signal does already exist, and it is what makes the second mitigation cheap:
+`toolResultSizeTracker.ts` keeps `perRunSizeLog` as a per-run map keyed by tool name, so "has
+`fetch_url` been called in this run" is a one-line derivation from state that is already there. The
+caveat that must not be glossed: its only reader, `getAndClearToolResultSummary`, **clears on read**,
+so any mid-run consumer needs a non-clearing accessor or it silently breaks the end-of-run summary.
+
+### The three mitigations, costed — and the first one is not what it looked like
+
+| candidate | cost |
+|---|---|
+| Stop co-offering `fetch_url` with writes on `refactor`/`complex_multi_file` | **Cheap only by the right route.** Priced as "lowest" on a first pass with an unmeasured caveat; measuring it changed the answer. |
+| Arm `editApprovalMode` once a fetch has occurred | **Low–moderate.** Detection is free (above); the work is that `editApprovalMode` is resolved once at dispatch, so making it dynamic mid-run is the real cost. |
+| Cap or exclude fetched content from the cached prefix | **Highest, and it cuts against a core invariant** — the cache rule is append-only, and rewriting or evicting an already-sent message is what R.2 did at a measured 2.3× cost. |
+
+The first candidate is worth stating properly, because the unmeasured version of it was wrong.
+`buildPipelineConfig` has **no branch at all** for `debug` or `complex_multi_file`, so both get `null`.
+A null pipeline means the `pipelineCfg &&` spread in `runLlmPatchFlow.ts` never fires, so neither
+`maxIterationsOverride` nor `coachingBudgetOverride` is set, and the tier branch leaves
+`maxIterationsForRun` at `softIterWarn × 3` — **120 iterations at complex tier**, with coaching at the
+full `MAX_SELF_CORRECTION_ATTEMPTS`. Creating a pipeline entry to carry a tool exclusion would
+**necessarily** set both overrides, because the spread is gated on the config's truthiness alone; it
+would also move `skipPlan`/`skipPlanSSE` and arm the L5.1b-2 soft promotion by flipping
+`pipelineApplied`. Pulling `complex_multi_file` from 120 iterations down to a pipeline's iterCap is a
+behaviour change on the archetype most likely to need iterations — **not a low-cost mitigation**.
+
+**But filter-only is reachable, just not through `buildPipelineConfig`** — and the precedent is
+already in the same file. The `isAnswerOnlyRun` block assigns `_dispatcherCapabilityFilter` directly
+and touches `pipelineCfg` not at all, with a comment explaining exactly why only the filter is taken:
+overriding the config "would flip `pipelineApplied:true` and arm L5.1b-2 promotion, plus move
+`coachingBudgetOverride`/`originalArchetype`/`skipPlan`". A second direct assignment of that shape is
+the cheap route; creating pipeline entries is the expensive one. That distinction is the whole cost
+finding, and it did not survive first contact with measurement — the same shape as item 250, which
+read as affordable at three sampled runs and was 3–25× over at 698.
+
+### Are the amplifiers deliberate?
+
+**The 100,000-character cap: deliberate as a mechanism, arbitrary as a magnitude.** `d0b4bc09`'s
+subject names the "streaming cap" and `fetchUrl.test.ts` pins the behaviour as `T-SIZE-CAP`, so it is
+intentional and tested — but nothing anywhere records why *100,000* and not some other number. At the
+4.1637 chars/token ratio item 161 measured, that is ~24,000 tokens, ~12% of a 200k window.
+
+**Cached-prefix persistence: incidental.** `fetchUrl.ts` contains no cache reference, and
+`git show --stat d0b4bc09` lists `builtinCapabilities.ts`, `fetchUrl.ts` and its test,
+`toolDefinitions.ts`, `toolExecutor.ts` and three further test files — **no caching file at all**.
+Fetched bytes persist across every later iteration of a run because *all* tool results do, not because
+anyone decided fetched ones should. Worth knowing before anyone designs around it.
+
+### What was silent, and is not now
+
+- **`DESIGN-web-search.md`** (`85a7ec0d`) — corrected in place rather than as a fourth account. It
+  rejected a client-side fetch tool in §3.1 and deferred `web_fetch` in §3.7; `fetch_url` landed seven
+  days later carrying precisely the mitigations §3.5's own "follow-up rule" demands, so the correction
+  closes that argument rather than contradicting it. What the mitigations do **not** cover is stated
+  as prominently: no domain allowlist (§3.5 lists `allowed_domains` as a control surface with no
+  client-side equivalent), no content-type filtering, and the `TODO(ssrf-v2)` DNS-pinning TOCTOU
+  window the source names itself. Two further divergences surfaced while correcting: §3.5's "the
+  existing backstops still hold" names `scopeGuard.ts`, which is a no-op on two of the five archetypes
+  where `fetch_url` is offered; and §3.5/§3.7 both say the toggle defaults OFF — §3.5 reasons *from*
+  that — while `config.ts` ships it on.
+- **`CLAUDE.md`** (`0bd05257`) — had no mention of either capability beyond `webSearchEnabled` as a
+  settings field. Two bullets now record the inverted exposure and that `web_search` sits outside the
+  capability filter by construction.
+- **This ledger** — item 273 opened the subject; this entry carries the why, the instrument, and the
+  costings.
+
+**If a future pass ever does retract the usage figures**, the boundary is worth stating now: item 273's
+offered-set matrix and its placement finding do **not** depend on the counter — they were measured by
+running `resolveToolList` and `convertParams` against the real filters. Only the usage figures rest on
+it, and as of `7bad9850` they have a positive control. See item 273 for the offered-set establishment,
+item 272 for the neighbouring declared-but-inert shape, and item 250 for the costing error this pass's
+first candidate nearly repeated.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 273 to find out which ones still need something. No index of
+reader the trouble of reading all 274 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (129): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260, 262, 264, 265, 266, 267, 268, 269, 270, 271, 273
+**Closed** (130): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260, 262, 264, 265, 266, 267, 268, 269, 270, 271, 273, 274
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (0):
