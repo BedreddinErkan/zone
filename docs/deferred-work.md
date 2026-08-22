@@ -21654,17 +21654,201 @@ defect or its remedy waited on that observation. Against Neither: a fix was prop
 exception-list ground this one clears, and item 261 for the inert-declaration class this defect was
 tested against and did **not** join, since its arguments are genuinely consumed.
 
+## 269. Closed — one commit reached `master` with no CI run of its own, no retroactive path can give it one, and the rule that failed is now a hook
+
+**The hole, re-measured rather than inherited.** A previous pass reported this; the report is not
+the instrument, so it was measured again before being recorded.
+`curl -s https://api.github.com/repos/BedreddinErkan/zone/commits/<sha>/check-runs`:
+
+| commit | `total_count` |
+|---|---|
+| `c4e9238d` | **0** |
+| `b1364be3` | 1 — `test`, `completed`, `success`, run number 359 |
+
+`c4e9238d` was created before a context-compaction boundary and was still unpushed when
+`b1364be3` was committed, so one `git push` carried the range `af03e7b2..b1364be3` and only the tip
+got a check-run. The one-commit-one-push rule exists precisely so a bisect lands on a commit
+carrying its own signal; **the range `c4e9238d..b1364be3` has a gap of exactly one commit, and a
+future bisect that stops on `c4e9238d` is reading a commit no CI ever ran.**
+
+**Five retroactive paths, each measured, each blocked.** `tests.yml` at `c4e9238d` is byte-identical
+to HEAD's (`git diff --stat c4e9238d HEAD -- .github/workflows/tests.yml` → empty). Its triggers are
+`pull_request` (unfiltered) and `push` filtered to `branches: [master]`. There is no
+`workflow_dispatch`.
+
+1. **Dispatch the workflow at that ref.** Blocked: the trigger does not exist at that ref, and
+   GitHub resolves a dispatched workflow's definition *from the dispatched ref*, so adding
+   `workflow_dispatch` at HEAD cannot reach backwards. Rewriting history to insert it changes the
+   SHA, which defeats the purpose of verifying that SHA.
+2. **Push a branch pointing at `c4e9238d`.** Blocked: `push` is filtered to `master`, and for a push
+   event GitHub evaluates the workflow file *at the pushed commit* — so no edit at HEAD widens it
+   retroactively either.
+3. **Move `master` back and let it re-run.** Refused: a history rewind on the default branch, which
+   trades a missing signal for a much larger problem.
+4. **Open a PR from `c4e9238d` into `master`.** Blocked: `git merge-base --is-ancestor c4e9238d
+   origin/master` passes, so there are zero commits between and no PR is possible.
+5. **Open a PR with head `c4e9238d` and a base branch at `af03e7b2`** — its parent
+   (`git log --format='%h %p'`), so the merge ref would fast-forward to exactly `c4e9238d`'s tree.
+   This is the one path that works in principle and is blocked in practice: `gh auth status` reports
+   no authenticated host, and the git credential lives in `git-credential-libsecret`, which is not
+   something to scrape into an API call.
+
+**Two measurements make path 5 weak even if authentication appeared.** The repository has had
+**zero pull requests, ever** (`/pulls?state=all` → 0 rows), and every workflow run is a push:
+`/actions/runs?event=push` → 359, `event=pull_request` → 0, `workflow_dispatch` → 0, `schedule` → 0,
+against a total of 359. The `pull_request` trigger has never fired here, so whether a check-run would
+attach to `c4e9238d` rather than to a synthetic merge commit is a guess, and this is not the place to
+find out.
+
+**Verdict: the hole cannot be closed. It is recorded rather than papered over** with the tip's green,
+which covers `b1364be3` and says nothing about its parent.
+
+**An incidental finding, recorded because it changes the cost of path 5.**
+`.github/workflows/feature-agent.yml` is tracked, is byte-identical on `origin/master`
+(`git rev-parse origin/master:<path>` equals `git hash-object <path>`), has been present since the
+initial commit `e3256993` (2026-04-01) — and has never run. `/actions/workflows` returns
+`total_count = 1`, listing only `Tests`; `/actions/workflows/feature-agent.yml` returns **HTTP 404**.
+The cause is **unresolved**, and every locally checkable candidate is ruled out: the file parses as
+valid YAML with well-formed `on.pull_request` and `on.workflow_dispatch` triggers and a single
+well-formed job, the repository is public, and its default branch is `master`. What remains are
+repository-settings causes that require authentication to inspect. This matters because that workflow
+runs the Zone agent with `OPENAI_API_KEY` on `pull_request`, so anyone reasoning that "opening a PR is
+free here" would be right today and wrong the moment it registers.
+
+**The rule is now a hook — `a99fe8fc`.** A remembered rule failed once in the exact way remembered
+rules fail: correctly followed for months, then missed under a context boundary. `scripts/prePush.mjs`
+reads the `githooks(5)` stdin contract — one
+`<local-ref> SP <local-object-name> SP <remote-ref> SP <remote-object-name> LF` line per ref update —
+skips deletes (all-zeroes local name) and refs that do not exist yet on the remote (all-zeroes remote
+name, where a whole history legitimately arrives at once), and refuses when
+`git rev-list --count <remote>..<local>` exceeds 1. `ZONE_ALLOW_MULTI_PUSH=1` is the deliberate
+exception. `scripts/githooks/pre-push` is the shim, committed at mode `100755` in the index
+(`git ls-files -s`); activation is `git config core.hooksPath scripts/githooks`.
+
+Three mechanical questions were checked rather than assumed. **Relative `core.hooksPath` resolution:**
+git 2.55 resolves it against the working tree's top level, not the cwd — `git rev-parse --git-path
+hooks/pre-push` from `src/llm` returns `../../scripts/githooks/pre-push`, and `git hook run` from that
+same directory refuses a synthesized two-commit update and permits a one-commit one. No absolute path
+is needed. **An unknown count does not block:** if `rev-list` cannot resolve the range it warns and
+allows, because a guard that refuses on an unrelated git error is worse than the problem it guards.
+**The zeroes are matched by shape** (`/^0+$/`), not at the SHA-1 width, so the guard survives a
+repository using SHA-256 object names.
+
+**Mutations, predicted by name before running, all four confirmed.** `count > 1` → `count > 2` killed
+six tests, exactly the six named. Making the new-branch arm classify as an update killed three, and —
+predicted — left the end-to-end new-branch case alive, because `rev-list` against an all-zeroes name
+errors and the warn-and-skip path reaches exit 0 by a different route. That survivor was a test whose
+name claimed coverage it did not have, so it was tightened to require a silent stderr and the mutation
+then killed four. Dropping the override branch killed two. The fourth was aimed at the harness rather
+than the guard: making the end-to-end stdin builder emit nothing killed the two positive cases and
+left exactly the two vacuous ones alive, which is what a working detector looks like.
+
+**What the hook does not cover, stated rather than left to be discovered.** Activation is
+`git config core.hooksPath scripts/githooks`, which is per-clone local configuration: a fresh clone
+has no hooks path set and pushes unguarded until someone runs that one command. Git offers no tracked
+way to set it — the alternatives are a `prepare` script in `package.json`, which changes contributor
+setup and runs code on every `npm install`, or a server-side check this repository cannot add. The
+guard therefore converts a rule that had to be remembered on every push into a command that has to be
+remembered once per clone. That is the whole of the improvement, and it is a real one, but it is not
+"cannot happen again".
+
+**Two findings the build produced along the way.** The ``import.meta.url === `file://${process.argv[1]}` ``
+entry-point check used by ten other `scripts/` entry points is **not** defeated by the shim's
+`scripts/githooks/../prePush.mjs` path — node normalises `argv[1]` to an absolute path, measured. It
+*is* defeated by a repository path containing a space, where `import.meta.url` percent-encodes and the
+string compare returns false while `path.resolve` + `fileURLToPath` still agrees; a module guarded that
+way would silently do nothing. Not changed here — this repository lives at a space-free path and a
+ten-site sweep is its own pass. And `[zone-pre-push]` lands in the marker inventory's `zero` bucket
+rather than `one`: `fileKind()` classifies anything under `scripts/` as `"script"`, and `scanTree`
+skips every non-`"source"` file before recording an emission, so no marker emitted only from
+`scripts/` can reach `one` or `several` by construction. It is the first production emission of that
+shape; the only other script-only `zero` row is a test fixture.
+
+## 270. Closed — the pre-rendered `title` is a wire-boundary decision, not drift, and what did drift is the structured channel beside it that no `tool_call` emitter fills
+
+**The question.** `ZoneStructuredProgressEvent` carries a pre-rendered `title` string rather than the
+tool arguments a renderer would format from. That shape is the structural reason a defect like item
+268 stays invisible: a handler that drops an argument produces a title with an empty tail, and no
+downstream consumer can recover what was dropped, because the arguments never crossed the boundary. It
+is also why five hand-rolled extraction points exist, one per emit site. Is that deliberate, drift, or
+drift that has become load-bearing?
+
+**Verdict: deliberate.** Five measurements, in ascending order of how decisive each is.
+
+1. **`title` is the only required display field.** The type has 70 `type` union members, 98 optional
+   fields, and exactly four required ones: `runId`, `ts`, `type`, `title`. A type-agnostic display slot
+   is what it was built to be.
+2. **It is not the TUI's alone.** Six non-test modules read it: `src/cli/sink.ts` (headless, five
+   sites), `eventToActions.ts`, `useAgentEvents.ts`, `investigationFlow.ts`,
+   `runLlmPatchFlow.ts` — which maps `event.title` into the legacy `onProgress({ stage })` string, a
+   consumer whose contract is a string and cannot take arguments — and `src/remote/toWireFrame.ts`.
+3. **The event crosses a security boundary, and that boundary is an explicit field allowlist.**
+   `toWireFrame.ts`'s own header names itself "the security boundary between the agent's internal
+   event stream and the WS wire", and enumerates what it refuses: metadata "never forwarded (freeform
+   bag; may contain screenshotPath and other arbitrary internal data)", "patch bodies are never
+   forwarded; filePath is included instead", `stagedFilesJson` and `planStepsJson` never forwarded,
+   an 8 KB cap on the large string fields. `toWireFrame.test.ts` pins these under a describe block
+   literally named "toWireFrame — security invariants".
+4. **Tool arguments are exactly the shape that boundary refuses.** `apply_patch`'s arguments carry a
+   patch body and `write_file`'s carry file content — the two things the header names as never
+   forwarded. An `args` bag on `tool_call` would be `metadata`'s shape, and `metadata` is already
+   pinned as dropped.
+5. **A curated alternative already exists in the type and is already forwarded.** `toolName`,
+   `filePath` and `command` are first-class optional fields, and `toWireFrame`'s `tool_call` arm
+   forwards all three.
+
+**The finding, which is not the pre-rendering.** All eight `tool_call` emit sites were read.
+**Not one of them sets `toolName`, `filePath` or `command`** — every one sets `title` and `status`
+alone, plus a `patch` at a single site. The channel is not unused repo-wide: `filePath` is set on 19
+progress-emit payloads, `command` on 8, and `toolName` on 4 — the latter on `tool_input_delta` and on
+`tool_result`, never on `tool_call`. So `tool_call`, the one event type where a renderer would need
+structure to re-derive a title, is the one type that ships none, while the wire boundary faithfully
+forwards three fields nobody fills. `sink.ts`'s `evt.title ?? evt.command ?? evt.filePath ?? "tool"`
+is a three-arm fallback whose second and third arms are unreachable twice over — `title` is required,
+and the two fields are never set on this event anyway. **That vacancy, not the pre-rendering, is what
+five hand-rolled extractions accumulated around.**
+
+**A second fact that argues against simply adding a field.** `toWireFrame`'s
+`[zone-wire-frame-unmapped]` detector lives only in the `switch`'s `default:` arm and warns once per
+**event type**, listing dropped keys. `tool_call` has an explicit case, so a new field added to it
+would be dropped **silently** — the loudness that makes this boundary safe does not extend to a new
+field on an already-mapped type.
+
+**What the four remaining extraction points would become.** They move; they do not disappear. A
+renderer formatting from arguments still has to encode the prefix (`[tool]` against `[fix]`), the cap
+(240 characters against uncapped), and the per-site preference — re-confirmed by reading both:
+`planInvestigation.ts` renders `find_references` by its `sourceFile`, `investigationFlow.ts` renders
+the same tool by its `symbolName`, and both are required arguments, so neither is recoverable from
+the other. The preference is real product behaviour, and it would have to live somewhere in a
+renderer as a per-site table — which is the same five decisions in a different file, not five fewer.
+
+**Would anything break if `title` gained an optional `args` alongside it rather than being replaced?**
+Nothing would fail to compile or throw: only one consumer enumerates event keys
+(`toWireFrame`'s `droppedFields: Object.keys(evt)…`, and only in the `default:` arm), and no consumer
+validates against a closed schema. The breakage would be silent and of a different kind — a freeform
+argument bag flowing into an event that a documented allowlist exists to keep freeform bags out of,
+under a detector that would not warn.
+
+**Nothing is specified, deliberately.** The decision rule committed before the measurement was that a
+deliberate answer closes with the reason recorded and no specification written, and the answer is
+deliberate. The empty-channel observation is recorded as a structural fact, explicitly **not** as a
+proposal: populating `toolName`/`filePath`/`command` at the eight `tool_call` sites would be a
+coherent change, and it is not proposed here, because it is an event-shape change touching every
+progress consumer and the standing practice is that establishment and construction land in separate
+passes. See item 268 for the defect that raised the question, and item 244 for the neighbouring
+hazard shape — an instrument that answers confidently from the wrong source.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 268 to find out which ones still need something. No index of
+reader the trouble of reading all 270 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (125): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260, 262, 264, 265, 266, 267, 268
+**Closed** (127): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260, 262, 264, 265, 266, 267, 268, 269, 270
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (0):
