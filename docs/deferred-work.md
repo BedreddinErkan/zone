@@ -23266,17 +23266,136 @@ See item 279 for the instrument and pricing this pass registered, item 277 for t
 truth, and item 280 for the observability gap that made `ZONE_VERBOSE_LOGS=1` necessary to measure any
 of this.
 
+## 282. Closed — the cage arm registered: reachable without a code change, but the toolset cannot be varied alone, and the environment took four corrections to hold constant
+
+**Bucket: Closed.** Registration only; pushed before the arm ran. Items 277 (`bf563d72`) and 279
+(`16000cb7`) remain the registration of prompts, ground truth and instrument — **this entry adds a
+second arm and changes none of them.**
+
+### The question, and why the brief's route does not work
+
+Zone's `investigation` archetype offers five read-only tools because `READ_ONLY_CAPABILITIES` contains
+no `net.fetch` and no writes. The same Zone offers twenty on `complex_multi_file`. Is that cage why it
+behaves narrowly?
+
+**The brief proposed running the six prompts on a twenty-tool archetype. That route is closed:**
+classification is deterministic per prompt, there is no `forceArchetype`, and item 277's screen put all
+six on `investigation`. Steering them would mean rewriting the prompts, which changes the thing being
+measured.
+
+### The route that works, and it is a tighter control than the one proposed
+
+`ZONE_ARCHETYPE_ENABLE_INVESTIGATION=0` makes `buildPipelineConfig` fall past its
+`archetype === "investigation" && flags.investigationEnabled` branch and return `null`, so
+`buildDispatcherCapabilityFilter` returns `undefined` and the tier filter applies instead. Adding
+`--force-tier complex` makes the tier filter `undefined` too, leaving the full registry. Verified by
+composing the real functions rather than reasoning about them:
+
+| arm | pipeline | tools offered |
+|---|---|---|
+| 1 | `iterCap=12, coachingBudget=2` | **5** — `read_file`, `list_files`, `search_in_files`, `find_references`, `run_command_readonly` |
+| 2 | **null** | **20** — the five plus `write_file`, `apply_patch`, `multi_edit`, `run_command`, `fetch_url`, `Task`, `TodoWrite`, `update_memory`, `revert_patch`, `ask_user`, `suggest_scope_change`, and the three background tools |
+
+Cage-off at `simple` still yields 5 and at `medium` yields 9, so **`--force-tier complex` is
+load-bearing rather than decoration.**
+
+**This holds the archetype constant.** The classifier still returns `investigation` for every prompt;
+only its pipeline is disabled. That is a tighter comparison than switching archetype, which would have
+changed the classification, the prompt, and the toolset together.
+
+### What else changes — the toolset cannot be varied alone, and this is registered before running
+
+| dimension | arm 1 | arm 2 | controlled? |
+|---|---|---|---|
+| offered tools | 5 | 20 | **the intended variable** |
+| `iterCap` | 12 | none → `softIterWarn × 3` = **120** at complex | **yes**, via `--max-turns 12` |
+| `coachingBudget` | 2 | `MAX_SELF_CORRECTION_ATTEMPTS` = 5 | **no** — residual |
+| `skipPlan` / `skipPlanSSE` | both true | both falsy → plan-generation gates open | **no** — residual, and a likely cost driver |
+| tier | per-prompt (simple ×4, medium, complex) | forced complex; also moves `tokenBudgetCap` and `maxSubagentCalls` 0→4 | **no** — forced by the design |
+| `pipelineApplied` | true | false → soft promotion unarmed | **no** — minor |
+
+**So a difference in arm 2 is attributable to the bundle, not to the toolset alone**, and the results
+entry must not read as though it isolates twenty tools. `--max-turns 12` removes the largest confound;
+the rest are carried.
+
+### How `--max-turns 12` is read, registered now because it can be inert or binding
+
+Arm 1's six cells stopped at 7, 8, 7, 9, 7 and 6 — every one **below** its cap of 12. So:
+
+- **A cell that stops below 12 had an inert cap and is directly comparable.**
+- **A cell that reaches 12 was truncated by the control**, and its coverage is a **floor, not a
+  result** — reported as such and not compared directly against arm 1's completed run.
+
+Without that distinction a truncated cell reads as "twenty tools found no more" when it may mean
+"twenty tools were still working when we stopped them."
+
+### The write decision, and the environment it forced
+
+Arm 2 offers `write_file`, `apply_patch`, `multi_edit` and `run_command`. `checkWriteScope` does **not**
+bypass on `investigation` — only `refactor` and `complex_multi_file` do — but it fails open on empty
+`allowedFiles` regardless of archetype (item 243), and `skipPlan` turning falsy makes the plan situation
+uncertain. Writes are therefore possible.
+
+**Arm 2 runs against a scratch clone** at `/dev/shm/zone-arm2`, targeted with `--repo`, with the CLI
+still executing from the real `dist/`. **Registered: if a cell writes, that cell is void and the write
+is reported as a finding about the arm** — the clone makes that a diagnostic rather than a hazard. Both
+the clone and the real tree are checked with `git status --porcelain` afterwards, since checking only
+the real tree would make a write into the clone invisible.
+
+**Holding the clone equal to the real tree took four corrections, and finding them is why this was
+registered rather than assumed.** A clone is not the same environment:
+
+1. **Same commit and same tracked content** — verified, not assumed: both at `94e21929`, both tree
+   `45f7a457`.
+2. **`.zone/memory.md` is gitignored**, so the clone would have started with no project memory at all
+   against arm 1's 3,989 bytes. Copied in.
+3. **`node_modules/` and `dist/` are absent from a clone.** Arm 1 had both, and arm 2 has full
+   `run_command`, so a missing `node_modules` would silently change what commands can succeed.
+   Symlinked, which is this repository's own documented clean-clone practice.
+4. **`.zone/model.json` is repo-local and gitignored**, and it carries `effort: "high"`. Without it the
+   clone resolves `resolveEffortLevel(undefined)` → **no effort at all**, which changes model behaviour
+   and cost on every cell. This was the least visible of the four and would have confounded the whole
+   arm. Copied in.
+
+**Residual, enumerated rather than closed:** the clone lacks `.claude/`, `.env`, `data/`, and everything
+in `.zone/` except the two copied files (`audits`, `logs`, `plans`, `sessions`, `trust.json`,
+`item166`, `item193`). The real tree also carries one working-tree modification —
+`.claude/scheduled_tasks.lock` shows deleted — which the clone does not. All six prompts concern `src/`,
+so these are judged non-binding; that judgement is recorded rather than hidden.
+
+### Two registered expectations, distinguishable so at most one survives
+
+- **The brief's:** coverage does not improve materially; cost and iteration count rise.
+- **This entry's:** coverage is unchanged **and** arm 2 opens **the same or fewer distinct files** than
+  arm 1's 2 / 1 / 4 / 2 / 4 / 1 — because the extra tools dilute rather than help, with an open plan
+  path and a four-subagent grant spending iterations on work that is not reading. **If arm 2 opens more
+  distinct files, this is wrong.**
+
+The likely mixed outcome is registered too: cost up while distinct files stay flat would make the
+brief's prediction right on cost and this entry's right on files, and it will be reported that way
+rather than resolved to a winner.
+
+### Spend
+
+Six cells. Expected **≈$2.6** at arm 1's measured median of $0.4283; per-cell cap **$1.00**; guard
+**$6.00**, stated separately so this cannot be read as budgeting the guard. Arm 1's full six now measure
+**$0.3457–$0.5025**, which **widens the floor** of item 279's `n=4` range of $0.4158–$0.5025 rather than
+holding it. If spend exceeds the guard, cells already run stand and the remainder is recorded as unrun.
+
+See item 277 for the prompts and ground truth, item 279 for the instrument and the model pinning, and
+item 281 for arm 1's first four cells.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 281 to find out which ones still need something. No index of
+reader the trouble of reading all 282 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (136): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260, 262, 264, 265, 266, 267, 268, 269, 270, 271, 273, 274, 275, 276, 277, 278, 279, 281
+**Closed** (137): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260, 262, 264, 265, 266, 267, 268, 269, 270, 271, 273, 274, 275, 276, 277, 278, 279, 281, 282
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (0):
