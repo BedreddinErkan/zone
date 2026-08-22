@@ -139,9 +139,16 @@ export function convertParams(
   //     comment previously said (docs/deferred-work.md item 161, measured against the
   //     per-call usage log). Whether that means system gets no caching benefit at all when
   //     tools are present, or rides along inside breakpoint #2's own cumulative span once one
-  //     exists, is NOT settled by item 161 and is not re-examined here — the "defense in depth
-  //     for a future 2nd breakpoint" comment below rests on the premise this note refutes and
-  //     has not been re-verified.
+  //     exists, was left open by item 161 — and is now SETTLED: it rides along. Measured from
+  //     a real run's per-call cache-usage records (item 284; the marker is named there rather
+  //     than here, since naming an emitter this file does not have registers a false
+  //     attribution hazard): iteration 1 writes only the tools block and leaves the
+  //     ~3,140-token system prompt uncached, then iteration 2 writes a span that includes
+  //     system and reads back exactly what iteration 1 wrote. So system is
+  //     uncached on the first call and cached from the second onward, for as long as a
+  //     breakpoint #2 exists. The practical consequence, which is what makes it worth knowing:
+  //     enlarging the system prompt costs full input rate once, a 1.25x write once, and 0.1x
+  //     reads thereafter — not full rate on every iteration.
   //   • no tools (synthesis calls): system block gets cache_control directly.
   const cacheEligible = isCacheEligible(finalSystem || "", tools, input.model);
   let systemForRequest: Anthropic.MessageCreateParams["system"] = finalSystem || undefined;

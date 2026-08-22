@@ -23649,17 +23649,117 @@ leak backwards into a comparison already recorded.
 See item 282 for the arm-2 registration this parallels, item 279 for the instrument, item 277 for the
 prompts and ground truth whose verification this entry corrects, and item 281 for arm 1's results.
 
+## 285. Closed — context bought the ninth file and cut a fifth off the iterations, at four times what the toolset route cost; and the cell whose answer was handed to it opened the file anyway
+
+**Bucket: Closed.** Arm 3 ran under item 284 (`efc66218`, committer `2026-08-23T00:15:54+03:00`), first
+cell at `21:16:37Z`. Six cells, no voids, no writes in either tree, **$4.4309** against a $9.00 guard.
+
+### Three arms
+
+| | arm 1 — 5 tools | arm 2 — 20 tools | arm 3 — 5 tools + 68 KB context |
+|---|---|---|---|
+| iterations | 44 | 55 (**+25%**) | **36 (−18%)** |
+| cost | $2.5653 | $3.0123 (**+17%**) | **$4.4309 (+73%)** |
+| distinct files opened | 14 | 13 | 13 |
+| coverage | 8/9 | **9/9** | **9/9** |
+
+Per cell, arm 3: 6 iterations every time — 6, 6, 6, 6, 6, 6 — against arm 1's 7, 8, 7, 9, 7, 6 and arm
+2's 8, 12, 9, 11, 7, 8. Costs $0.6823–$0.7953, coverage 1/1, 1/1, 2/2, 2/2, 2/2, 1/1. Every cell
+`investigation`, every one terminating naturally, **none near the cap**, so item 282's
+coverage-is-a-floor rule never fired here.
+
+### The three cells whose readings were registered in advance
+
+**Cell 6 — the natural experiment, and Zone declined the shortcut.** `CLAUDE.md` states
+"`createCoalescingWriter`: single-flight, dirty-flag re-run", which is the mechanism the prompt asks
+for, and item 284 registered both readings before the cell ran. It **opened `diskRunEnvelope.ts`
+anyway** (coverage 1/1) and its answer is grounded in the source rather than in the handed summary:
+it cites `:685–727`, `trigger()` at 699, `run()` at 689, and the ordering detail that `run()` **clears
+`dirty` first** at 690 — none of which is in `CLAUDE.md`'s one-line version. So the registered reading
+that fires is the first: **given the answer in its context, Zone still went and checked.**
+
+**Cell 4 — coverage improved, 1/2 → 2/2.** Arm 1 named `toolExecutor.ts` in prose without opening it;
+arm 3 opened it. Item 284 registered that holding at 2/2 would mean it pursued the clauses `CLAUDE.md`
+does not answer — it did better than hold, and the improvement is the whole of arm 3's coverage gain
+over arm 1.
+
+**Cell 3 — the middle case, and the effect it isolates is real but small.** `CLAUDE.md` names
+`classifyTurns.ts` without giving the rule. Arm 3 reached the same 2/2 in **6 iterations against arm
+1's 7**. That is the registered signature of **navigation, not substitution**: one iteration saved
+locating a file whose name it was handed, with the mechanism still read out of source. One iteration is
+a small effect and is reported as one.
+
+### What context did, and what it cost
+
+**It changed how Zone worked more than what it found.** Coverage moved 8/9 → 9/9, one file, and the
+file is exactly the one arm 1 had already described correctly without opening. Meanwhile iterations
+fell 18% and — more striking than the mean — **the variance collapsed**: arm 1 ranged 6–9 and arm 2
+ranged 7–12, while every arm-3 cell took exactly 6. A map does not make Zone find more; it makes it
+stop looking sooner, and stop at the same point every time.
+
+**Arm 1's shape survives both manipulations.** Search to locate, commit to a small set, stop early:
+arm 3 opens 1, 2, 3, 2, 3, 2 distinct files against arm 1's 2, 1, 4, 2, 4, 1 — 13 against 14, the same
+order of magnitude. Neither twenty tools nor a 68 KB map changed the strategy; arm 2 swapped the search
+tool and arm 3 shortened the search.
+
+**The cost comparison is the product finding.** Both arms reach 9/9. Arm 2 pays **+$0.4470** for the
+marginal ground-truth file; arm 3 pays **+$1.8656** — **4.2× more for the same coverage**. Arm 3 is the
+faster route (36 iterations against 55) and by far the more expensive one. If the goal is coverage, the
+toolset route is cheaper; if the goal is fewer turns, context buys them at roughly $0.15 per iteration
+saved.
+
+The projection held reasonably: item 284 registered ≈$0.66/cell from the cache measurement, and the
+measured average was **$0.738** — **12% over**, with the shape of the estimate (one uncached pass, one
+write, then reads) correct.
+
+### The registered expectations — two right, two wrong, and the wrong one is a repeat
+
+- **"Coverage does not improve over 8/9"** — **wrong**, it reached 9/9. This is the **second
+  consecutive arm** where the coverage-will-not-move prediction failed; item 283 recorded the same miss
+  for arm 2. Two failures of the same prediction is a pattern in the predictor, not noise: the prior
+  that a strong baseline leaves no headroom has now been wrong about both manipulations.
+- **"Cost rises ~55% per cell"** — **understated**; actual +73%.
+- **"Iterations fall slightly"** — **correct**, −18%, and the uniformity was not predicted.
+- **"Distinct files drop below 14"** — **correct**, 13. The counter-argument registered alongside it —
+  that a map names files Zone would otherwise never find, so it might open *more* — did not happen.
+
+### What this settles about the cache, recorded where the question was asked
+
+Item 284 settled from arm 1's own `[zone-cache-usage]` records what `convertParams.ts`'s comment called
+unsettled: the system prompt is uncached on iteration 1 and rides inside breakpoint #2's cumulative
+span from iteration 2. **That comment has been amended in place** rather than leaving the answer three
+hundred ledger items away from the question, and it now carries the practical consequence — enlarging
+the system prompt costs full rate once, a 1.25× write once, and 0.1× reads thereafter.
+
+### The boundary
+
+Three arms now vary the toolset and the context against **one fixed prompt set, on one repository, with
+one model**. Within that: the cage was not the constraint (item 283), and context is a real but
+expensive lever that buys speed and consistency rather than discovery.
+
+**What remains is unmeasured, not explained.** Zone reached 9/9 under two different manipulations and
+8/9 with neither, on six prompts chosen to be answerable from this repository. Nothing here measures
+harder prompts, prompts needing information outside the repository, a different repository, a different
+model, or the prompt-framing and loop-shape differences that were never varied. Those are candidates,
+not conclusions, and the falsification of two hypotheses does not promote them.
+
+**Mutation is not applicable.** The scorer stayed a scratchpad script; the only source change is a
+comment correction with no runtime behaviour to substitute into.
+
+See item 284 for arm 3's registration and the readings fixed before it ran, item 283 for arm 2, item
+281 for arm 1, and item 277 for the prompts and ground truth.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 284 to find out which ones still need something. No index of
+reader the trouble of reading all 285 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (139): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260, 262, 264, 265, 266, 267, 268, 269, 270, 271, 273, 274, 275, 276, 277, 278, 279, 281, 282, 283, 284
+**Closed** (140): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260, 262, 264, 265, 266, 267, 268, 269, 270, 271, 273, 274, 275, 276, 277, 278, 279, 281, 282, 283, 284, 285
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (0):
