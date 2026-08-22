@@ -23385,17 +23385,150 @@ holding it. If spend exceeds the guard, cells already run stand and the remainde
 See item 277 for the prompts and ground truth, item 279 for the instrument and the model pinning, and
 item 281 for arm 1's first four cells.
 
+## 283. Closed — the cage was not the constraint: given fifteen extra tools Zone used one, to do what it was already doing
+
+**Bucket: Closed.** Arm 1 completed (cells 5 and 6 finished under items 277/279 unchanged); arm 2 ran
+under item 282 (`9ab3a68f`, committer `2026-08-22T20:47:18Z`), first arm-2 cell at `20:48:54Z`.
+Pass spend **$3.7507** against a $6.00 guard.
+
+### Arm 1 completed — 8 of 9 ground-truth files
+
+Cells 5 and 6, which last pass lost to an exhausted balance, ran clean: cell 5 `investigation`, 7
+iterations, $0.3905, coverage **2/2**; cell 6 `investigation`, 6 iterations, $0.3457, coverage **1/1**.
+Both terminated naturally, both well under the cap. **Cell 5's earlier partial run stayed void and
+unscored** — the re-run is the data point, and it independently reached the same 2/2 the void run had
+been heading for.
+
+Arm 1's six cells cost **$0.3457–$0.5025**, which **widens the floor** of item 279's `n=4` range of
+$0.4158–$0.5025 rather than holding it. The registered ceiling stands.
+
+### The two arms, side by side
+
+| cell | arm 1 (5 tools) iters / cost / distinct reads / coverage | arm 2 (20 tools) iters / cost / distinct reads / coverage |
+|---|---|---|
+| 1 ranker terms | 7 · $0.4701 · 2 · **1/1** | 8 · $0.5774 · 1 · **1/1** |
+| 2 `multi_edit` no-op | 8 · $0.4158 · 1 · **1/1** | **12 (cap)** · $0.5019 · 1 · **1/1 (floor)** |
+| 3 compaction survivors | 7 · $0.4407 · 4 · **2/2** | 9 · $0.4931 · 4 · **2/2** |
+| 4 syntax-checker skip | 9 · $0.5025 · 2 · **1/2** | 11 · $0.6039 · 2 · **2/2** |
+| 5 verification variants | 7 · $0.3905 · 4 · **2/2** | 7 · $0.4015 · 3 · **2/2** |
+| 6 envelope coalescing | 6 · $0.3457 · 1 · **1/1** | 8 · $0.4345 · 2 · **1/1** |
+| **totals** | **44 iters · $2.5653 · 14 files · 8/9** | **55 iters · $3.0123 · 13 files · 9/9** |
+
+**No cell wrote anything.** Verified in both trees afterwards: the clone shows only the `dist` symlink
+this pass created, and the real tree only its pre-existing lock-file drift. The registered
+write-voiding condition never fired.
+
+**Cell 2 of arm 2 reached the cap of 12 with `success: false`.** Per the reading registered in item 282
+before the arm ran, **its coverage is a floor, not a result.** Here the floor happens to be
+unambiguous — its ground truth is one file and it found that file — but it is labelled rather than
+compared directly against arm 1's completed 8-iteration run.
+
+### The finding: fifteen extra tools, one used
+
+Arm 2 was offered twenty tools. Across all six cells it called exactly four distinct tools, and **only
+one of them was unavailable to arm 1**:
+
+| tool | calls | new in arm 2? |
+|---|---|---|
+| `run_command` | 32 | **yes** |
+| `read_file` | 26 | no |
+| `search_in_files` | 11 | no |
+| `find_references` | 2 | no |
+
+**Never called: `Task`, `fetch_url`, `write_file`, `apply_patch`, `multi_edit`, `TodoWrite`,
+`update_memory`, `revert_patch`, `ask_user`, `suggest_scope_change`, and all three background tools** —
+fourteen of the fifteen additions, including every write tool and the subagent dispatch that a
+four-subagent grant had just made available.
+
+**And the one tool it did use, it used to do what it was already doing.** All 32 `run_command`
+invocations are `grep`: `grep -ril "multi_edit\|multiEdit" src --include=*.ts`,
+`grep -n contentChanged src/tools/toolExecutor.ts`, and so on. Meanwhile `search_in_files` fell from
+**27 calls in arm 1 to 11 in arm 2**. Zone did not gain a capability; it **substituted shell grep for
+the built-in search tool** and carried on.
+
+So the answer to the question that motivated the arm — is the five-tool cage why Zone behaves narrowly?
+— is **no**. Uncaged, it reached for one additional tool and used it as a synonym for one it already
+had.
+
+### What it cost to find that out
+
+Arm 2 was **17% more expensive** ($3.0123 against $2.5653) and took **25% more iterations** (55 against
+44), for **one additional ground-truth file** and **one fewer distinct file opened** (13 against 14).
+The extra file is cell 4's `toolExecutor.ts` — precisely the file arm 1 had cited correctly in prose
+without ever opening, recorded in item 281 as the "found it without opening it" case. Uncaged, Zone
+opened it.
+
+**Arm 1's shape survives the uncaging.** Item 281 described it as: locate by search, commit to a small
+set of files, stop early. Arm 2 opens 1, 1, 4, 2, 3, 2 distinct files against arm 1's 2, 1, 4, 2, 4, 1
+— the same order of magnitude, slightly fewer in total — and stops below the cap on five of six cells.
+The one cell that did not stop early is also the one whose success flag is false.
+
+### The two registered expectations, and how each fared
+
+- **The brief's** — coverage does not improve materially; cost and iteration count rise. **Cost and
+  iterations: correct**, +17% and +25%. **Coverage: defensible but not clean** — 8/9 to 9/9 is an
+  improvement, and one file out of nine is fair to call immaterial, but it is not "no change".
+- **This entry's** — coverage unchanged **and** same-or-fewer distinct files. **Files: correct**, 13
+  against 14. **Coverage: wrong**, it moved by one.
+
+**The mixed outcome registered in advance as likely is what happened**: cost up, files flat, and
+coverage marginally up. Reported that way rather than resolved to a winner, exactly as item 282
+committed to.
+
+### What the arm does not license
+
+**The difference is attributable to the bundle, not to the toolset**, as item 282 registered before
+running. Arm 2 also carried a null pipeline's coaching budget of 5 against 2, open `skipPlan` gates, a
+forced complex tier with a four-subagent grant, and `pipelineApplied: false`. `--max-turns 12` held the
+largest confound — the iteration ceiling would otherwise have been 120 rather than 12 — and that
+control was **inert on five of six cells** and **binding on one**, which is the distinction registered
+in advance and the reason cell 2 is a floor.
+
+**The `CLAUDE.md` asymmetry stays in force and is not addressed by any of this**: 67,894 bytes in
+Claude Code's context every session against Zone's 3,989-byte `.zone/memory.md`. The prompts were
+chosen to target mechanisms `CLAUDE.md` does not explain, which makes it non-binding for these six, not
+absent in general.
+
+**So the honest closing position: the cage was not the constraint, and the remaining difference between
+the two systems is unmeasured rather than explained.** What this pass rules out is one hypothesis. It
+does not identify what does account for the difference, and the candidates it leaves — prior context,
+prompt framing, the shape of the loop itself — are not measured here and should not be inferred from a
+falsified alternative.
+
+### Environment control took five corrections, and one was nearly invisible
+
+Item 282 registered four; a fifth surfaced on the first attempt. Recorded because each was a variable
+that would otherwise have differed silently between arms: `.zone/memory.md` is gitignored and had to be
+copied; `node_modules` and `dist` are absent from a clone and were symlinked; **`.zone/model.json` is
+repo-local and carries `effort: "high"`, without which arm 2 would have run at no effort at all**; and
+the clone is **not in `~/.zone/trusted-projects.json`**, so the first three arm-2 cells exited
+immediately with `project_not_trusted_noninteractive` before spending anything. `ZONE_TRUST_ALL=1`
+resolves it and is equivalent by construction — the gate is a flat OR of four trust sources feeding one
+`fall through → proceed` branch, and the env form is explicitly run-only, so it leaves no trace in the
+user's configuration.
+
+Same commit and same tracked tree hash were verified in both, not assumed. Residual differences,
+enumerated rather than closed: the clone lacks `.claude/`, `.env`, `data/`, and everything under
+`.zone/` except the two copied files. All six prompts concern `src/`, so these are judged non-binding —
+a judgement, recorded as one.
+
+**Mutation is not applicable.** The scorer stayed a scratchpad script whose figures are transcribed
+here; measurements and prose have no runtime behaviour to substitute into.
+
+See item 282 for the arm's registration and its confound table, item 281 for arm 1's first four cells,
+item 279 for the instrument, and item 277 for the prompts and ground truth.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 282 to find out which ones still need something. No index of
+reader the trouble of reading all 283 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (137): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260, 262, 264, 265, 266, 267, 268, 269, 270, 271, 273, 274, 275, 276, 277, 278, 279, 281, 282
+**Closed** (138): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260, 262, 264, 265, 266, 267, 268, 269, 270, 271, 273, 274, 275, 276, 277, 278, 279, 281, 282, 283
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (0):
