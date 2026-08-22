@@ -22772,6 +22772,12 @@ Nine distinct files across six sets; `toolExecutor.ts` appears in two.
 - **Positive control:** at least one ground-truth file in the cell's coverage read set. Zero → the cell
   is **void**, however fluent the prose.
 
+**Amended by item 278 — one element only.** The coverage *source* registered here (stdout `▸ [tool]
+read_file: <path>`) was falsified on the first real run: headless text emits zero such lines. Everything
+else in this section stands — the prompts, the ground truth, path-suffix matching, `read_file`-only, the
+positive control and the void-cell readings never depended on where the read set was parsed from. The
+next registration substitutes the `ZONE_VERBOSE_LOGS=1` stderr instrument and cites item 278.
+
 **What the void-cell diagnostic licenses, registered now because this is exactly the branch where a
 post-hoc reading would be tempting.** Every void cell additionally reports whether any ground-truth
 path appeared anywhere in stdout, including as a `search_in_files` result. The readings are fixed in
@@ -22810,17 +22816,147 @@ See item 276 for the protocol's establishments and its re-verdict, item 251 for 
 register-before-measure precedent this follows, and item 90 for the unread ground truth both are
 designed around.
 
+## 278. Closed — the comparison stopped after one cell: the registered coverage instrument does not exist, and the cost estimate was priced on a model the runs no longer use
+
+**Bucket: Closed.** One cell ran, is unscoreable, and is kept as an artifact rather than a data point.
+**$0.6091 spent, no comparison produced.** What the pass produced instead is three falsified
+registrations and a corrected protocol for the next one.
+
+**Why it stopped, and the distinction that decided it: what broke was the instrument, not the budget.**
+The registered coverage source turned out not to exist, and the working replacement was found *after*
+the first cell had run. Continuing would have meant scoring under an instrument chosen post-hoc —
+voiding exactly the property that item 277's pushed commit and its server timestamp existed to
+establish. Cutting N instead would have compounded it, folding a cost decision and a protocol change
+into one move. The spend projection reached **~$3.53 against the registered $3.36 stop rule**, so the
+rule fired too, but it was the second reason and not the first.
+
+### Finding 1 — item 276's coverage instrument is falsified
+
+Item 276 registered that each read appears on stdout as `▸ [tool] read_file: <path>`, reasoned from
+`sink.ts`'s `tool_call` case being gated only on `!quiet`. Measured on a real headless run:
+`command grep -c '\[tool\]' zone1.out` → **0**. Headless text emits the final prose and nothing else;
+the 8,555 bytes of stdout are the answer, start to finish.
+
+**This is the third instrument trap inside that one entry, and the first two did not catch it.** E1
+caught that headless JSON's `summary` is a mode string rather than the answer. E3 caught that the
+marker sink cannot supply the read set, since the only path-carrying marker covers 5 of 102 runs. Both
+were found by reading, and both were right. This one was also found by reading and was wrong — the
+sink's `tool_call` case does print, but the events do not arrive on that path. **Reading a print
+statement establishes what a function would emit, never that it is reached**, and three traps in one
+entry is the argument for a dry pass over a code read.
+
+### Finding 2 — the replacement instrument exists, and it is behind the same gate as a known blind spot
+
+`ZONE_VERBOSE_LOGS=1` makes `[zone-agent-tool-call]` emit on stderr, carrying `tool` and `filePath` as
+structured JSON — verified on a $0.10 capped probe, which recorded
+`{"iter":2,"tool":"read_file","filePath":"src/tools/scopeGuard.ts"}`. It is strictly better than the
+stdout instrument it replaces: typed fields rather than a parsed prefix, and the tool name alongside
+the path so the `read_file`-only rule is applied on a field instead of a regex.
+
+**The finding is where it lives.** That marker is emitted through `debugLog`, whose entire body is
+`if (VERBOSE) console.log(...)`, with `VERBOSE` read from `ZONE_VERBOSE_LOGS` **once at module load**.
+This session has already recorded what that gate costs: it is why `apply_patch`'s rejection branches
+were invisible in production telemetry (items 245/246). Same gate, same class, and now load-bearing for
+a measurement rather than a diagnosis.
+
+So, stated as an observability fact rather than a protocol detail: **the only instrument that records
+which files a run opened exists solely in a mode nobody runs by default.** A normal run — the 102 in
+the sink, every run a user makes — leaves no recoverable record of what it read. That is why the sink
+shows `[zone-agent-tool-call]` for 5 of 102 runs: not sampling, but the five that happened to be run
+verbose. Anyone asking after the fact which files a run consulted cannot find out, and the data was
+never captured rather than discarded.
+
+### Finding 3 — the cost figure was priced on a model these runs no longer use
+
+Item 276's ≈$0.90–$1.68 estimate rests on **median $0.1499 across 11 investigation runs**. Re-derived by
+joining each run's archetype to the model recorded on its own `[zone-token-breakdown]`:
+
+| model | n | median | min | max |
+|---|---|---|---|---|
+| `claude-sonnet-5` | 8 | $0.1497 | $0.1174 | $0.4252 |
+| `claude-opus-5` | 1 | $0.4866 | — | — |
+
+Nine of the eleven have a recoverable model; two do not, and are excluded rather than assumed. **Every
+model-attributable run behind the estimate is Sonnet**, and all eight predate 2026-08-09, the earliest
+`claude-opus-5` record in the sink. Cell 1, run today on Opus 5, cost **$0.4866 — 3.25× the Sonnet
+median**.
+
+A caveat against over-reading that as a clean before/after: for the *investigation subset* it is one,
+but sink-wide the models are mixed from 2026-08-09 onward, with Sonnet records continuing through
+08-19. **Model is a per-run variable that none of these cost figures controlled for**, which is the
+more general defect.
+
+**n=1 is not an estimate, so the next pass registers a range rather than a point.** Bounded below by
+the one measured Opus investigation run ($0.4866) and above by the Sonnet maximum scaled by the
+observed ratio ($0.4252 × 3.25 ≈ $1.38): **$0.49–$1.38 per cell, $2.9–$8.3 for six** — declared as a
+scaled projection, not a measurement. **The $3.36 stop rule is not carried forward**; it was derived
+from the median now known to be wrong, and a stop rule inherited from a falsified estimate is worse
+than none.
+
+**The same staleness is a class, not one figure.** The global **median $0.0867 / p75 $0.1825 / p90
+$0.4004 across 698 runs** is quoted as a live sizing input in items 79, 170 and 264. Those figures were
+correct when measured and carry no model attribution, so each needs the same join before being reused
+for a spend decision. Not re-priced here — that is its own pass — but recorded so the next reuse checks
+rather than inherits.
+
+### Finding 4 — a per-run USD cap overshoots by up to one iteration
+
+Measured, not inferred: the probe ran with `--max-budget-usd 0.05` and emitted
+`[zone-run-usd-cap] {"capUsd":0.05,"spentUsd":0.1006,"iter":2}`, terminating as
+`run_usd_cap_exceeded` at **2.01× its cap**. The check is per-iteration and post-hoc — it stops the run
+*after* the iteration that crossed the line, so a cap of X permits X plus one iteration's cost. With
+Opus iterations at roughly $0.07 each that overshoot is material, and a per-cell cap for the next pass
+must be set below the intended ceiling rather than at it.
+
+### Cell 1 is an artifact, not a data point
+
+It ran, succeeded, and produced a genuinely dense answer with file-and-line citations, at 7 iterations
+against the `iterCap` of 12 — well short of the cap, so it stopped because it was finished rather than
+because it was cut off. **Its read set is not recoverable**: it ran before the instrument was known, so
+`ZONE_VERBOSE_LOGS` was unset and `command grep -c 'zone-agent-tool-call' zone1.err` returns **0**.
+Under the registered positive control it is void, and under any rule it is unscoreable, because the
+data needed to score it was never emitted.
+
+The prose is kept for the next pass's qualitative half and is **not** counted as a cell. Recording the
+distinction explicitly because the failure mode is precisely that a real, good-looking output quietly
+becomes a data point it was never eligible to be. One incidental corroboration it does supply: its own
+stderr carries `[zone-classifier-fallback]` naming `rejectedField: "tier"`, `rejectedValue:
+"investigation"` — the model answered the tier question with an archetype — which is exactly the
+deterministic fallback item 277 registered as prompt 1's caveat, now explained rather than merely
+observed.
+
+### Item 277's re-verdict, scoped to one element
+
+**Amended: its coverage source is falsified; everything else stands.** The six prompts, the nine
+ground-truth files, the path-suffix matching rule, the `read_file`-only decision, the positive control,
+the void-cell readings and the reporting rules are all unaffected — none of them depended on where the
+read set came from. The next registration amends **that one element** and cites this entry, so the
+register-before-measure ordering carries across the amendment instead of resetting: item 277 remains
+the registration of the criterion, and this entry is the recorded reason one input to it changed.
+
+**What the next pass registers, before running:** the `ZONE_VERBOSE_LOGS=1` stderr instrument in place
+of stdout parsing; a per-cell range of $0.49–$1.38 with its provenance as a scaled projection; a stop
+rule computed from that range rather than inherited; and a per-cell cap set below its ceiling to absorb
+the one-iteration overshoot. Then all six cells, under one instrument, chosen before any of them runs.
+
+**Mutation is not applicable.** This pass landed measurements and prose; there is no runtime behaviour
+to substitute into.
+
+See item 277 for the criterion this entry amends one input to, item 276 for the protocol whose third
+instrument trap this is, items 245/246 for the `debugLog` gate the coverage instrument now shares, and
+item 264 for the 698-run figures the staleness class covers.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 277 to find out which ones still need something. No index of
+reader the trouble of reading all 278 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (133): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260, 262, 264, 265, 266, 267, 268, 269, 270, 271, 273, 274, 275, 276, 277
+**Closed** (134): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260, 262, 264, 265, 266, 267, 268, 269, 270, 271, 273, 274, 275, 276, 277, 278
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (0):
