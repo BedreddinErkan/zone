@@ -22475,9 +22475,16 @@ item 243 for the `filesLikely` fail-open this entry's "not protected, not verifi
 rests on, and item 272 for the neighbouring declared-but-inert shape this placement gap was adjacent to
 before it was closed.
 
-## 276. Closed — the registered protocol for comparing Zone's investigation against Claude Code, with the outcome variable settled and the ground truth recordable before any run
+## 276. Closed — INCOMPLETE as an executable protocol: the design for comparing Zone's investigation against Claude Code, whose prompts and ground truth were specified in shape and never written down
 
-**Bucket: Closed.** The deliverable is the protocol, and it is complete. **Nothing was run.** Registered
+**Bucket: Closed.** The deliverable is the protocol. **Nothing was run.**
+
+**Re-verdict (item 277): INCOMPLETE as an executable protocol.** This entry says its E4 carries six
+prompts each with a ground-truth file set, and it carries neither — the shape of the protocol without
+any of its content, which made a later instruction to execute it "unchanged" unfollowable. Item 277
+registers the actual prompts, ground truth and matching rule, and records two defects this entry's
+draft contained: a ground-truth path that does not exist, and an either/or set the matching rule
+cannot score. Everything established here stands; only the claim to be executable does not. Registered
 in its own commit so "the protocol preceded the runs" is checkable from history rather than asserted —
 item 251's precedent. The comparison itself is a later pass; if its results ever conflict with what is
 written here, this entry is the record of what was committed to in advance.
@@ -22653,17 +22660,167 @@ See item 251 for the register-before-measuring precedent this entry follows, ite
 ground truth it is designed around, item 274 for the web-search establishment E2's confound rests on,
 and item 275 for the placement fix that put `fetch_url`'s availability in its current state.
 
+## 277. Closed — the comparison's prompts, ground truth and scoring rule, registered before any run; and item 276's failure to carry any of them
+
+**Bucket: Closed.** This entry is the artifact item 276 said it contained and did not. **Committed and
+pushed before a single comparison run**, so the ordering is checkable from a server-side timestamp
+rather than asserted.
+
+### What item 276 got wrong, recorded as a finding rather than a footnote
+
+Item 276's E4 opens *"Six prompts, repo-internal, each with a ground-truth file set written into the
+ledger before any run"* and then enumerates **no prompts and no file sets**. The phrase "pre-registered
+ground-truth file set" appears four times in that entry; the artifact appears zero times. The entry
+specifies the **shape** of a protocol and carries none of its **content**, which made the instruction
+to execute it "unchanged" unfollowable — there was nothing to carry forward.
+
+This is the class this session keeps finding — an entry wrong about what it contains — landing on the
+one dimension the protocol existed to protect. Item 90's lesson was that a ground truth nobody reads is
+worse than none because it looks like rigour. **This is a step further: the ground truth was never
+written, and the entry reads as though it was.** Item 276 is re-verdicted in place to *Closed —
+INCOMPLETE as an executable protocol*; its establishments (the path, the confound decision, the
+instrument findings) stand, only its executability does not.
+
+**The general rule it yields, now also in `CLAUDE.md` so it is not confined to the entry that failed
+it:** a protocol entry is executable only if it carries the **literal prompts**, the **literal
+ground-truth file sets**, and the **matching rule**. Shape without content is not a protocol.
+
+### A capability difference item 276's E2 never listed, and it may be the largest
+
+**`CLAUDE.md` is 67,894 bytes and is in Claude Code's context every session. Zone never reads it** —
+`git grep 'CLAUDE\.md' -- 'src/**'` returns only a ranker fixture. Zone gets `.zone/memory.md`: **3,989
+bytes**, mostly stack, commands, entry points and helper pointers. A **17× asymmetry in prior context**
+on a repo-internal research task, plausibly outweighing the tool-count difference E2 did enumerate.
+
+Its scoring consequence is registered **before** any run, because after would be indistinguishable from
+excusing a result: for a prompt whose answer `CLAUDE.md` already states, Claude Code can answer
+correctly with **zero reads** — coverage 0, correctness high — so coverage would measure *"did the
+system need to look"* rather than *"did it investigate well"*. Zone must read either way.
+
+**The mitigation, chosen now: every prompt targets a mechanism `CLAUDE.md` does not explain.** Checked,
+not assumed — `command grep -c` gives 0 mentions for `rankRelevantFiles`, `stopword`, "no-op
+replacement" and `OUT_OF_REPO_MARKER`, and single name-only mentions for `classifyTurns`,
+`gracefulSkip`, `createCoalescingWriter` and `pre_existing_errors`. Every prompt asks for the *rule*,
+which no name-only mention supplies. This makes coverage comparable; it is not a claim of symmetry.
+
+### The six prompts, verbatim, with their screened archetype
+
+Screened through the real `classifyTask` against the BYOK key before this commit. **The first screen
+was an instrument failure and is reported as one:** run without a key it returned `fallbackUsed=true`,
+`confidence=0`, `$0` cost and `refactor` for all six — the fallback value, not a result. Re-run with
+the key, the screen is real.
+
+| # | prompt (verbatim) | archetype | tier | conf / aconf | fallback |
+|---|---|---|---|---|---|
+| 1 | `Trace how a task description becomes a ranked list of relevant files: which terms are extracted from the task text, how they are normalized before matching, and what the ranker deliberately excludes from that term set.` | investigation | medium | 0 / 0.95 | **true** |
+| 2 | `When multi_edit replaces text across files, how does it decide whether a given file actually changed? What happens when the replacement produces byte-identical content?` | investigation | simple | 0.85 / 0.9 | false |
+| 3 | `When context compaction runs, how does it decide which conversation turns survive and which are summarized away?` | investigation | simple | 0.92 / 0.95 | false |
+| 4 | `Trace what happens when a syntax checker's binary is not installed on the machine: how does the patch flow detect the checker is unavailable, what does it do instead of failing the patch, and which checkers are active without an opt-in flag?` | investigation | complex | 0.85 / 0.92 | false |
+| 5 | `How does verification decide between reporting applied, applied_with_warnings, and pre_existing_errors?` | investigation | simple | 0.95 / 0.98 | false |
+| 6 | `The run envelope is checkpointed repeatedly during a run. How does it avoid overlapping or lost writes when checkpoints arrive faster than a disk write completes?` | investigation | simple | 0.92 / 0.95 | false |
+
+**Two prompts were replaced at the screen, before any run and before this commit**, which is the whole
+point of screening: the original 1 and 4 classified as **`question`**, not `investigation`. Both read
+as single-fact lookups; rewritten as multi-clause traces they land on `investigation`. Their originals
+are recorded for the record — *"How does Zone decide which words in a task description count as
+meaningful symbols when ranking relevant files, and what does it deliberately ignore?"* and *"What
+causes a syntax checker to skip a file instead of reporting it as invalid, and which languages are
+checked without opt-in?"* — because a screen that silently discards its rejects cannot be audited.
+
+**Prompt 1 carries a recorded caveat rather than a clean screen.** It returns `fallbackUsed=true` with
+`confidence=0` while `archetype=investigation` at `archetypeConfidence=0.95`. Re-run, it reproduced
+**identically**, so this is deterministic, not transport noise. The fallback is on the **tier**
+dimension, not the archetype: the registered screen gates on archetype, which is what selects the
+toolset, and tier barely binds an investigation run because `INVESTIGATION_PIPELINE` supplies its own
+`iterCap` of 12 and its own 5-tool filter at every tier. Accepted with the caveat recorded as a
+covariate rather than hidden or rescreened until it looked clean.
+
+**Screen cost: $0.0219 actual against ~$0.012 estimated — 1.8×**, because the estimate priced six
+screens and the real screen took ten (six, two replacements, two retries).
+
+### Ground truth, per prompt, with why each file is in it
+
+Authored from knowing this repository, deliberately **not** derived by a tool: a mechanically derived
+ground truth contains its own answer, so scoring Zone's reads against it would measure the agreement
+between two retrieval heuristics rather than whether the investigation was any good.
+
+**Every path was confirmed to exist** (`git ls-files --error-unmatch`) and **every set was checked for
+a split mechanism** before being written down — a set that should be two files and is registered as one
+is unscoreable in the same way an either/or is.
+
+| # | ground-truth set | why each file is in it |
+|---|---|---|
+| 1 | `src/repo/rankRelevantFiles.ts` | `extractNormalizedTerms`, `singularizeTerm`, `getTaskEntityTerms` and `extractTaskSignals` all resolve here. Checked for split: `scopeGuard.ts` has its own separate `SYMBOL_STOP` for a different purpose — a decoy a searcher can land on, which the prompt's "when ranking relevant files" disambiguates. **One file.** |
+| 2 | `src/tools/toolExecutor.ts` | the `multi_edit` handler and the `filesStaged` byte-comparison that decides a no-op, including the EOL-homogenization case, are both here. **One file.** |
+| 3 | `src/llm/compaction/classifyTurns.ts` · `src/llm/compaction/ContextCompactor.ts` | the survivor rule, and the orchestrator that applies it. `types.ts` only declares shapes and is excluded. **Two files.** |
+| 4 | `src/tools/syntaxCheckers.ts` · `src/tools/toolExecutor.ts` | **the path in item 276's draft was wrong** — there is no `src/core/syntaxCheckers.ts`; it is `src/tools/`. Caught by the existence check, which is exactly the `correctFile` failure in a new costume. And the mechanism is genuinely split: `syntaxCheckers.ts` declares `gracefulSkip` per checker and the default-on set; `toolExecutor.ts` is where the rule fires — `if (!available && checker.gracefulSkip)` → approve plus a one-time warning. **Two files.** |
+| 5 | `src/llm/verification/classify.ts` · `src/llm/verification/composer.ts` | item 276's draft left this an either/or, which the path-suffix rule cannot score. Resolved by reading: `deriveFinalizeBranch` in `classify.ts` is the decider (`regressed === false` → `pre_existing_errors`, else `rollback` → `rolled_back` else `applied_with_warnings`), and `composer.ts` carries the `keyVerified` floor that gates whether `pre_existing_errors` is honoured at all. `types.ts` declares the union and is excluded; `runCompletion/` consumes the verdict downstream and is excluded. **Two files.** |
+| 6 | `src/api/diskRunEnvelope.ts` | `createCoalescingWriter`'s single-flight plus dirty-flag re-run. Checked for split: `agentLoop.ts` calls it but holds none of the mechanism. **One file.** |
+
+Nine distinct files across six sets; `toolExecutor.ts` appears in two.
+
+### The scorer's matching rule
+
+- **Path-suffix match against the repo-relative ground-truth path, case-sensitive.** Not bare basename
+  — `index.ts` occurs dozens of times and would credit a read of the wrong one. Not exact-string —
+  stdout carries whatever path the caller passed, absolute or relative.
+- **Only `read_file` counts toward coverage.** `search_in_files` and `list_files` surface paths as
+  *results*, not as a decision to open a file; counting them would credit a grep that returned fifty
+  paths it never read. Both are recorded as **process**, a secondary axis, never as coverage.
+  Registered before seeing which tool Zone leans on, and Zone's investigation set holds all three, so
+  this is a live choice with a real consequence.
+- **Positive control:** at least one ground-truth file in the cell's coverage read set. Zero → the cell
+  is **void**, however fluent the prose.
+
+**What the void-cell diagnostic licenses, registered now because this is exactly the branch where a
+post-hoc reading would be tempting.** Every void cell additionally reports whether any ground-truth
+path appeared anywhere in stdout, including as a `search_in_files` result. The readings are fixed in
+advance:
+
+- **One cell** void with the paths surfacing only through search → **uninterpretable at n=1**, reported
+  as a single observation and nothing more.
+- **Several cells** void the same way → **an instrument finding, not a Zone finding**: the registered
+  coverage rule is narrower than how Zone actually works, and the honest response is to **report it as
+  a protocol limitation, not to rescore under a widened rule.** Rescoring after seeing which rule
+  flatters the result is the precise failure this registration exists to prevent.
+- **Void with no ground-truth path anywhere in stdout** → the run never engaged the subject; a Zone
+  finding, and the prose is not evidence against it.
+
+An expectation is recorded so it can be wrong: the system prompt's investigation branch explicitly says
+*"Use search_in_files and find_references; read source files as needed. Do NOT avoid source reads —
+they are the point"*, so **at least one `read_file` per cell is expected**; the open question is
+whether the file read is a ground-truth one.
+
+### Reporting rules, fixed in advance
+
+Per-cell, never aggregated — an average over six heterogeneous prompts implies a precision six cells
+cannot support. Fractions with denominators, not percentages. Correctness stays a labelled judgement
+and is never collapsed into coverage; cost is one-sided and never expressed as a ratio; no combined
+score is produced.
+
+**Instrument-failure signals, void rather than poor:** error; `terminationReason` other than
+`natural_completion`; `iterCap` 12 reached; empty stdout; archetype other than `investigation`.
+
+**Stop rule:** if actual spend exceeds 2× the ≈$0.90–$1.68 estimate — that is, **>$3.36** — the
+remaining cells do not run. **Cells already run stand and are reported**, with the remainder recorded
+explicitly as unrun: a partial set reported as partial is fine, a partial set that reads as complete is
+not.
+
+See item 276 for the protocol's establishments and its re-verdict, item 251 for the
+register-before-measure precedent this follows, and item 90 for the unread ground truth both are
+designed around.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 276 to find out which ones still need something. No index of
+reader the trouble of reading all 277 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (132): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260, 262, 264, 265, 266, 267, 268, 269, 270, 271, 273, 274, 275, 276
+**Closed** (133): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260, 262, 264, 265, 266, 267, 268, 269, 270, 271, 273, 274, 275, 276, 277
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (0):
