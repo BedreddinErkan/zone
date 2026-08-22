@@ -1,0 +1,5 @@
+#!/bin/sh
+# Zone pre-push guard — refuses a push carrying more than one commit. Logic and rationale
+# live in scripts/prePush.mjs; this shim exists only so git has an executable to call.
+# Activated with: git config core.hooksPath scripts/githooks
+exec node "$(dirname "$0")/../prePush.mjs" "$@"

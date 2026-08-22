@@ -322,7 +322,7 @@ describe("self-exclusion — the tool does not inventory its own fixtures", () =
  * shifts these numbers should make this test fail and prompt a review, not silently drift.
  */
 describe("drift check — today's figures against the real tree", () => {
-  it("413 marker names; emitter-count distribution zero=42 one=351 several=20; 24 hazards", () => {
+  it("414 marker names; emitter-count distribution zero=43 one=351 several=20; 24 hazards", () => {
     // Re-derived via this file's own scanTree/hazards, not hand-added to the prior 410/349 —
     // the repository-tree write guard (ledger item 236) landed one new marker,
     // `[zone-repo-guard]`, so the total moved 410->411. It lands in `several`, not `one`:
@@ -346,8 +346,18 @@ describe("drift check — today's figures against the real tree", () => {
     // which created a 25th hazard row out of prose alone. The referent was rewritten rather than
     // the constant bumped, which is this document's standing rule and, here, the difference between
     // recording a real attribution hazard and inventing one.
+    //
+    // 413->414: this pass's pre-push guard added `[zone-pre-push]`, emitted from
+    // scripts/prePush.mjs. It lands in `zero`, not `one` — measured, and structural rather than a
+    // miscount: fileKind() classifies anything under scripts/ as "script", and scanTree skips
+    // every non-"source" file before recording an emission, so no marker emitted only from
+    // scripts/ can reach `one` or `several` by construction. `zero` therefore reads "named but
+    // never emitted" for this row when the truth is "emitted from a file kind the scanner does
+    // not credit" — the first production emission of that shape, the only other script-only zero
+    // row being a test fixture. Hazards stay 24: the guard's ledger entry names the marker, but
+    // hazards() reports only mentions inside "source" files and docs/ is not one.
     const result = scanTree(readTrackedFiles());
-    expect(result.size).toBe(413);
+    expect(result.size).toBe(414);
 
     const dist = { zero: 0, one: 0, several: 0 };
     for (const attr of result.values()) {
@@ -356,7 +366,7 @@ describe("drift check — today's figures against the real tree", () => {
       else if (c === 1) dist.one++;
       else dist.several++;
     }
-    expect(dist).toEqual({ zero: 42, one: 351, several: 20 });
+    expect(dist).toEqual({ zero: 43, one: 351, several: 20 });
     expect(hazards(result)).toHaveLength(24);
   });
 
