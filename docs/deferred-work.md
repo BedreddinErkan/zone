@@ -23518,17 +23518,148 @@ here; measurements and prose have no runtime behaviour to substitute into.
 See item 282 for the arm's registration and its confound table, item 281 for arm 1's first four cells,
 item 279 for the instrument, and item 277 for the prompts and ground truth.
 
+## 284. Closed — arm 3 registered: the context asymmetry, the manipulation that would have injected nothing, and the cache question settled from arm 1's own records
+
+**Bucket: Closed.** Registration only; pushed before any arm-3 cell ran. Items 277 (`bf563d72`), 279
+(`16000cb7`) and 282 (`9ab3a68f`) stand — prompts, ground truth, matching rule, instrument, positive
+control and void conditions are all unchanged. **Arm 3 is arm 1 plus context**, deliberately based on
+arm 1 rather than arm 2, so the comparison is single-variable against a completed six-cell arm.
+
+### The manipulation, and the version of it that would have measured nothing
+
+**`readProjectMemoryBlock` does not return `.zone/memory.md`.** It returns only what `INIT_BLOCK_RE`
+captures between `<!-- ZONE_INIT_BEGIN -->` and `<!-- ZONE_INIT_END -->`, plus lines matching
+`^-\s+\[YYYY-MM-DD\]\s+…`, wrapped under a `# Project memory` header.
+
+So **appending `CLAUDE.md` to that file injects zero bytes** — its content is neither inside the
+markers nor dated-bullet shaped. That is the obvious manipulation, and it would have produced a null
+arm indistinguishable from a real one: a bigger file, an unchanged prompt, and six cells measuring
+nothing.
+
+The manipulation used instead wraps `CLAUDE.md` **inside** the markers, in the arm's clone only.
+**No cap exists in the read path** — `MEMORY_WARN_THRESHOLD_BYTES` (40 KiB) is referenced only by the
+TUI `/memory` display and by `update_memory` in `toolExecutor`, never by `readProjectMemoryBlock`.
+
+**Field-level proof, before spending, because "the file is bigger" is not "the model saw it":**
+`readProjectMemoryBlock` returns **3,916 chars** against the real repo and **68,235** against the arm-3
+clone — **17.4×** — and the returned block contains `VERIFIER SHELL DISCIPLINE`, a string that occurs
+only in `CLAUDE.md`. This is the same proof item 279 required after item 278's instrument turned out
+never to have been reached.
+
+### The cache question, settled by measurement where the source says it is unsettled
+
+`convertParams.ts`'s own comment records that breakpoint #1 covers tools alone, and then states that
+whether system "rides along inside breakpoint #2's own cumulative span once one exists **is NOT settled
+by item 161 and is not re-examined here**." **Arm 1's `[zone-cache-usage]` records settle it.** From
+cell 1, whose system prompt was 12,557 chars (~3,140 est tokens):
+
+| iter | cache write | cache read |
+|---|---|---|
+| 1 | 1,917 | 0 |
+| 2 | 9,551 | 1,917 |
+| 3 | 3,196 | 11,468 |
+
+Iteration 1 writes ~1,917 tokens — the tools block, not the ~3,140-token system prompt. Iteration 2
+writes 9,551 and reads back exactly the 1,917 written at iteration 1. **The system prompt is uncached
+on iteration 1 and is absorbed into breakpoint #2's cumulative span from iteration 2 onward.** The
+answer belongs next to the question: it is the comment in `convertParams.ts` immediately above the
+`cacheEligible` branch that poses it, and a future reader should be sent there rather than only here.
+
+**Cost consequence** at Opus 5's `input: 5 / cache_read: 0.5 / cache_write: 6.25` per Mtok. The
+addition is 68,235 chars ≈ **16,387 tokens**. Per cell at arm 1's 6–9 iterations: one uncached pass
+(~$0.082), one cache write (~$0.102), ~6 cache reads (~$0.049) — **≈$0.23 extra**, so **≈$0.66/cell**
+against arm 1's $0.43 average. A fully-uncached prompt would have cost ~$0.66 extra per cell instead of
+$0.23; the measurement is what rules that out.
+
+**Expected total ≈$4.0; per-cell cap `--max-budget-usd 1.50`, above even the uncached counterfactual so
+it cannot bind; guard $9.00**, stated separately so this is not read as a budget of $9.00. **If a cell
+does hit the cap, item 282's rule applies unchanged: its coverage is a floor, not a result** — arm 2
+cell 2 did exactly that, so this is a live possibility rather than a formality.
+
+### `CLAUDE.md` now answers one of the six, and item 277's check was too coarse
+
+Item 277 verified that the prompts target mechanisms `CLAUDE.md` does not explain by **counting
+mentions**. That test asks the wrong question: it counts whether a name appears, not whether the
+mention carries the answer. Re-run against the current 68,842-byte file:
+
+- **Prompt 6 is answered outright.** `CLAUDE.md` contains "`createCoalescingWriter`: single-flight,
+  dirty-flag re-run" — precisely the mechanism the prompt asks for. Under item 277's mention-count test
+  this scored 1 and passed as "name-only".
+- **Prompt 4 is partly answered:** "TS+Python always on; Go/Ruby/Java opt-in via
+  `ZONE_EXPERIMENTAL_SYNTAX_CHECKERS`; all `gracefulSkip:true`" supplies exactly the third of its three
+  clauses. The detection mechanism is absent.
+- **Prompt 3 is pointed at, not answered:** `classifyTurns.ts` is named as deciding survivors, without
+  the rule.
+- **Prompts 1, 2 and 5 are unanswered** — `rankRelevantFiles`, `stopword`, `contentChanged`,
+  `availabilityCheck` and `deriveFinalizeBranch` all return zero mentions.
+
+**This corrects item 277's own verification**, and it is recorded as a correction rather than folded in
+silently.
+
+### The three affected cells, with both readings registered before they run
+
+These are the cells where a post-hoc reading would be most tempting, so each gets its interpretation
+fixed in advance.
+
+**Cell 6 — coverage uninterpretable either way, and it is the cleanest natural experiment in the arc.**
+It still runs, because tool counts and iterations stay comparable.
+- **If it opens `diskRunEnvelope.ts` anyway**, Zone declined the shortcut its context handed it and
+  verified against source. That is a behavioural finding about Zone and is arguably worth more than the
+  coverage number.
+- **If it answers without opening it**, context substituted for investigation. Coverage would read
+  **0/1 and mean the opposite of poor work.**
+
+**Cell 4 — coverage interpretable, caveated.** `CLAUDE.md` supplies the "which checkers are active
+without opt-in" clause but not the availability-detection mechanism, so a read of `syntaxCheckers.ts`
+or `toolExecutor.ts` still has to be earned. A **drop** in coverage here would mean the answered clause
+let it stop early; holding at 2/2 would mean it pursued the unanswered clauses.
+
+**Cell 3 — the interesting middle case, and the one that isolates a distinction the aggregate cannot
+make.** `CLAUDE.md` names the file without giving the rule. **If arm 3 reaches the same coverage in
+fewer iterations than arm 1's 7, that separates "a map shortens the search" from "context supplies the
+answer"** — the first is a navigation effect, the second a substitution effect, and only a cell where
+the file is named but the mechanism is not can tell them apart.
+
+### Registered expectations
+
+**Coverage does not improve** over arm 1's 8/9: arm 1's single miss was cell 4's `toolExecutor.ts`,
+cited in prose without being opened, and `CLAUDE.md` does not name that file as where the rule fires.
+**Cost rises ~55% per cell. Iterations fall slightly**, because a model handed a map spends fewer turns
+locating.
+
+**Second, distinguishable: distinct files opened drops below arm 1's 14.** The counter-argument is
+registered too, because it is the more likely failure: **a 68 KB map names files Zone would never have
+found on its own, so it may open more, not fewer.** If distinct files rise, this expectation is wrong
+and that reading is already on the record rather than invented afterwards.
+
+If coverage improves, the context asymmetry is a real lever and that is the finding.
+
+### Environment
+
+Item 282's five corrections, re-verified rather than assumed to transfer: same commit `63a4bef3` and
+same tracked tree `e8c6951e` in both, verified; `node_modules` and `dist` symlinked; `.zone/model.json`
+copied, since it carries `effort: "high"` and its absence would run the arm at no effort at all;
+`ZONE_TRUST_ALL=1`, since the clone is absent from `~/.zone/trusted-projects.json` and that absence
+aborted three arm-2 cells before they spent anything. **The fifth — `.zone/memory.md` — is the one this
+arm deliberately replaces, which is the manipulation itself.**
+
+A **fresh clone** at `/dev/shm/zone-arm3` rather than reuse of arm 2's, so the memory replacement cannot
+leak backwards into a comparison already recorded.
+
+See item 282 for the arm-2 registration this parallels, item 279 for the instrument, item 277 for the
+prompts and ground truth whose verification this entry corrects, and item 281 for arm 1's results.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 283 to find out which ones still need something. No index of
+reader the trouble of reading all 284 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (138): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260, 262, 264, 265, 266, 267, 268, 269, 270, 271, 273, 274, 275, 276, 277, 278, 279, 281, 282, 283
+**Closed** (139): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260, 262, 264, 265, 266, 267, 268, 269, 270, 271, 273, 274, 275, 276, 277, 278, 279, 281, 282, 283, 284
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (0):
