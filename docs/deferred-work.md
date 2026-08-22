@@ -2379,7 +2379,18 @@ also need `fetch-depth: 0` added to CI's checkout (shallow by default today)". T
 workflows: **`tests.yml`**, which runs `npm test` and whose `actions/checkout@v4` sets no
 `fetch-depth`, is the one that would need it — the conclusion holds, but only for that workflow.
 `feature-agent.yml` **already sets `fetch-depth: 0`**, so a reader grepping the setting finds a hit
-and concludes this entry is wrong. Naming the workflow is what prevents that. The claim beside it —
+and concludes this entry is wrong. Naming the workflow is what prevents that.
+
+**Addendum, item 271:** `feature-agent.yml` is deleted. Measured after the deletion, not assumed —
+`command grep -rn 'fetch-depth'` and `git grep -n 'fetch-depth'` against the tracked tree both return
+exactly three lines, and all three are this paragraph's own prose; no workflow or config file carries
+the setting any more. The gotcha this paragraph warns about — a reader independently grepping the tree
+and landing on a real file that contradicts it — cannot happen the way it used to,
+because there is no other file left to land on. The `tests.yml` conclusion is unchanged: it still sets
+no `fetch-depth`, and it is still the only live workflow this entry's claim is about. The naming
+clause is kept rather than cut, as an accurate record of why the workflow was named at the time.
+
+The claim beside it —
 that no test in this suite shells out to git — is **confirmed**: five test files import
 `child_process` and all five mock it; none invokes git, so this would indeed be the first to cross
 that boundary.
@@ -21838,17 +21849,133 @@ progress consumer and the standing practice is that establishment and constructi
 passes. See item 268 for the defect that raised the question, and item 244 for the neighbouring
 hazard shape — an instrument that answers confidently from the wrong source.
 
+## 271. Closed — `feature-agent.yml` deleted: no structural, schema, or documented cause was found for its non-registration, and a search-engine synthesis that offered one did not survive checking its own sources
+
+**The question, from item 270's incidental finding.** `.github/workflows/feature-agent.yml` is tracked,
+byte-identical to `origin/master`, present since the repository's root commit, valid YAML — and
+GitHub's workflow-by-path API returns HTTP 404 for it. The owner confirmed from the Actions UI that
+the sidebar lists only **Tests**: the file is absent, not greyed-out-disabled. Compared structurally
+against `tests.yml`, the workflow that works, on every axis a schema or encoding defect could hide in.
+
+**Path — identical convention.** `git ls-files -- '.github/workflows/*'` returns exactly the two
+files, one directory, one extension. `find .github -iname '*workflow*'` finds nothing else: no
+singular `workflow/`, no nested directory, no trailing-space or doubled-extension variant.
+
+**Mode and encoding — identical on every axis checked.** `git ls-files -s`: both `100644`. CRLF count
+via `grep -c $'\r'`: 0 for both (`.gitattributes` carries `* text=auto eol=lf`, applied uniformly).
+BOM via `od -An -tx1 -N4`: both open `6e 61 6d 65` ("name"), neither has one. Neither file ends in a
+trailing newline — a real property, but symmetric, so it cannot be the differentiator. Non-ASCII bytes
+and tab characters: zero in both, via `grep -cP '[^\x00-\x7F]'` and `grep -cP '\t'` — rules out a
+smuggled Unicode confusable and an indentation-breaking tab alike. A strict YAML loader that raises on
+any repeated mapping key, top-level or nested, found none in either file. Filenames are clean ASCII
+with no trailing whitespace (`git ls-files | od -c`).
+
+**Schema — both individually well-formed, no violation found.** Identical top-level key sets (`name`,
+`on`, `permissions`, `concurrency`, `jobs`). `permissions` uses the correctly-hyphenated
+`pull-requests` key, not the invalid underscored form. Every step in both files has a valid
+`uses`-or-`run` shape with all required keys present. `pyyaml` parses both cleanly, including the
+`workflow_dispatch.inputs` block.
+
+**Everything else that differs, reported in full rather than stopping at the first hit, none elevated
+as causal:** size (579 bytes / 26 lines vs 8057 bytes / 243 lines); `on:` (`pull_request` bare +
+`push: branches:[master]` vs `pull_request: types:[...]` + `workflow_dispatch`, with **no `push`
+trigger at all** on the broken file); `permissions` (`contents: read` alone vs `+ pull-requests: read`);
+job shape (`test`, unnamed, vs `feature-agent`, `name: Zone CI`, `timeout-minutes: 25`); step count (8
+unnamed vs 11, every one named); checkout `fetch-depth` (unset/shallow vs `0`/full history — the fact
+item 36 depends on, addended above); `node-version` (`22` vs `20`, stale against this project's own
+Node 22+ baseline); secrets (none vs `secrets.OPENAI_API_KEY`); `file(1)`'s MIME guess (`text/plain`
+vs `text/javascript` — a libmagic heuristic triggered by the literal Node.js `require`/`JSON.parse`
+code embedded in one `run: |` heredoc, not a property GitHub's path-and-extension-based workflow
+discovery is documented to use). None of these is a documented schema violation, individually or in
+combination — they are ordinary authoring choices that explain why the file is more elaborate, not why
+GitHub refuses to index it.
+
+**The timeline, which is the only asymmetry that held up.** `tests.yml` was added in `d6884285`
+(2026-06-13), a dedicated "chore(baseline): commit WT ... CI" commit, and edited twice more since,
+most recently `b5285f63` (2026-08-16). `feature-agent.yml` was added at the repository's true root
+commit `e3256993` (2026-04-01, confirmed via `git rev-list --max-parents=0 HEAD`), touched once more
+three days later (`fbb6fc72`, "initial commit"), and **untouched since** — roughly 4.5 months. Its own
+text still carries `"Smile Agent decision is..."` on line 236, the project's name before its rename to
+Zone, matching `.idea/misc.xml`'s `Python 3.14 (smile-agent)` SDK entries from the same root commit.
+The file was never revisited even as the project renamed itself and moved its own Node baseline from
+20 to 22 (the workflow still pins `node-version: 20`).
+
+**The external-cause search, and why its result is recorded as a finding rather than adopted as an
+answer.** A `WebSearch` for this exact symptom returned a synthesized claim: a reported bug where a
+workflow present in a repository's very first commit fails to register when the default branch is
+named `master` (works fine on `main`), fixable by one further edit — a claim that would fit this case
+exactly, since the default branch here is `master` and the file has had no edit since its first commit.
+Fetching the synthesis's own cited sources does not support it: two GitHub Community Discussions it
+drew from (`#180806`, `#143998`) were fetched directly and contain no such claim — one discusses only
+generic causes, the other's sole substantive reply is "make sure nothing is underlined in red"; a
+third candidate (`#25397`) turned out to be an unrelated branch-filter issue; a fourth, a blog post,
+returned HTTP 410 Gone; GitHub's own docs page on triggering workflows says nothing about first-commit
+indexing. This is the standing protocol's own warning realized in the tooling rather than the codebase:
+an instrument — the search synthesis — disagreed with the primary sources it cited when they were
+checked directly, and the claim is not used as the cause. Two unauthenticated API probes
+(`GET .../actions/permissions`, `PUT .../workflows/feature-agent.yml/disable`) both return `401`
+before reaching any distinguishing state; `gh auth status` remains unauthenticated on this machine, so
+the one class of explanation needing repo-admin access — an Actions-enablement toggle, an org policy —
+stays unreachable here, the same boundary item 269 hit for the check-runs question.
+
+**Verdict: no structural, schema, encoding, or documented-behavior cause was found.** Deleted
+(`git rm .github/workflows/feature-agent.yml`) rather than fixed, per the rule committed before
+measuring: a tracked file GitHub has never recognised, 4.5 months old, with every locally- and
+remotely-checkable cause ruled out, costs nothing to remove and nothing to keep spending API budget on
+guarding against — it will never fire on a PR, since none has ever been opened here (item 269:
+359 of 359 runs are `push`).
+
+**What the deletion is not.** "The feature agent" is a live, current concept in this codebase,
+separate from the workflow file that wrapped it in CI — `src/core/runFeatureAgent.ts`, 29 KB, imported
+from `src/cli/index.ts`. The three CLI flags the workflow invoked still resolve today, checked against
+the live file rather than assumed: `command grep -n '\.option("--ci"' src/cli/index.ts` → line 1255,
+`--diff-aware` → line 1258, `--mode <mode>` (default `"preview"`) → line 1288. Deleting the workflow
+deletes a CI wrapper around live functionality, not the functionality itself. `docs/deferred-work.md`'s
+other two mentions of "the feature agent" (in items discussing plan-context assembly) name
+`core/runFeatureAgent.ts` directly and are about that module — confirmed by reading both in context,
+unaffected by this deletion. CLAUDE.md does not mention `feature-agent.yml` at all. No script or `src/`
+runtime file references the filename; `src/patch/validatePatchPlan.ts` path-prefixes
+`.github/workflows/` generically as a "do not patch CI files" guard, which does not enumerate this
+filename and is unaffected by one file inside that directory being removed while `tests.yml` remains.
+Item 36 carries the one addendum this deletion required, added and measured in place above.
+
+**The pre-push hook's second exercise, and its first against a deletion.** `a99fe8fc`'s guard has so
+far only been proven against additions. This commit is a `git rm` plus ledger prose — one commit,
+allowed by the hook, the same as every push since it was activated. Recorded because a guard proven
+only on one shape of diff is a narrower claim than "the guard works" until it has seen the other shape.
+
+## 272. Neither — `.agent-cache/last-result.json` is tracked despite `.agent-cache/` being gitignored, a leftover from the same root commit as item 271's deleted workflow, structural fact recorded with no fix proposed
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
+
+**The fact.** `.agent-cache` appears in both `.gitignore` (line 4) and `.npmignore` (line 7), yet
+`git ls-files -- '.agent-cache/*'` returns `.agent-cache/last-result.json` — a tracked file inside a
+directory the repository's own ignore rules say should never be tracked. `git show --stat e3256993`
+(the true root commit, `git rev-list --max-parents=0 HEAD`) lists `.agent-cache/last-result.json | 53 +`
+among its changes: the file was committed before the ignore rule existed to stop it, in the same
+initial-import commit that added item 271's now-deleted `feature-agent.yml`, `dist/*` (later untracked
+in `54918abc`), and the still-tracked `.idea/*` JetBrains project files.
+
+**Why this is recorded and not fixed here.** This pass's brief scoped the investigation to
+`feature-agent.yml` specifically. Untangling a tracked-yet-gitignored file is a different cleanup with
+its own considerations this pass did not evaluate: whether `git rm --cached` alone suffices or history
+should be rewritten, whether anything reads this exact committed JSON content today (`loadSavedAgentResult`
+reads `.agent-cache/last-result.json` from the *working tree* at runtime, per `src/core/loadSavedAgentResult.ts`
+and `DEFAULT_RESULT_PATH` in `src/cli/index.ts` — whether the *committed* copy specifically is ever read
+back rather than regenerated was not checked). Recorded now so it is not rediscovered as a new finding
+by a future pass that greps `.agent-cache` and wonders why a gitignored path shows up in `git ls-files`.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 270 to find out which ones still need something. No index of
+reader the trouble of reading all 272 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (127): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260, 262, 264, 265, 266, 267, 268, 269, 270
+**Closed** (128): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260, 262, 264, 265, 266, 267, 268, 269, 270, 271
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (0):
@@ -21863,12 +21990,12 @@ the same correction this section made the last time the bucket emptied.
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (15): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250, 263
 
-**Neither — a structural fact recorded, with no fix proposed** (128): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (129): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152, 154, 155, 158,
 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199, 200, 201, 202, 205,
-206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230, 232, 243, 244, 247, 248, 249, 254, 256, 261
+206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230, 232, 243, 244, 247, 248, 249, 254, 256, 261, 272
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
