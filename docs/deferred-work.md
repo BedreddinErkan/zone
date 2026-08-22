@@ -23119,17 +23119,164 @@ depends on.
 See items 245/246 for the first instance of this gate's cost, item 279 for the protocol that works
 around it, and item 278 for the pass that found it while looking for something else.
 
+## 281. Closed — four of six cells ran and Zone's investigation scored 5 of 6 ground-truth files; the other two died on an exhausted API balance, and the Claude Code arm turned out to be unmeasurable by construction
+
+**Bucket: Closed.** The comparison ran under the instrument registered in item 279 (`16000cb7`,
+committer date `2026-08-22T19:23:27Z`), with the first cell starting at `19:23:52Z`. Prompts and ground
+truth come from item 277 (`bf563d72`, `19:00:09Z`), unchanged.
+
+### The four scoreable cells
+
+| # | subject | archetype | iters / cap | cost | tool mix | coverage |
+|---|---|---|---|---|---|---|
+| 1 | ranker term extraction | investigation | 7 / 12 | $0.4701 | 5 read, 3 search, 2 find_refs | **1/1** |
+| 2 | `multi_edit` no-op detection | investigation | 8 / 12 | $0.4158 | 3 read, 7 search, 1 list | **1/1** |
+| 3 | compaction survivors | investigation | 7 / 12 | $0.4407 | 5 read, 3 search, 1 list, 1 find_refs | **2/2** |
+| 4 | syntax-checker unavailability | investigation | 9 / 12 | $0.5025 | 3 read, 6 search, 1 list, 1 find_refs | **1/2** |
+
+**5 of 6 ground-truth files opened across the four scoreable cells.** All four classified
+`investigation`, so the pre-screen held; all four terminated naturally; **none approached the
+`iterCap` of 12** — the highest was 9, so every cell stopped because it was finished, not because it
+was cut off. The positive control fired on all four.
+
+### The two void cells, and the reason is external
+
+Cells 5 and 6 died on `"Your credit balance is too low to access the Anthropic API"` — the BYOK
+account ran out mid-sequence. **This is an instrument failure of the registered kind (`error`,
+termination ≠ `natural_completion`), not a Zone quality signal, and it is not the stop rule firing:**
+spend reached $1.8292 against a stop rule of $8.28.
+
+**Cell 5 is the one that costs the most to leave void, and the registered rule is followed anyway.**
+It had completed five iterations of real work before the balance failed, and its marker trail shows it
+had **already opened both ground-truth files** — `verification/classify.ts` and
+`verification/composer.ts` — plus `runCompletion/deriveResultFields.ts`. Under the coverage rule it
+would have scored **2/2**. It is **reported as void and not scored**, because the registered rule voids
+on error and rescuing a cell whose number happens to be favourable is exactly what registering in
+advance exists to prevent. Recorded here as a diagnostic, deliberately outside the table.
+
+Cell 6 failed in two seconds with zero tool calls and no recoverable read set. Nothing about prompt 6
+was measured; it is **unrun**, not poor.
+
+### The registered expectations — one survived
+
+Item 279 registered two, so at most one could survive.
+
+- **The brief's:** Zone leans on `search_in_files` over `read_file`, and at least one cell voids that
+  way. **Falsified.** No cell voided on coverage at all. Search is used heavily — 3, 7, 3, 6 calls —
+  but never instead of reading: every cell that executed made `read_file` calls (5, 3, 5, 3, and 5 in
+  the void cell 5).
+- **This entry's:** the investigation prompt's own *"Do NOT avoid source reads — they are the point"*
+  produces at least one `read_file` per cell. **Survived**, 5 of 5 executing cells.
+
+The shape underneath the counts: Zone searches more often than it reads, then reads a small number of
+files precisely. Distinct files opened per cell were 2, 1, 4 and 2 — it is not sampling the repository
+broadly, it is locating and then committing to a small set.
+
+### Cell 4 is the interesting one — it cited a file it never opened
+
+Coverage 1/2: it opened `syntaxCheckers.ts` and never opened `toolExecutor.ts`. But its prose names
+**both**, and correctly — its opening line is *"The external syntax-check path lives in two files: the
+registry `src/tools/syntaxCheckers.ts` and its single consumer in `src/tools/toolExecutor.ts`"*, which
+is precisely the split this entry's ground truth records. It even excludes a decoy unprompted, noting
+that `src/ast/astSyntaxValidator.ts` is a separate in-process validator that "spawns nothing, so it has
+no availability concern at all."
+
+So the miss is real under the registered rule and the answer is not wrong. **This is the registered
+"found it without opening it" case**, and the diagnostic confirms it: `toolExecutor.ts` appears in the
+run's output despite never appearing in its read set. Whether reaching a correct conclusion about a
+file from search results alone should count as coverage is a question the rule answered in advance —
+it does not — and that answer is left standing rather than revisited now that a cell depends on it.
+
+### Correctness — judgement, and it is high
+
+Labelled judgement, never collapsed into coverage. Zone's factual claims were spot-checked against the
+source and every cited line resolved exactly: cell 2's `wholeWord = args.wholeWord !== false` at
+`toolExecutor.ts:3570`, `const contentChanged = newContent !== content` at `:3688`, `count: -1` at
+`:3667` and the `count === 0` notFound filter at `:3704`; cell 4's `which` timeout of `5_000` at
+`syntaxCheckers.ts:65`, the `node_modules/.bin/tsc` probe at `:94` and the `which tsc` fallback at
+`:97`. Not one citation was invented.
+
+Cell 2 additionally found the subtlety the prompt was aimed at without being led to it — that the
+byte comparison runs **after** EOL re-encoding, against the raw pre-write content rather than the
+normalized intermediate, so homogenizing a mixed-EOL file counts as a genuine change. Cell 1 went
+further than asked and identified that the raw-keyword loop in `scoreFile` re-tokenizes by whitespace
+alone and therefore re-admits the very words the two blocklists exclude — a divergence finding, not a
+lookup.
+
+### The Claude Code arm is unmeasurable by construction, and that is a finding
+
+**No coverage figure is reported for Claude Code, because authoring the ground truth required reading
+the ground-truth files.** Item 277's sets were written by inspecting `rankRelevantFiles.ts`,
+`toolExecutor.ts`, `syntaxCheckers.ts`, `verification/classify.ts` and `verification/composer.ts` —
+and checking each set for a split mechanism *required* opening them. Any subsequent "investigation" by
+the same party starts having already read most of the answer, so its read set measures nothing.
+
+This is the conflict flagged before registration — that the author of the ground truth is also one of
+the two systems being compared — but it bites in a place the flag did not anticipate: not on
+*judgement*, which was the worry, but on the **coverage instrument itself**. A mechanically derived
+ground truth was rejected for good reason (it would measure agreement between two retrieval
+heuristics), and a hand-authored one turns out to disqualify its author as a scored arm. **Both
+options cannot be taken at once, and no third party was available.** The honest consequence is that
+this comparison has one measured arm and one reference point, and it is written that way.
+
+What Claude Code still supplies is the qualitative reference, and against it Zone's four answers are
+strong: correct, precisely cited, and in two cases surfacing structure beyond the question. The
+asymmetry registered in advance still stands and is not erased by this — `CLAUDE.md` is 67,894 bytes
+in Claude Code's context every session against Zone's 3,989-byte `.zone/memory.md`, and the prompts
+were chosen to target mechanisms `CLAUDE.md` does not explain, which makes that difference non-binding
+rather than absent.
+
+### Cost — the registered range was right about the floor and too pessimistic about the ceiling
+
+Opus investigation runs now number **five** observations, not one: the artifact run at $0.4866 plus
+cells 1–4. Median **$0.4701**, min **$0.4158**, max **$0.5025**.
+
+Item 279 registered **$0.49–$1.38** as a scaled projection. Measured, the true spread is
+**$0.4158–$0.5025** — the floor was slightly high and **the ceiling was about 2.7× too pessimistic**,
+because it came from scaling a Sonnet *maximum* by a single-observation ratio. The projection erred in
+the safe direction, and the correction is that the scaled-maximum method inflates: five real
+observations sit in a band a tenth as wide as the projected one. **A later pass should price from these
+five, not from the scaled range.** Four cells cost **$1.8292**; six would have been ≈$2.75, against the
+honest expectation of $2.9–$3.5 that item 279 stated alongside the $8.28 guard.
+
+### Which registered decision rules fired
+
+- *Prompt not `investigation` → does not run* — held; all four scoreable cells classified
+  `investigation`.
+- *Void on error / non-natural termination* — **fired twice**, cells 5 and 6.
+- *Void cells reported with the diagnostic, never rescored* — **fired**, and it cost a favourable 2/2.
+- *Several cells voiding the same way is a protocol limitation, not a Zone finding* — **did not
+  fire**: both voids share a cause, but it is an exhausted API balance rather than anything the
+  protocol chose.
+- *Stop rule* — **did not fire**; $1.8292 against $8.28.
+- *`find_references` invisibility is a limitation, not poor investigation* — **did not fire**; no cell
+  lost a ground-truth file that way.
+
+**Mutation is not applicable.** The scorer stayed a scratchpad script whose figures are transcribed
+here; measurements and prose have no runtime behaviour to substitute into.
+
+### What remains
+
+Prompts 5 and 6 are **unrun**, pending API credit. Re-running them needs no re-registration: item 277's
+prompts and ground truth and item 279's instrument, model, cap and rule all stand unchanged, so the
+ordering property still holds for them. A later pass runs those two cells and appends; it should not
+re-derive the protocol, and it should price from the five Opus observations recorded here.
+
+See item 279 for the instrument and pricing this pass registered, item 277 for the prompts and ground
+truth, and item 280 for the observability gap that made `ZONE_VERBOSE_LOGS=1` necessary to measure any
+of this.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 280 to find out which ones still need something. No index of
+reader the trouble of reading all 281 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (135): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260, 262, 264, 265, 266, 267, 268, 269, 270, 271, 273, 274, 275, 276, 277, 278, 279
+**Closed** (136): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260, 262, 264, 265, 266, 267, 268, 269, 270, 271, 273, 274, 275, 276, 277, 278, 279, 281
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (0):
