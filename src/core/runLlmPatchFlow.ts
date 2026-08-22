@@ -5790,6 +5790,42 @@ const initializeTodosFromPlan = (): void => {
       _dispatcherCapabilityFilter = buildDispatcherCapabilityFilter(INVESTIGATION_PIPELINE);
     }
 
+    // Placement fix (item 275): refactor and complex_multi_file are the two archetypes
+    // scopeGuard.ts's checkWriteScope bypasses unconditionally (`archetype === "refactor" ||
+    // archetype === "complex_multi_file"` — its own literal check, not inferred), so on those
+    // two nothing stands between text a fetch_url call brings into context and a write to any
+    // file. Excluding fetch_url there closes exactly that gap.
+    //
+    // MERGE, never replace — unlike the isAnswerOnlyRun assignment above, which substitutes a
+    // whole different pipeline's filter. This only needs to subtract one tool from whatever
+    // filter the archetype already has. Placed LAST in this sequence deliberately: nothing
+    // after this point reassigns _dispatcherCapabilityFilter, so this exclusion cannot be
+    // silently undone by anything that runs before it — including a future isAnswerOnlyRun
+    // firing on the same run, where re-adding fetch_url to an exclude set investigation's own
+    // filter already omits by construction is a harmless no-op, not a conflict.
+    //
+    // By tool name, not by the net.fetch capability it declares: matches the two lines above in
+    // buildDispatcherCapabilityFilter (Task / suggest_scope_change, also excluded by name), and
+    // fetch_url is BUILTIN_TOOL_CAPS's only net.fetch entry today — a capability-level exclude
+    // would be equivalent now and would also silently catch any future second net.fetch tool
+    // this carve-out was never meant to reach.
+    //
+    // debug is deliberately NOT included: checkWriteScope's bypass names only these two
+    // archetypes, so debug's writes are still scope-checked (whether that check actually blocks
+    // a given write further depends on the plan's filesLikely being populated — item 243's
+    // fail-open applies regardless of archetype — but the unconditional bypass itself does not
+    // apply to debug, which is the property this fix is closing).
+    if (
+      taskClassification?.archetype === "refactor" ||
+      taskClassification?.archetype === "complex_multi_file"
+    ) {
+      const priorExclude = _dispatcherCapabilityFilter?.excludeToolNames ?? new Set<string>();
+      _dispatcherCapabilityFilter = {
+        ..._dispatcherCapabilityFilter,
+        excludeToolNames: new Set([...priorExclude, "fetch_url"]),
+      };
+    }
+
     // Item 167: the requestedTools/plan-marks grant that used to run here has
     // moved to agentLoop.ts's own loop entry, where effectiveFilter is
     // resolved — the layer with a real, liftable ceiling for the archetypes
@@ -5888,6 +5924,21 @@ const initializeTodosFromPlan = (): void => {
         ...(_dispatcherCapabilityFilter && {
           capabilityFilter: _dispatcherCapabilityFilter,
         }),
+      }),
+      // Item 275: closes the delivery gap the comment above (Item 167) already names for
+      // debug — "the filter never reaches agentLoop no matter what the variable holds" — for
+      // a null pipelineCfg outside the isAnswerOnlyRun case. The spread above is nested inside
+      // `pipelineCfg &&`, so for complex_multi_file (pipelineCfg always null) it never runs
+      // regardless of what _dispatcherCapabilityFilter holds; the isAnswerOnlyRun spread below
+      // only opens for that one narrow condition. This is the only other door, and it is
+      // deliberately archetype-agnostic rather than named to refactor/complex_multi_file
+      // specifically: it fires whenever a null-pipeline archetype's filter is actually set, by
+      // this fix or a future one, from wherever that turns out to be needed. Today only the
+      // refactor/complex_multi_file exclusion above sets it under this condition — debug's
+      // stays undefined, so this spread stays a no-op for debug (pinned by a test asserting
+      // debug's offered set is unchanged, not left to be assumed).
+      ...(!pipelineCfg && !isAnswerOnlyRun && _dispatcherCapabilityFilter && {
+        capabilityFilter: _dispatcherCapabilityFilter,
       }),
       // The answer-only budget routes through maxIterationsOverride because that is the
       // only one of the two fields that survives the tier block (see MEASURED CAVEAT
