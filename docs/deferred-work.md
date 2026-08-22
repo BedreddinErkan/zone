@@ -22946,17 +22946,190 @@ See item 277 for the criterion this entry amends one input to, item 276 for the 
 instrument trap this is, items 245/246 for the `debugLog` gate the coverage instrument now shares, and
 item 264 for the 698-run figures the staleness class covers.
 
+## 279. Closed — the coverage instrument re-registered with proof it populates the field, the six cells priced per model, and the one projection in the ledger that the model change actually moves
+
+**Bucket: Closed.** Registration only; pushed before any of the six cells ran.
+
+**This amends exactly one element of item 277 and the ordering property carries across the amendment
+rather than resetting.** Item 277 — pushed `bf563d72`, committer date `2026-08-22T19:00:09Z`, before
+the first cell started at `19:00:35Z` — remains the registration of the prompts, the ground truth, the
+path-suffix rule, the `read_file`-only decision, the positive control and the void-cell readings. None
+of those depended on where the read set was parsed from. **Only the coverage source changes**, because
+item 278 falsified the old one. Said explicitly because a fresh registration commit could otherwise
+read as though the prompts were chosen after seeing cell 1.
+
+### The instrument, and proof it populates the field the measurement depends on
+
+`ZONE_VERBOSE_LOGS=1`; `[zone-agent-tool-call]` on **stderr**; parsed as **JSON per line** against
+`^\[zone-agent-tool-call\]\s+(\{.*\})$`, never by text match; coverage counted from records where
+`tool === "read_file"`, using the `filePath` field.
+
+**The pre-flight asserts the narrow claim, not the broad one, and this distinction is item 278's
+failure moved one level in.** "The instrument is reached" is satisfied by a marker that fires with
+`filePath: null` on every call — which would score zero coverage on every cell and be
+indistinguishable from a run that opened nothing. The field is `parsedArgs.filePath ?? null`, so the
+null case is real, not hypothetical. What was verified is therefore that **a `read_file` record carries
+a non-null `filePath`**: on the $0.10 probe, 3 records parsed, 2 of them `read_file`, **2 of 2 with a
+non-null path**, and the verbatim line is
+
+`{"iter": 2, "tool": "read_file", "filePath": "src/tools/scopeGuard.ts", "patchPreview": null, "contentLength": null, "command": null}`
+
+The same probe corroborates the negative half: its `run_command_readonly` record carries
+`filePath: null`, so the field discriminates rather than being populated unconditionally.
+
+### What the instrument cannot see, registered before seeing which tools Zone uses
+
+The marker sets `filePath: parsedArgs.filePath ?? null`, and of the five tools an `investigation` run
+is offered, **only `read_file` declares a `filePath` parameter** — `list_files` takes `dirPath`,
+`search_in_files` takes `pattern`, `find_references` takes `sourceFile` and `symbolName`,
+`run_command_readonly` takes `command`. Two consequences:
+
+- The instrument **cannot over-count**: the registered `read_file`-only rule is enforced by the
+  marker's own shape rather than by the scorer's discipline.
+- **`find_references` is invisible to coverage even though `sourceFile` is a real file path.** A run
+  that reaches a ground-truth file through `find_references` and never opens it scores zero for that
+  file. **If a cell voids for that reason it is the registered limitation firing, not poor
+  investigation, and it is reported under that label.**
+
+**Void-cell diagnostic source:** because the marker cannot show paths that only ever appeared as search
+results, the diagnostic greps the cell's **combined stdout and stderr** for each ground-truth path.
+That answers "did any ground-truth path appear anywhere in this run's output" without widening the
+coverage rule that produced the void.
+
+### The model, pinned rather than inherited
+
+**`--model claude-opus-5` on every cell.** The comparison is between *scaffolds*, and Claude Code runs
+on Opus 5, so matching the model isolates the variable of interest instead of confounding scaffold with
+model. Pinning also fixes a reproducibility hole: `~/.zone/model.json` **does not exist**, and neither
+does `~/.zone/config.json`, so cell 1's Opus 5 came from the tail of
+`flags.model ?? ZONE_MODEL ?? diskModel?.model ?? file.defaultModel` with every named link absent. An
+unpinned run is not reproducible by anyone else; `-m/--model` removes the question.
+
+### Cost, re-derived per model
+
+| model | n | median | min | max |
+|---|---|---|---|---|
+| `claude-sonnet-5` | 8 | $0.1497 | $0.1174 | $0.4252 |
+| `claude-opus-5` | 1 | $0.4866 | — | — |
+
+Nine of the eleven investigation runs carry a recoverable model; two do not and are excluded rather
+than assumed. **n=1 is not an estimate**, so what is registered is a **range declared as a scaled
+projection: $0.49–$1.38 per cell** — lower bound the one measured Opus run, upper bound the Sonnet
+maximum scaled by the single observed 3.25× ratio.
+
+**Stop rule: $8.28**, six times the range's upper bound, per the committed rule that too-small n takes
+the bound from the upper end. **It is a runaway guard, not a forecast** — the honest expectation is
+**≈$2.9–$3.5** at cell 1's observed rate, and both numbers are stated so this cannot be read as
+budgeting $8.28. **$3.36 is not carried forward**; it derived from a median now known to be from the
+wrong population. **Per-cell cap `--max-budget-usd 1.00`**, set well above the expected $0.49 so it
+does not bind and void a cell, and chosen knowing the cap terminates up to one iteration late.
+
+### The class sweep — one entry moves, and its corrected numbers are stated in full
+
+The sink is **1,311 `claude-sonnet-5` records against 26 `claude-opus-5`**, so every figure derived
+from it is model-blind and Sonnet-dominated. Item 264's own distinction resolves what that costs:
+*observations* of what runs cost cannot be repriced, only *projections* built on them can.
+
+- **Item 264 — does not move.** Its $0.0867 / $0.1825 / $0.4004 are observations of a real population
+  and stay true of it. It gains one qualifier: the population is Sonnet-dominated, so reuse as a
+  forecast must state the model.
+- **Item 79 — does not move.** Its figure is parenthetical ("the first two are cheap") and its
+  conclusion is that the third requirement blocks regardless. Scaled, the median is $0.28 and p90
+  $1.30 — still cheap against a blocker. Unchanged.
+- **Item 170 — moves, and it is the only one with teeth**, because its four sizings are projections a
+  future pass would spend against. Stated as numbers rather than as a multiplication for someone else
+  to perform, since 3.25× is a single-observation ratio and compounding it silently is how a projection
+  hardens into a figure:
+
+| target upper bound | total n | additional runs | median (Sonnet → Opus) | p75 | p90 |
+|---|---|---|---|---|---|
+| < 0.20 | 17 | 9 | $0.78 → **$2.54** | $1.64 → **$5.33** | $3.60 → **$11.70** |
+| < 0.15 | 23 | 15 | $1.30 → **$4.23** | $2.74 → **$8.91** | $6.01 → **$19.53** |
+| < 0.10 | 36 | 28 | $2.43 → **$7.90** | $5.11 → **$16.61** | $11.21 → **$36.43** |
+| < 0.05 | 72 | 64 | $5.55 → **$18.04** | $11.68 → **$37.96** | $25.63 → **$83.30** |
+
+Item 170's own guidance — *"only `< 0.20` sits under a $3.00 bar at the median"* — **survives, with
+almost no margin left**: $2.54 against a $3.00 bar. Its companion judgement that no row is affordable
+at p90 survives with room to spare.
+
+### Two expectations, registered so at most one survives
+
+- **The brief's:** Zone leans on `search_in_files` over `read_file`, and at least one cell voids that
+  way.
+- **This entry's:** the investigation branch's own system prompt says *"Use search_in_files and
+  find_references; read source files as needed. Do NOT avoid source reads — they are the point"*, so
+  **at least one `read_file` per cell** is expected, and the open question is whether the file opened
+  is a ground-truth one.
+
+Per-cell tool counts are reported either way, because how an investigation distributes its calls is a
+finding about Zone regardless of where coverage lands.
+
+### Cell 1's two runs are kept apart
+
+Prompt 1 already ran once, before the instrument was known. That earlier run is the **artifact run**:
+its prose is kept for the qualitative half and **its $0.4866 is the pricing input this entry uses**. Prompt 1 is
+re-run under the instrument and **that re-run is the data run** — the cell result, the read set, the
+coverage. The two are not interchangeable and the results entry labels every figure with which run it
+came from, so the artifact's cost cannot silently serve as both an input to the estimate and a cell
+result. If the re-run's cost differs materially from $0.4866 that is the **second** Opus observation
+and it tightens or widens the range that set the stop rule — worth a line either way.
+
+See item 277 for the criterion this amends one input to, item 278 for the falsification that required
+it, and item 280 for the observability finding this instrument depends on.
+
+## 280. Neither — Zone cannot say which files any real run opened, because the only marker that records it is behind a debug gate nobody sets
+
+**Bucket: Neither.** A structural fact is recorded and no fix is proposed.
+
+**The fact.** `[zone-agent-tool-call]` is the only marker carrying a `filePath`, and it is emitted
+through `debugLog`, whose entire body is `if (VERBOSE) console.log(...)` with
+`VERBOSE = process.env.ZONE_VERBOSE_LOGS === "1"` read **once at module load**. Unless that variable is
+set before the process starts, the marker does not exist.
+
+**What that costs, measured rather than reasoned.** Of the 102 distinct runs in the marker sink,
+**5 emit `[zone-agent-tool-call]`** — and that is not sampling, it is the five that happened to be run
+with the variable set. The alternatives do not close the gap:
+`[zone-file-manifest-injected]` covers 81 of 102 but carries only `topFile`, `entryCount` and
+`totalReads` — the most-read file, never the set; `[zone-tool-result-size]` covers essentially every
+tool call and carries `tool` with **no path at all**. So for **97 of 102 runs the question "which files
+did that run open" has no answer**, and the data was never captured rather than captured and discarded.
+
+**Why this is worth an entry rather than a note in the protocol that works around it.** Item 279's
+comparison sets `ZONE_VERBOSE_LOGS=1` and gets what it needs, so the protocol is fine. The finding is
+about Zone: **every run a user has actually performed is unauditable in this dimension.** Any later
+question of the form "did that run look at the file it got wrong", "was the fix informed by the test it
+broke", or "how much of the repository does a typical run touch" is unanswerable retrospectively, for
+every run in the sink except five.
+
+**The same gate, the same class, already recorded once.** Items 245/246 found `apply_patch`'s
+rejection branches invisible in production telemetry for this reason. That was a diagnostic gap; this
+is a measurement gap, and the recurrence is the point — `debugLog` is not a debug convenience in
+practice, it is a decision that a signal will be absent from every real run.
+
+**What closing it would cost, stated so the tradeoff is visible and not as a proposal.** The narrow
+version is promoting this one marker from `debugLog` to `log`, which is a one-line change with a real
+price: it fires **once per tool call**, so it is among the highest-volume markers in the system, and
+the sink already rotates one generation at roughly 165 KB/day. A cheaper variant is a per-run summary
+of distinct paths read, emitted once at close through `log` — the same information for coverage
+questions at a fraction of the volume, and structurally similar to what
+`[zone-tool-result-summary]` already does for sizes. **Neither is proposed here.** This pass is the
+comparison, and a change to the marker surface mid-comparison would alter the instrument the comparison
+depends on.
+
+See items 245/246 for the first instance of this gate's cost, item 279 for the protocol that works
+around it, and item 278 for the pass that found it while looking for something else.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 278 to find out which ones still need something. No index of
+reader the trouble of reading all 280 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (134): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260, 262, 264, 265, 266, 267, 268, 269, 270, 271, 273, 274, 275, 276, 277, 278
+**Closed** (135): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260, 262, 264, 265, 266, 267, 268, 269, 270, 271, 273, 274, 275, 276, 277, 278, 279
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (0):
@@ -22971,12 +23144,12 @@ the same correction this section made the last time the bucket emptied.
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (15): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250, 263
 
-**Neither — a structural fact recorded, with no fix proposed** (129): 2, 3, 5, 9, 11, 15, 17, 19,
+**Neither — a structural fact recorded, with no fix proposed** (130): 2, 3, 5, 9, 11, 15, 17, 19,
 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152, 154, 155, 158,
 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199, 200, 201, 202, 205,
-206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230, 232, 243, 244, 247, 248, 249, 254, 256, 261, 272
+206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230, 232, 243, 244, 247, 248, 249, 254, 256, 261, 272, 280
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
