@@ -22475,17 +22475,195 @@ item 243 for the `filesLikely` fail-open this entry's "not protected, not verifi
 rests on, and item 272 for the neighbouring declared-but-inert shape this placement gap was adjacent to
 before it was closed.
 
+## 276. Closed — the registered protocol for comparing Zone's investigation against Claude Code, with the outcome variable settled and the ground truth recordable before any run
+
+**Bucket: Closed.** The deliverable is the protocol, and it is complete. **Nothing was run.** Registered
+in its own commit so "the protocol preceded the runs" is checkable from history rather than asserted —
+item 251's precedent. The comparison itself is a later pass; if its results ever conflict with what is
+written here, this entry is the record of what was committed to in advance.
+
+### E1 — which path, and the two that are not it
+
+**"Investigation" names four different things in this tree, and three of them are not what a research
+prompt reaches.** Enumerated by shape, not by name-matching: the **archetype** (`taskClassifier.ts`'s
+7-value union, `archetypeDispatcher.ts`'s `INVESTIGATION_PIPELINE`); **`runPlanInvestigation`**
+(`planInvestigation.ts`, called from `dispatch.ts` inside the plan gate); **`runInvestigationFlow`**
+(`investigationFlow.ts`, called only from `memory/initFlow.ts` — the `/init` command); and
+**`planDepth: "investigate"`**, the legacy setting that routes to the strict checkpoint loop and calls
+neither of the two functions.
+
+**The plan path is excluded, and the reason is an artifact-type mismatch, not a preference.**
+`runPlanInvestigation` returns `Promise<ExecutionPlan>` — a structured object with `objective`,
+`steps`, `filesLikely`, `scopeSummary`, `riskHints`. Claude Code answers a research prompt in prose.
+Comparing an ExecutionPlan against prose is comparing different artifacts, so that arm would need its
+own protocol and gets none here. **It is also TTY-only:** the gate is `if (opts.mode === "plan")` in
+`runOneShotInner`, and both headless branches bypass it — the JSON branch calls `runLlmPatchFlow`
+directly with a hardcoded `mode: "patch"`, and the text branch calls `runOneShotInner(task, config,
+runId, { sessionId })` with **no `mode` key at all**, so `opts.mode` is `undefined`. Reachable
+interactively via `--permission-mode plan` (`initialMode.ts`: only `"plan"` engages it), never
+headlessly. Obstacle named rather than the question, per the committed rule.
+
+**The comparison uses the `investigation` archetype path, which is headless-reachable.** Its toolset,
+re-derived through `resolveToolList` against the real filters rather than adopted from the prior
+entry: **5 tools at every tier** — `read_file`, `list_files`, `search_in_files`, `find_references`,
+`run_command_readonly` — with `iterCap: 12` and `coachingBudget: 2`. No `fetch_url` at any tier,
+because `READ_ONLY_CAPABILITIES` has no `net.fetch`. `WEB_SEARCH_DIRECTIVE` **is** present on the
+investigation branch of `assembleAgentSystemPrompt`, and provider-native `web_search` does reach the
+run, since `convertParams` appends it after the capability filter has run.
+
+**The artifact, and an instrument trap worth its own line.** In headless **text** mode the prose answer
+reaches stdout: `sink.ts`'s `agent_loop_complete` case writes `evt.detail` when non-empty. In headless
+**JSON** mode it does not — the envelope's fields are `success`, `exit_code`, `cost_usd`,
+`duration_ms`, `turn_count`, and a `summary` that resolves to `decisionMode` or `finalState`, **a mode
+string, not the answer**. The structured-looking output is the wrong instrument and the plain one is
+right, which is the opposite of the intuition. **The protocol uses `--print` text mode and captures
+stdout.**
+
+### E2 — every capability difference, and why the comparison does not hold them constant
+
+| axis | Zone, `investigation` archetype | Claude Code, this session |
+|---|---|---|
+| tools offered | 5, all read-only | Read/Edit/Write/Bash/Grep/Glob, plus WebSearch/WebFetch, plus Agent/Explore |
+| provider web search | available, default on, **used 0 times across 82 runs** | used repeatedly, including in this pass |
+| URL fetch | `fetch_url` not offered — `net.fetch` is not a read-only capability | WebFetch available |
+| subagents | `allowSubagentDispatch: false` | Agent/Explore available |
+| iteration ceiling | `iterCap` 12 | no comparable hard cap |
+| coaching | budget 2 | none |
+| repository access | yes | yes |
+| cost accounting | exact per run, by construction | none |
+
+**Decision: compare the systems as they actually are, and choose prompts where the largest difference
+cannot bite.** The reason is not preference — **the hold-constant arm is not instrumentable on the
+Claude Code side.** Zone's capability set is mechanically fixed by the pipeline and can be re-derived
+on demand. The Claude Code side can only be constrained by an assistant promising not to use tools it
+still holds, and an unverifiable promise is not an instrument by this document's own standard. That
+asymmetry is the finding, not a limitation to apologise for: one side's constraint is checkable and
+the other's is not, so the constant-capability question cannot be asked honestly with these two
+systems.
+
+What is achievable instead is making the difference **non-binding**: repo-internal prompts, where web
+access has nothing to contribute, so the largest capability gap cannot move the outcome. **The scope
+limit that buys is stated rather than left implicit: this protocol says nothing about tasks requiring
+external information**, which is precisely the band Zone's own web-search directive reserves for
+searching, and precisely where the gap would be widest.
+
+### E3 — the outcome variable, chosen rather than accumulated
+
+**Primary: coverage — recall of a pre-registered ground-truth file set, scored mechanically.** It is
+the only axis scoreable on both sides without judgement, and it is the direct remedy for item 90's
+`correctFile` failure, where a ground truth existed, sat unread by any scorer across 34 captures, and
+made the arc look rigorous while the single positive result had answered the wrong question. A file
+set is recordable in advance and a set-recall scorer cannot quietly not read it.
+
+**Where coverage is measured from, and the instrument that looks right and is not.** The marker sink
+is this session's default instrument and it **cannot** answer this. Measured: `[zone-agent-tool-call]`
+is the only marker carrying a `filePath`, and it is emitted by **5 of 102 runs** — debug-gated, not
+general. `[zone-file-manifest-injected]` covers **81 of 102** but carries only `topFile`, `entryCount`
+and `totalReads` — the most-read file, not the set. `[zone-tool-result-size]` covers everything and
+carries `tool` with no path at all. **The full read set is not recoverable from the sink.** It *is*
+recoverable from stdout: `sink.ts`'s `tool_call` case prints `evt.title`, gated only on `!quiet`, and
+the title is built by `toolCallIdentifyingArg`, which returns `args.filePath` for `read_file` — so
+each read appears as `▸ [tool] read_file: <path>`. Same shape of finding as the previous pass's
+static-matrix boundary: the habitual instrument is the wrong one here, and saying so is the point.
+
+**Secondary, labelled as judgement rather than measurement: correctness** — does the prose name the
+right mechanism. Recorded per prompt against the ground truth, by reading. It is a judgement and the
+protocol calls it one, the way the ~45-of-64 boundary was labelled.
+
+**Secondary, one-sided: cost.** Exact for Zone by construction; **Claude Code has none** — no gate, no
+estimate, no per-run figure. Recorded as one-sided and never used as a primary or a ratio, because a
+ratio against a missing denominator is not a number.
+
+**Secondary, asymmetric: process** — iterations and tool mix, from the sink for Zone, from whatever
+the transcript happens to show for Claude Code. Asymmetric in fidelity, recorded as such.
+
+**Rejected: usefulness to the owner.** A judgement with no protocol behind it. Excluded rather than
+accumulated as a fifth axis that would carry the appearance of an outcome without the substance of one.
+
+### E4 — the prompt set, and the screen it needs
+
+**Six prompts, repo-internal, each with a ground-truth file set written into the ledger before any run.**
+
+**The screen exists because of something measured this pass and not anticipated: archetype is
+deterministic per prompt, not controllable, and not predictable from prompt shape.** Ten
+research-shaped prompts in the sink resolved to **5 `investigation`, 4 `debug`, 1 `question`** — and
+the one that resolved to `question` is the one whose text literally begins with the word
+"Investigate", while the four `debug` results are four runs of a single prompt beginning "Why does".
+Determinism is per prompt (djb2-hashed cache, `temperature: 0`), so a given prompt lands the same way
+every time — but there is **no archetype override**: `forceTier` exists as both a CLI flag and
+`ZONE_FORCE_TIER`, and no `forceArchetype` or `ZONE_FORCE_ARCHETYPE` exists anywhere in `src/`.
+
+This matters more than a classification curiosity, because the archetypes differ enormously in what
+they offer: `investigation` gets 5 read-only tools, `debug` gets 20 at complex tier including every
+write tool. **An uncontrolled archetype is a confound inside Zone, before Claude Code is involved at
+all.** So: pre-screen each candidate prompt by running the classifier alone, keep only those landing
+on `investigation`, and record every prompt's archetype as a covariate regardless.
+
+**Cost, priced from investigation runs rather than the global median.** The 11 recorded
+`investigation` runs give **median $0.1499, p90 $0.2805, max $0.4252, median 5 iterations, 11/11
+successful** — against the global figure of $0.0867 the brief supplied, which understates an
+investigation run by roughly 73%. Six prompts: **≈$0.90 at median, ≈$1.68 at p90**, plus about $0.002
+per classifier pre-screen. The Claude Code side costs nothing measurable, which is E3's one-sidedness
+restated as a budget line.
+
+**What N buys and what it costs:** six is enough to distinguish a consistent gap from a single
+prompt's accident, and not enough to support any claim about the size of a gap. The protocol commits
+in advance to reporting per-prompt results rather than an aggregate score, because an average over six
+heterogeneous prompts would imply a precision the design does not have.
+
+### E5 — what would falsify the comparison rather than Zone
+
+**Instrument-failure signals, none of which is a quality signal:** the run errors; `terminationReason`
+is anything other than `natural_completion`; the run reaches `iterCap` 12; stdout carries no
+`agent_loop_complete` detail; or the archetype came out as anything other than `investigation`. Any of
+these voids that prompt's cell and it is re-run or dropped, never scored.
+
+**The positive control:** at least one file from the pre-registered ground-truth set must appear in the
+run's read set. Zero ground-truth files read means the run never engaged the subject, and the cell is
+void regardless of how the prose reads — the nano probe's first clean negative was an easy-prompt
+artifact that only a control caught, and a fluent answer about the wrong subsystem is exactly the shape
+that passes an unguarded read.
+
+**Comparability of form:** both sides produce prose plus a read set, so both outcome axes are defined
+on both. The plan path produces neither prose nor a comparable read set, which is why E1 excludes it.
+
+### The committed decision rules, and which fired
+
+- *No outcome variable scoreable without judgement* → **did not fire.** Coverage is mechanical, from
+  stdout.
+- *Capability confound cannot be held constant* → **fired.** It cannot, for the instrumentation reason
+  in E2, so the protocol answers the systems-as-they-are question and says so.
+- *Investigation path not drivable headlessly* → **fired, partially.** The plan path is not; the
+  archetype path is. Obstacle named, and the comparison uses the path that works.
+- *Ground truth not recordable before the run* → **did not fire.** File sets are recordable, and the
+  correctness axis survives as a labelled judgement rather than a measurement.
+
+**Mutation is not applicable.** This pass lands prose and a ledger entry; a protocol has no runtime
+behaviour to substitute a mutation into.
+
+### DeepSeek ordering, recorded as a decision
+
+DeepSeek integration is a separate, later pass, and the ordering is deliberate rather than an
+omission: **a provider swap changes what the comparison measures**, so a baseline for Zone's
+investigation output should exist before the provider moves. Running the comparison first means a
+later DeepSeek result has something to be compared against; running it after would leave no way to
+tell a provider effect from a system effect.
+
+See item 251 for the register-before-measuring precedent this entry follows, item 90 for the unread
+ground truth it is designed around, item 274 for the web-search establishment E2's confound rests on,
+and item 275 for the placement fix that put `fetch_url`'s availability in its current state.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 275 to find out which ones still need something. No index of
+reader the trouble of reading all 276 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (131): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260, 262, 264, 265, 266, 267, 268, 269, 270, 271, 273, 274, 275
+**Closed** (132): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260, 262, 264, 265, 266, 267, 268, 269, 270, 271, 273, 274, 275, 276
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (0):
