@@ -22212,6 +22212,12 @@ so any mid-run consumer needs a non-clearing accessor or it silently breaks the 
 
 ### The three mitigations, costed — and the first one is not what it looked like
 
+**Forward pointer, item 275: the leftmost candidate in the table was implemented.** This paragraph and the
+table under it describe the state as measured when written — costed, not yet chosen. Item 275 takes
+the filter-only route, finds and closes a pre-existing delivery bug that made it silently inert for
+`complex_multi_file`, and lands it. Left here unedited as the record of the costing that preceded the
+decision.
+
 | candidate | cost |
 |---|---|
 | Stop co-offering `fetch_url` with writes on `refactor`/`complex_multi_file` | **Cheap only by the right route.** Priced as "lowest" on a first pass with an unmeasured caveat; measuring it changed the answer. |
@@ -22276,17 +22282,210 @@ it, and as of `7bad9850` they have a positive control. See item 273 for the offe
 item 272 for the neighbouring declared-but-inert shape, and item 250 for the costing error this pass's
 first candidate nearly repeated.
 
+## 275. Closed — the placement gap on refactor and complex_multi_file is closed, a pre-existing delivery bug was found and fixed alongside it, and the remaining archetypes' protection is stated no wider than what was verified
+
+**Bucket: Closed.** Item 274 recorded the placement finding and costed three mitigations without
+choosing one. This pass takes the cheapest — filter-only, excluding `fetch_url` on `refactor` and
+`complex_multi_file` — and closes it. Item 274's own establishment (the counter's positive control,
+the four hypotheses) is unaffected; this entry supersedes only its placement-finding prose, which
+described the pre-fix state. **A forward pointer is left there rather than a rewrite.**
+
+### Four establishments, each run rather than read
+
+**1 — what `isAnswerOnlyRun`'s assignment actually does.** Read exactly, not assumed from its
+surface shape: `_dispatcherCapabilityFilter = buildDispatcherCapabilityFilter(INVESTIGATION_PIPELINE)`
+is a **wholesale replacement**, discarding whatever the variable held. That is right for its own
+purpose — substituting a different archetype's entire read-only cage — but it is not this fix's shape:
+this needs to subtract one tool from whatever filter an archetype already has, not replace the whole
+thing. The precedent that transfers is the *pattern* — a standalone `if` block in `runLlmPatchFlow.ts`
+assigning `_dispatcherCapabilityFilter` — not the replace-vs-merge mechanics.
+
+**2 — the exclusive if-chain, and the gap it hides.** Every assignment to
+`_dispatcherCapabilityFilter`, named: the base assignment (`buildDispatcherCapabilityFilter(pipelineCfg)`
+— returns `undefined` for both `refactor` and `complex_multi_file`, by different routes: `REFACTOR_PIPELINE`
+has `allowSubagentDispatch`/`allowScopeRevision` both `true` so its `excludeToolNames` stays empty;
+`complex_multi_file`'s `pipelineCfg` is `null` and the function short-circuits on it); the suppression
+branch (irrelevant to both — neither pipeline config has `readOnlyPipeline` set); `isAnswerOnlyRun`'s
+replacement (fires only under a narrow, specific re-classification condition).
+
+**The gap was found at the consumption site, not the assignment sites — reading the object literal
+that builds `agentLoopBaseInput`, not the variable's history:**
+
+```js
+...(pipelineCfg && {
+  maxIterationsOverride: pipelineCfg.iterCap,
+  coachingBudgetOverride: pipelineCfg.coachingBudget,
+  pipelineApplied: true,
+  originalArchetype: taskClassification?.archetype,
+  ...(_dispatcherCapabilityFilter && { capabilityFilter: _dispatcherCapabilityFilter }),
+}),
+```
+
+`capabilityFilter` is nested **inside** the `pipelineCfg &&` spread. For `refactor` (`pipelineCfg`
+truthy — `REFACTOR_PIPELINE`), this fires and delivers whatever the variable holds. **For
+`complex_multi_file` (`pipelineCfg` always `null`), the entire spread — capabilityFilter included —
+never runs, regardless of what `_dispatcherCapabilityFilter` holds.** A second spread further down,
+gated on `isAnswerOnlyRun` rather than `pipelineCfg`, is the only other door, and it opens only for
+that narrow case. The code's own existing comment names this exact defect class for a different
+archetype: *"for a null pipelineCfg (archetype 'debug', the measured case) it is skipped entirely and
+the filter never reaches agentLoop no matter what the variable holds."* `complex_multi_file` shares the
+identical null-`pipelineCfg` shape and the identical gap — it had simply never been exercised, because
+nothing had tried to set the filter for it outside `isAnswerOnlyRun` before this pass.
+
+**So the filter-only route, as named in item 274, works for `refactor` and is silently inert for
+`complex_multi_file`.** This is precisely what establishing before implementing was for — the brief's
+own precedent-confirmation instruction surfaced a real, load-bearing asymmetry a surface reading would
+have missed.
+
+**Why this is not the "stop and report" side effect the committed decision rules warned about, and the
+fix stays filter-only.** The pipeline-entry route was rejected because `iterCap`/coaching are *bundled
+with* the filter in the very same spread condition — that route cannot deliver one without the other.
+This gap is a different kind of thing: a **delivery bug**, not a bundling problem. Closing it changes
+only whether `capabilityFilter` reaches `agentLoopBaseInput` — no `maxIterationsOverride`, no
+`coachingBudgetOverride`, no `pipelineApplied`, no promotion arming. The fix is a third, narrowly-scoped
+spread, additive, touching neither existing spread's body:
+
+```js
+...(!pipelineCfg && !isAnswerOnlyRun && _dispatcherCapabilityFilter && {
+  capabilityFilter: _dispatcherCapabilityFilter,
+}),
+```
+
+Confirmed by mutation (below) to change nothing for any archetype that worked before this pass.
+
+**3 — the filter keys on tool name, and nothing collides.** `BUILTIN_TOOL_CAPS` has exactly one entry
+carrying `net.fetch`: `fetch_url`. Capability-level and name-level exclusion are equivalent today.
+Chosen: **by name**, matching the two lines that precede it in `buildDispatcherCapabilityFilter`
+(`Task`, `suggest_scope_change`, also excluded by name) — and safer against a hypothetical future
+second `net.fetch` tool this specific carve-out was never meant to reach.
+
+**4 — `debug` does not join the set.** Read directly from `checkWriteScope`'s own literal condition,
+not inferred from the shared null-`pipelineCfg` shape the brief raised as a reason it might:
+
+```js
+if (archetype === "refactor" || archetype === "complex_multi_file") {
+  return null;
+}
+```
+
+Exactly two archetypes named. `debug` shares the null-`pipelineCfg` delivery-gap shape and also offers
+`fetch_url` at complex tier, but the layer this fix is about — an unconditional bypass leaving nothing
+between injected text and disk — is not present for it. **The recorded set stays two.**
+
+### The fix, and what it does not claim
+
+`src/core/runLlmPatchFlow.ts` (`85724edf`): a merge-not-replace assignment excluding `fetch_url` by
+name for `refactor`/`complex_multi_file`, placed last in the sequence so nothing after it can undo it;
+and the narrowly-scoped third spread closing the delivery gap for `complex_multi_file`. Both are
+additions — the two pre-existing, delicately-commented spreads are untouched.
+
+**Two distinct claims about the three archetypes left as-is, not one collapsed into the other.**
+`checkWriteScope`'s literal bypass naming only two archetypes is PROOF that the unconditional bypass
+does not apply to `simple_add`/`targeted_fix`/`debug`. It is **not** proof that the check blocks a
+write in practice on those three. Reading further in the same function: `if (allowedFiles.size === 0)
+{ ... return null; }` — allow — fires whenever neither the plan-level `filesLikely` nor any step's
+`filesLikely` is populated, on **any** non-bypassed archetype. This is the documented fail-open (item
+243): a plan with an empty or absent `filesLikely` allows every write regardless of archetype. **The
+precise, verified claim: their writes are not unconditionally bypassed by archetype; whether
+`checkWriteScope` blocks a given write on them in practice depends on the plan's `filesLikely` being
+populated, which this pass does not verify behaviourally.** Stated this way rather than as though three
+archetypes are protected.
+
+### Proof the fix reaches the model, not just that a filter object is built correctly
+
+`src/core/runLlmPatchFlow.fetchUrlPlacement.test.ts` mirrors this file's own sibling "R4" pattern
+exactly (`runLlmPatchFlow.terminationReasonProbe.test.ts`): every module around `runLlmPatchFlow` is
+mocked except `agentLoop.js`, a specific archetype is forced through the real `classifyTask` seam, and
+the real `tools` array a mocked `createChatCompletion` receives is read back. `tier: "complex"` is set
+explicitly on the fixture — `fetch_url` is complex-tier-only, so a test left at the fixture's default
+medium tier would pass whether or not the fix existed. Four cases:
+
+- `refactor` — `fetch_url` absent, `apply_patch`/`write_file` present (positive control: the run
+  genuinely reached the point where `fetch_url` would otherwise be offered).
+- `complex_multi_file` — same two assertions. **This is the case that exercises the new third
+  spread** — without it, this test fails even with the exclusion block in place (confirmed by
+  mutation M3 below).
+- Contrast: `targeted_fix` — `fetch_url` present. Proves the exclusion is scoped to exactly two
+  archetypes.
+- **`debug` — pinned, not inferred.** The new spread's condition is archetype-agnostic: it fires for
+  *any* null-pipeline archetype the moment something sets the filter. Nothing in this pass sets it for
+  `debug`, so the spread stays dead for it — but that is a fact about today's code, not a guarantee the
+  spread's shape provides. This test asserts `fetch_url` is still present for `debug`, so a future
+  change adding a `debug` exclusion breaks this test loudly and is a deliberate decision, not a silent
+  side effect of a spread condition nobody remembered was archetype-agnostic.
+
+The positive control itself was checked, not assumed: `toolNames.length > 0` was confirmed to actually
+fail against an empty array before being relied on across all four cases.
+
+### Mutations — kill sets predicted by name before running, all four exact
+
+| # | mutation | predicted kill | actual |
+|---|---|---|---|
+| M1 | `=== "refactor"` → `=== "xxx"` | refactor test only | ✓ exactly |
+| M2 | `=== "complex_multi_file"` → `=== "xxx"` | complex_multi_file test only, distinct line from M1 | ✓ exactly — no collapse |
+| M3 | delete the new third spread only | complex_multi_file test only | ✓ exactly — this is the proof the delivery-gap finding was real, not a redundant addition |
+| M4 | delete the whole new `if` block | both refactor and complex_multi_file | ✓ exactly |
+
+Reverted by diff against a pre-mutation snapshot after each, confirmed byte-identical.
+
+### The before/after offered-set tables, and an instrument-boundary finding worth its own line
+
+**Before** (`resolveToolList` composed exactly as `agentLoop.ts` does — `capabilityFilter ??
+tierFilterFromClassifier`), re-run on the current tree rather than assumed unchanged since two passes
+ago:
+
+| archetype | pipeline | dispatcherFilter | simple | medium | complex |
+|---|---|---|---|---|---|
+| simple_add | null | undef | no (5) | no (9) | **YES (20)** |
+| targeted_fix | set | undef | no (5) | no (9) | **YES (20)** |
+| refactor | set | undef | no (5) | no (9) | **YES (20)** |
+| debug | null | undef | no (5) | no (9) | **YES (20)** |
+| investigation | set | set | no (5) | no (5) | no (5) |
+| question | set | set | no (2) | no (2) | no (2) |
+| complex_multi_file | null | undef | no (5) | no (9) | **YES (20)** |
+
+Confirmed identical to the matrix measured two passes ago — the tree moved in the interim (item 274's
+counter test landed) but not on this path.
+
+**After, re-running the identical static instrument, unmodified — reported as unchanged, and why that
+is correct rather than a null result:** this pass's fix does not live inside `buildPipelineConfig` or
+`buildDispatcherCapabilityFilter`, the two pure functions this instrument composes — it is a follow-on
+assignment made inline, later, in `runLlmPatchFlow.ts`'s own scope. Re-running the same instrument
+unmodified therefore reproduces the identical before table, cell for cell, including `refactor`'s and
+`complex_multi_file`'s `complex:YES(20)` rows. **Reporting that table as "the after state" would be
+wrong — it would look like the fix did nothing.** The real after-state is established the only way this
+fix's location permits: behaviourally, through the four cases the prior section walked through, which is why the plan called for a
+static re-run in the first place — to find out whether the same instrument still applied, not to
+assume it would. It does not, and that boundary is the finding: `refactor` and `complex_multi_file`
+drop from offering `fetch_url` to not, `targeted_fix` and `debug` are unchanged, all four proven by
+driving the real production call site rather than composing pure functions that don't see this fix.
+
+### Where item 274 needs a pointer, not a rewrite
+
+Item 274's placement-finding paragraphs describe the pre-fix state accurately as of when they were
+written; they are not edited. This entry supersedes them going forward. Item 274's own establishment —
+the four hypotheses for why search goes unused, and the counter's positive control — rests on none of
+this and stands unchanged.
+
+**Verification:** `npm run typecheck` clean (real source added, not only prose).
+`env -u FORCE_COLOR npm test` → 492/6269/0/17 (baseline 491/6265/0/17, +1 file +4 tests, arithmetic
+closes). Marker inventory re-derived, unchanged at 414/43-351-20/24 — this pass adds no `[zone-*]`
+marker. See item 274 for the four hypotheses on why search goes unused and the mitigation costings,
+item 243 for the `filesLikely` fail-open this entry's "not protected, not verified to block" distinction
+rests on, and item 272 for the neighbouring declared-but-inert shape this placement gap was adjacent to
+before it was closed.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 274 to find out which ones still need something. No index of
+reader the trouble of reading all 275 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (130): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260, 262, 264, 265, 266, 267, 268, 269, 270, 271, 273, 274
+**Closed** (131): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260, 262, 264, 265, 266, 267, 268, 269, 270, 271, 273, 274, 275
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (0):
