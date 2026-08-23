@@ -23908,9 +23908,9 @@ remains dependent on the shield, so closing 286 narrowed this class without touc
 See item 286 for the recording seam that is immune to this gate, and item 280 for the observation
 both entries descend from.
 
-## 288. The dependency graph resolves almost no source-to-source import, because an ESM `.js` specifier is never mapped back to its `.ts` file
+## 288. Closed — the dependency graph resolves almost no source-to-source import, because an ESM `.js` specifier is never mapped back to its `.ts` file
 
-**Bucket: Actionable now.** The remedy is one condition at one site and needs nothing new to be learned.
+**Bucket: Actionable now → Closed.** Built and verified this commit.
 
 **The fact, measured rather than reasoned.** Of the 604 relative import specifiers in the files the
 graph actually analyses, **594 (98.3%) end in `.js`** — the ESM TypeScript convention this repo is
@@ -23934,17 +23934,53 @@ edges cannot answer "who imports this symbol" for anything. An earlier draft of 
 uncapping would restore `importedBy` completeness; that claim is **withdrawn**, and the measurement
 that withdrew it is the 34-to-92 figure.
 
-**The condition to change.** In `resolveCandidatePath`, when the candidate's basename ends in a
-JavaScript extension (`.js`, `.jsx`, `.mjs`, `.cjs`), also try the corresponding TypeScript extensions
-before returning null. The existing `noExt` branch stays as it is; this adds a second reachable branch
-rather than widening that one.
+**The fix, built.** `resolveCandidatePath` now tries the TypeScript extensions when the candidate's
+basename carries a JS extension, before the literal path is tried — the existing `noExt` branch is
+unchanged; this is a second reachable branch, not a widening of that one. Verified on the real fixed
+module (not simulated): a `.js` specifier resolving to its `.ts` sibling is pinned by a unit test, and
+a literal `.js` target that exists on disk (the `dist/` case) still wins over the swap — pinned as a
+hostile-input case, not left to the happy path.
 
-See item 289 for the cap, which is real and separate, item 290 for the ordering instability, and item
-291 for what the failure reports to the model.
+**Measured against the real module, both populations, dist/-state-split** (`~/.zone` is not involved;
+figures are the graph's own build). Full-repo (977 files at measurement time; the count moved to 978
+once this pass's own new test file joined the enumerated universe, adding exactly one direct node and
+one resolved edge — traced to that file's own `import … from "./buildDependencyGraph.js"`, not a
+miss): **1011 nodes** (977 direct — dist-independent — + 34 back-edge-only, all of which are `dist/`),
+**2064 deduped resolved edges** (1991 non-dist, 73 `dist/`). Pinned-300 (`git ls-files` sorted,
+reproducible independent of fast-glob's own unstable order): **399 nodes, 682 edges** — matched the
+registered prediction exactly, all four figures. `dist/`'s build-determinism premise was verified, not
+assumed: a no-op rebuild reproduced a byte-identical tree hash (`0a204a0357…`), so the dist-dependent
+component of these figures is attributable rather than guessed at.
 
-## 289. The dependency graph analyses at most 300 files, so 670 of 960 tracked sources have no node
+**These figures are a floor, not the graph's complete edge set — stated explicitly rather than
+implied.** `readHeadLines(abs, 200)` caps how much of each file is read, independent of this fix; 311
+of 977 files (31.8%) exceed 200 lines, and the resolver only sees what's inside that window. Filed
+separately as item 296 rather than folded in here — see that entry for the measured size (small: +45
+edges, 2.2%) and why it's filed rather than fixed in this pass.
 
-**Bucket: Actionable now.** The cap is a named constant at a named site, and its cost is measured here.
+**Second instrument for the extraction the fix resolves against — genuinely independent, not another
+regex.** A TypeScript-compiler-API AST walk (not `git grep`, which would share the derivation step with
+the builder's own regex and reproduce its blind spots) found **2115** relative specifiers against the
+real 4-pass extractor's **2213**, on the identical 200-line input window — a 98-specifier gap (4.4%),
+not agreement. See items 294 and 295 for the two, opposite-direction defects that gap decomposes into.
+
+**Mutation, 8 mutants against the fix + cap + sort together (this entry, 289, 290 share one kill set —
+inseparable for measurement, per this entry's own diagnosis).** All predicted-live mutants killed;
+N6 (reversing the sort) is a genuine, correctly-triaged survivor — a reversed sort is still
+deterministic, so cross-shuffle stability tests can't distinguish direction from no direction at all,
+and nothing downstream depends on ascending over descending. N8 (emptying the structural guard's own
+file read) initially survived — a real gap in the guard itself, not a false negative about the fix —
+fixed by adding a plausibility floor (`src.length > 1000`) before the guard's `not.toMatch` assertions,
+the same vacuous-guard shape this project has caught repeatedly elsewhere.
+
+See item 289 for the cap (closed alongside this), item 290 for the ordering instability (closed
+alongside this), item 291 for what the failure reports to the model (untouched), items 294/295 for the
+extraction over-/under-match this fix's own measurement surfaced, and item 296 for the line-cap
+truncation filed rather than fixed here.
+
+## 289. Closed — the dependency graph analysed at most 300 files, so 670 of 960 tracked sources had no node
+
+**Bucket: Actionable now → Closed.** Built and verified this commit.
 
 **The fact.** `buildDependencyGraph`'s main loop is `for (const rel of posixFiles) { if (analyzed >=
 MAX_ANALYZE) break; ... }` with `MAX_ANALYZE = 300` (`src/repo/buildDependencyGraph.ts`), iterating the
@@ -23974,15 +24010,24 @@ this cap was protecting.
 **Necessary, not sufficient.** Uncapping alone moves resolved edges from 34 to 92 (item 288). Both
 conditions have to change before `find_references` answers correctly; neither one alone does.
 
-**Scope correction.** An earlier draft proposed exempting the `find_references` path from the cap.
-That scoping is wrong: `buildDependencyGraph` has **three** production callers —
+**Scope correction, carried into the fix.** An earlier draft proposed exempting the `find_references`
+path from the cap. That scoping was wrong: `buildDependencyGraph` has **three** production callers —
 `src/tools/toolExecutor.ts` (find_references), `src/llm/plannerStep.ts`, and
-`src/core/runLlmPatchFlow.ts` — so plan-phase file ranking and import-context summaries are degraded by
-the same two defects, and a one-caller exemption would leave them degraded.
+`src/core/runLlmPatchFlow.ts`, confirmed to fire at most once per run each (`plannerStep`'s and
+`runLlmPatchFlow`'s own call are mutually exclusive branches of the same pre-loop planning phase; none
+is per-iteration) — so the fix removes `MAX_ANALYZE` for the module as a whole, not for one caller.
 
-## 290. Which files the dependency graph contains changes between runs, because the enumeration is never sorted
+**Built: `if (analyzed >= MAX_ANALYZE) break;` removed, and `MAX_ANALYZE`/`analyzed` removed with it**
+rather than left as a dead constant — confirmed absent from the module source by a structural test, so
+a later reintroduction at a high, seemingly-safe cap (e.g. 100000) fails a *behavioural* check, not
+merely a source-text one. Pinned by a fixture with 305 files: a file placed past the old positional
+boundary gets a node. Measured cost with the file-cap removed (200-line cap still in place, filed
+separately as item 296): median **128ms** over 977 files — cheap, no reintroduced ceiling, matching
+this entry's own earlier finding that `MAX_ANALYZE` carried no stated rationale (`0d11c37d`).
 
-**Bucket: Actionable now.** One sort, at a named site, makes membership reproducible.
+## 290. Closed — which files the dependency graph contained changed between runs, because the enumeration was never sorted
+
+**Bucket: Actionable now → Closed.** Built and verified this commit.
 
 **The fact, and a refutation of this session's own earlier answer.** fast-glob returns the same 977-file
 SET on every invocation (identical sorted-set hash across four processes) but a **different ORDER every
@@ -24001,10 +24046,23 @@ and returns "Source file not found in dependency graph" on the next, with no cha
 between them. Any bug report against this tool is therefore not reliably reproducible, which is a
 second-order cost on top of the first-order one.
 
-**The condition to change.** Sort `posixFiles` before the analysis loop in `buildDependencyGraph`
-(`src/repo/buildDependencyGraph.ts`). This does not fix items 288 or 289 and does not pretend to — it
-makes their victims a fixed set rather than a rotating one, which is what makes the other two
-measurable. Sorting also removes the collision hazard in item 293's key sampling from the ordering side,
+**Built: `const posixFiles = files.map(posix).sort();`** — plain lexicographic `.sort()`, matching
+`cacheKey`'s own existing collation, no locale-dependent comparator introduced. Does not by itself fix
+items 288 or 289 — it makes their effects a fixed, measurable set rather than a rotating one.
+
+**Verified, and a near-miss worth recording as its own lesson.** Post-fix, 8 separate processes
+produced an **identical** node-key SHA-256 hash, an identical node count, and identical `importedBy`
+array order for a shared file — full determinism, not sampled agreement. Reproducing the *pre-fix*
+instability (to confirm the harness actually detects what it claims to prove gone, not just that it
+runs) needed the cap AND the missing sort together, reverted in a throwaway patched copy, never in the
+real fixed module: 6 runs produced **2 distinct** graph-key hashes, each correlated with a distinct
+fast-glob order hash from that same run — the causal link this entry's own earlier "3 distinct sets"
+finding asserted but hadn't shown directly. **The near-miss:** a first attempt at this reproduction,
+run only 4 times, landed on the same fast-glob ordering mode all 4 times by chance and showed zero
+variation — which would have read as "the pre-fix state was actually fine" had it not been extended to
+6. The same fallacy this entry itself already named ("agreement at n=2 is not a property") reproduced
+itself one level up, inside the very check built to guard against it, caught only by not stopping at a
+small n. Sorting also removes the collision hazard in item 293's key sampling from the ordering side,
 though not from the sampling side.
 
 ## 291. `find_references` reports its failure as prose with no structured fields, so the new tool-call record carries a sentence instead of a code
@@ -24081,45 +24139,140 @@ an aside inside another entry's establish notes does not surface later as work.
 **The condition to change.** Hash the full sorted list rather than a 500-element prefix. The cost is one
 pass over a few hundred short strings, against a 60-second reuse window.
 
+## 294. The dependency graph's regex-based extraction matches import-shaped text regardless of comment, string, or type-position context — an over-match
+
+**Bucket: Neither.** A structural fact recorded, with no fix proposed.
+
+**Surfaced by, not separate from, item 288's own verification.** Two of the four specifiers item 288's
+original establish reported as "unresolved" turned out not to be real imports at all: `./db.js` inside
+a template-literal test-fixture string, and a specifier pointing at a path that never existed. Both
+were harmless while the resolver was broken — resolving to nothing either way. **After the fix they
+resolve if a coincidental TS sibling exists**, converting a silent no-op into silent wrong data. That
+consequence is this entry, not a footnote inside 288.
+
+**Measured, on a genuinely independent second instrument — not `git grep`.** A `git grep` for the same
+regex shape would share the derivation step with the builder's own extraction and reproduce its blind
+spots exactly where both are wrong, which reads as confirmation and is not. A TypeScript-compiler-API
+AST walk (`ts.createSourceFile` + a tree traversal collecting `ImportDeclaration`, dynamic-`import()`,
+and `require()` nodes — none of which a comment or string literal can ever parse as) is immune to
+context by construction. Held to the real extractor's own 200-line head window, so extraction *method*
+is the only variable: real (verbatim 4-pass regex) **2213** relative specifiers, AST **2115** — a
+**98-specifier gap (4.4%)**.
+
+**Root cause, traced on one file, then scale-checked.** `src/cli/dispatch.feedback.test.ts`'s dynamic-
+import pass matches `../llm/executionPlan.js` from
+`await importOriginal<typeof import("../llm/executionPlan.js")>()` — TypeScript's `typeof import("…")`
+type-only construct, an `ImportTypeNode` in type position, not a runtime `import()` call. The regex
+can't distinguish type position from value position; the AST walker, which never descends into type
+positions, correctly does. **Scale:** `typeof import(` occurs **81 times across 59 files**, concentrated
+in this codebase's `vi.mock(path, async (importOriginal) => { const actual = await
+importOriginal<typeof import(path)>() })` test idiom — a large, coherent fraction of the 98-specifier
+gap, not scattered noise.
+
+**Not a clean "AST is truth" story — stated honestly rather than overclaimed.** In that same file, the
+type-only construct is *also the only thing* that attributes the file's real dependency on
+`executionPlan.js`: the actual `vi.mock("../llm/executionPlan.js", …)` call, one line earlier in that
+same file, isn't matched by any of the real extractor's 4 passes, and the AST walker (which doesn't
+special-case `vi.mock`) misses it too. See item 295 for that opposite-direction defect, filed
+separately rather than under this entry, because whichever gets fixed first should not read as having
+closed both.
+
+**No remedy specified.** A real fix needs AST-level extraction, not a regex patch — out of scope for
+the pass that found it.
+
+See item 288 for the fix whose own verification surfaced this, and item 295 for the under-match this
+entry's own file-level trace also found.
+
+## 295. The dependency graph's extraction recognises no pattern for `vi.mock(specifier, …)`, so a real dependency expressed that way is silently absent — an under-match
+
+**Bucket: Neither.** A structural fact recorded, with no fix proposed.
+
+**The fact.** None of `extractJsImportsWithSymbols`'s four passes (static `from`, side-effect import,
+dynamic `import()`, `require()`) matches `vi.mock("../llm/executionPlan.js", async (importOriginal) =>
+{…})` — the string argument to `vi.mock` names a real module the file depends on (it's what's being
+mocked), but the call shape doesn't match any pass's regex. Traced on the same file as item 294's
+root cause (`src/cli/dispatch.feedback.test.ts`): the file's real dependency on `executionPlan.js` was
+attributed *only* by the (mistaken) `typeof import(…)` match one line below the `vi.mock` call itself —
+had that type-only construct not happened to be present, this dependency would have been invisible to
+the graph entirely, with nothing to even miscount.
+
+**Scale.** `vi.mock(` occurs **582 times across 158 files** — larger than item 294's over-match
+population, and every occurrence is a candidate case of a real test-file dependency this graph cannot
+see, independent of items 288/289/290's fixes.
+
+**Same extractor, opposite failure direction from item 294.** 294 is a false positive (matches text
+that isn't an import); this is a false negative (misses a call that expresses a real one). Recording
+both under one entry would let fixing either read as having closed both — kept separate for that
+reason.
+
+**No remedy specified.** A real fix needs AST-level extraction with a `vi.mock` special case (or a more
+general "string argument to a call whose name looks like a mock/spy setup" heuristic) — out of scope
+for the pass that found it.
+
+See item 288 for the fix whose own verification surfaced this, and item 294 for the opposite-direction
+defect found on the same file.
+
+## 296. The dependency graph reads only the first 200 lines of each file, so imports past that line are silently dropped — a fourth truncation, filed rather than fixed alongside items 288–290
+
+**Bucket: Actionable now.** The remedy is exactly as specifiable as item 289's own cap was: raise or
+remove `MAX_LINES`.
+
+**The fact.** `readHeadLines(abs, MAX_LINES, stagingFiles)` with `MAX_LINES = 200` caps how much of
+each file the extractor ever sees — the same defect family as item 289, one layer down: 289 capped
+*which files* got analysed; this caps *how much of each file* gets read. Both silently drop real edges
+by construction; both were invisible because nothing measured either one before this pass.
+
+**Measured, not assumed.** **311 of 977 enumerated files (31.8%) exceed 200 lines** (average 213 —
+barely over the cap itself). Removing the line cap on top of items 288–290's fixes: **+45 edges
+(2064 → 2109, 2.2%), +2 nodes (1011 → 1013)** — real, but small, because imports overwhelmingly cluster
+near a file's head regardless of the file's total length. Cost with both the file-cap and the line-cap
+removed: 3 runs, median **137ms** (vs 128ms with only the file-cap removed) — cheap, no reintroduced
+ceiling, the same absence of a stated rationale item 289 found for `MAX_ANALYZE` (`0d11c37d`).
+
+**Filed rather than fixed in this pass, deliberately.** The mutation kill set for items 288–290 was
+registered for exactly those three changes; folding in a fourth mid-pass would either leave it
+unregistered or require re-deriving it. Item 288's own closing text states this cap's figures are a
+floor, not the graph's complete edge set, rather than letting the fix read as more complete than it is.
+
+See item 289 for the sibling truncation (files, not lines) this entry's condition mirrors, and item
+288 for the fix whose own closing text names this cap's remaining effect explicitly.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 293 to find out which ones still need something. No index of
+reader the trouble of reading all 296 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (142): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42,
+**Closed** (145): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42,
 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113,
 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167,
 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228,
 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260,
 262, 264, 265, 266, 267, 268, 269, 270, 271, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285,
-286
+286, 288, 289, 290
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (7): 287, 288, 289, 290, 291, 292, 293
+first (5): 287, 291, 292, 293, 296
 
-Seven, from one for the whole of the preceding pass, and the jump is the point rather than an
-embarrassment. This bucket's size is the ledger's own signal about whether anything is specified and
-waiting: it sat at zero for months, went to 2 when an enumeration pass opened items 258 and 259
-together, dropped to 1 when 258 closed in the next pass, fell back to 0 once 259's last member was
-built, went to 1 with item 287, and lands at 7 because a single diagnosis pass into one tool found six
-separable defects, each with its own site and its own condition. Every one of those movements came from
-a finding this session generated rather than from inherited backlog. A bucket this full does not mean
-the work grew; it means six things that were already broken stopped being invisible, and three of them
-(288, 289, 290) have to be built together before `find_references` answers correctly.
+Five, down from seven — the bucket's movement continues to be the ledger's own signal about whether
+anything is specified and waiting, in both directions. The diagnosis pass into `find_references` left
+it at 7 (287 plus six separable defects in one tool); this pass built three of those six (288, 289,
+290 — inseparable for measurement, closed together) and filed a fourth its own verification surfaced
+(296, the line-cap truncation), landing back at 5: 287, 291, 292, 293, 296. Every movement in either
+direction has come from a finding this session generated rather than from inherited backlog.
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (15): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250, 263
 
-**Neither — a structural fact recorded, with no fix proposed** (129): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
+**Neither — a structural fact recorded, with no fix proposed** (131): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
 74, 76, 77, 78, 79, 80, 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109,
 112, 114, 115, 118, 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152,
 154, 155, 158, 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199,
 200, 201, 202, 205, 206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230,
-232, 243, 244, 247, 248, 249, 254, 256, 261, 272
+232, 243, 244, 247, 248, 249, 254, 256, 261, 272, 294, 295
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.

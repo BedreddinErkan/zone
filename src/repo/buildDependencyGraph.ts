@@ -58,7 +58,6 @@ export interface DependencyGraph {
 
 const CACHE = new Map<string, { graph: DependencyGraph; ts: number }>();
 const TTL_MS = 60_000;
-const MAX_ANALYZE = 300;
 const MAX_LINES = 200;
 
 const ENTRY_NAMES = new Set([
@@ -114,7 +113,8 @@ function resolveCandidatePath(
 ): string | null {
   const tryPaths: string[] = [];
   const normalizedCandidate = posix(path.posix.normalize(candidate));
-  const noExt = !/\.[a-z0-9]+$/i.test(path.posix.basename(normalizedCandidate));
+  const basename = path.posix.basename(normalizedCandidate);
+  const noExt = !/\.[a-z0-9]+$/i.test(basename);
   if (noExt) {
     tryPaths.push(
       normalizedCandidate + ".ts",
@@ -128,6 +128,18 @@ function resolveCandidatePath(
       path.posix.join(normalizedCandidate, "index.js"),
       path.posix.join(normalizedCandidate, "index.jsx")
     );
+  }
+  // Item 288: an ESM TypeScript specifier names its compiled ".js" output
+  // (`import { log } from "./logger.js"`) while the source on disk is ".ts" —
+  // the noExt branch above never fires for these (they DO carry an extension),
+  // so without this, virtually every source-to-source import in an ESM TS repo
+  // silently resolved to nothing. Tried before the literal path so a real
+  // on-disk ".js" file (e.g. compiled output under dist/) still wins when one
+  // exists — this only fills in for specifiers the literal path can't satisfy.
+  const jsExtMatch = basename.match(/\.(m?js|jsx?|cjs)$/i);
+  if (jsExtMatch) {
+    const stem = normalizedCandidate.slice(0, normalizedCandidate.length - jsExtMatch[0].length);
+    tryPaths.push(stem + ".ts", stem + ".tsx");
   }
   tryPaths.unshift(normalizedCandidate);
 
@@ -443,20 +455,22 @@ export async function buildDependencyGraph(
     }
   }
 
-  const posixFiles = files.map(posix);
+  // Item 290: sorted so which files land in the graph — and the iteration order
+  // that determines importedBy array order and nodes.keys() order — doesn't
+  // depend on the enumerator's (unstable) return order. Plain lexicographic
+  // sort, matching cacheKey's own collation above — no locale-dependent
+  // comparator introduced.
+  const posixFiles = files.map(posix).sort();
   const fileSet = fileSetFromList(posixFiles);
   const nodes = new Map<string, DependencyNode>();
   const entryPoints = discoverEntryPoints(fileSet);
 
-  let analyzed = 0;
   for (const rel of posixFiles) {
-    if (analyzed >= MAX_ANALYZE) break;
     if (!/\.(m?[jt]sx?|jsx?|py)$/i.test(rel)) continue;
 
     const abs = path.join(repoPath, rel.split("/").join(path.sep));
     if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) continue;
 
-    analyzed += 1;
     const head = readHeadLines(abs, MAX_LINES, stagingFiles);
     let resolvedImports: string[] = [];
     let exports: string[] = [];
