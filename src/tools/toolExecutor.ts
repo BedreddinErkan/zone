@@ -759,7 +759,7 @@ function nearestExistingAncestor(p: string): string | null {
 //     the resolution chain is live (e.g. a symlink resolving through a search-denied directory).
 //     Any such failure means containment can't be proven; an undecidable boundary check is not a
 //     passing one.
-function checkPathBoundary(abs: string, repoPath: string, toolName: string): true | "escape" {
+export function checkPathBoundary(abs: string, repoPath: string, toolName: string): true | "escape" {
   const lexical = path.resolve(abs);
   const ancestor = nearestExistingAncestor(lexical);
   if (ancestor === null) {

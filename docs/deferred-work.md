@@ -24522,9 +24522,9 @@ entry marked Actionable now on an unsettled remedy is the error item 288 made wi
 See item 243 for the empty-set instance and its own measurement, item 301 for the containment gate
 this one is often confused with, and item 93 for the sibling gate's discriminated-union fix.
 
-## 301. Two containment implementations disagree, and a write escapes the repository through an in-repo symlink
+## 301. Closed — two containment implementations disagree, and a write escapes the repository through an in-repo symlink
 
-**Bucket: Actionable now.** The remedy is one named site adopting a function that already exists.
+**Bucket: Actionable now → Closed.** Built and verified this commit.
 
 **Two implementations of "is this path inside the repository".** `checkPathBoundary`
 (`src/tools/toolExecutor.ts`, `6802d0c7`) realpaths both sides, is separator-safe, and fails closed
@@ -24589,42 +24589,233 @@ Settle `apply/applyPatchPlan.ts`'s liveness and give it a check or delete it.
 See item 300 for the scope gate this containment gate is often confused with, and item 243 for the
 mitigation argument that lists the repository boundary as a surviving layer.
 
+**checkPathBoundary is now exported** (`src/tools/toolExecutor.ts`) — the only signature change; its
+three parameters and `true | "escape"` return already matched every call site. `applyLlmPatches.ts`'s
+lexical `isInsideRepo` expression is replaced with
+`checkPathBoundary(absolutePath, repoPath, "applyLlmPatches") === "escape"`, in the identical
+position inside the identical per-patch loop iteration, under the identical
+`try { … } catch { failed.push(...) }` shape — a substitution, not a rewritten control flow.
+`fs.access(resolvedRepo)` is unchanged; it answers a different question (does the repository
+directory exist at all).
+
+**The symlink construction this entry opened with, re-run against the fixed code.** Same temporary
+repository, same `src/link.txt` symlinked to a file outside it, built fresh in `/tmp`, never in this
+repository. Before the fix: `{"applied":["src/link.txt"],"skipped":[],"failed":[]}`, and the file
+outside the temporary repository was overwritten. After the fix: the write is refused, `failed`
+carries the entry, and the file outside the temporary repository is byte-identical to its state
+before the run. `git status` in this repository was checked and was clean immediately before and
+immediately after every construction; nothing in this repository's working tree was touched by any
+probe.
+
+**What closing this entry guarantees, stated at the precision the ordering supports.** The check
+runs once per patch, synchronously, immediately before that patch is written — confirmed by reading
+`applyLlmPatches`' control flow rather than assumed: the whole function is one
+`for (const patch of patches)` loop, and the check, the `mkdir`, and the `writeFile` sit inside one
+iteration of it, so a batch mixing a legitimate write with an escaping one refuses only the escaping
+one, tested in both orderings. What this entry does **not** claim: that nothing can change what a
+checked path resolves to between the check and the write within that same iteration. Two `await`
+points — the `mkdir`, then the `writeFile` — follow the synchronous, realpath-based check before a
+byte is written, and a realpath check observes what a path resolves to at the instant it runs, not
+for whatever follows. That gap is exactly as old as this function (it sat in the identical position
+under the original lexical check, equally synchronous) and this fix does not touch it — filed on its
+own terms as item 303, naming the gap rather than letting this closure imply a guarantee the ordering
+does not support.
+
+**One thread this entry opened and this pass does not close.** A third, weaker implementation named
+early in this entry — `src/apply/applyPatchPlan.ts`, which writes `patch.filePath` directly with no
+containment check and no `repoPath` parameter at all — had its liveness (`apply/runApplyFlow.ts`,
+`core/runFeatureAgent.ts`) left unsettled. This pass's scope was the constructed `applyLlmPatches`
+escape specifically; `applyPatchPlan.ts`'s liveness remains exactly as open as this entry originally
+left it, and this closure does not extend to it.
+
+**Verification.** `src/core/applyLlmPatches.test.ts`, 19 cases — 14 pre-existing (`5467aa34`) plus 5
+new, covering the symlink-escape construction, a legitimate write through a repository root itself
+reached via a symlink, a broken-symlink undecidable boundary failing closed, and a two-patch batch
+with the escaping patch in each position. Five named mutants, each run and reverted independently:
+reverting to the lexical check kills 4 cases; realpathing only the target side, not the repository
+root, kills 1 (the symlinked-root case this mutant exists to catch); failing open on an undecidable
+boundary kills 13 (broader than the one case that names it, because every legitimate-write case
+also depends on the fail-closed default not misfiring); checking only the first patch in a batch
+kills 2; and reordering the check one statement earlier with no semantic change kills 0, the
+predicted-inert negative control, confirmed.
+
+## 302. Closed — a mechanical lint replaces the spatial-cross-reference ledger-writing habit that recurred after being named
+
+**Bucket: Actionable now → Closed.** Built and verified this commit.
+
+**The habit.** Ledger prose in this document sometimes points at a nearby paragraph spatially — a
+check named only by its position, a pass identified only by direction, a fix marked only as resolved
+nearby — instead of naming what it means: an item number, a file and line, a probe letter. Naming
+the habit in a prior pass's own ledger text did not stop it recurring: six confirmed instances across
+three passes that each separately tripped one of
+this document's own sweeps (`9c9a6b80`, `b0a16462`, `0c938d11`), mined from those sessions'
+transcripts rather than from `git log`'s diffs, because every one of those instances was caught and
+rewritten before its commit — the bad phrasing never reached a diff to search. The gap was never
+detection: `buildAnaphorPattern` and `buildPositionalPattern` already match this exact shape and
+already caught it four times. What each catch produced was a bare count mismatch against a frozen
+number, naming no file, no line, and no instruction — so each trip cost a fresh, throwaway locator
+script rather than a repeatable one, and the underlying habit had nothing standing in its way between
+sweeps.
+
+**The fix imports rather than reimplements.** `scripts/deferredWorkSpatialReferenceLint.ts` does not
+carry a third pattern; it imports `buildAnaphorPattern` and `buildPositionalPattern` and unions their
+matches by span. A third independent copy of the same matching logic is the exact defect class this
+document already flags elsewhere under `PATCH_MULTI_BLOCK_EXAMPLE` — described there as "a third,
+still-independent copy of the same format… not unified" — and this entry does not repeat it.
+`scripts/deferredWorkHeadings.ts` extracts `parseHeadings`/`entryBodiesByNumber` out of
+`scripts/deferredWorkSnapshot.test.ts` (item 36) into an importable, non-test module for the same
+reason: importing a function directly out of a `.test.ts` file re-executes every `describe`/`it` it
+registers as a side effect (confirmed empirically — a one-test probe file importing one function from
+it ran that file's entire prior suite, not the one test the probe itself defined), which would have
+silently inflated the battery's own count had the extraction not happened first.
+
+**The count, registered before it was run.** `buildPositionalPattern`'s range already contains every
+single-word match `buildAnaphorPattern`'s own "above" branch can produce, so the union was predicted
+to equal 114 (the positional sweep's own frozen absolute) plus however many of the anaphor sweep's 52
+are specifically a `verb + there` construction, a shape positional matching never produces at all —
+predicted range 115 to 166, registered ahead of running it. The measured union, deduped by span, is
+**117**, inside the registered range and reported as a landed prediction rather than adjusted to fit
+it. Cross-checked by a second, independent derivation: a true set difference (anaphor spans with no
+overlapping positional span) finds exactly 3 — one inside item 12, one inside item 56, and the worked
+example inside the "pattern this document is built to avoid" essay that already discusses this exact
+anaphor-vs-line-number distinction — and 114 + 3 = 117, matching the span-dedup count exactly.
+
+**The allowlist is keyed on the matched text together with its enclosing item number, not on text
+alone.** A text-only allowlist would silently pass a new spatial reference that happens to reuse an
+already-allowlisted phrase in a different entry — the closest failure mode to what actually happened
+across this document's own writing: recurring phrasing, not a single repeated instance. Item numbers
+come from `parseHeadings`, reused rather than reimplemented. The scan itself is bounded to the
+numbered-items region — everything before the "## Status snapshot" heading, the same boundary
+`entryBodiesByNumber` already uses for that same last entry's span — because `parseHeadings` tracks
+only "## N. " headings, not "## Status snapshot" or the free-form "pattern" essays after it, so
+without that bound the LAST numbered item has no next heading to stop at and its span silently
+swallows everything to the end of the file. That was not a hypothetical risk: it is what the first
+version of this lint did, corrected in the same commit that introduces it (the defect this produced
+is its own record, following this paragraph). Within the bounded region, every match resolves to an enclosing item;
+the only other possibility, a match in the preamble before item 1, would resolve to no item at all
+and none currently do. The array is occurrence-indexed, not deduplicated by value, and compared by
+exact sequence equality, so a disappearing instance paired with a reappearing one elsewhere is caught
+even where a same-length set comparison would miss it.
+
+**Disposition, fixed and stated rather than left to infer.** Every one of the 95 pairs present as of
+this commit is pre-existing text, allowlisted in bulk rather than rewritten one entry at a time —
+rewriting 95 historical instances is a separate, much larger content pass and is not what this entry
+does. The 95 is the count within the scan's own bound (before "## Status snapshot"); the 117 named
+above is a different, wider measurement — the raw union-by-span count across the whole document as it
+stood before this commit, including the Status snapshot prose and the pattern essays this lint does
+not scan. The
+allowlist does not grow going forward: a new entry introducing a new spatial self-reference, a reused
+phrase in a different item included, fails the battery immediately with its file, its line, and its
+matched text, until the referent is named. Extending the allowlist afterward is a deliberate act,
+asserted by the lint's own test the same way `ANAPHOR_ABSOLUTE` and the two `POSITIONAL_*_ABSOLUTE`
+constants already are.
+
+**A defect this same establish work produced, caught by the tool disagreeing with its own author
+rather than by rereading.** The first version of `itemForLine` had no upper bound past the last
+numbered heading it tracks, because `parseHeadings` tracks only "## N. " headings and nothing marks
+where the last one's span should end. Before item 301
+became the last numbered item in this document (which this same pass also did, immediately before
+writing this entry), that gap silently attributed 22 matches to item 301 that do not live in item
+301's body at all — they live in the Status snapshot prose and the untracked "pattern" essays after
+it, none of which is a ledger entry. The original version of this paragraph reported those 22 as
+item 301's own, drafted in one sitting, as evidence for why a mechanical check earns its keep. That
+claim did not survive adding item 303 immediately after 302 and re-running the lint: the 22 matches
+moved from "item 301" to "item 303" between one run and the next, which a real per-entry count could
+not do, and which is what exposed the bug. `git diff` on this document, plus a live probe run before
+and after the boundary fix in `deferredWorkSpatialReferenceLint.ts`, confirms item 301's real body
+carries zero spatial-reference matches — the entry earlier in this document reads clean on its own
+terms. The evidence this entry can actually stand behind is narrower than originally claimed: naming
+the habit did not stop it recurring (six instances, mined from session transcripts, per the opening
+paragraph), and that finding does not depend on the retracted density claim.
+
+**Verification.** `scripts/deferredWorkSpatialReferenceLint.test.ts`, 8 cases: a plausibility floor
+(the ledger file read is checked non-trivial in both byte length and line count) that an emptied scan
+set fails outright, closing the vacuity hole that let three earlier guards in this project pass
+silently against nothing; a hostile-input fixture containing an unreferented spatial pointer, which
+the lint flags; a fixture naming its referent explicitly, which it does not; a below-direction hit,
+confirming detection is not limited to one direction; a `verb + there` hit via the anaphor pattern
+specifically; a zero-orphans check over the real document; and a fixture pinning the boundary fix
+this entry itself needed — a numbered heading followed by a synthetic "## Status snapshot" followed
+by more spatial-reference-shaped text, asserting that trailing text is excluded from the scan rather
+than folded into the preceding item, the exact shape of the defect this entry's own establish work
+produced and corrected. Three named mutants — narrowing to the above direction only, pointing the
+ledger read at an unrelated small file, and inverting the pass/fail verdict — killed 2, 2, and 6 of
+the 8 cases respectively; the second is the one this entry's plausibility floor exists to catch, and
+it is one of the 2 it kills; the third kills both the hostile-input and the clean-fixture case, the
+two directions a verdict inversion must be shown to break.
+
+## 303. A point-in-time containment check in applyLlmPatches leaves a window between the check and the write it guards
+
+**Bucket: Neither.** A structural fact recorded, with no fix proposed — closing it is a choice among
+several remedies and this pass does not make that choice.
+
+**The gap.** `applyLlmPatches` (`src/core/applyLlmPatches.ts`, item 301) now runs
+`checkPathBoundary` synchronously, via `realpathSync`, immediately before each patch is written.
+Inside that same loop iteration, two `await` points follow before a byte reaches disk:
+`await fs.mkdir(parentDir, { recursive: true })`, then `await fs.writeFile(...)`. A realpath-based
+check observes what a path resolves to at the instant it runs; it makes no claim about what that
+same path resolves to by the time execution reaches the write. Something with filesystem access,
+timed to land inside this window, could in principle swap a path component for a symlink pointing
+outside the repository after the check passes and before the write happens.
+
+**Neither introduced by item 301's fix nor closed by it.** The original lexical check occupied the
+identical position and was equally synchronous; this window is exactly as old as the function itself
+(`9e79b81a`). Replacing the containment test with a stronger one narrows which escapes go undetected
+at the instant the check runs. It does not change when that check runs relative to the write, which
+is the axis this entry is about.
+
+**Severity, bounded the same way item 301 bounded its own.** Exploiting this needs something with
+write access to the same filesystem, timed to a window of at most two `await` turns inside a single
+call — itself reached only through the `plan_full_patch` branch, measured at 14.4% of runs in item
+301's own sink window. Item 301's finding needed only a symlink already present in the repository, no
+timing required; this window is narrower, not a restatement of the same severity.
+
+**What would close it, named without choosing among them.** A lock held across the span from the
+check to the write; a second `checkPathBoundary` call placed immediately before `fs.writeFile`, after
+the `mkdir`; or an atomic create-exclusive write (an `fs.writeFile` call carrying an exclusive-create
+flag) that fails outright rather than following a path swapped out from under it. Selecting one of
+these, and confirming it actually closes the window rather than only narrowing it, is future work.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 301 to find out which ones still need something. No index of
+reader the trouble of reading all 303 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (145): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42,
+**Closed** (147): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42,
 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113,
 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167,
 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228,
 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260,
 262, 264, 265, 266, 267, 268, 269, 270, 271, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285,
-286, 288, 289, 290
+286, 288, 289, 290, 301, 302
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (7): 287, 291, 292, 293, 296, 299, 301
+first (6): 287, 291, 292, 293, 296, 299
 
-Five, down from seven — the bucket's movement continues to be the ledger's own signal about whether
+Six, down from seven — the bucket's movement continues to be the ledger's own signal about whether
 anything is specified and waiting, in both directions. The diagnosis pass into `find_references` left
-it at 7 (287 plus six separable defects in one tool); this pass built three of those six (288, 289,
+it at 7 (287 plus six separable defects in one tool); that pass built three of those six (288, 289,
 290 — inseparable for measurement, closed together) and filed a fourth its own verification surfaced
-(296, the line-cap truncation), landing back at 5: 287, 291, 292, 293, 296. Every movement in either
-direction has come from a finding this session generated rather than from inherited backlog.
+(296, the line-cap truncation), landing at 5: 287, 291, 292, 293, 296. A later pass (`b0a16462`) filed
+299, returning it to 6, and the pass after that (`0c938d11`) filed the symlink-escape finding as 301,
+reaching 7: 287, 291, 292, 293, 296, 299, 301. This pass closes 301 (`applyLlmPatches` now routes
+through `checkPathBoundary`), landing back at 6: 287, 291, 292, 293, 296, 299. Every movement in
+either direction has come from a finding some session in this series generated rather than from
+inherited backlog.
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (15): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250, 263
 
-**Neither — a structural fact recorded, with no fix proposed** (134): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
+**Neither — a structural fact recorded, with no fix proposed** (135): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
 74, 76, 77, 78, 79, 80, 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109,
 112, 114, 115, 118, 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152,
 154, 155, 158, 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199,
 200, 201, 202, 205, 206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230,
-232, 243, 244, 247, 248, 249, 254, 256, 261, 272, 294, 295, 297, 298, 300
+232, 243, 244, 247, 248, 249, 254, 256, 261, 272, 294, 295, 297, 298, 300, 303
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.

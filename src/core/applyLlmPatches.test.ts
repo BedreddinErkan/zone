@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { promises as fs } from "node:fs";
+import fsSync from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { applyLlmPatches } from "./applyLlmPatches.js";
@@ -232,5 +233,118 @@ describe("applyLlmPatches", () => {
     expect(result.skipped).toEqual([]);
     expect(result.failed).toEqual(["src/ui/index.html"]);
     await expect(fs.access(path.join(tmpDir, "src/ui/index.html"))).rejects.toThrow();
+  });
+});
+
+/**
+ * Item 301: the containment check used to be a lexical `startsWith`,
+ * symlink-blind — case 2 below is the exact construction that escaped before
+ * the fix and must refuse now. These cases need real symlinks, so they use
+ * sync `fs` and their own fixtures rather than the async helpers above.
+ */
+describe("applyLlmPatches — containment (item 301)", () => {
+  let repoDir: string;
+  let outsideDir: string;
+
+  beforeEach(() => {
+    repoDir = fsSync.mkdtempSync(path.join(os.tmpdir(), "zone-alp-repo-"));
+    outsideDir = fsSync.mkdtempSync(path.join(os.tmpdir(), "zone-alp-outside-"));
+  });
+
+  afterEach(() => {
+    fsSync.rmSync(repoDir, { recursive: true, force: true });
+    fsSync.rmSync(outsideDir, { recursive: true, force: true });
+  });
+
+  it("HOSTILE INPUT: the exact symlink escape that succeeded before this fix now refuses, and nothing outside the repo changes", async () => {
+    fsSync.mkdirSync(path.join(repoDir, "src"), { recursive: true });
+    const secret = path.join(outsideDir, "secret.txt");
+    fsSync.writeFileSync(secret, "ORIGINAL-OUTSIDE\n", "utf8");
+    fsSync.symlinkSync(secret, path.join(repoDir, "src", "link.txt"));
+
+    const res = await applyLlmPatches(
+      [{ filePath: "src/link.txt", fullContent: "OVERWRITTEN-VIA-SYMLINK\n" }],
+      repoDir
+    );
+
+    expect(res.applied).toEqual([]);
+    expect(res.failed).toEqual(["src/link.txt"]);
+    expect(fsSync.readFileSync(secret, "utf8")).toBe("ORIGINAL-OUTSIDE\n");
+  });
+
+  it("asymmetric realpath: a repo root reached through a symlink still allows a legitimate write (X2)", async () => {
+    // If only the TARGET were realpathed and the repo root were not, a
+    // realpath'd target ("<real>/src/x.ts") would never lexically match an
+    // un-realpath'd root ("<symlinked-repo>"), and a legitimate write through
+    // a symlinked --repo would be spuriously rejected.
+    const symlinkedRepo = path.join(os.tmpdir(), `zone-alp-repolink-${Date.now()}`);
+    fsSync.symlinkSync(repoDir, symlinkedRepo);
+    try {
+      const res = await applyLlmPatches(
+        [{ filePath: "src/via-symlinked-root.ts", fullContent: "export const y = 2;\n" }],
+        symlinkedRepo
+      );
+      expect(res.applied).toEqual(["src/via-symlinked-root.ts"]);
+      expect(res.failed).toEqual([]);
+    } finally {
+      fsSync.unlinkSync(symlinkedRepo);
+    }
+  });
+
+  it("undecidable boundary: a broken symlink target fails closed, not open (X3)", async () => {
+    fsSync.mkdirSync(path.join(repoDir, "src"), { recursive: true });
+    // Points at a path that does not exist — realpathSync throws, containment
+    // cannot be proven, checkPathBoundary's own contract says that means "escape".
+    fsSync.symlinkSync(
+      path.join(outsideDir, "does-not-exist.txt"),
+      path.join(repoDir, "src", "broken.txt")
+    );
+    const res = await applyLlmPatches(
+      [{ filePath: "src/broken.txt", fullContent: "should not land\n" }],
+      repoDir
+    );
+    expect(res.applied).toEqual([]);
+    expect(res.failed).toEqual(["src/broken.txt"]);
+  });
+
+  it("multi-patch: a legitimate patch followed by an escaping one — only the escaping one fails (X4, direction one)", async () => {
+    fsSync.mkdirSync(path.join(repoDir, "src"), { recursive: true });
+    const secret = path.join(outsideDir, "secret2.txt");
+    fsSync.writeFileSync(secret, "UNTOUCHED\n", "utf8");
+    fsSync.symlinkSync(secret, path.join(repoDir, "src", "escape.txt"));
+
+    const res = await applyLlmPatches(
+      [
+        { filePath: "src/good.ts", fullContent: "export const a = 1;\n" },
+        { filePath: "src/escape.txt", fullContent: "SHOULD NOT LAND\n" },
+      ],
+      repoDir
+    );
+    expect(res.applied).toEqual(["src/good.ts"]);
+    expect(res.failed).toEqual(["src/escape.txt"]);
+    expect(fsSync.readFileSync(secret, "utf8")).toBe("UNTOUCHED\n");
+  });
+
+  it("multi-patch: an escaping patch followed by a legitimate one — the escape fails and the loop still processes what follows (X4, direction two)", async () => {
+    fsSync.mkdirSync(path.join(repoDir, "src"), { recursive: true });
+    const secret = path.join(outsideDir, "secret3.txt");
+    fsSync.writeFileSync(secret, "UNTOUCHED\n", "utf8");
+    fsSync.symlinkSync(secret, path.join(repoDir, "src", "escape2.txt"));
+
+    const res = await applyLlmPatches(
+      [
+        { filePath: "src/escape2.txt", fullContent: "SHOULD NOT LAND\n" },
+        { filePath: "src/good2.ts", fullContent: "export const b = 2;\n" },
+      ],
+      repoDir
+    );
+    // If a mutant hoisted the check to only patches[0], this ordering would
+    // have caught the escape (patch[0] IS the escape here) but is exactly the
+    // shape that would let a THIRD, later patch through unchecked — the
+    // companion case above (good-then-escape) is what actually kills that
+    // mutant; this case pins that the loop doesn't abort after one failure.
+    expect(res.failed).toEqual(["src/escape2.txt"]);
+    expect(res.applied).toEqual(["src/good2.ts"]);
+    expect(fsSync.readFileSync(secret, "utf8")).toBe("UNTOUCHED\n");
   });
 });

@@ -11,32 +11,14 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { type Heading, parseHeadings, entryBodiesByNumber } from "./deferredWorkHeadings.js";
 
 const LEDGER_PATH = path.join(process.cwd(), "docs", "deferred-work.md");
-
-interface Heading {
-  n: number;
-  closed: boolean;
-  /** Line index of the "## N. ..." heading itself — the entry body runs from
-   *  here to the next heading (or the snapshot section). Added for item 218's
-   *  in-entry bucket parse; the two original consumers (assertion 2 and
-   *  computeMissingItems) only ever read `n`/`closed` and are unaffected. */
-  line: number;
-}
 
 interface Bucket {
   label: string;
   declared: number;
   items: number[];
-}
-
-export function parseHeadings(lines: string[]): Heading[] {
-  const out: Heading[] = [];
-  lines.forEach((line, i) => {
-    const m = /^## (\d+)\. (.*)$/.exec(line);
-    if (m) out.push({ n: Number(m[1]), closed: /^Closed —/.test(m[2]!), line: i });
-  });
-  return out;
 }
 
 // ─── Item 218: in-entry bucket classification ──────────────────────────────────────────────────
@@ -116,24 +98,6 @@ export function extractBucketFromEntryBody(body: string): string | null {
     }
   }
   return best;
-}
-
-/** entry number -> its own body text (heading line to next heading, or to the snapshot section
- *  for the last entry). Shared by both per-entry maps below so the boundary logic exists once. */
-export function entryBodiesByNumber(lines: string[], headings: Heading[]): Map<number, string> {
-  const snapshotStart = lines.findIndex((l) => /^## Status snapshot/.test(l));
-  const result = new Map<number, string>();
-  for (let idx = 0; idx < headings.length; idx++) {
-    const { n, line } = headings[idx]!;
-    const endLine =
-      idx + 1 < headings.length
-        ? headings[idx + 1]!.line
-        : snapshotStart === -1
-          ? lines.length
-          : snapshotStart;
-    result.set(n, lines.slice(line, endLine).join("\n"));
-  }
-  return result;
 }
 
 /** entry number -> whether its body carries a marker at all (existence — see `hasInEntryMarker`). */
