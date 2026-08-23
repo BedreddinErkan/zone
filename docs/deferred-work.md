@@ -24776,11 +24776,190 @@ the `mkdir`; or an atomic create-exclusive write (an `fs.writeFile` call carryin
 flag) that fails outright rather than following a path swapped out from under it. Selecting one of
 these, and confirming it actually closes the window rather than only narrowing it, is future work.
 
+## 304. One concept, four implementations of "apply a patch plan to disk", and containment diverges across them
+
+**Bucket: Actionable now.** The remedy is named per site and needs nothing new learned first.
+
+**Why this exists when item 301 is closed.** Item 301 asked which sites use a *lexical containment
+check* and answered correctly: seven, of which one gated a write. That question cannot see a path
+carrying **no check at all**, and item 301's own closing text named one such residual
+(`apply/applyPatchPlan.ts`) it never touched. A census of write *paths* rather than write *checks*
+finds the residual is not one site.
+
+**The census, three instruments, differences reported rather than merged.** Scope: tracked
+`src/**/*.{ts,tsx}` minus `*.test.*`, `__tests__/`, `src/test/` — **399 files**;
+`rankerBaseline.snapshot.json` is `.json` and excluded from all three by construction. A TypeScript
+AST walk over `CallExpression`s naming any of 36 filesystem write primitives returns **139 call sites
+across 37 files**; four of those files are decoys and drop out (`logger.ts`, `toWireFrame.ts` and
+`SessionsModal.tsx` each define a *local string* `truncate`, and `astPatchFallback.ts`'s
+`path.remove` is a Babel node removal), leaving **33**. `git grep -lE` over the same primitives
+returns **32**, missing `src/cli/tui/index.tsx` because the alternation carried `unlinkSync` but not
+bare `unlink`. The AST walk missed nothing grep caught. **Union 33.** `find_references` covers the
+wrappers only, with both of its known limits live here — the 200-line window (item 296) and
+invisibility to non-exported symbols, the same limit that answered "No files import it" for
+`checkPathBoundary` before `2452803e` exported it.
+
+**The instrument was validated before its output was trusted.** The AST walk was run against an
+in-memory construction whose answer is known independently — two real writes plus one same-named
+decoy — and returned all three. **Decoy separation is manual, not automatic.** That is why the four
+decoy files were confirmed by reading each definition rather than by trusting the walk, and it is the
+limit any reuse of this census inherits.
+
+**Two pairs of distinct exported functions share a name, and item 301's caller list conflated one
+pair.** That entry recorded `apply/applyPatchPlan.ts`'s callers as `apply/runApplyFlow.ts` and
+`core/runFeatureAgent.ts`. Those are callers of **two different functions**: `runFeatureAgent`
+imports `applyPatchPlan` from `../patch/applyPatchPlan.js`, a different file with a different
+signature and a different plan type. `runApplyFlow` is likewise two functions
+(`src/apply/` and `src/patch/apply/`). **A correction recorded here, not a reopening — item 301
+stays closed.**
+
+**The four implementations, and what each does about containment.**
+
+| # | implementation | containment | reachable via |
+|---|---|---|---|
+| 1 | `core/applyLlmPatches.ts` | **realpath**, `checkPathBoundary` | `runTaskOnlyFlow`, `runLlmPatchFlow` — fixed at `2452803e` |
+| 2 | `apply/applyPatchPlan.ts` | **none** — `fs.writeFile(patch.filePath, …)` verbatim | `apply/runApplyFlow.ts` ← `cli/index.ts` `runTaskOnlyFlow`, under `--task-only --apply --patch-plan <file>` |
+| 3 | `patch/applyPatchPlan.ts` | **none at the write**; a lexical check upstream, described below | `core/runFeatureAgent.ts` ← `runCliWithOptions`, under TTY + `--task` with no positional task |
+| 4 | `patch/apply/runApplyFlow.ts` | **none** — `fs.copyFileSync` of a backup over its original | **nothing** — see the unreachability paragraph |
+
+Four implementations written against four different plan types (`PatchPlan` in `apply/`,
+`LlmPatchPlan` in `types/agent.ts`, a third in `patch/conversion/`, and the staging map). **The
+containment divergence is a symptom of the duplication, which is why this is one entry naming four
+sites rather than three entries naming one defect each.**
+
+**Site 2, constructed rather than argued, per the rule for a claimed bypass.** Three shapes were
+built in temporary directories and run against the built artifact: an absolute path outside the
+fixture repository, a `../` traversal, and item 301's exact in-repo-symlink construction. **All three
+wrote outside the fixture repository**, and each returned `{"applied":true}` — the function does not
+merely fail to stop the escape, it reports success. Nothing upstream supplies a check:
+`validateBasicPatchPlan` (`apply/runApplyFlow.ts`) tests non-empty and duplicate `filePath` only, and
+`loadPatchPlan` → `assertValidPatchPlan` (`cli/loadPatchPlan.ts`) is a JSON-shape assertion. **There
+is no `repoPath` anywhere in this chain** — `RunApplyFlowInput` is `{result, plan, request}` — which
+is why the fix is threading, not a one-line substitution. Every probe ran under `/tmp`; the
+repository was untouched, `git status` identical before and after.
+
+**Site 3 has a fourth containment implementation, upstream, and it enforces — but it is lexical.**
+`runFeatureAgent` calls `validatePatchPlan` (`src/patch/validatePatchPlan.ts`) unconditionally before
+any apply. Its `isPathOutsideRepo` compares `path.relative` of two `path.resolve` results and rejects
+when the result starts with `..` or is absolute — **no realpath on either side**, emitted at
+`level:"error"` with code `PATH_OUTSIDE_REPO`. The enforcement chain was read link by link and then
+run: `normalizePatchValidationIssues` (`core/normalizeIssues.ts`) maps `severity: issue.level`;
+`decideExecutionMode` — the **local** definition in `runFeatureAgent.ts`, not the same-named export
+in `core/decision/decideExecutionMode.ts`, a third duplicate-name pair — returns `mode:"blocked"` on
+any error-severity issue; and `runFeatureAgent` skips the apply unless the mode is `safe_to_apply`.
+Driven with the real functions, an absolute path and a `../` traversal both produce
+`PATCH_VALIDATION_ERROR:error` → `blocked` → **no call to the writer at all.**
+
+**What that lexical check does not catch, measured.** Given an in-repo symlink pointing outside the
+repository, the same chain produces **zero issues** and `mode:"safe_to_apply"` — the check resolves
+the link's own path, not its target. No write escapes (the `create` branch skips because the target
+exists, and the two `modify` writes are contained by construction: one path goes through
+`sanitizeFileName`, which destroys every separator, the other through `path.basename`). **What does
+escape is a read.** With `mode:"apply"`, `backupFile` reads through the symlink and copies the
+outside file's contents to `.agent-backups/<timestamp>/link.txt` **inside** the repository —
+confirmed by asserting the outside file's marker string appears in the in-repo backup. This is
+exfiltration-shaped, not overwrite-shaped, and is a different severity from site 2's.
+
+**Site 4 is unreachable as of this commit, established with both instruments.**
+`git grep -n "patch/apply/runApplyFlow\|apply/runApplyFlow" -- 'src/**' ':(exclude)src/repo/rankerBaseline.snapshot.json'`
+returns only hits on `../apply/runApplyFlow.js` — the *other* file — and
+`command grep -rn --include=*.ts "patch/apply/runApplyFlow" src/ scripts/` returns nothing. The
+exclusion was applied explicitly in both because the ranker snapshot names this file and is the known
+fixture-shadow hazard (item 244). Recorded rather than left in a table row, because dead code that
+writes without containment is a latent restoration hazard: whoever wires it up inherits the defect
+silently. **Deletion is the cheapest fix available for this one site** — named, not proposed; this
+pass changes no behaviour.
+
+**Severity, bounded honestly.** Neither live path is the default. Site 2 needs
+`--task-only --apply --patch-plan <file>`; site 3 needs a TTY with `--task` and no positional task,
+and additionally a `safe_to_apply` decision. Site 2 is the sharper of the two: no check exists at
+all, all three escape shapes succeed, and success is reported. The write tools and
+`core/applyLlmPatches.ts` are unaffected.
+
+**The condition to change.** Site 2: thread `repoPath` into `RunApplyFlowInput` — it exists at
+`runTaskOnlyFlow` — and call `checkPathBoundary` per patch, mirroring `2452803e`. Site 3: replace
+`isPathOutsideRepo`'s lexical comparison with the same realpath-based gate, which closes the symlink
+read; the write sites need no change. Site 4: delete, or give it a boundary check if it is to be
+revived. See item 301 for the site already fixed, item 303 for the check-to-write window that fix
+does not close, and item 305 for why nothing prevents the next write path from repeating this.
+
+## 305. Nothing binds a new filesystem write to the containment gate, so the census in item 304 expires on the next commit that adds one
+
+**Bucket: Neither.** A structural fact recorded; this entry sketches a guard as condition and site
+but deliberately does not build it, because its false-positive surface is unquantified.
+
+**The fact.** `checkPathBoundary` has eight call sites, all found by reading: one in
+`core/applyLlmPatches.ts` and seven in `toolExecutor.ts` — `stagedWrite`, and the handlers for
+`read_file`, `list_files`, `apply_patch`, `write_file`, and two in the `multi_edit` region. **Three of
+the four patch-application implementations item 304 enumerates route through none of them.** No test,
+lint, or type signature requires a new write path to adopt the gate: searching `src/**/*.test.ts` and
+`scripts/**` finds three files naming `checkPathBoundary`, and all three test its behaviour — none
+enumerates the write surface. The export added at `2452803e` made the gate reusable; it did not make
+it obligatory.
+
+**Why this is its own entry and not a sentence inside item 304.** Item 304 is a census, and a census
+is a statement about one commit. Its own instrument is a script that has to be re-run to stay true.
+The defect class here is different: **the absence of anything that fails when the census goes stale.**
+Fixing every site item 304 names would leave this entry untouched.
+
+**The guard, as condition and site.** Expressible as a test in `scripts/`, shaped like the existing
+ledger battery: reuse item 304's AST walk over tracked production `src/`, collect every
+write-primitive call site, and assert the set equals a frozen allowlist keyed on `(file, primitive)`
+— the same disposition shape `scripts/deferredWorkSpatialReferenceLint.ts` already uses, so a newly
+added write site fails until it is either routed through `checkPathBoundary` or deliberately
+classified as out of scope.
+
+**Why it is not built here, stated as a quantity that does not exist rather than as reluctance.** The
+false-positive surface is unmeasured and is the largest population in the census by call count: the
+user-level `~/.zone/` and sink writers (`diskKeys`, `diskSessions`, `diskRunEnvelope`, `markerSink`,
+`toolCallSink`, `costLogger`, `usageTracker`, `tierSettings`, `commandCacheLog` among them), which
+are not model-path-controlled and must never be gated on a repository boundary; the `utils/files.ts`
+and `atomicWrite.ts` wrappers, legitimately unbounded because their callers own the boundary; every
+test fixture; and same-named decoys the walk cannot separate automatically, proven by item 304's own
+instrument validation returning a local string helper alongside two real writes. **A guard whose
+allowlist is mostly exemptions is a worse instrument than no guard**, because it reads as coverage.
+Sizing that surface is the work this entry defers, and it is the condition to change: measure the
+exempt population, and if the non-exempt remainder is small enough for the allowlist to be auditable,
+build it.
+
+## 306. Three frozen absolutes have no disposition mechanism, so a legitimate mention of the pattern they detect cannot be written
+
+**Bucket: Neither.** A structural fact recorded, with no fix proposed — the two available remedies
+trade against each other and neither is clearly right.
+
+**The asymmetry.** `scripts/deferredWorkSpatialReferenceLint.ts` fails against a frozen allowlist of
+`(item, text)` pairs, so a pre-existing instance is accounted for and a new one fails with its
+location. The anaphor and positional sweeps fail against three frozen scalars — `ANAPHOR_ABSOLUTE`,
+`POSITIONAL_LINE_BASED_ABSOLUTE`, `POSITIONAL_WRAP_NORMALIZED_ABSOLUTE` — with **no allowlist at
+all**. For new drift that is the correct design and this entry does not dispute it: the remedy for a
+new spatial self-reference is to name the referent, never to record an exemption.
+
+**Where the design fails, observed rather than hypothesised.** Item 302 is an entry *about* these
+patterns. Drafting it tripped all three scalars, because illustrating what the check detects requires
+writing the shape it detects, and a counter cannot distinguish a **mention** from a **use**. The
+resolution shipped in that entry was to describe the phrasings abstractly and name the items carrying
+them instead of quoting any. That works, and it is strictly worse documentation: the entry that
+defines the pattern is the one entry that cannot show it.
+
+**Why this is not "the guard is too strict."** An over-strict guard rejects things it should accept
+and the fix is to loosen the rule. Here the rule is right and the *vocabulary* is missing — there is
+no way to say "this occurrence is quoted, not committed." `scripts/markerAttribution.ts` already
+solved exactly this distinction for a different matcher: it separates a file that **emits** a marker
+from one that merely **mentions** its name, by shape rather than by exemption. The precedent exists
+in this repository; it has not been applied here.
+
+**The two remedies, and why neither is chosen.** Give the sweeps an allowlist mirroring the lint's —
+which costs the property that makes a bare scalar valuable, that it cannot be quietly widened. Or
+teach them a mention form, a fenced or otherwise marked span excluded from counting, following
+`markerAttribution.ts` — which is more code, and a marked-span mechanism is itself a way to launder a
+real instance. The condition to change is a second occurrence: one entry that could not quote its own
+subject is an inconvenience, and a second would make it a recurring cost worth paying code for.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 303 to find out which ones still need something. No index of
+reader the trouble of reading all 306 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -24795,27 +24974,27 @@ first.
 286, 288, 289, 290, 301, 302
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (6): 287, 291, 292, 293, 296, 299
+first (7): 287, 291, 292, 293, 296, 299, 304
 
-Six, down from seven — the bucket's movement continues to be the ledger's own signal about whether
-anything is specified and waiting, in both directions. The diagnosis pass into `find_references` left
-it at 7 (287 plus six separable defects in one tool); that pass built three of those six (288, 289,
-290 — inseparable for measurement, closed together) and filed a fourth its own verification surfaced
-(296, the line-cap truncation), landing at 5: 287, 291, 292, 293, 296. A later pass (`b0a16462`) filed
-299, returning it to 6, and the pass after that (`0c938d11`) filed the symlink-escape finding as 301,
-reaching 7: 287, 291, 292, 293, 296, 299, 301. This pass closes 301 (`applyLlmPatches` now routes
-through `checkPathBoundary`), landing back at 6: 287, 291, 292, 293, 296, 299. Every movement in
-either direction has come from a finding some session in this series generated rather than from
-inherited backlog.
+Seven, up from six, and the movement is the ledger's own signal about whether anything is specified
+and waiting, in both directions. The diagnosis pass into `find_references` left it at 7 (287 plus six
+separable defects in one tool); that pass built three of those six (288, 289, 290 — inseparable for
+measurement, closed together) and filed a fourth its own verification surfaced (296, the line-cap
+truncation), landing at 5: 287, 291, 292, 293, 296. A later pass (`b0a16462`) filed 299, returning it
+to 6, and the pass after that (`0c938d11`) filed the symlink-escape finding as 301, reaching 7.
+`2452803e` closed 301, landing back at 6. This pass files 304 — the census that finds the closed
+site was one of four implementations — returning it to 7: 287, 291, 292, 293, 296, 299, 304. Every
+movement in either direction has come from a finding some session in this series generated rather
+than from inherited backlog.
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (15): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250, 263
 
-**Neither — a structural fact recorded, with no fix proposed** (135): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
+**Neither — a structural fact recorded, with no fix proposed** (137): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
 74, 76, 77, 78, 79, 80, 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109,
 112, 114, 115, 118, 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152,
 154, 155, 158, 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199,
 200, 201, 202, 205, 206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230,
-232, 243, 244, 247, 248, 249, 254, 256, 261, 272, 294, 295, 297, 298, 300, 303
+232, 243, 244, 247, 248, 249, 254, 256, 261, 272, 294, 295, 297, 298, 300, 303, 305, 306
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
