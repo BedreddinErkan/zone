@@ -65,6 +65,7 @@ import {
   type EnvelopeStatus,
 } from "../api/diskRunEnvelope.js";
 import { validateTodoWriteArgs } from "../tools/todoWriteValidate.js";
+import { recordToolCall } from "./toolCallRecord.js";
 import {
   executeTool,
   withStagingTempFlush,
@@ -3482,7 +3483,19 @@ Example:
   // interruption and can still see in its own context.
   if (isWarmResume) {
     const { entries, filesRead } = rehydrateFileAccess(reconciledResumeMessages);
-    toolCallLog.push(...entries);
+    // Replayed, not new: these calls were already recorded durably under the runId
+    // that made them. A resumed run gets a fresh runId, so re-recording them here
+    // would attribute one run's calls to another. They populate the in-memory log
+    // (the read-before-patch gate needs them) and nothing else.
+    for (const entry of entries) {
+      recordToolCall(toolCallLog, entry, {
+        runId: input.runId,
+        sessionId: input.sessionId,
+        iter: 0,
+        repoPath: input.repoPath,
+        replayed: true,
+      });
+    }
     for (const f of filesRead) filesReadThisRun.add(f);
     // The TUI's checklist is populated by this event, so without it a resumed
     // run shows no plan at all — the work is remembered, the display is not.
@@ -4566,6 +4579,7 @@ Example:
         budget,
         iter,
         runId: input.runId,
+        sessionId: input.sessionId,
         effectiveTokenBudgetCap,
         tokenBudgetHardThreshold: TOKEN_BUDGET_HARD,
         detectorState,
@@ -4593,6 +4607,16 @@ Example:
         const argsString = call.function.arguments ?? "";
         let parsedArgs: Record<string, unknown> = {};
         let _argsParseFailed = false;
+        // Shared by every recordToolCall below. Deliberately NOT a local wrapper
+        // function: each site calls the recorder by name so the structural guard
+        // can count call sites, and so a new branch that forgets to record is
+        // visible as a missing call rather than hidden behind a helper.
+        const recordMeta = {
+          runId: input.runId,
+          sessionId: input.sessionId,
+          iter,
+          repoPath: input.repoPath,
+        };
         try {
           parsedArgs = argsString
             ? (JSON.parse(argsString) as Record<string, unknown>)
@@ -4611,7 +4635,7 @@ Example:
             `truncated because the output was too large. Re-issue as smaller/split calls ` +
             `(for a large file, patch one region per call), not one big multi-block call.`;
           responseInput.push({ role: "tool", tool_call_id: callId, content: truncMsg });
-          toolCallLog.push({ id: callId, tool: name, args: {}, result: truncMsg, success: false });
+          recordToolCall(toolCallLog, { id: callId, tool: name, args: {}, result: truncMsg, success: false, rejectionReason: "args_parse_failed" }, recordMeta);
           // [INNER-LOOP: ARGS_PARSE_FAILED]
           continue;
         }
@@ -4626,13 +4650,14 @@ Example:
             tool_call_id: callId,
             content: rejectionMsg,
           });
-          toolCallLog.push({
+          recordToolCall(toolCallLog, {
             id: callId,
             tool: name,
             args: parsedArgs,
             result: rejectionMsg,
             success: false,
-          });
+            rejectionReason: "allowed_tools_reject",
+          }, recordMeta);
           debugLog("[zone-allowed-tools-reject]", {
             tool: name,
             allowed,
@@ -4650,13 +4675,14 @@ Example:
               tool_call_id: callId,
               content: rejectionMsg,
             });
-            toolCallLog.push({
+            recordToolCall(toolCallLog, {
               id: callId,
               tool: name,
               args: parsedArgs,
               result: validation.error,
               success: false,
-            });
+              rejectionReason: "todowrite_invalid",
+            }, recordMeta);
             // [INNER-LOOP: TODOWRITE_INVALID]
             continue;
           }
@@ -4676,13 +4702,13 @@ Example:
             tool_call_id: callId,
             content: okMsg,
           });
-          toolCallLog.push({
+          recordToolCall(toolCallLog, {
             id: callId,
             tool: name,
             args: parsedArgs,
             result: "ok",
             success: true,
-          });
+          }, recordMeta);
           // [INNER-LOOP: TODOWRITE_HANDLED]
           continue;
         }
@@ -4693,9 +4719,13 @@ Example:
             : "";
 
           /** Push the tool reply and move on — every branch below ends this way. */
-          const replyAndContinue = (content: string, success: boolean): void => {
+          const replyAndContinue = (content: string, success: boolean, reason?: string): void => {
             responseInput.push({ role: "tool", tool_call_id: callId, content });
-            toolCallLog.push({ id: callId, tool: name, args: parsedArgs, result: content.slice(0, 200), success });
+            recordToolCall(toolCallLog, {
+              id: callId, tool: name, args: parsedArgs,
+              result: content.slice(0, 200), success,
+              ...(reason ? { rejectionReason: reason } : {}),
+            }, recordMeta);
           };
 
           if (!question) {
@@ -4869,7 +4899,7 @@ Example:
                     : `Plan revised — ${input.executionPlan?.steps.length ?? 0} steps.`)
                 : "Scope revision request received but plan could not be regenerated. Continue with current plan.";
               responseInput.push({ role: "tool", tool_call_id: callId, content: ackMsg });
-              toolCallLog.push({ id: callId, tool: name, args: parsedArgs, result: ackMsg, success: replanned });
+              recordToolCall(toolCallLog, { id: callId, tool: name, args: parsedArgs, result: ackMsg, success: replanned, ...(replanned ? {} : { rejectionReason: "scope_change_replan_failed" }) }, recordMeta);
               // [INNER-LOOP: SCOPE_CHANGE_REPLANNED]
               continue;
             }
@@ -4877,7 +4907,7 @@ Example:
           debugLog("[zone-tool-misuse]", JSON.stringify({ tool: "suggest_scope_change", mode }));
           const noopMsg = "suggest_scope_change is only active in investigation mode — call ignored.";
           responseInput.push({ role: "tool", tool_call_id: callId, content: noopMsg });
-          toolCallLog.push({ id: callId, tool: name, args: parsedArgs, result: noopMsg, success: false });
+          recordToolCall(toolCallLog, { id: callId, tool: name, args: parsedArgs, result: noopMsg, success: false, rejectionReason: "scope_change_noop" }, recordMeta);
           // [INNER-LOOP: SCOPE_CHANGE_NOOP]
           continue;
         }
@@ -4892,7 +4922,7 @@ Example:
           if (!validTypes.includes(String(scopeType)) || !scopeReason || !revisedPlanSummary) {
             const errMsg = "suggest_scope_change rejected: missing required fields (type, reason, revised_plan_summary).";
             responseInput.push({ role: "tool", tool_call_id: callId, content: errMsg });
-            toolCallLog.push({ id: callId, tool: name, args: parsedArgs, result: errMsg, success: false });
+            recordToolCall(toolCallLog, { id: callId, tool: name, args: parsedArgs, result: errMsg, success: false, rejectionReason: "scope_change_invalid" }, recordMeta);
             // [INNER-LOOP: SCOPE_CHANGE_INVALID]
             continue;
           }
@@ -4900,14 +4930,14 @@ Example:
           if (scopeType === "under_scope" && missingFiles.length === 0) {
             const errMsg = "suggest_scope_change rejected: missing_files required for under_scope.";
             responseInput.push({ role: "tool", tool_call_id: callId, content: errMsg });
-            toolCallLog.push({ id: callId, tool: name, args: parsedArgs, result: errMsg, success: false });
+            recordToolCall(toolCallLog, { id: callId, tool: name, args: parsedArgs, result: errMsg, success: false, rejectionReason: "scope_change_no_files" }, recordMeta);
             // [INNER-LOOP: SCOPE_CHANGE_NO_FILES]
             continue;
           }
           if (scopeType === "over_scope" && unnecessaryFiles.length === 0) {
             const errMsg = "suggest_scope_change rejected: unnecessary_files required for over_scope.";
             responseInput.push({ role: "tool", tool_call_id: callId, content: errMsg });
-            toolCallLog.push({ id: callId, tool: name, args: parsedArgs, result: errMsg, success: false });
+            recordToolCall(toolCallLog, { id: callId, tool: name, args: parsedArgs, result: errMsg, success: false, rejectionReason: "scope_change_no_files" }, recordMeta);
             // [INNER-LOOP: SCOPE_CHANGE_NO_FILES]
             continue;
           }
@@ -4931,7 +4961,7 @@ Example:
 
           const ackMsg = "Scope change proposal recorded. Investigation can continue.";
           responseInput.push({ role: "tool", tool_call_id: callId, content: ackMsg });
-          toolCallLog.push({ id: callId, tool: name, args: parsedArgs, result: ackMsg, success: true });
+          recordToolCall(toolCallLog, { id: callId, tool: name, args: parsedArgs, result: ackMsg, success: true }, recordMeta);
           // [INNER-LOOP: SCOPE_CHANGE_HANDLED]
           continue;
         }
@@ -4944,7 +4974,7 @@ Example:
           if (!rawPath) {
             const errMsg = "revert_patch rejected: missing required field 'path'.";
             responseInput.push({ role: "tool", tool_call_id: callId, content: errMsg });
-            toolCallLog.push({ id: callId, tool: name, args: parsedArgs, result: errMsg, success: false });
+            recordToolCall(toolCallLog, { id: callId, tool: name, args: parsedArgs, result: errMsg, success: false, rejectionReason: "revert_patch_invalid" }, recordMeta);
             // [INNER-LOOP: REVERT_PATCH_INVALID]
             continue;
           }
@@ -4953,7 +4983,7 @@ Example:
           if (!stagingFiles.has(abs)) {
             const errMsg = `revert_patch rejected: '${relPath}' was not modified in this run.`;
             responseInput.push({ role: "tool", tool_call_id: callId, content: errMsg });
-            toolCallLog.push({ id: callId, tool: name, args: parsedArgs, result: errMsg, success: false });
+            recordToolCall(toolCallLog, { id: callId, tool: name, args: parsedArgs, result: errMsg, success: false, rejectionReason: "revert_patch_not_staged" }, recordMeta);
             // [INNER-LOOP: REVERT_PATCH_NOT_STAGED]
             continue;
           }
@@ -4962,7 +4992,7 @@ Example:
           log("[zone-revert-patch-invoked]", JSON.stringify({ runId: input.runId ?? null, path: relPath, success: true }));
           const revertOkMsg = `Reverted: '${relPath}' restored to its pre-run state.`;
           responseInput.push({ role: "tool", tool_call_id: callId, content: revertOkMsg });
-          toolCallLog.push({ id: callId, tool: name, args: parsedArgs, result: revertOkMsg, success: true });
+          recordToolCall(toolCallLog, { id: callId, tool: name, args: parsedArgs, result: revertOkMsg, success: true }, recordMeta);
           // [INNER-LOOP: REVERT_PATCH_OK]
           continue;
         }
@@ -5000,13 +5030,14 @@ Example:
               `Files read so far: [${readSoFar}]. ` +
               `Call read_file on '${targetFilePath}' first to see the exact current content, ` +
               `then issue apply_patch with FIND lines that match the file verbatim.`;
-            toolCallLog.push({
+            recordToolCall(toolCallLog, {
               id: callId,
               tool: name,
               args: parsedArgs,
               result: syntheticOutput,
               success: false,
-            });
+              rejectionReason: "apply_patch_no_read_first",
+            }, recordMeta);
             // Chat Completions protocol: assistant tool_call already pushed above.
             // Each tool_call needs exactly one matching role:"tool" reply.
             responseInput.push({

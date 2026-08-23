@@ -23077,7 +23077,7 @@ and it tightens or widens the range that set the stop rule — worth a line eith
 See item 277 for the criterion this amends one input to, item 278 for the falsification that required
 it, and item 280 for the observability finding this instrument depends on.
 
-## 280. Neither — Zone cannot say which files any real run opened, because the only marker that records it is behind a debug gate nobody sets
+## 280. Closed — Zone cannot say which files any real run opened, because the only marker that records it is behind a debug gate nobody sets
 
 **Bucket: Neither.** A structural fact is recorded and no fix is proposed.
 
@@ -23116,8 +23116,19 @@ questions at a fraction of the volume, and structurally similar to what
 comparison, and a change to the marker surface mid-comparison would alter the instrument the comparison
 depends on.
 
-See items 245/246 for the first instance of this gate's cost, item 279 for the protocol that works
-around it, and item 278 for the pass that found it while looking for something else.
+**Bucket: Neither → Closed.** The observation this entry recorded is no longer true of Zone: item 286
+built the durable per-call record, so a run with no environment variables set now leaves the file set
+it touched on disk. Closed on the fix rather than on a reclassification. Two of this entry's own
+statements did not survive the work, and item 286 carries their corrections rather than this entry
+being rewritten: `[zone-agent-tool-call]` is not the only marker carrying a `filePath`
+(`[zone-tool-readfile-smart]` carries one, behind the same gate and across the same run set), and
+"5 of 102" is a rate over marker-emitting runs, not over runs — the sink cannot see a headless-JSON
+run at all, which item 287 records. The sentence that
+mattered was always the one about the gate, and it was right.
+
+See items 245/246 for the first instance of this gate's cost — which turned out **not** to share this
+gate, corrected in item 286 — item 279 for the protocol that works around it, item 278 for the pass
+that found it while looking for something else, and item 286 for the fix that closes it.
 
 ## 281. Closed — four of six cells ran and Zone's investigation scored 5 of 6 ground-truth files; the other two died on an exhausted API balance, and the Claude Code arm turned out to be unmeasurable by construction
 
@@ -23749,37 +23760,189 @@ comment correction with no runtime behaviour to substitute into.
 See item 284 for arm 3's registration and the readings fixed before it ran, item 283 for arm 2, item
 281 for arm 1, and item 277 for the prompts and ground truth.
 
+## 286. Closed — every tool call now leaves a durable record, because recording was separated from debug printing rather than the debug default being changed
+
+**Bucket: Closed.** Item 280 recorded, as a structural fact with no fix proposed, that Zone could not
+say which files any real run opened. The fix is built here, so item 280 closes with it.
+
+**What was actually wrong.** Not the value of a default. `[zone-agent-tool-call]` is emitted through
+`debugLog`, whose whole body is `if (VERBOSE) console.log(...)` with
+`VERBOSE = process.env.ZONE_VERBOSE_LOGS === "1"` evaluated once at module load (`7243490c` is the
+commit that documented that gate). Proven by running rather than by reading: importing the built
+`dist/utils/logger.js`, calling `debugLog`, setting the variable, and calling again captures **zero**
+lines; the same script run with the variable already set captures **two**. So the record of what a
+run touched existed only in a mode nobody runs, and raising the default would have made the printing
+louder without making the recording structural.
+
+**The seam, and why it is that one.** `toolCallLog` is already the complete enumeration of tool
+calls: calls that execute reach it through `handleToolResult`, and calls **rejected before
+execution** reach it directly from the agent loop without touching the executor at all. Coaching,
+compaction and verdict classification all read that array, so a tool call that skipped it would
+already be broken in three visible ways. Every push onto it — 16 sites in `agentLoop.ts`, one in
+`handleToolResult.ts` — now goes through `recordToolCall`, which pushes and durably records in one
+call so a future tool cannot acquire the first without the second. A structural guard pins the count
+at exactly 17 by equality, so deleting a site fails as loudly as adding one.
+
+**Where the record goes, and why not the marker sink.** A separate file, `~/.zone/tool-calls.jsonl`,
+carrying a `name` field so the existing `.name` JSON reader works on it unchanged. One argument for
+separation was raised and does not survive: torn interleaving between two writers cannot happen
+here, because both are `fs.appendFileSync` on a single-threaded process and serialize. The two that
+do survive are volume and retention. The marker sink's rotation trigger is **size** — 2 MiB, one
+generation, `.1` overwritten — so a high-volume stream sharing it shortens the retained window for
+every low-volume marker in it, and the surviving window across both marker files is only
+**24.9 days** (`2026-07-29T14:09:45.499Z` to `2026-08-23T11:24:26.903Z`, 9,661 records, 3,848,016
+bytes, ~398 B/record). `f7fd16d6` is the rotation the measurement is against.
+
+**Two corrections to item 280, which stands otherwise.** Its claim that `[zone-agent-tool-call]` is
+the only marker carrying a `filePath` is wrong: `[zone-tool-readfile-smart]` carries one too. The
+conclusion is untouched, because both sit behind the same gate and appear in **exactly the same run
+set** — a set identity, which is the sharpest available evidence that the gate is the only variable.
+Its "5 of 102" is now 26 of 125, and neither figure should be read as a rate over runs: the marker
+sink cannot see a headless-JSON run at all (item 287), so any denominator drawn from it is a count
+of marker-emitting runs and a **biased estimator** of anything else, in a direction nothing here
+establishes. The jump from 4.9% to 20.8% is 4.2x, which a window shift alone does not produce; the
+likelier reading is that verbose usage changed because this project's own measurement passes set the
+variable deliberately, so 20.8% describes instrumented sessions and is not a stable baseline.
+
+**A shared-gate class was expected here and does not exist.** The working assumption was that
+`apply_patch`'s rejection branches (items 245 and 246) sat behind the same `debugLog` gate, making
+one defect with two instances. They do not: `[zone-apply-patch-marker-imbalance]`,
+`[zone-apply-patch-no-valid-blocks]`, `[zone-apply-patch-find-block-empty]`,
+`[zone-apply-patch-replace-block-empty]` and `[zone-apply-patch-find-not-found]` all emit through
+unconditional `log()`. Only `[zone-apply-patch-content-before-find]` is gated. Recording the two as
+one class would have put a false claim in this ledger.
+
+**An empty sink is falsifiable, and only because a second writer carries the count.** The sink is
+fail-soft and silent, which is right for a diagnostic side-channel and leaves an empty file with two
+causes. A drop counter carried on the next successful record covers partial failure but not total
+failure — if every write fails there is no record left to carry it. The run-level counters therefore
+travel the **cost-log** writer, which writes through `fs` directly and is unaffected by the stdout
+shield: `toolCallsAttempted` and `toolCallsDropped` on each `run_summary`. **The rule that follows:**
+an empty or absent `tool-calls.jsonl` is a genuine zero only when that run's cost summary reports
+`toolCallsAttempted: 0`; `attempted > 0` with an empty file is a writer failure, not an absence. One
+population has neither instrument and is named rather than covered — a run that produces no cost-log
+entry at all, because `appendRunSummary` is reached only when an iteration cost update occurred.
+
+**Measured on two real runs, no environment variables set.** Headless text (run id
+`a200b73b-a02b-4a1a-a247-9b038efc319f`, a run id and not a commit): one record, `search_in_files`,
+`outcome: "ok"`, and the cost summary agrees at `toolCallsAttempted: 1`. Headless
+`--output-format json` (run id `5a79cd5c-ba91-47bf-8d64-1d7ce498c333`): three records —
+`run_command_readonly` carrying its verbatim command, then `read_file` at
+`/tmp/zone-l3-target/src/greet.ts` with **`outcome: "error"`**, then the same path with
+`outcome: "ok"`. That failed read is the point: it is precisely the class that left no trace before,
+and it is now on disk with its path. Both are n=1 and support an existence claim only — no
+performance, regression or improvement claim. The count is corroborated but not independently
+confirmed: `[zone-tool-result-summary]` reported the same three calls tool-for-tool, and the cost
+summary the same total, but both derive from the same `handleToolResult` step the recorder sits in,
+so they share a derivation and cannot disagree about whether that step was reached. The
+request-side capture that would have been input-level independent does not exist in this tree.
+
+**Mutation.** Fifteen mutants, all killed, no survivors. Substituting the recorder's unconditional
+guard with the env predicate kills 24 tests, which is what says the ungating is observed rather than
+merely written. Two results are worth keeping. The "absolute path" and "repo-relative path" mutants
+killed an identical four tests, because for a repo-relative argument the two substitutions produce
+the same string; they were separated by adding a case with an **absolute in-repo** argument, where
+`resolveAgentPath` strips the repo prefix and the raw argument coincides with the correct answer
+while the relative form does not. And the mutant that moves the `attempted` increment inside the
+write's success branch dies on the total-failure case, which is what says the health signal counts
+calls rather than counting the writer's own successes. `M6` was retired rather than reported inert:
+it substitutes a module-load env read, the recorder has none, and a mutation with no target is a
+no-op whose survival would be indistinguishable from a vacuous guard.
+
+**One defect this pass introduced and fixed.** The first implementation let path resolution throw
+when a caller had no `repoPath`, which turned an observability feature into a way to kill a tool
+call — the exact inversion of "a diagnostic side-channel must be strictly less reliable than the run
+it observes". Thirty-four tests caught it. Nothing in the new tests did, because they all supplied a
+valid `repoPath`: observer absence, not inertness. Everything past the in-memory push is now wrapped,
+and three cases pin it.
+
+See item 280 for the observation this closes, item 287 for the second invisibility class found while
+closing it, and items 245 and 246 for the rejection branches that turned out not to share the gate.
+
+## 287. Zone's headless JSON mode writes no marker to the sink at all, and the markers go to stdout instead
+
+**Bucket: Actionable now.** The fix is specified in this entry and needs nothing new to be learned
+first.
+
+**The fact.** `runHeadless` and `runHeadlessResume` install the stdout shield conditionally:
+`isJson ? (): void => {} : applyStdoutInterception()` (`d019940b`). `~/.zone/markers.jsonl` is fed
+**exclusively** from inside that monkey-patched `process.stdout.write`, so under
+`--output-format json` no marker of any kind reaches the sink — `log()`-sourced and
+`debugLog()`-sourced alike, independent of `ZONE_VERBOSE_LOGS`. The comment at the gate reads "JSON
+mode emits a single envelope — no shield needed", which is true about the envelope and silently also
+disables the sink.
+
+**Observed, not inferred.** The headless-JSON run recorded in item 286
+(`5a79cd5c-ba91-47bf-8d64-1d7ce498c333`)
+left `markers.jsonl` at 4,649 lines before and 4,649 after, with **zero** records for that run id,
+while the same run wrote three records to `tool-calls.jsonl`. The markers were not suppressed —
+they were printed to stdout, where `[zone-cache-usage]`, `[zone-token-breakdown]`,
+`[zone-archetype]` and the rest appeared ahead of the JSON envelope. So JSON mode does not emit "a
+single envelope"; it emits telemetry lines followed by an envelope, and a consumer that parses all
+of stdout rather than its last line gets malformed input.
+
+**Severity, with the confound removed, and stated as a bound.** A naive comparison gives 156 of 240
+cost-logged runs absent from the marker sink, which is wrong by roughly 20x: the marker sink's
+rotation had evicted most of that history. Restricted to the sink's own retained window there are 92
+cost-logged runs, of which **8** have no marker record. Those 8 are an **upper bound** on
+headless-JSON runs, not a count of them: no headless or output-format field exists in a cost-log
+record, and at least three of the 8 carry synthetic run ids (`comp-run-1`,
+`comp-run-interactive-1`, `comp-run-interactive-2`) that belong to a comparison harness. The
+existence of the class rests on the single observed run, not on the rate; the rate only orders the
+work.
+
+**The fix.** Install the interception unconditionally and route markers to stderr in JSON mode
+rather than swallowing them, so the envelope on stdout stays clean *and* the sink stays fed. That is
+one change at two call sites in `dispatch.ts`, and it is strictly better than the current behaviour
+on both counts, since today the markers reach stdout anyway.
+
+**Why this is a separate entry from 286.** Item 286 removed a dependency on printing for the
+tool-call record specifically, and `tool-calls.jsonl` is written directly and is unaffected by this
+gate — which is why the headless-JSON run still produced records. Every *other* marker in the tree
+remains dependent on the shield, so closing 286 narrowed this class without touching it.
+
+See item 286 for the recording seam that is immune to this gate, and item 280 for the observation
+both entries descend from.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 285 to find out which ones still need something. No index of
+reader the trouble of reading all 287 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (140): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42, 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113, 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167, 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228, 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260, 262, 264, 265, 266, 267, 268, 269, 270, 271, 273, 274, 275, 276, 277, 278, 279, 281, 282, 283, 284, 285
+**Closed** (142): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42,
+44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113,
+116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167,
+169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228,
+229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260,
+262, 264, 265, 266, 267, 268, 269, 270, 271, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285,
+286
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (0):
+first (1): 287
 
-Empty again. The full arc, worth a line because this bucket's movement is the ledger's own signal
-about whether anything is specified and waiting: it sat at zero for months, went to 2 when an
-enumeration pass opened items 258 and 259 together, dropped to 1 when 258 closed in the very next
-pass, and returns to 0 here with 259's last member built. Every one of those movements came from a
-finding this session generated rather than from inherited backlog. Empty reads as "nothing to do"
-and is better read as **"nothing currently specified"** — the weaker and more accurate claim, and
-the same correction this section made the last time the bucket emptied.
+Non-empty for the first time in several passes, and the arc is worth a line because this bucket's
+movement is the ledger's own signal about whether anything is specified and waiting: it sat at zero
+for months, went to 2 when an enumeration pass opened items 258 and 259 together, dropped to 1 when
+258 closed in the very next pass, fell back to 0 once 259's last member was built, and returns to 1
+with item 287. Every one of those movements came from a finding this session generated rather than
+from inherited backlog, and 287 is no exception — it was found while closing item 280, not looked
+for. When this bucket is empty, that reads as "nothing to do" and is better read as **"nothing
+currently specified"**, the weaker and more accurate claim; a single member is the same statement
+with one exception named.
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (15): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250, 263
 
-**Neither — a structural fact recorded, with no fix proposed** (130): 2, 3, 5, 9, 11, 15, 17, 19,
-27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73, 74, 76, 77, 78, 79, 80,
-81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109, 112, 114, 115, 118,
-119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152, 154, 155, 158,
-159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199, 200, 201, 202, 205,
-206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230, 232, 243, 244, 247, 248, 249, 254, 256, 261, 272, 280
+**Neither — a structural fact recorded, with no fix proposed** (129): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
+74, 76, 77, 78, 79, 80, 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109,
+112, 114, 115, 118, 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152,
+154, 155, 158, 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199,
+200, 201, 202, 205, 206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230,
+232, 243, 244, 247, 248, 249, 254, 256, 261, 272
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.

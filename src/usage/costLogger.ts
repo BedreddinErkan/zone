@@ -44,7 +44,30 @@ export function appendIterCostRecord(logPath: string, p: IterCostUpdatePayload):
   }
 }
 
-export function appendRunSummary(logPath: string, p: IterCostUpdatePayload): void {
+/**
+ * Tool-call sink health, carried here rather than in the sink itself.
+ *
+ * The sink cannot report its own total failure: if every append fails there is
+ * no record left to carry a drop count, so an empty `tool-calls.jsonl` would be
+ * indistinguishable from a run that made no tool calls. These two counters are
+ * formed in the recorder and travel a DIFFERENT writer to a DIFFERENT file, so
+ * they survive exactly the failure the sink cannot report on.
+ *
+ * The falsifiability rule they exist for: an empty or absent tool-calls.jsonl is
+ * a genuine zero only when the same runId's summary reports
+ * `toolCallsAttempted: 0`. `attempted > 0` with an empty sink is a writer
+ * failure, not an absence.
+ */
+export interface ToolCallSinkHealth {
+  attempted: number;
+  dropped: number;
+}
+
+export function appendRunSummary(
+  logPath: string,
+  p: IterCostUpdatePayload,
+  toolCallHealth?: ToolCallSinkHealth,
+): void {
   try {
     fs.mkdirSync(path.dirname(logPath), { recursive: true });
     fs.appendFileSync(
@@ -61,6 +84,8 @@ export function appendRunSummary(logPath: string, p: IterCostUpdatePayload): voi
         totalCostUsd: p.cumulativeCost,
         runHitRatio: p.cacheHitCumulative,
         runId: p.runId,
+        toolCallsAttempted: toolCallHealth?.attempted ?? 0,
+        toolCallsDropped: toolCallHealth?.dropped ?? 0,
       }) + "\n",
       "utf8",
     );

@@ -101,6 +101,7 @@ import {
 } from "./agentLifecycleEvents.js";
 import { cacheHitRatio, type IterCostUpdatePayload } from "../usage/iterCostMeter.js";
 import { costLogPath, appendIterCostRecord, appendRunSummary } from "../usage/costLogger.js";
+import { readToolCallHealth } from "../llm/toolCallRecord.js";
 import { computeWorkerMaxIterations, ANSWER_ONLY_ITER_BUDGET } from "../llm/subagents.js";
 import {
   classifyTask,
@@ -6031,7 +6032,10 @@ const initializeTodosFromPlan = (): void => {
     }
 
     if (_costLogPath !== null && latestIterCostUpdate !== null) {
-      try { appendRunSummary(_costLogPath, latestIterCostUpdate); } catch { /* best-effort */ }
+      // Drained here, at the one place a run's summary is written, so the sink's
+      // own health reaches disk by a writer that does not share the sink's failing step.
+      const _toolCallHealth = readToolCallHealth(runId);
+      try { appendRunSummary(_costLogPath, latestIterCostUpdate, _toolCallHealth); } catch { /* best-effort */ }
     }
 
     // R3: staged-checkpoint outcomes — staging was discarded; exit before post-loop processing.

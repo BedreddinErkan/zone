@@ -322,7 +322,7 @@ describe("self-exclusion — the tool does not inventory its own fixtures", () =
  * shifts these numbers should make this test fail and prompt a review, not silently drift.
  */
 describe("drift check — today's figures against the real tree", () => {
-  it("414 marker names; emitter-count distribution zero=43 one=351 several=20; 24 hazards", () => {
+  it("415 marker names; emitter-count distribution zero=43 one=352 several=20; 24 hazards", () => {
     // Re-derived via this file's own scanTree/hazards, not hand-added to the prior 410/349 —
     // the repository-tree write guard (ledger item 236) landed one new marker,
     // `[zone-repo-guard]`, so the total moved 410->411. It lands in `several`, not `one`:
@@ -356,8 +356,23 @@ describe("drift check — today's figures against the real tree", () => {
     // not credit" — the first production emission of that shape, the only other script-only zero
     // row being a test fixture. Hazards stay 24: the guard's ledger entry names the marker, but
     // hazards() reports only mentions inside "source" files and docs/ is not one.
+    //
+    // 414->415: the tool-call record seam added `[zone-tool-call-record]`, emitted from
+    // src/utils/toolCallSink.ts. It lands in `one`, so `one` moves 351->352. Two things about
+    // this row were predicted before the scan and are worth keeping, because both are places a
+    // plausible guess would have been wrong. First, the emission is credited through
+    // hasSinkWriteShape (an object-literal `name:` property in a file that also calls
+    // appendFileSync) rather than through isEmittingLine — the sink never passes the marker as a
+    // call argument. Had the literal lived only in the exported TOOL_CALL_RECORD_NAME constant,
+    // it would have matched NO shape (a `const x = "..."` line ends in `;`, not `,` or `)`) and
+    // the row would have landed in `zero`, moving 43->44 for a reason that looks like a miscount
+    // and is not. Second, hazards stay 24 even though the recorder's own test file names the
+    // marker: fileKind maps *.test.ts to "test", and hazards() skips every non-"source" mention.
+    // `[zone-agent-tool-call]` is deliberately untouched at one emitter — the new record is a
+    // separate channel with a separate name, so no count keyed on the debug marker sums two
+    // populations with different gating.
     const result = scanTree(readTrackedFiles());
-    expect(result.size).toBe(414);
+    expect(result.size).toBe(415);
 
     const dist = { zero: 0, one: 0, several: 0 };
     for (const attr of result.values()) {
@@ -366,7 +381,7 @@ describe("drift check — today's figures against the real tree", () => {
       else if (c === 1) dist.one++;
       else dist.several++;
     }
-    expect(dist).toEqual({ zero: 43, one: 351, several: 20 });
+    expect(dist).toEqual({ zero: 43, one: 352, several: 20 });
     expect(hazards(result)).toHaveLength(24);
   });
 

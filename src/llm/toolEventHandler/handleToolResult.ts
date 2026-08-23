@@ -1,4 +1,5 @@
 import { debugLog } from "../../utils/logger.js";
+import { recordToolCall } from "../toolCallRecord.js";
 import { handleSubagentResult, logSubagentDispatched } from "../subagentDispatch.js";
 import {
   classifyVerifyCommand,
@@ -63,15 +64,29 @@ export async function handleToolResult(
       typeof parsedArgs.filePath === "string" ? parsedArgs.filePath : null;
   }
 
-  // Step 5: toolCallLog
-  ctx.toolCallLog.push({
-    id: callId,
-    tool: name,
-    args: parsedArgs,
-    result: result.output.slice(0, 4000),
-    success: result.success,
-    filesStaged: result.filesStaged,
-  });
+  // Step 5: toolCallLog + its durable record. One call, not two: the in-memory
+  // entry and the on-disk record are acquired together so a future tool cannot
+  // get the first without the second. This site covers every EXECUTED tool; the
+  // reject-before-execution branches record through the same function in agentLoop.
+  recordToolCall(
+    ctx.toolCallLog,
+    {
+      id: callId,
+      tool: name,
+      args: parsedArgs,
+      result: result.output.slice(0, 4000),
+      success: result.success,
+      filesStaged: result.filesStaged,
+      rejectionReason: result.rejectionReason,
+    },
+    {
+      runId: deps.runId,
+      sessionId: deps.sessionId,
+      iter: deps.iter,
+      repoPath: deps.repoPath,
+      errorText: result.error,
+    },
+  );
 
   // Step 6: filesReadThisRun + filesReadCountThisRun
   if (name === "read_file" && result.success && typeof parsedArgs.filePath === "string" && parsedArgs.filePath) {

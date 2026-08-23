@@ -13,6 +13,11 @@ export interface ToolCallLogEntry {
   result: string;
   success?: boolean;
   filesStaged?: string[];
+  /** Structured rejection code when the call was refused rather than attempted-and-failed.
+   *  Mirrors `ToolResult.rejectionReason` for executed calls; the agent loop's
+   *  reject-before-execution branches set their own literal. Optional: it is absent on
+   *  every success, and existing fixtures predate it. */
+  rejectionReason?: string;
 }
 
 export interface ToolEventContext {
@@ -59,6 +64,9 @@ export interface HandleToolResultDeps {
   budget: TokenBudgetMeter;
   iter: number;
   runId: string | null | undefined;
+  /** Stable per-session id, for joining a resumed run's records to the run it resumed.
+   *  Optional so existing test fixtures don't need updating. */
+  sessionId?: string | null | undefined;
   effectiveTokenBudgetCap: number;
   tokenBudgetHardThreshold: number;
   detectorState: DetectorState;
