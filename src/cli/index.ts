@@ -921,6 +921,7 @@ const finalOutput = [
       request: {
         confirm: true,
       },
+      repoPath,
     });
     tracker.endPhase("run_apply_flow");
 

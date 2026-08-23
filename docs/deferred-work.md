@@ -24776,9 +24776,10 @@ the `mkdir`; or an atomic create-exclusive write (an `fs.writeFile` call carryin
 flag) that fails outright rather than following a path swapped out from under it. Selecting one of
 these, and confirming it actually closes the window rather than only narrowing it, is future work.
 
-## 304. One concept, four implementations of "apply a patch plan to disk", and containment diverges across them
+## 304. Closed — one concept, four implementations of "apply a patch plan to disk", and containment diverges across them
 
-**Bucket: Actionable now.** The remedy is named per site and needs nothing new learned first.
+**Bucket: Actionable now → Closed, site 2 only.** Sites 3 and 4 are named below as explicitly
+unaddressed, not implied done by this closure.
 
 **Why this exists when item 301 is closed.** Item 301 asked which sites use a *lexical containment
 check* and answered correctly: seven, of which one gated a write. That question cannot see a path
@@ -24883,6 +24884,65 @@ read; the write sites need no change. Site 4: delete, or give it a boundary chec
 revived. See item 301 for the site already fixed, item 303 for the check-to-write window that fix
 does not close, and item 305 for why nothing prevents the next write path from repeating this.
 
+**Site 2 fixed, in this commit.** `RunApplyFlowInput` gained a `repoPath` field; `runTaskOnlyFlow`
+already had the value in scope (the same one already feeding `applyLlmPatches` two lines earlier in
+that function), so no new parameter threads any further upstream. `applyPatchPlan` gained a second
+parameter and, immediately before its one write, computes
+`path.resolve(repoPath, patch.filePath)` and calls `checkPathBoundary` on the result — the same
+exported function, reused rather than reimplemented, positioned inside the per-patch loop rather than
+as a pre-flight pass over the whole batch, mirroring where `2452803e` put it and for the same reason:
+a pre-flight-only check would recompute the write's own path a second time, and a mismatch between
+the two computations is exactly the kind of thing this document has been burned by before.
+
+**Re-run exactly as constructed, against the built artifact — the acceptance test a fix earns, not an
+assertion that the gate exists.** All three shapes from this entry's own opening: before, each wrote
+outside the fixture repository and reported `applied:true`; after, each refuses
+(`Patch target resolves outside the repository: …`) and the outside file's content is byte-identical
+to what it was before the call. `git status` in this repository was checked and was clean immediately
+before and immediately after every construction, and every fixture was removed and its removal
+confirmed.
+
+**What this guarantees, and what it does not.** The check proves the resolved target does not sit
+outside `repoPath` at the instant it runs, for site 2 only — the same point-in-time property item 303
+already names for the site fixed at `2452803e`, narrower here: this loop has no `await` between the
+check and the write at all, unlike that one's intervening `mkdir`. A second, separate property that a
+reader should not have to find by reading the code: an escaping patch at position N in a batch leaves
+patches 1 through N−1 already written, with no rollback. This is not a new failure mode — any
+`fs.writeFile` error already left a batch partially applied before this fix, uncaught, and the
+containment check is one more cause of an effect that already existed — but it is a user-visible
+property of a security fix and belongs here rather than only in the commit that made it.
+
+**Mutation, seven named mutants, each applied and reverted independently, none by `git checkout`.**
+Removing the check kills 6 of 8 new cases (every hostile construction and both multi-patch cases —
+broader than the three it targets, since the multi-patch cases also stop asserting containment once
+nothing blocks the second patch). Reverting to a lexical comparison kills 2 (the symlink case and the
+undecidable-boundary case — both symlink-shaped, neither visible to a check that never realpaths).
+Moving the check after the write instead of before it kills 6 — this is the one this entry's own test
+design exists to catch: an assertion on the thrown error alone cannot tell "refused before writing"
+from "wrote, then complained," and every hostile case here asserts on the outside file's content, not
+on the exception, specifically because of that. Checking only the first patch in a batch kills
+exactly 1: the two-patch case with the *second* patch escaping — the case with the first patch
+escaping is unaffected by construction, since index 0 is exactly what the mutant still checks, and
+that asymmetry was confirmed by walking both cases against the mutant before trusting the count.
+Failing open on an undecidable boundary kills 1, the broken-symlink case. Narrowing the boundary
+argument to a subdirectory instead of the repository root kills 3 — every case that happens to write
+at the repository root rather than inside that subdirectory, not only the one case built to name it.
+A reorder of two independent local declarations kills 0, the predicted-inert negative control,
+confirmed.
+
+**Verification.** `src/apply/applyPatchPlan.test.ts`, new, 8 cases — a legitimate write at the
+repository root, the three hostile reconstructions the acceptance-test paragraph names (P1, P2, P3),
+an asymmetric-realpath legitimate write
+through a symlinked repository root, an undecidable-boundary case, and the two multi-patch orderings.
+Five existing cases in `src/apply/runApplyFlow.test.ts` and one exact-argument assertion in
+`src/cli/index.test.ts` were updated for the new parameter; none changed what they test.
+
+**Sites 3 and 4 are unaddressed, named rather than left to be assumed closed alongside this.** Site 3
+still enforces only the lexical `isPathOutsideRepo` comparison this entry already described — a
+symlink still escapes as a read into an in-repo backup. Site 4 is still dead code with no containment
+of its own. Neither was touched this pass; both remain exactly as open as this entry's own
+"condition to change" paragraph left them.
+
 ## 305. Nothing binds a new filesystem write to the containment gate, so the census in item 304 expires on the next commit that adds one
 
 **Bucket: Neither.** A structural fact recorded; this entry sketches a guard as condition and site
@@ -24921,6 +24981,11 @@ allowlist is mostly exemptions is a worse instrument than no guard**, because it
 Sizing that surface is the work this entry defers, and it is the condition to change: measure the
 exempt population, and if the non-exempt remainder is small enough for the allowlist to be auditable,
 build it.
+
+**One site's classification changed since this entry was filed — a reclassification, not a
+closure.** Item 304's site 2 (`apply/applyPatchPlan.ts`) moved from uncontained to gated. The fact
+this entry states is unaffected: nothing enforces that the *next* new write path gets the same
+treatment, and two of item 304's four sites (3 and 4) are still uncontained as of this commit.
 
 ## 306. Three frozen absolutes have no disposition mechanism, so a legitimate mention of the pattern they detect cannot be written
 
@@ -24965,27 +25030,27 @@ priority ordering" cautions against ranking by importance, which this section do
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (147): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42,
+**Closed** (148): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42,
 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113,
 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167,
 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228,
 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260,
 262, 264, 265, 266, 267, 268, 269, 270, 271, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285,
-286, 288, 289, 290, 301, 302
+286, 288, 289, 290, 301, 302, 304
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (7): 287, 291, 292, 293, 296, 299, 304
+first (6): 287, 291, 292, 293, 296, 299
 
-Seven, up from six, and the movement is the ledger's own signal about whether anything is specified
+Six, down from seven, and the movement is the ledger's own signal about whether anything is specified
 and waiting, in both directions. The diagnosis pass into `find_references` left it at 7 (287 plus six
 separable defects in one tool); that pass built three of those six (288, 289, 290 — inseparable for
 measurement, closed together) and filed a fourth its own verification surfaced (296, the line-cap
 truncation), landing at 5: 287, 291, 292, 293, 296. A later pass (`b0a16462`) filed 299, returning it
 to 6, and the pass after that (`0c938d11`) filed the symlink-escape finding as 301, reaching 7.
-`2452803e` closed 301, landing back at 6. This pass files 304 — the census that finds the closed
-site was one of four implementations — returning it to 7: 287, 291, 292, 293, 296, 299, 304. Every
-movement in either direction has come from a finding some session in this series generated rather
-than from inherited backlog.
+`2452803e` closed 301, landing back at 6. A later pass filed 304 — the census that finds the closed
+site was one of four implementations — returning it to 7, and this pass closes 304's site 2, landing
+back at 6: 287, 291, 292, 293, 296, 299. Every movement in either direction has come from a finding
+some session in this series generated rather than from inherited backlog.
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (15): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250, 263
 

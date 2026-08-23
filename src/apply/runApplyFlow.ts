@@ -8,6 +8,7 @@ export type RunApplyFlowInput = {
   result: RunAgentResult;
   plan: PatchPlan;
   request: ApplyRequest;
+  repoPath: string;
 };
 
 function validateBasicPatchPlan(plan: PatchPlan): void {
@@ -33,7 +34,8 @@ function validateBasicPatchPlan(plan: PatchPlan): void {
 export async function runApplyFlow({
   result,
   plan,
-  request
+  request,
+  repoPath
 }: RunApplyFlowInput): Promise<ApplyResult> {
   const eligibility = canApplyDecision(result);
 
@@ -55,5 +57,5 @@ export async function runApplyFlow({
 
   validateBasicPatchPlan(plan);
 
-  return applyPatchPlan(plan);
+  return applyPatchPlan(plan, repoPath);
 }

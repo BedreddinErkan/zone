@@ -75,7 +75,8 @@ describe("runApplyFlow", () => {
     const result = await runApplyFlow({
       result: buildRunAgentResult("blocked"),
       plan,
-      request: { confirm: true }
+      request: { confirm: true },
+      repoPath: dir
     });
 
     expect(result).toEqual({
@@ -101,7 +102,8 @@ describe("runApplyFlow", () => {
     const result = await runApplyFlow({
       result: buildRunAgentResult("safe_to_apply"),
       plan,
-      request: { confirm: false }
+      request: { confirm: false },
+      repoPath: dir
     });
 
     expect(result).toEqual({
@@ -127,7 +129,8 @@ describe("runApplyFlow", () => {
     const result = await runApplyFlow({
       result: buildRunAgentResult("safe_to_apply"),
       plan,
-      request: { confirm: true }
+      request: { confirm: true },
+      repoPath: dir
     });
 
     const saved = await fs.readFile(filePath, "utf8");
@@ -145,7 +148,8 @@ describe("runApplyFlow", () => {
       runApplyFlow({
         result: buildRunAgentResult("safe_to_apply"),
         plan: { patches: [] },
-        request: { confirm: true }
+        request: { confirm: true },
+        repoPath: process.cwd()
       })
     ).rejects.toThrow("Patch plan must include at least one patch.");
   });
@@ -169,7 +173,8 @@ describe("runApplyFlow", () => {
             }
           ]
         },
-        request: { confirm: true }
+        request: { confirm: true },
+        repoPath: dir
       })
     ).rejects.toThrow(`Duplicate patch filePath detected: ${filePath}`);
   });

@@ -1058,7 +1058,8 @@ expect(printedOutput).toContain("Intent: rename_symbol");  });
       plan: patchPlan,
       request: {
         confirm: true
-      }
+      },
+      repoPath: process.cwd()
     });
     expect(renderApplyResultMock).toHaveBeenCalledWith(applyResult);
 
