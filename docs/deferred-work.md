@@ -19502,9 +19502,40 @@ test-pinned contract on a sample that cannot see the relevant population would b
 measurement that does not exist. Against Blocked on data: naming the missing observation is the
 point of this entry, but the entry is complete without it. Against Closed: nothing was built here.
 
-**Where this lives:** the write-scope guard under the tools directory and the four test files that
-pin its empty-set branch. See item 242 for the adjacent bypass that **was** closed, and item 79 for
-the answer-only branch that fires ahead of this one.
+**Corrections entered by a later pass, recorded rather than silently replacing this entry's original findings.**
+
+*A third cause of an empty set, which this entry's own argument does not reach.* This entry explains
+that absent and present-but-empty converge because both plan reconstruction sites strip an empty
+array before the guard is called. There is a third path that argument cannot cover: a `filesLikely`
+that is **non-empty at reconstruction and becomes empty inside the guard**, because every entry
+normalizes to the out-of-repo marker and is skipped while the allowed set is built. Constructed and
+confirmed against the compiled guard — a plan whose file list holds only out-of-repo paths reaches
+the fail-open with a list that was never empty on disk.
+
+*One mitigating layer named above is off by default.* This entry lists the manual edit-approval gate
+among the layers that survive a fail-open. It is not on unless asked for: `editApprovalMode` defaults
+to `"auto"` in `cli/dispatch.ts`, and `onEditApprovalRequired` is wired in `agentLoop.ts` only when
+that value is `"manual"`. The mitigation argument is therefore weaker than stated — three layers
+survive by default, not four. The repository boundary, capability filtering, and the answer-only
+deny-all are unaffected.
+
+*The out-of-repo rejection inside the guard is unreachable on this path.* It is ordered after all
+four abstention returns, so when the allowed set is empty it cannot fire. Containment nonetheless
+holds on the three write tools, which run the symlink-aware boundary check in the handler and again
+inside the staging writer — but see item 301 for a different write path where a second, lexical
+implementation of that check disagrees and a write escapes.
+
+*A figure in this entry could not be reproduced, and its derivation is unknown.* The claim that the
+branch is "pinned by five assertions across four test files" does not carry the command that
+produced it. A later query — the `filesLikely: []` literal across vitest files — finds 2 assertions
+in 1 file, but that is a **different definition**, so this is recorded as un-reproduced rather than
+refuted. Which instrument would settle it is not recoverable from the entry, and that is itself the
+ledger-discipline point: a figure without its command is not re-checkable later.
+
+**Where this lives:** the write-scope guard under the tools directory and the test files that
+pin its empty-set branch. See item 242 for the adjacent bypass that **was** closed, item 79 for
+the answer-only branch that fires ahead of this one, item 300 for the return-value ambiguity this
+entry is one instance of, and item 301 for the containment divergence.
 
 ## 244. Neither — a tracked test fixture embeds a stale copy of the scope guard's source, and greps for that source hit the fixture
 
@@ -24408,14 +24439,161 @@ answer rather than checking it. Export the two `taskClassifier` functions so the
 observed at all; a site whose default no test reaches is unprotected against a future edit whether or
 not it is fixed here.
 
-See item 297 for why no compiler probe reports any of this, and item 298 for the branching population
-these three sites belong to.
+**A second confirmed site, entered by a later pass.** The same shape appears on the write path:
+`write_file`'s path-escape return sets `error: undefined` and `rejectionReason: undefined` while
+putting `write_file_blocked_path_escape: "…" would escape repo` into `output`. Confirmed by running
+`executeTool` against a traversal path — the write was correctly refused and
+`[zone-path-boundary-rejected]` was emitted, but the tool-call record for it carries `outcome:
+"error"` with prose as its reason rather than a structured code, exactly as this entry records for
+`find_references`. So the class has at least two sites, and the remedy is the same at both: set the
+two fields at the return. Folded in here rather than opened as a near-duplicate entry, since the
+fix does not differ in direction.
+
+See item 297 for why no compiler probe reports any of this, item 298 for the branching population
+these three sites belong to, and item 301 for the containment gate whose refusal produces the
+`write_file` path-escape site.
+
+## 300. The write-scope gate cannot express abstention, in a codebase that already has the idiom
+
+**Bucket: Neither.** A structural fact is recorded, with no fix proposed — deliberately; the remedy
+is a design choice and this entry does not make it.
+
+**The contract.** `checkWriteScope(filePath, executionPlan, repoPath?, archetype?): string | null`
+(`src/tools/scopeGuard.ts`) has **ten return sites — seven `null`, three strings**. Of the seven
+nulls, only **three** mean *checked and allowed*: the repository-local `.zone/` exemption, an exact
+match in the allowed set, and the TS/JS extension-family stem match. **Four** mean *did not check*:
+the `refactor`/`complex_multi_file` archetype bypass, no plan supplied, an empty allowed set, and a
+target that normalizes to the empty string. All three call sites — one per write tool in
+`toolExecutor.ts` — consume the result identically as `if (scopeError) { …block… }`, so **`null` is
+"proceed" and no caller can learn which of the two meanings it received.** The function's own
+docstring conflates them as well, opening "Returns `null` when a write to `filePath` is allowed".
+
+**Items 243 and the archetype bypass are instances of this root, not separate defects.** Both are
+particular `null`s among the four that mean "did not check"; a fix to either leaves the other, and
+the ambiguity, in place.
+
+**The codebase has the idiom and applied it to the sibling gate.** Two allow-list gates are reached
+from the same tool executor:
+
+| gate | result shape | abstention expressible? |
+|---|---|---|
+| `checkCommandSafe` (`src/llm/runCommandSafe.ts`) | `{ safe: true } \| { safe: false; reason: string; tag: RejectionClass }` | **yes — discriminated union** |
+| `checkWriteScope` (`src/tools/scopeGuard.ts`) | `string \| null` | **no** |
+
+The command gate was deliberately upgraded to that shape, and its own comment records why — item
+93's fix, because a rejection path that forgot to set `tag` under an optional field "would silently
+reach the consumer's message lookup as `undefined`", and the discriminated union makes the compiler
+reject any `safe: false` return missing it. `scopeGuard.ts` is not innocent of the idiom either:
+`maybeExpandScopeForVerifyDiagnostic` and `maybeExpandScopeForSymbolMatch`, in that same file, both
+return `{ expanded, addedFile, reason }`. **The gate is the one function in its own file that
+carries no reason.**
+
+**Reachability, constructed rather than argued.** Eight inputs were driven through the compiled
+guard; seven returned `null` and the control blocked, so the harness was shown to detect
+disagreement before its agreements were trusted. The seven: both archetypes with a populated plan
+and a write elsewhere; steps present with every `filesLikely` empty; `steps: []` with no plan-level
+list; no plan; a `filesLikely` holding only out-of-repo paths; and a write to the repository root
+itself. The control — populated scope, out-of-scope write — blocked.
+
+**A dead branch.** The out-of-repo rejection inside this guard is ordered *after* all four
+abstention returns, so under either archetype, an empty allowed set, or no plan, it cannot fire.
+Its message can only ever appear when a populated scope already exists. This is not a containment
+hole — see item 301 for where containment actually lives and where it diverges.
+
+**Observation is high and cannot express the property.** `scopeGuard.test.ts` holds **43 vitest
+cases** and every branch is reached, including both archetypes, the `.zone/` exemption, answer-only,
+the extension-family tolerance, out-of-repo, and the empty set. The expectation going in was
+observer absence on the highest-severity branch; that expectation is **refuted**. The sharper fact
+is that those tests assert `toBeNull()` on the abstention cases — **they encode the ambiguity rather
+than catching it**, because the function gives them no way to distinguish the two meanings either.
+
+**What the gate protects, stated plainly and not inflated.** This is not an attacker model. The user
+runs Zone on their own repository with their own key. The property is that **a write lands only in
+files the user's approved plan named**; the failure is the model editing a file the user did not
+approve — scope creep, not compromise. One layer that item 243 names as mitigating is weaker than that
+entry states: per-edit human approval is **off by default** (see that entry's own correction).
+
+**No remedy is specified.** A sentinel value, a discriminated result, or throwing on abstention are
+three different designs with different blast radii across three call sites and 43 tests that
+currently assert the ambiguous value. Choosing among them is not this diagnosis pass's job, and an
+entry marked Actionable now on an unsettled remedy is the error item 288 made with its withdrawn
+"exempt the find_references path" proposal.
+
+See item 243 for the empty-set instance and its own measurement, item 301 for the containment gate
+this one is often confused with, and item 93 for the sibling gate's discriminated-union fix.
+
+## 301. Two containment implementations disagree, and a write escapes the repository through an in-repo symlink
+
+**Bucket: Actionable now.** The remedy is one named site adopting a function that already exists.
+
+**Two implementations of "is this path inside the repository".** `checkPathBoundary`
+(`src/tools/toolExecutor.ts`, `6802d0c7`) realpaths both sides, is separator-safe, and fails closed
+when the boundary is undecidable. `applyLlmPatches` (`src/core/applyLlmPatches.ts`, `9e79b81a`)
+carries its own, and it is **purely lexical**:
+`absolutePath.startsWith(resolvedRepo + path.sep) || absolutePath === resolvedRepo`, computed from
+`path.resolve` with **no `realpath` on either side**. `checkPathBoundary`'s own comment states
+exactly what that costs: it realpaths "the target itself, for an existing file — **catching a
+symlink planted at the target**".
+
+**Constructed, not argued, per the rule for a claimed bypass.** A temporary repository was built
+with `src/link.txt` symlinked to a file outside it. The two checks disagree on that input: the
+lexical rule returns *inside* and would write; the realpath rule resolves the target to the outside
+path and refuses. Running the real `applyLlmPatches` against it returned
+`{"applied":["src/link.txt"],"skipped":[],"failed":[]}` and **the file outside the repository was
+overwritten**. The probe ran entirely in a temporary directory, which was removed; the repository
+was untouched.
+
+**Reachability, with its limit stated rather than assumed.** `applyLlmPatches` is live — imported
+and called from `runLlmPatchFlow.ts` and `cli/index.ts`. Its enclosing branch fires in production:
+`[zone-flow-branch]` is emitted unconditionally through `log()` and records **111 runs in the sink's
+24.9-day window — 95 `agent_loop`, 16 `plan_full_patch` (14.4%)**. What is **not** established is
+whether that branch reaches this function with a non-empty patch list. The marker that would show
+it, `[zone-convert-result]`, fires immediately where the list is populated and reads **0** — but it
+is `debugLog`-gated, so its zero covers verbose runs only (26 of 125 per item 280) and is a floor,
+not a production count. **The escape is proven at the function level; the frequency with which the
+live flow reaches it is the observation this entry does not have.**
+
+**Severity, bounded honestly.** Exploiting it needs a symlink inside the repository pointing outside
+it. The realistic case is not adversarial — it is an ordinary user repository that legitimately
+contains one, where a run could then write outside the repository without the user expecting it.
+The default write path is unaffected: the three write tools run `checkPathBoundary` in the handler
+**and** again inside `stagedWrite`'s five-argument overload, and `multi_edit` runs it **per path** in
+a pre-flight loop before any file is touched and again in its write loop — the batched
+per-call-check-with-per-path-write shape is explicitly avoided, with a comment saying why.
+
+**A third implementation, weaker still, whose liveness this entry does not settle.**
+`src/apply/applyPatchPlan.ts` writes `patch.filePath` directly with **no containment check and no
+`repoPath` parameter at all**. Its callers are `apply/runApplyFlow.ts` (reached from `cli/index.ts`)
+and `core/runFeatureAgent.ts`. Whether either is live in the current default flow was not
+established here and is named rather than assumed.
+
+**Two instruments over the write surface, and their difference is the finding.** A regex scan for
+filesystem-write shapes and a TypeScript-AST `CallExpression` walk over tracked production `src/`
+(the ranker snapshot is `.json` and excluded by construction from both) do not agree: the AST walk
+reports **61 write sites across 29 files** and surfaced `core/applyLlmPatches.ts`,
+`apply/applyPatchPlan.ts` and `snapshots/snapshotStore.ts`, which the regex's file-level tally did
+not bring forward. **This entry exists because of that difference** — the single-tool probe that
+preceded it had generalised "containment holds" from the three write tools to every write path.
+
+**A structural note about where the trust is discharged.** `finalizeStaging`
+(`src/llm/verification/staging.ts`, the single disk-write point for tool writes per `840d816`)
+flushes with `fs.writeFileSync(abs, content)` and **performs no boundary check of its own** — it
+writes whatever absolute paths are keys in the staging map. That is safe only because every inserter
+validates first. The trust is discharged at the insert sites, not at the write, and nothing at the
+write states that dependency.
+
+**The condition to change.** Replace `applyLlmPatches`' lexical `isInsideRepo` expression with the
+symlink-aware, fail-closed check that already exists, so the two implementations cannot disagree.
+Settle `apply/applyPatchPlan.ts`'s liveness and give it a check or delete it.
+
+See item 300 for the scope gate this containment gate is often confused with, and item 243 for the
+mitigation argument that lists the repository boundary as a surviving layer.
 
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 299 to find out which ones still need something. No index of
+reader the trouble of reading all 301 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -24430,7 +24608,7 @@ first.
 286, 288, 289, 290
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (6): 287, 291, 292, 293, 296, 299
+first (7): 287, 291, 292, 293, 296, 299, 301
 
 Five, down from seven — the bucket's movement continues to be the ledger's own signal about whether
 anything is specified and waiting, in both directions. The diagnosis pass into `find_references` left
@@ -24441,12 +24619,12 @@ direction has come from a finding this session generated rather than from inheri
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (15): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250, 263
 
-**Neither — a structural fact recorded, with no fix proposed** (133): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
+**Neither — a structural fact recorded, with no fix proposed** (134): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
 74, 76, 77, 78, 79, 80, 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109,
 112, 114, 115, 118, 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152,
 154, 155, 158, 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199,
 200, 201, 202, 205, 206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230,
-232, 243, 244, 247, 248, 249, 254, 256, 261, 272, 294, 295, 297, 298
+232, 243, 244, 247, 248, 249, 254, 256, 261, 272, 294, 295, 297, 298, 300
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
