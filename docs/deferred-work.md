@@ -24237,11 +24237,185 @@ floor, not the graph's complete edge set, rather than letting the fix read as mo
 See item 289 for the sibling truncation (files, not lines) this entry's condition mirrors, and item
 288 for the fix whose own closing text names this cap's remaining effect explicitly.
 
+## 297. The provider concept has eleven types and no canonical one, and unifying them would not make the compiler an instrument
+
+**Bucket: Neither.** A structural fact is recorded. A remedy was drafted, measured, and **withdrawn
+before this entry was written** — see this entry's two probes.
+
+**The fact.** `git grep '"anthropic" | "openai"'` (both orderings, production only; the ranker
+snapshot is `.json` and excluded by construction) finds **ten structurally-identical provider unions**,
+of which the named `LLMProvider` (`src/llm/types.ts:9`, `fec1dd2b`) is one: `ApiKeyProvider`
+(`api/diskKeys.ts:5`), `diskModel.ts:12`, `factory.ts:72`, `modelRegistry.ts:10`, `modelRegistry.ts:135`,
+`getProviderForModel`'s own return type (`modelRegistry.ts:147`), `RoutingProvider`
+(`modelRouting.ts:10`), `withExponentialBackoff.ts:24`, and `ProviderName` (`usage/pricing.ts:10`,
+also `fec1dd2b`). **An eleventh exists and this entry's own scan missed it** — `App.tsx:117`, found
+only by Probe B, which is itself the reason both probes are recorded rather than the scan alone.
+
+**There is a canonical resolver, for one direction only.** `getProviderForModel(id)`
+(`modelRegistry.ts:147`) is the sole function whose job is model→provider, and it has exactly **one**
+production caller (`config.ts:125`; the only other references are its own test). Its return type is the
+structural literal, not `LLMProvider`, so it does not participate in the named type at all. It answers
+the *produce* direction; the *consume* direction — sites that branch on a provider value — has no
+canonical home, and that population is item 298.
+
+**The remedy that was withdrawn, and the measurement that withdrew it.** The draft remedy was
+mechanical: one exported type, nine replaced duplicates, `getProviderForModel`'s return widened to it.
+Two probes were run to test whether that would make the compiler able to enumerate this class, each a
+scratch mutation reverted by file-restore against a pre-probe snapshot, with `tsc --noEmit` confirmed
+clean before and after.
+
+- **Probe A — widen `LLMProvider` alone: 9 errors.** A prediction of 2–6 was registered beforehand and
+  is reported unreconciled: **the prediction was low by three.** Two sites were named in advance and
+  both appeared (`subagentDispatch.ts:127`, `toolExecutor.ts:1123`, each passing
+  `getRequestContext()?.provider ?? "openai"` into `getModelForRole(role, provider: RoutingProvider)`).
+  The three unanticipated errors were `Record<LLMProvider, …>` mapped-type exhaustiveness in
+  `models.ts` — a kind of enforcement the scan had not looked for.
+- **Probe B — widen all eleven simultaneously: 4 errors.** Registered before running: errors dominated
+  by `Record<Union, …>` exhaustiveness, and **no error at any of the three cost-laundering points**.
+  Both halves held. The 4 are `models.ts:18`, `models.ts:94`, `pricing.ts:43` (all
+  `Record<…>` missing the new key) and `App.tsx:117` (the eleventh, un-widened literal).
+
+**What Probe B establishes, and why it moves this entry to Neither.** After unifying every provider
+type, the compiler still reports **zero** errors at the 24 branching sites of item 298 and **zero** at
+all three cost-laundering points of item 299 — `TokenBudgetMeter:99`'s `provider as ProviderName`
+(an explicit cast), `recordingClient.toProviderName:90`, and `taskClassifier:433` — because each
+narrows the value on the way through and therefore keeps compiling whatever the input type becomes.
+The only compiler-enforced exhaustiveness in the entire provider surface comes from `Record<Union, …>`
+mapped types, and all three of those are **data tables**, not logic. **So unification is cosmetic for
+the enumeration purpose**: it would tidy eleven declarations into one and leave every semantic site
+exactly as invisible as it is now. A real fix needs the laundering points removed or exhaustiveness
+enforcement added, and choosing between those is a design decision this diagnosis pass does not make.
+
+**A second reason the draft remedy was not merely mechanical.** `ProviderName` is the key type of
+`PRICING_USD_PER_MTOK: Record<ProviderName, …>`. Collapsing it into `LLMProvider` asserts that every
+LLM provider must have a pricing-table entry — defensible, but a semantic commitment rather than a
+rename, and `Record` exhaustiveness would then force the table to grow with the union. Structural
+identity today is not conceptual identity.
+
+See item 298 for the branching population this entry's resolver does not cover, and item 299 for the
+cost surfaces the laundering points feed.
+
+## 298. Twenty-four production sites branch two-valued on a provider, and no instrument this repo has can see them
+
+**Bucket: Neither.** A structural fact is recorded, with no fix proposed — deliberately; see below.
+
+**The population, and why the reported six was an instance-level count.** Zone's own finding reported
+provider resolution "rewritten in six places as a two-armed ternary with inconsistent else arms —
+three defaulting to Anthropic, three to OpenAI". Measured with a TypeScript-AST walk over tracked
+`src/**/*.{ts,tsx}` (production only), two disjoint definitions give two different populations:
+
+- **Class A — sites *producing* a provider value with a default arm** (ternary / `??` / `||` /
+  if-return / default-param / switch): **11 production sites.**
+- **Class B — sites *branching on* a provider value, whatever the branches produce**: **24 production
+  sites across 14 files**, including **six in `src/cli/dispatch.ts` alone** and sites in
+  `ModelModal.tsx`, `embedFile.ts`, `webSearchWarning.ts` and `initFlow.ts` — none of which the
+  reported six named.
+
+**Both instruments have named gaps, and the gap is the finding.** The class-A walk missed three of the
+reported six, because it keyed on provider *literals* in the branches: `factory.resolveProvider` (a
+bare trailing `return "anthropic"`, not inside an `if`), `modelRouting.getModelForRole` (branches are
+identifiers, `ANTHROPIC_DEFAULTS`/`OPENAI_DEFAULTS`), and `pickClassifierModel` (branches produce
+model ids). Class B catches those and 18 more. A text scan is reported for scale only and **not** as
+cross-validation — a grep for the same literals shares its token with the AST scan and would
+reproduce its blind spots as agreement: 34 production files, 106 literal occurrences.
+
+**The "3-and-3 two-armed ternary" split does not survive.** Of the six reported sites, exactly **one**
+is a plain two-armed ternary on a provider literal. Four distinct condition kinds are in play:
+
+| site | shape | condition tests | else arm | test-observed |
+|---|---|---|---|---|
+| `config.resolveProvider:86` | if-return, no else | `value === "openai"` (a config string) | `"anthropic"` | 1 test file |
+| `modelRegistry.getProviderForModel:147` | catalog lookup + `??` | **catalog membership**, not a name | `"anthropic"` | 1 test file |
+| `factory.resolveProvider:63` | precedence chain, trailing return | **presence** of explicit/context | `"anthropic"` | 1 test file |
+| `modelRouting.getModelForRole:47` | ternary → identifiers | `provider === "anthropic"` | `OPENAI_DEFAULTS` | 4 test files |
+| `openaiClient.getModelName:78` | nested ternary **+ default param `= "openai"`** | `provider === "anthropic"` | OpenAI branch | 5 test files |
+| `taskClassifier.pickClassifierModel:290` | if-return, no else | `provider === "anthropic"` | `"gpt-4o-mini"` | **0** |
+
+**One reported site fails loudly rather than silently, and the report had it backwards.**
+`factory.createLLMClient`'s if/else-if chain ends `else { throw new Error("Unsupported provider: …") }`
+(`factory.ts:41–48`). Its *resolver* defaults to Anthropic; its *consumer* throws. A third provider
+reaching the factory is the one place in this population that is not a silent mis-route.
+
+**No instrument sees these.** Item 297's Probe B widened all eleven provider types simultaneously and
+produced **zero** errors at any of the 24 sites — they are type-correct and semantically two-valued,
+which is precisely the combination no compiler reports. There is no `assertNever` or exhaustiveness
+enforcement anywhere on a provider value (`git grep 'assertNever|: never|exhaustive'`, production:
+zero provider-related hits).
+
+**No remedy is proposed, and that is the honest bucket.** Routing every site through a canonical
+resolver, adding exhaustiveness enforcement, or both, is a design decision; the count of sites does
+not settle it, and an entry marked Actionable now on an unsettled remedy is the error item 288 made
+with its withdrawn "exempt the find_references path" proposal.
+
+See item 297 for the type population and the probe, and item 299 for the three sites where this shape
+reaches money.
+
+## 299. A mis-defaulted provider records a paid run as $0, and the three cost surfaces launder it three different ways
+
+**Bucket: Actionable now.** The remedy is specifiable independently of items 297 and 298's design
+question, at named sites.
+
+**The mechanism.** `totalCost` (`usage/pricing.ts`) resolves rates by
+`PRICING_USD_PER_MTOK[provider]?.[model]`; a miss logs
+`console.warn("[zone-pricing] unknown model …, cost=0")` and returns **0**. So a foreign model id
+arriving under a coerced `"openai"` yields a silent zero — **not a wrong rate**, and conditional on
+the foreign id not colliding with an existing table key (the OpenAI keys are all `gpt-*`, so a
+`deepseek-*` id will not collide). A wrong *rate* would require a collision; a $0 requires only a miss.
+
+**Three surfaces, three laundering points, and only one of them is the site the report named.** This
+was traced rather than inferred — the three cost surfaces in this codebase are distinct, and
+conflating them has already cost four wrong claims:
+
+| surface | consumer / gate | fed by | laundering point | shape |
+|---|---|---|---|---|
+| Daily ledger | `getUsage` → the daily USD cap, checked **once per run, pre-loop** (`agentLoop:2789`) | `recordExecution` (`recordingClient:113`) computing its own `est_cost_usd` | `toProviderName` (`recordingClient:90`) | if-return coercion |
+| Per-run meter + cost-log | **`--max-budget-usd`, checked every iteration** (`agentLoop:4099`, against `budget.snapshot().costUsd`) | `buildIterCostUpdate` → `totalCost` (`iterCostMeter:108`) | **`provider as ProviderName`** (`TokenBudgetMeter:99`) | **explicit cast** |
+| Classifier telemetry | `classifierCostUsd` on `[zone-archetype]` — **telemetry only, gates nothing** | `computeResponseCost` (`taskClassifier:586`) | inline ternary (`taskClassifier:433`) | ternary coercion |
+
+**The correction this trace forced.** `computeResponseCost` — the site the original finding named as
+the cost surface — reaches **only the telemetry row**. Its value flows to `classifierCostUsd` and no
+further. The two surfaces that actually gate spend are fed by `recordingClient` and `TokenBudgetMeter`,
+neither of which the finding named, and one of which launders through an explicit cast that no
+compiler will ever question.
+
+**The two gates degrade differently, which the severity argument has to distinguish.**
+`--max-budget-usd` compares this run's own accumulated cost every iteration, so a $0 means the gate
+**never fires within the run** and an ostensibly capped run proceeds to its iteration limits. The
+daily cap reads *prior* recorded usage once before the loop, so a $0 does not affect the run that
+produced it — it under-reports into the ledger and weakens the gate for **subsequent** runs. Same
+defect, two different failure timings.
+
+**Currently latent, and the instrument was checked before its zero was trusted.** `[zone-pricing]`
+appears **0 times in 9,687 retained sink records** (read with the `.name` JSON reader over
+`markers.jsonl` + `.1`, never `grep -c`, since a substring count would credit records that merely
+quote a marker name). That zero is genuine rather than instrument blindness: `applyStderrInterception`
+calls `appendMarkerRecord` on marker-shaped stderr (`cli/tui/stdoutShield.ts`), and the sibling
+`console.warn` marker `[zone]` — `config.ts`'s own provider-conflict warning, on the identical
+`console.warn` → shield → sink path — appears **289 times** in the same sink. The path works; nothing
+has tripped it, consistent with every model in use being in the table.
+
+**Both classifier sites are unobserved.** `pickClassifierModel` and `computeResponseCost` are
+module-private (neither carries `export`) and referenced by **zero** test files
+(`git grep -l <fn> -- 'src/**/*.test.ts'`). The other four sites named by the original finding are
+referenced by one to five test files each. Observer absence sits on exactly the sites where a wrong
+answer becomes a wrong number.
+
+**The condition to change.** At each of the three laundering points, stop coercing an unrecognised
+provider into `"openai"` and refuse it loudly instead — the cost path already has the vocabulary
+(`[zone-pricing]`'s warn) but applies it one layer too late, after the identity has already been
+rewritten. `TokenBudgetMeter:99`'s `as ProviderName` is the sharpest instance: a cast asserts the
+answer rather than checking it. Export the two `taskClassifier` functions so the else arm can be
+observed at all; a site whose default no test reaches is unprotected against a future edit whether or
+not it is fixed here.
+
+See item 297 for why no compiler probe reports any of this, and item 298 for the branching population
+these three sites belong to.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 296 to find out which ones still need something. No index of
+reader the trouble of reading all 299 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -24256,7 +24430,7 @@ first.
 286, 288, 289, 290
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (5): 287, 291, 292, 293, 296
+first (6): 287, 291, 292, 293, 296, 299
 
 Five, down from seven — the bucket's movement continues to be the ledger's own signal about whether
 anything is specified and waiting, in both directions. The diagnosis pass into `find_references` left
@@ -24267,12 +24441,12 @@ direction has come from a finding this session generated rather than from inheri
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (15): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250, 263
 
-**Neither — a structural fact recorded, with no fix proposed** (131): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
+**Neither — a structural fact recorded, with no fix proposed** (133): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
 74, 76, 77, 78, 79, 80, 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109,
 112, 114, 115, 118, 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152,
 154, 155, 158, 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199,
 200, 201, 202, 205, 206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230,
-232, 243, 244, 247, 248, 249, 254, 256, 261, 272, 294, 295
+232, 243, 244, 247, 248, 249, 254, 256, 261, 272, 294, 295, 297, 298
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
