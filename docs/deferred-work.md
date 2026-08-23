@@ -23825,17 +23825,21 @@ entry at all, because `appendRunSummary` is reached only when an iteration cost 
 
 **Measured on two real runs, no environment variables set.** Headless text (run id
 `a200b73b-a02b-4a1a-a247-9b038efc319f`, a run id and not a commit): one record, `search_in_files`,
-`outcome: "ok"`, and the cost summary agrees at `toolCallsAttempted: 1`. Headless
+`outcome: "ok"`, with `toolCallsAttempted: 1` on the cost summary. Headless
 `--output-format json` (run id `5a79cd5c-ba91-47bf-8d64-1d7ce498c333`): three records —
 `run_command_readonly` carrying its verbatim command, then `read_file` at
 `/tmp/zone-l3-target/src/greet.ts` with **`outcome: "error"`**, then the same path with
 `outcome: "ok"`. That failed read is the point: it is precisely the class that left no trace before,
 and it is now on disk with its path. Both are n=1 and support an existence claim only — no
-performance, regression or improvement claim. The count is corroborated but not independently
-confirmed: `[zone-tool-result-summary]` reported the same three calls tool-for-tool, and the cost
-summary the same total, but both derive from the same `handleToolResult` step the recorder sits in,
-so they share a derivation and cannot disagree about whether that step was reached. The
-request-side capture that would have been input-level independent does not exist in this tree.
+performance, regression or improvement claim. **Correction, entered after the fact: 1 and 3 are
+single-instrument figures and are not established counts.** `toolCallsAttempted` is genuinely
+independent for the WRITE-HEALTH claim — it is carried by a different writer to a different file, which
+is the whole point of item 286's falsifiability rule — and it is **not** independent for the COUNT,
+because the counter and the record are incremented inside the same recorder invocation.
+`[zone-tool-result-summary]` is no better: it reports the same three calls tool-for-tool, but derives
+from the same `handleToolResult` step the recorder sits in. The request-side capture that would have
+been independent at the input level does not exist in this tree, so no second instrument for the count
+was available and none should be read into these two numbers.
 
 **Mutation.** Fifteen mutants, all killed, no survivors. Substituting the recorder's unconditional
 guard with the env predicate kills 24 tests, which is what says the ungating is observed rather than
@@ -23904,11 +23908,184 @@ remains dependent on the shield, so closing 286 narrowed this class without touc
 See item 286 for the recording seam that is immune to this gate, and item 280 for the observation
 both entries descend from.
 
+## 288. The dependency graph resolves almost no source-to-source import, because an ESM `.js` specifier is never mapped back to its `.ts` file
+
+**Bucket: Actionable now.** The remedy is one condition at one site and needs nothing new to be learned.
+
+**The fact, measured rather than reasoned.** Of the 604 relative import specifiers in the files the
+graph actually analyses, **594 (98.3%) end in `.js`** — the ESM TypeScript convention this repo is
+written in (`import { log } from "../utils/logger.js"`). `resolveCandidatePath`
+(`src/repo/buildDependencyGraph.ts`, present since `fec1dd2b`) computes
+`noExt = !/\.[a-z0-9]+$/i.test(basename)` and appends its `.ts`/`.tsx`/`index.ts` candidates **only
+inside that branch**. A `.js` specifier has an extension, so `noExt` is false, the candidate list
+collapses to the literal path, `src/utils/logger.js` is not in `fileSet` and does not exist on disk,
+and the import is dropped. **The `.ts` candidates are unreachable for exactly the specifiers that need
+them.**
+
+**What that costs.** Over the analysed set, **573 of 607 relative specifiers resolve to nothing
+(94.4%)**. Of the 34 that do resolve, **24 point into `dist/`** — build output that exists on disk
+verbatim, imported by `scripts/`, which is the entire reason any back-edge exists at all — and only
+**10** reach analysed source. Followed end to end on one file:
+`src/api/commandApprovals.ts` imports `"../utils/logger.js"` and its resolved `imports` array is `[]`.
+
+**This entry, not item 289, is what decides the remedy.** Removing the analysis cap raises the graph
+from 317 nodes to 1,011 and raises resolved edges from **34 to 92** — across 977 files. A graph with 92
+edges cannot answer "who imports this symbol" for anything. An earlier draft of this diagnosis claimed
+uncapping would restore `importedBy` completeness; that claim is **withdrawn**, and the measurement
+that withdrew it is the 34-to-92 figure.
+
+**The condition to change.** In `resolveCandidatePath`, when the candidate's basename ends in a
+JavaScript extension (`.js`, `.jsx`, `.mjs`, `.cjs`), also try the corresponding TypeScript extensions
+before returning null. The existing `noExt` branch stays as it is; this adds a second reachable branch
+rather than widening that one.
+
+See item 289 for the cap, which is real and separate, item 290 for the ordering instability, and item
+291 for what the failure reports to the model.
+
+## 289. The dependency graph analyses at most 300 files, so 670 of 960 tracked sources have no node
+
+**Bucket: Actionable now.** The cap is a named constant at a named site, and its cost is measured here.
+
+**The fact.** `buildDependencyGraph`'s main loop is `for (const rel of posixFiles) { if (analyzed >=
+MAX_ANALYZE) break; ... }` with `MAX_ANALYZE = 300` (`src/repo/buildDependencyGraph.ts`), iterating the
+list in fast-glob order, unsorted. fast-glob supplies **977** files; the graph holds **317** nodes.
+
+**The class, on two instruments that share no derivation step.** Consumer side: tracked `.ts`/`.tsx`
+from `git ls-files` minus the graph's own keys = **670 of 960 absent (69.8%)**. Producer side: tracked
+`.ts`/`.tsx` not present in fast-glob positions 0–299, which never touches the graph at all = **670**.
+The two sets are byte-identical, so this figure is no longer single-instrument. Reconciliation of the
+complement: 300 analysed minus the 10 entries that are not tracked `.ts`/`.tsx` (`eslint.config.mjs`
+and nine `scripts/*.mjs`) = the 290 present.
+
+**Split, and the shape.** Non-test **280 of 412 absent (68.0%)**; test 390 of 548 (71.2%). Whole
+subsystems sit at zero nodes: `src/tools` 0 of 84, `src/repo` 0 of 30 (the graph builder cannot see
+itself), `src/utils` 0 of 20, `src/patch` and `src/patch-generation` 0 of 40, and `src/types`,
+`src/usage`, `src/test`, `src/memory`, `src/semantic`, `src/snapshots`, `src/prompts`, `src/visual`,
+`src/remote`, `src/mcp` 0 of 57 between them. `src/llm` holds 45 of 281. `agentLoop.ts`,
+`toolExecutor.ts`, `logger.ts` are all absent. **158 of the 300 analysed files are tests**, so a
+majority of the budget is spent on the files a dependency graph is least useful for.
+
+**Cost of removing it, measured.** Median over three runs each: capped **24 ms**, uncapped **69 ms**
+(spreads `[32, 24, 23]` and `[73, 69, 64]`), peak RSS 91 MB for the process. No timeout or memory
+ceiling is reintroduced by uncapping. The constant arrived in `0d11c37d`, a WIP commit whose message
+names nine unrelated changes and **states no performance rationale**, so there is no recorded ceiling
+this cap was protecting.
+
+**Necessary, not sufficient.** Uncapping alone moves resolved edges from 34 to 92 (item 288). Both
+conditions have to change before `find_references` answers correctly; neither one alone does.
+
+**Scope correction.** An earlier draft proposed exempting the `find_references` path from the cap.
+That scoping is wrong: `buildDependencyGraph` has **three** production callers —
+`src/tools/toolExecutor.ts` (find_references), `src/llm/plannerStep.ts`, and
+`src/core/runLlmPatchFlow.ts` — so plan-phase file ranking and import-context summaries are degraded by
+the same two defects, and a one-caller exemption would leave them degraded.
+
+## 290. Which files the dependency graph contains changes between runs, because the enumeration is never sorted
+
+**Bucket: Actionable now.** One sort, at a named site, makes membership reproducible.
+
+**The fact, and a refutation of this session's own earlier answer.** fast-glob returns the same 977-file
+SET on every invocation (identical sorted-set hash across four processes) but a **different ORDER every
+time** — four distinct order hashes in four runs. Because the analysis loop truncates positionally, the
+analysed 300 is a different 300 between runs. Across eight processes the graph produced **three distinct
+member sets**: union 322, intersection 312, **10 members flip in and out**, among them
+`src/memory/constants.ts`, `src/mcp/mcpClientManager.ts` and five `src/llm/agentLoop.*.test.ts` files.
+
+**This session first answered "deterministic" on two samples that happened to agree** — node count 317
+and an identical key hash across a pair of processes. Two samples are not a determinism claim, and six
+more produced a second hash. Recorded because the mistake is the reusable part: an agreement at n=2 was
+read as a property.
+
+**What it costs a user.** `find_references` against a file near the boundary succeeds on one invocation
+and returns "Source file not found in dependency graph" on the next, with no change to the repository
+between them. Any bug report against this tool is therefore not reliably reproducible, which is a
+second-order cost on top of the first-order one.
+
+**The condition to change.** Sort `posixFiles` before the analysis loop in `buildDependencyGraph`
+(`src/repo/buildDependencyGraph.ts`). This does not fix items 288 or 289 and does not pretend to — it
+makes their victims a fixed set rather than a rotating one, which is what makes the other two
+measurable. Sorting also removes the collision hazard in item 293's key sampling from the ordering side,
+though not from the sampling side.
+
+## 291. `find_references` reports its failure as prose with no structured fields, so the new tool-call record carries a sentence instead of a code
+
+**Bucket: Actionable now.** One return site gains two fields it already has vocabulary for.
+
+**The fact.** The not-found return in the `find_references` branch of `src/tools/toolExecutor.ts` is
+`{success: false, output: "Source file not found in dependency graph: …"}` — verified by running
+`executeTool`, with `error` and `rejectionReason` both `undefined`. Item 286's recorder therefore falls
+to the last branch of `deriveOutcome` and writes `outcome: "error"` with `reason` set to the first line
+of that prose. **The recorder is behaving correctly**; it reports what the tool hands it, and the tool
+hands it nothing structured. That fallback chain is unchanged by this pass.
+
+**The text is worse than unstructured, it misdirects.** It tells the model to "Verify the path is
+relative to repo root and the file exists" — and in the observed live failure the path was
+repo-relative and the file did exist. Both instructions were already satisfied, so the model was sent
+to re-check the one thing that was correct while the actual cause, positional truncation of the
+analysis loop, went unnamed. There is no code-level fallback to search: the recovery in the original
+report was the model reading that sentence and choosing `search_in_files` itself, so the failure is
+visible but its cause is not.
+
+**The condition to change.** Set `error` and `rejectionReason` on that return, and name the real
+condition in the message rather than the symptom.
+
+**A single-observer note carried over from `9c9a6b80`.** Mutant M12 in that pass (substituting the sink
+destination) was killed by exactly one test. A candidate second observer, for whichever pass next
+touches that file: a structural assertion that `src/utils/toolCallSink.ts` contains the literal
+`"tool-calls.jsonl"` and not `"markers.jsonl"`, which is independent of the runtime path.
+
+## 292. Eight tests run only on the owner's machine, and are structurally invisible to CI and to every clean-clone run
+
+**Bucket: Actionable now.** The remedy is stated; only the choice of fixture form is left, and either
+form closes the hole.
+
+**The fact.** `scripts/hashPromptDumps.test.ts` and `scripts/rescoreAnswerCorrectness.test.ts` gate
+eight assertions on `it.runIf(fs.existsSync(REAL_CAPTURES))` where `REAL_CAPTURES` is
+`.zone/audits/notice-regression-arm` (`5dcfe602`). `.gitignore` line 18 ignores `.zone/`, so that
+directory — 34 files, 336K — exists in the working tree and in no clone. `.github/workflows/tests.yml`
+runs `actions/checkout@v4` then `npm test`, a clean checkout. **Those eight assertions have therefore
+never run in CI, and never in any of the clean-clone runs this project uses as its verification bar.**
+
+**How it surfaced.** Pass `9c9a6b80` reported a local suite of 6,302 passed / 17 skipped and a
+clean-clone suite of 6,294 passed / 25 skipped, and treated the eight-test gap as a puzzle about that
+pass's own change. It was not: the gap is this gate, it predates the change, and it reproduces at the
+parent commit. The reusable part is that **skip counts are not comparable across the two environments**,
+so any suite figure has to name which environment produced it.
+
+**Framing.** This is a verification-bar defect, not a test defect. The tests are correct and their
+`runIf` is honest; what is wrong is that a green CI run reads as covering them.
+
+**The remedy, stated as asked.** Make them runnable in a clean checkout, rather than marking them
+working-tree-only: marking preserves the hole permanently, while the tests themselves are the recorded
+check for item 157's pooling finding. Either commit the 34 captures behind a `!.zone/audits/notice-regression-arm/`
+exception to the existing ignore, or replace them with a committed synthetic fixture reproducing the
+two-group split. Until one of those lands, the describe block should at least say working-tree-only in
+its name so no reader mistakes a green CI run for coverage.
+
+## 293. The dependency-graph cache key samples only the first 500 sorted paths, so two different file lists of equal length can collide
+
+**Bucket: Actionable now.** A one-expression change at a named site.
+
+**The fact.** `cacheKey` (`src/repo/buildDependencyGraph.ts`) hashes `repoPath`, then
+`sorted.slice(0, 500).join("\n")`, then the total count, then the alias config. Two file lists that
+agree on their first 500 sorted paths and have the same length therefore produce the same key. With 977
+files in this repo, deleting one path and adding another where both sort after position 500 is exactly
+that shape, and the second build inside the 60-second TTL would return the first build's graph.
+
+**Latent, and not the cause of anything observed here.** The cache is a module-level `Map` with
+`TTL_MS = 60_000` and no filesystem, so nothing survives a process; it is also bypassed entirely when
+`stagingFiles` is non-empty. No stale-cache effect contributed to items 288, 289 or 290, all three of
+which reproduce on cache-bypassed rebuilds. This entry exists because a sampling hazard recorded only as
+an aside inside another entry's establish notes does not surface later as work.
+
+**The condition to change.** Hash the full sorted list rather than a 500-element prefix. The cost is one
+pass over a few hundred short strings, against a 60-second reuse window.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 287 to find out which ones still need something. No index of
+reader the trouble of reading all 293 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -23923,17 +24100,17 @@ first.
 286
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (1): 287
+first (7): 287, 288, 289, 290, 291, 292, 293
 
-Non-empty for the first time in several passes, and the arc is worth a line because this bucket's
-movement is the ledger's own signal about whether anything is specified and waiting: it sat at zero
-for months, went to 2 when an enumeration pass opened items 258 and 259 together, dropped to 1 when
-258 closed in the very next pass, fell back to 0 once 259's last member was built, and returns to 1
-with item 287. Every one of those movements came from a finding this session generated rather than
-from inherited backlog, and 287 is no exception — it was found while closing item 280, not looked
-for. When this bucket is empty, that reads as "nothing to do" and is better read as **"nothing
-currently specified"**, the weaker and more accurate claim; a single member is the same statement
-with one exception named.
+Seven, from one for the whole of the preceding pass, and the jump is the point rather than an
+embarrassment. This bucket's size is the ledger's own signal about whether anything is specified and
+waiting: it sat at zero for months, went to 2 when an enumeration pass opened items 258 and 259
+together, dropped to 1 when 258 closed in the next pass, fell back to 0 once 259's last member was
+built, went to 1 with item 287, and lands at 7 because a single diagnosis pass into one tool found six
+separable defects, each with its own site and its own condition. Every one of those movements came from
+a finding this session generated rather than from inherited backlog. A bucket this full does not mean
+the work grew; it means six things that were already broken stopped being invisible, and three of them
+(288, 289, 290) have to be built together before `find_references` answers correctly.
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (15): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250, 263
 
