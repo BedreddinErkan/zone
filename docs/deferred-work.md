@@ -25628,6 +25628,233 @@ script must be one a consumer's environment can execute — this repository's bu
 See `efc8e758` for the previous release commit and item 37 for the last time this tarball's contents
 needed correcting.
 
+## 314. The TUI progress-event seam is one shared delivery channel plus nine independent literal writes, not five parallel routes onto the bus
+
+**Bucket: Neither.** A structural correction to a prior pass's own model, not a fix — the
+mechanism this describes is functioning as designed; only the description of it was wrong.
+
+**The mechanism.** `src/cli/tui/index.tsx:523-529` defines `onProgress`, and it is exactly
+`opts.onProgress`, threaded through `src/cli/dispatch.ts:143`'s
+`progressCallback = opts.onProgress ?? sink.onProgress` into every `runLlmPatchFlow` call as
+`onProgress: progressCallback`. `emitStructuredProgress` (`src/core/runLlmPatchFlow.ts:4469-4485`)
+— the single closure every one of that file's 67 direct call sites uses to reach the bus — calls
+`input.onProgress?.({ stage, progress })`, and `input.onProgress` there is that same
+`progressCallback`, which for the TUI is `index.tsx`'s own `onProgress`, which does
+`bus.emit(evt.type, evt)` at `index.tsx:527`. The whitelist function `mapStructuredEventToProgress`
+(`runLlmPatchFlow.ts:11312-11461`) — previously described as an independent "route" — is a filter
+for one specific inbound sub-channel (the generic `onStructuredEvent(evt: unknown)` catch-all from
+the agent loop) that, when it recognizes a type, feeds its result into this exact same
+`emitStructuredProgress` closure via a passthrough at `runLlmPatchFlow.ts:5549-5550`. `dispatch.ts`'s
+own four emissions (`plan_generation_started`, `trust_approval_required`, `iter_cost_update`,
+`narration`, at `dispatch.ts:306,398,419,436,545,572,593,620,667`) all call `progressCallback({...})`
+directly, and terminate at the identical `index.tsx:527` call. `dispatch.ts:297-304`'s
+`investigationProgressCallback` — the progress wrapper for `src/llm/planInvestigation.ts`'s
+`runPlanInvestigation`, a mechanism distinct from both `src/llm/investigationFlow.ts`'s
+`runInvestigationFlow` and from its own name — forwards to `progressCallback(update)` directly at
+`dispatch.ts:304` with no conditional in between, so it terminates there too; this is a direct
+source read (**GUESS**, not runtime-confirmed by an observed arrival) but the trace itself is a
+single unconditional call.
+
+**What is genuinely independent.** `index.tsx` has 9 other literal `bus.emit(...)` call sites
+(`:483,487,491,553,564,575,582,595,607`, 6 distinct types: `agent_loop_complete`, `narration`,
+`run_failed`, `run_summary`, `tool_call`, `tool_result`) written directly in the TUI's own
+run-orchestration code — these bypass the `onProgress` channel entirely and are a real, separate
+delivery mechanism.
+
+**What is dead.** `src/llm/investigationFlow.ts`'s own separate `emitStructuredProgress` closure
+(its own definition, at `investigationFlow.ts:94` — see item 315) has exactly one production
+caller, `src/memory/initFlow.ts:85` (`/init`), which supplies no `onProgress` at all
+(`suppressOutputFormat: true`). Every one of its 9 constructed types is also producible via the
+shared channel or the 9 independent sites above, so this deadness costs nothing in type coverage —
+it simply never reaches the TUI bus today.
+
+**Corrected count.** Not "five independent routes." There is one shared delivery channel
+(carrying constructions from the agent-loop whitelist, `runLlmPatchFlow.ts`'s 67 direct call
+sites, and `dispatch.ts`'s emissions, including `planInvestigation.ts`'s mechanism) terminating at
+one call, plus 9 independent literal writes, plus one dead producer. A prior pass's report to the
+user described this as "four inbound routes onto one bus, plus two non-bus inbound mechanisms and
+one outbound," later revised to "five routes" — both readings counted separate *construction*
+sites as separate *delivery* mechanisms, which they are not for all but the 9 independent sites.
+
+## 315. `emitStructuredProgress` has two independent definitions sharing a name — the sixth duplicate-name pair
+
+**Bucket: Neither.** A naming collision recorded for the collapsing-rule discipline this ledger
+already applies to `applyPatchPlan`, `runApplyFlow`, `decideExecutionMode`, `ensureDir`, and
+`isPathOutsideRepo`. No fix is proposed — both definitions are legitimate, separately-scoped
+closures with no shared behavior to unify.
+
+`src/core/runLlmPatchFlow.ts:4469-4485` defines one `emitStructuredProgress` closure, scoped
+inside `runLlmPatchFlow`'s own body and reachable from its 67 call sites plus the whitelist
+passthrough (item 314). `src/llm/investigationFlow.ts:94-106` defines a second, textually
+identical-looking closure, scoped inside `runInvestigationFlow`'s own body, calling its own local
+`input.onProgress`. A whole-tree grep for the identifier (`grep -rln "emitStructuredProgress" src/`)
+returns exactly these two files — neither imports it from the other or from a shared module. A
+name-scoped instrument (a grep, a call-site count, a type-based scan) over "emitStructuredProgress"
+is under-scoped by construction unless it distinguishes which file's definition it is counting;
+this is exactly how a prior pass's Point E (the establish pass's runtime observation) attached to
+only the `runLlmPatchFlow.ts` definition and explicitly declared the `investigationFlow.ts` one
+unobserved, rather than silently conflating the two.
+
+## 316. The tool-call sink names the tool in `.tool`; `.name` holds the marker string — a reader keyed on `.name` reports every record as unknown
+
+**Bucket: Neither.** Documents a reader hazard in a sink that is itself correctly shaped; there is
+nothing to fix in `~/.zone/tool-calls.jsonl` or its writer (`src/utils/toolCallSink.ts`).
+
+Each line is one JSON object with keys `name, runId, sessionId, seq, iteration, ts, tool, paths,
+command, outcome, reason, droppedSinceLast`. `.name` is always the literal marker string
+`[zone-tool-call-record]` — every record's `.name` is identical, by design, matching every other
+marker sink in this codebase. The tool that was actually called is in `.tool` (e.g.
+`"tool":"apply_patch"`). A JSON reader that filters or displays records keyed on `.name` — treating
+it as "which tool ran" — will find every record's `.name` equal to the marker and equal to every
+other record's, reporting the whole log as unattributable. This is not a defect in the sink: `.name`
+correctly identifies *what kind of record this is* (a marker convention shared across sinks),
+`.tool` correctly identifies *which tool ran*; the hazard is entirely in assuming a field named
+`name` answers "which tool" without checking the record shape first.
+
+## 317. Two disconnected phase channels: a wired-but-producerless transcript marker, and a spinner fed by label strings from five emitters
+
+**Bucket: Neither.** Re-bucketed from a prior pass's own tentative remedy, which the same pass
+found wrong — the remedy is a design decision (transcript marker vs. spinner label vs. both), not
+a patch this entry can specify.
+
+`phase_changed` → `PHASE_MARKER` (`src/cli/tui/store-core.ts`'s reducer) writes only
+`{ kind: "phase_marker", phase }` into `state.transcript` — a numeric payload
+(`src/core/agentLifecycleEvents.ts`), never touching `state.spinner`. No producer constructs a
+`phase_changed` event anywhere in the routes item 314 describes; a tree-wide sweep for the literal
+string confirms zero non-test, non-type-declaration hits. Separately, `SPINNER_START` (label a
+plain string) is dispatched from five distinct emitters and does write `state.spinner`. Emitting
+`phase_changed` today would add a transcript entry a design has not yet specified the rendering
+for; it would not, by itself, move the spinner.
+
+## 318. Plan generation and the token-budget/max-iterations wrapup calls are genuinely non-streamed
+
+**Bucket: Blocked on data.** Closing requires a run that actually enters one of these paths — a
+task shaped to hit the token-budget or max-iterations exit rather than complete normally, or a run
+observed during plan generation itself. The prior instrumented run (a one-line JSDoc edit,
+n=1) could not and did not naturally trigger any of them.
+
+`src/llm/executionPlan.ts:529` (plan generation) and `src/llm/agentLoop.ts`'s four non-streamed
+`createChatCompletion` call sites — `:3571` (`synthesizeTokenBudgetExit`, two independent trigger
+sites at `agentLoop.ts:4465` and `src/llm/toolEventHandler/handleToolResult.ts:176`), `:5707`
+(read-only max-iterations assessment), and `:5815` (write-mode max-iterations assessment, a fifth
+call site not previously catalogued) — all pass request options without `onToolArgumentsDelta` or
+the new `onTextDelta` (`{ signal, effort }` only, or `{ signal }` for plan generation). This is
+confirmed by direct read of each call site's options object (**GUESS** — no run has entered any of
+these four paths to confirm at runtime).
+
+## 319. The 200ms narration debounce is bound to exactly three literal event types by explicit registration, not a wildcard
+
+**Bucket: Neither.** A structural fact this pass acted on directly (see the implementation commit)
+rather than proposing as a standalone fix.
+
+`src/cli/tui/hooks/useAgentEvents.ts` binds `handleTextEvent` via three hardcoded calls —
+`bus.on("narration", handleTextEvent)`, `bus.on("chat_chunk", handleTextEvent)`,
+`bus.on("chat_response", handleTextEvent)`. `src/cli/tui/hooks/eventToActions.ts`'s switch is a
+separate, unrelated dispatch table (only decides store actions for events already routed to a
+non-text handler) and has no bearing on which events debounce. `EventBus`
+(`src/cli/eventBus.ts`) is a thin `EventEmitter` wrapper keyed by exact type string; an
+unregistered type produces no effect anywhere, silently. A new event kind needs its own explicit
+`bus.on` registration to debounce at all, and — as this pass's own implementation demonstrates for
+`chat_chunk` — can be given its own separate debounced handler rather than sharing
+`handleTextEvent`'s buffer, if sharing it would have a side effect (there, committing into the same
+narration entries `ASSISTANT_FINAL` also writes).
+
+## 320. `buildModels()` drops `recommendedTier` between `ModelOption` and `ModelEntry`
+
+**Bucket: Actionable now.** `src/llm/models.ts:10`'s `ModelOption` declares `recommendedTier?`
+(populated on 4 of the catalog's 17 entries) and `ESCALATION_LADDERS` (`models.ts:94-97`) encodes a
+strength ordering, but `buildModels()` (`src/llm/modelRegistry.ts:128-143`) does not carry
+`recommendedTier` into the `ModelEntry` shape the model picker actually reads. The fix is
+mechanical: add the field to `buildModels()`'s projection; nothing new needs to be learned first.
+
+## 321. The `[W]` web-search status-bar glyph is near-constant
+
+**Bucket: Neither.** `src/cli/tui/components/StatusBar.tsx:66`'s `webSearchEnabled !== false`
+means absence of the setting is read as enabled, and `config.ts` resolves an unset
+`webSearchEnabled` to `true` by default — so `[W]` renders for nearly every session regardless of
+whether a run actually used web search. No fix proposed; this is a design question about what the
+glyph should communicate (capability vs. usage), not a defect in the boolean logic itself.
+
+## 322. `OpenAIAdapter.createChatCompletionStream`'s gpt-5.x throw is unreachable from the report path — it constrains an unrelated fallback path instead
+
+**Bucket: Neither.** Corrects a prior pass's own claim that this throw "constrains" the streamed
+report-path work (its proposed entries 3 and 4, items 318 above and its sibling) — it constrains
+neither.
+
+`src/llm/agentLoop.ts` never calls `.createChatCompletionStream` at any of its five
+`createChatCompletion` call sites (confirmed by a full-file grep for both method names) — the two
+streamed sites (`:4351`, `:5577`) call `.createChatCompletion`, whose gpt-5.x branch
+(`src/llm/openaiAdapter.ts:50-61`) does not throw. `onToolArgumentsDelta`/the new `onTextDelta` are
+passed unconditionally into those calls' options but `OpenAIAdapter.createChatCompletion` never
+reads either — dead weight for that provider, not a path to the throw. The throw
+(`openaiAdapter.ts:91-97`, `this.provider === "openai" && normalizeModelId(params.model).startsWith("gpt-5")`)
+is reachable, but through a genuinely separate path: `src/core/runLlmPatchFlow.ts:8351,9274,10400`
+→ `planFullPatchWithLlm` (`src/llm/planFullPatch.ts:711,1235`) → `RecordingLLMClient`
+(`src/llm/recordingClient.ts:168`) → the throw — the "full patch" patch-generation/repair fallback,
+unrelated to streaming a normal final answer.
+
+## 323. Streaming (tool-argument deltas today; assistant-text deltas as of this pass) is Anthropic-only — 9 of the model catalog's 17 entries get neither
+
+**Bucket: Neither.** A scoped-feature limit, not a defect. Extending either mechanism to OpenAI
+would require building against its own streaming surface (`createChatCompletionStream`, item 322,
+or the Responses API), a separate piece of work.
+
+`onToolArgumentsDelta` and the new `onTextDelta` (`src/llm/types.ts`) are read only by
+`AnthropicAdapter.createChatCompletion` (`src/llm/anthropicAdapter.ts:99-101`); OpenAI's
+implementation of the same method never inspects either option. The model catalog
+(`src/llm/modelRegistry.ts`) lists 17 entries, 9 OpenAI and 8 Anthropic — the 9 OpenAI entries
+receive no live streaming feedback under either mechanism, regardless of model. Source-read
+(**GUESS**); not runtime-confirmed against an actual OpenAI-provider run.
+
+## 324. `tool_input_delta` reaches the bus but has no consumer anywhere under the Ink TUI
+
+**Bucket: Neither.** A structural fact that directly shaped this pass's design (no undebounced
+fine-grained-stream precedent existed in the Ink TUI to mirror for assistant-text deltas — the
+200ms narration cadence was the only proven-safe pattern available, so the new mechanism reuses
+it rather than shipping unbuffered).
+
+A whole-tree grep for the literal type string returns exactly 4 non-test hits: its type
+declaration (`src/core/agentLifecycleEvents.ts`), its producer
+(`src/core/runLlmPatchFlow.ts:5443`, inside `toolInputStream`, Phase F1's live tool-argument
+streaming), and two consumers — `src/remote/toWireFrame.ts:74-84` (relayed live, unbounded, to
+connected remote-control clients — see item 325) and an explicit no-op case in
+`src/cli/sink.ts:383-394` (headless mode). Zero hits anywhere under `src/cli/tui/`. The 34
+`tool_input_delta` arrivals a prior pass measured at the bus during an instrumented run therefore
+had no visible effect on the primary Ink interface — only on the two secondary surfaces.
+
+## 325. Remote-control clients receive per-fragment delta events with no debounce and no size cap — a pre-existing pattern this pass's own new event now also uses
+
+**Bucket: Neither.** Recorded rather than fixed in this pass — bounding the remote-control
+broadcast path is a change to a different subsystem (`src/remote/`), with its own testing and
+connectivity considerations (V1 is unencrypted `ws`, Tailscale/LAN-scoped), out of the report-path
+scope this pass targets.
+
+`src/remote/remoteControlAdapter.ts`'s own `onProgress` converts every arriving event to a wire
+frame via `toWireFrame()` and calls `broadcast(frame)` unconditionally; `client.send(...)`
+(`src/remote/controlServer.ts:292`) is a raw, unthrottled WebSocket send with no batching or size
+limit anywhere in either file. `tool_input_delta` (item 324) already exhibits this exact pattern —
+every JSON-argument fragment is broadcast individually, uncapped, today. This pass's `chat_chunk`
+mechanism joins that same broadcast path (`toWireFrame.ts` already had a ready case for it,
+grouped with `tool_input_delta` under "Output chunks: text/delta content only" — no code change
+was needed there), carrying neither the 200ms debounce nor the 2,000-character tail cap that
+apply only inside the TUI's own handler. This is not a new risk category introduced by this pass;
+it extends an existing, previously unrecorded gap to one more event kind.
+
+## 326. `composer.ts`'s own code comment flags a latent title-mislabeling bug on the write-mode max-iterations exit
+
+**Bucket: Neither.** Recorded as found; not resolved in this pass, and its own comment already
+names the defect precisely enough that a future pass may find it directly actionable — left here
+as a structural fact rather than asserting a fix this pass did not design or verify.
+
+`src/llm/runCompletion/composer.ts` carries its own comment: `// LATENT BUG: max_iterations exit
+reports "token_budget_exceeded" even though this is an iteration-cap exit, not a token-budget one`.
+This affects `agentLoop.ts:5815` (the write-mode max-iterations assessment, item 318) — its
+`agent_loop_complete.title` reads identically to `:3571`'s genuine token-budget exit. Harmless
+today only because `:5815` and `:5707` (the read-only counterpart) are mutually exclusive via one
+`isReadOnlyMode` gate, so no single run's `agent_loop_complete` title is ever asked to distinguish
+between the two — found while establishing item 318, not by any dedicated investigation of
+`composer.ts` itself.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
@@ -25647,7 +25874,7 @@ first.
 286, 288, 289, 290, 301, 302, 304, 308, 309, 310
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (7): 287, 291, 292, 293, 296, 299, 313
+first (8): 287, 291, 292, 293, 296, 299, 313, 320
 
 Six, down from seven, and the movement is the ledger's own signal about whether anything is specified
 and waiting, in both directions. The diagnosis pass into `find_references` left it at 7 (287 plus six
@@ -25664,17 +25891,25 @@ its measurement concluded that neither guard shape item 305 sketches is worth bu
 "Actionable now" requires a fix specified in the entry, which a decision not to build is not. The
 pass after it took the bucket from six to eight by running item 304's site 3 rather than reading it:
 309 and 310 both arrived with a fix already specified and measured to work, and 311 went to Neither
-in the same commit because its remedy is a key choice nobody has made. This pass built both — 309 and
-310 closed, landing the bucket back at six: 287, 291, 292, 293, 296, 299.
+in the same commit because its remedy is a key choice nobody has made. That pass built both — 309 and
+310 closed, landing the bucket back at six: 287, 291, 292, 293, 296, 299. A later, unrelated release
+pass filed 313 (the dist-orphan `prepack` fix, its own fix specified in the same entry) with no
+corresponding update to this paragraph's own narrative, reaching seven without this text saying so —
+noted here rather than silently left, since a bucket header and its own prose disagreeing about how
+a count was reached is exactly the kind of drift this document's own discipline exists to catch.
+This pass lands `buildModels()` dropping `recommendedTier` as 320 — a mechanical one-line projection
+fix, carried forward from an earlier pass's unlanded draft rather than newly discovered — reaching
+eight: 287, 291, 292, 293, 296, 299, 313, 320.
 
-**Blocked on data** — closing requires an observation that doesn't exist yet (15): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250, 263
+**Blocked on data** — closing requires an observation that doesn't exist yet (16): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250, 263, 318
 
-**Neither — a structural fact recorded, with no fix proposed** (140): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
+**Neither — a structural fact recorded, with no fix proposed** (151): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
 74, 76, 77, 78, 79, 80, 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109,
 112, 114, 115, 118, 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152,
 154, 155, 158, 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199,
 200, 201, 202, 205, 206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230,
-232, 243, 244, 247, 248, 249, 254, 256, 261, 272, 294, 295, 297, 298, 300, 303, 305, 306, 307, 311, 312
+232, 243, 244, 247, 248, 249, 254, 256, 261, 272, 294, 295, 297, 298, 300, 303, 305, 306, 307, 311, 312,
+314, 315, 316, 317, 319, 321, 322, 323, 324, 325, 326
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
