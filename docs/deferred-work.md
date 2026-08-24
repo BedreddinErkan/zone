@@ -25128,6 +25128,17 @@ shape whose population is defined by write DESTINATION rather than by write prim
 is named as unmeasured, not recommended — nothing here has measured its own exemption surface, and
 four vacuous guards have been caught in this project already.
 
+**That condition is WITHDRAWN, and the measurement that withdrew it is item 309's.** A
+destination-keyed population provably misses a live model-derived escape: `patch/backupFile.ts`
+writes to a destination contained by `path.basename`, which any destination-keyed population would
+classify as safe, while the content it writes there is read from a **model-derived source path** with
+no boundary check of any kind — the read escape item 309 reproduces. Keying on destination answers
+the wrong half of that call. Recorded as a withdrawal rather than replaced quietly, because a later
+reader would otherwise build the named shape and inherit a hole the entry that named it already
+knew about. **The honest state: neither a primitive-keyed nor a destination-keyed population has
+been shown adequate, and the condition to change is now open rather than specified.** Item 307
+records the primitive-keyed failure; this paragraph records the destination-keyed one.
+
 ## 306. Three frozen absolutes have no disposition mechanism, so a legitimate mention of the pattern they detect cannot be written
 
 **Bucket: Neither.** A structural fact recorded, with no fix proposed — the two available remedies
@@ -25163,9 +25174,11 @@ subject is an inconvenience, and a second would make it a recurring cost worth p
 
 ## 307. A write-primitive census reports the one site still known to be defective as covered, because that file's unrelated directory calls put it on the list
 
-**Bucket: Neither.** A structural fact recorded, with no fix proposed — the remedy is a census
-keyed on something other than the primitive, and item 305 records why no shape measured so far
-earns being built.
+**Bucket: Neither.** The claim, stated as the claim rather than as its mechanism: **a census keyed
+on write primitives reports `src/patch/applyPatchPlan.ts` — a site with a live, reproduced escape
+(item 309) — as covered**, and `src/patch/backupFile.ts` and `src/core/saveAgentResult.ts` have the
+same shape. A structural fact recorded with no fix proposed; item 305 records why no census shape
+measured so far earns being built.
 
 **The fact, and the loose version of it is false.** Item 304's site 3 is
 `src/patch/applyPatchPlan.ts`, whose model-derived write is
@@ -25209,16 +25222,41 @@ site 3 by reading the chain, not by the census — the census's own shape could 
 **Item 304 stays Closed**; this is the same treatment item 304 gave item 301's conflated caller
 list. See `08b374cd` for the census and `3c6362e1` for the site-2 fix that left site 3 open.
 
+**The three-file list is complete for this entry's own shape, confirmed by a second instrument.**
+The list was derived once, by `git grep`, and had not been checked. An AST walk over tracked
+production `src/` — validated first against a known-answer fixture carrying three expected wrapper
+calls and two decoys, a method call and a locally-redefined name, neither of which leaked — returns
+the identical enumeration: 4 external `ensureDir` callers, 4 `writeTextFile`, 0
+`atomicWriteFileSync`, 3 `writeAuditSnapshot`, 2 `writeJsonFile`, 3 for the `snapshotStore`-local
+`ensureDir`, **16 external caller sites**. Files that call a write wrapper while holding no
+filesystem primitive of their own: exactly the three this entry names.
+
+**Two bounds that keep the entry from reading narrower or wider than it is.** The **transitive**
+write closure — every function reaching a write through any number of hops — is **32 files**, so the
+one-hop shape described here is the sharp instance of a much wider class rather than the whole of
+it. And `patch/backupFile.ts` is in the list for a reason the shape does not capture: its
+*destination* is contained by `path.basename`, and what makes it dangerous is its *source*, a
+model-derived path read with no boundary check.
+
 **The condition to change.** A census whose population is derived from write *destination* rather
 than from the callee's name — reaching a wrapper's callers transitively — would contain site 3.
-Nothing here has measured that shape's own exemption surface, and item 305 records what happens
-when a guard shape is adopted before its false-positive population is sized.
+That shape is **not** a sufficient answer, and item 305 records the withdrawal: `backupFile`'s own
+destination is safe by construction while its source escapes, so a destination-keyed population
+classifies it as covered for the same reason a primitive-keyed one classifies
+`patch/applyPatchPlan.ts` as covered. The condition is open, not specified.
 
-## 308. Two instruments in this repository drop matches silently, and a regex census that trusts either understates itself with no error
+## 308. Closed — relocated to CLAUDE.md: two instruments in this repository drop matches silently, and a regex census that trusts either understates itself with no error
 
-**Bucket: Neither.** A structural fact recorded, with no fix proposed — the working practice
-(`-a`, and strip the carriage return) is cheap and already stated; there is no code change to make
-and no counter to freeze.
+**Bucket: Neither → Closed, relocated.** Not fixed and not withdrawn — **moved**, because this
+entry's content is not deferred work. It is a set of environment facts a scan must know *before* it
+starts, which is what CLAUDE.md's "Operational notes for changes" section is for, and where the
+sibling facts it kept pointing at already live: the `rankerBaseline.snapshot.json` fixture-shadow
+hazard and the shell `grep` function's gitignore skipping. A reader who consults the ledger before
+running a scan is a reader who already knows to be careful; the facts belong where the careless
+reader will meet them. The four findings below are now a bullet in that section, written as
+description rather than as a byte-exact quotation attributed to a source file, so
+`scripts/claudeMdQuotations.test.ts`'s deliberately closed two-pair checked set stays closed. The
+text is kept here rather than deleted, per the standing rule that a relocation is recorded.
 
 **Why this is worth an entry when the workaround is one flag.** Both failures are silent. Neither
 prints a warning, neither exits nonzero, and both produce a *smaller, plausible* number rather than
@@ -25259,26 +25297,178 @@ trailing carriage return before parsing each line, or match with `[\s\S]` rather
 treat a per-file zero from a textual instrument as a question rather than an answer, since the two
 hazards named here both present as one.
 
+## 309. Item 304's site 3 escapes in both directions, and its write-side "contained by construction" is wrong
+
+**Bucket: Actionable now.** The fix is the one item 304's own "condition to change" already
+specifies — replace `isPathOutsideRepo`'s lexical comparison with `checkPathBoundary` — and this
+entry measures that it closes both escapes rather than assuming it. **Item 304 stays Closed and
+stays open on sites 3 and 4; nothing here reopens it.**
+
+**What the check compares, read link by link.** `isPathOutsideRepo` (`src/patch/validatePatchPlan.ts`)
+resolves the repository root and the patch path with `path.resolve`, takes `path.relative` between
+the two, and rejects when the result begins with a parent-directory segment or is absolute. **No
+`realpath` on either side.** It is item 301's class exactly — differing only in comparing via
+`path.relative` instead of a string prefix, which avoids the sibling-directory confusion a bare
+prefix has and is equally blind to a symlink. Item 304 established that the check *enforces*, which
+is true and is why the traversal and absolute-path constructions were blocked; neither of those
+constructions used a symlink, so neither could reveal this.
+
+**Two controls first, so a refusal is distinguishable from a broken harness.** A parent-directory
+traversal is rejected with `PATH_OUTSIDE_REPO` and `isValid: false` — the instrument can see a
+block. A legitimate in-repo `create` lands on disk — the harness can produce a write. Both ran in a
+fresh temporary fixture against the built artifact.
+
+**The read escape, and it has TWO sinks rather than the one item 304 records.** A `modify` operation
+whose path is an in-repo symlink pointing at an existing file outside the repository validates with
+`isValid: true` and **zero issues**. `patch/applyPatchPlan.ts` then reads through the symlink and:
+
+- in **dry-run** mode, embeds the outside file's first 4000 characters in the patch document and
+  writes it to `.agent-patches/<sanitized>.patch-preview.txt`. Item 304 records only the
+  `.agent-backups` sink and only under apply mode. This one has **no mode guard at all**, so it
+  fires in the mode a user selects precisely to avoid side effects;
+- in **apply** mode, additionally copies the whole file to `.agent-backups/<timestamp>/<basename>`.
+
+**The write escape, which item 304 states does not exist.** That entry reads "the `create` branch
+skips because the target exists" — true only for a symlink whose target exists. Point an in-repo
+symlink at a path that does **not** exist outside the repository and `fileExists` (`fs.access`)
+follows the dangling link, reports false, and the `create` branch proceeds:
+`writeTextFile` → `fs.writeFile` follows the symlink and **creates the outside file**. Verified on
+the filesystem rather than on a return value — absent before the call, present after, holding the
+generated-file header plus the model's own preview text. `applyPatchPlan` returns
+`action: "created"` with an `outputPath` naming the in-repo symlink: it reports success and names
+the wrong file, the same shape item 304 found at site 2. Per this document's own observer
+discipline the probe also records that the symlink is still a symlink afterwards — the property
+*adjacent* to containment, and exactly the assertion that would have missed this.
+
+**Ordering, since the natural hypothesis is wrong.** The copy does not precede the check and does
+not sit on another branch. `runFeatureAgent` calls `validatePatchPlan`, then `decideExecutionMode`,
+then `applyPatchPlan` inside its dry-run-or-apply gate. The check runs **first** and **passes**. The
+cause is symlink-blindness, not sequence. Within `applyPatchPlan`'s `modify` branch the order is
+`readTextFile`, then `backupFile` under apply only, then the preview write.
+
+**The specified fix closes both, measured rather than argued.** Run directly against the two
+constructions, `checkPathBoundary` returns `escape` for the symlink whose target exists
+(`reason: "outside_repo"`) and `escape` for the dangling one (`reason: "unresolvable"` —
+`nearestExistingAncestor` uses `lstatSync`, so it finds the broken link itself rather than skipping
+to its parent, and `realpathSync` then throws on it). Controls: an ordinary in-repo path and an
+`.agent-patches` path both return `true`, so it is not refusing everything. A validator-level fix
+also closes the **write** escape, because an error-severity issue blocks the plan before
+`applyPatchPlan` is reached at all.
+
+**Severity, bounded by reachability rather than by assertion.** `runCliWithOptions` is reached only
+from an interactive terminal with no `--print`, with **no positional task** (a positional argument
+routes to the TUI), and with `--task` given — the flag whose own help text marks it deprecated in
+favour of the positional form. `runFeatureAgent` additionally needs **not** `--task-only`, and
+`applyPatchPlan` needs `--mode dry-run` or `--mode apply`; the default is `preview`, under which
+this code never runs. Note that `--dry-run` and `--mode dry-run` are **different options** and only
+the second reaches here. Finally `decideExecutionMode` must return `safe_to_apply`, which requires
+confidence at or above 85 **and zero warnings of any kind**. So: an unusual invocation, using a
+deprecated flag while the documented spelling routes elsewhere.
+
+**An incidental observation, recorded without inflation.** `runFeatureAgent` passes only the target
+path, the plan and the mode to `applyPatchPlan` — never `schemaPatchWarnings` — so that function's
+`blockingSchemaErrors` branch cannot fire in production. It is redundant rather than defective:
+`decideExecutionMode` already blocks on error severity upstream.
+
+Every probe ran in a fresh temporary fixture, never in this repository; `git status` here was
+checked immediately before and immediately after each one and was identical, and every fixture was
+removed with removal confirmed by the probe's own output. See `2452803e` for the same class fixed
+at item 301's site, `3c6362e1` for site 2, and `08b374cd` for the census that named site 3.
+
+## 310. The patch validator classifies an unresolved path and contains a resolved one, so the protected-file list is bypassed by re-spelling
+
+**Bucket: Actionable now.** The fix is one change in `src/patch/validatePatchPlan.ts`: classify the
+same path the boundary check already resolves.
+
+**Three notions of one path inside one call chain.** `validatePatchPlan` normalizes the patch path —
+where "normalize" is only a backslash-to-forward-slash replacement plus a trim, **not** a resolution
+— and then applies two checks to two different things. `isPathOutsideRepo` sees the path **resolved**
+by `path.resolve`. `isProtectedFilePath`, which holds the `.env` / lockfile / `.github/workflows/` /
+`.git/` list, sees the **normalized-but-unresolved** string and compares it by equality and prefix.
+And `patch/applyPatchPlan.ts`, the writer, computes its own destination with `path.join` on the
+**raw** path — a third computation. This document has been burned before by two computations of one
+path drifting apart; here there are three by construction.
+
+**The bypass, with its control.** Spelled plainly, `.env` is correctly rejected with
+`TARGETS_PROTECTED_FILE` and `isValid: false`. Spelled `./.env`, `src/../.env` or `.//.env`, the
+same file validates with **zero issues** and `isValid: true` — every one of those resolves to the
+repository's own `.env`, which is what `isPathOutsideRepo` sees and passes as in-repo, and which
+`isProtectedFilePath` never sees because it is comparing the unresolved spelling. The writer then
+joins the raw path and lands on `.env` regardless. **No symlink is involved in this one**, and it
+works in dry-run mode.
+
+**What that reaches.** A `modify` operation on the repository's own `.env` reads it and copies its
+first 4000 characters into `.agent-patches/`, and under apply mode the whole file into
+`.agent-backups/`. The protected-file list exists to prevent exactly that, and the list is not
+wrong about which paths matter — it is looking at the wrong string. Item 311 records why the copy is
+then readable, which is a separate defect with a separate fix; **closing this entry removes that
+defect's only known live instance without addressing it.**
+
+**The fix, and what it does not cover.** Applying `isProtectedFilePath` to the resolved path — the
+one `isPathOutsideRepo` already computes — closes every spelling, because resolution is what
+collapses them. It does not close the writer's third computation: a validator-level fix still leaves
+`applyPatchPlan` joining the raw path, so the check and the write continue to disagree about what
+"the path" is whenever normalization changes the string. Recorded so the narrower fix is not
+mistaken for the wider one.
+
+## 311. read_file's sensitive-path blocklist is keyed on basename, so any step that copies a file under a new name defeats it
+
+**Bucket: Neither.** A structural fact recorded, with no fix proposed — the remedy is a key choice
+with real trade-offs, and this entry does not make it.
+
+**The mechanism.** `read_file`'s BYOK2 blocklist decides from `path.basename` and two path-shaped
+regular expressions: it refuses a file called `.env`, one beginning `.env.` other than
+`.env.example`, and paths under `.zone/keys.json` or `.zone/sessions/`. The classification therefore
+lives entirely in the **name**, and nothing carries it across a copy. Any code path that reads a
+protected file and writes its contents somewhere else under a different name produces an artifact
+the blocklist has no opinion about, sitting inside the repository where `checkPathBoundary` is happy
+to serve it.
+
+**One known live instance today, run end to end against the built artifact.** Four steps, each
+measured, not reasoned: `read_file` on `.env` is **refused**; a patch plan naming `./.env` validates
+with zero issues (item 310); `applyPatchPlan` in **dry-run** writes the secret into
+`.agent-patches/._.env.patch-preview.txt`; and `read_file` on that path **succeeds and serves the
+secret**. The sibling copy under `.agent-backups/<timestamp>/.env` is correctly refused, because its
+basename really is `.env` — which is the whole point, and the reason the two sinks had to be tested
+separately rather than treated as one. `sanitizeFileName`, the helper item 304 credits with
+containing the destination, is also what renames the file out of the blocklist's reach: the path is
+contained and the classification is lost in the same call.
+
+**Why this is not folded into item 310.** Their fixes are independent and in different files.
+Item 310's fix classifies the resolved path in `src/patch/validatePatchPlan.ts` and removes the only
+instance known today; this entry is a property of the blocklist's key, in
+`src/tools/toolExecutor.ts`, and survives that fix untouched. Recording them together would leave a
+reader believing the key choice had been addressed because its one visible symptom went away — the
+same trap the item 294 and 295 split exists to avoid.
+
+**The trade-off, stated rather than resolved.** Keying on content or on provenance means tracking
+where bytes came from across a copy, which nothing in this codebase does today. Excluding the agent
+artifact directories from `read_file` is cheap but narrow: it fixes the directory this instance
+happens to use and not the property. Adding a name pattern for preview and backup artifacts is
+narrower still. The condition to change is a **second** live instance arising from a different
+copying step, which would settle whether the weakness is worth code or whether removing instances as
+they appear is the proportionate answer.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 308 to find out which ones still need something. No index of
+reader the trouble of reading all 311 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (148): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42,
+**Closed** (149): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42,
 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113,
 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167,
 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228,
 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260,
 262, 264, 265, 266, 267, 268, 269, 270, 271, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285,
-286, 288, 289, 290, 301, 302, 304
+286, 288, 289, 290, 301, 302, 304, 308
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (6): 287, 291, 292, 293, 296, 299
+first (8): 287, 291, 292, 293, 296, 299, 309, 310
 
 Six, down from seven, and the movement is the ledger's own signal about whether anything is specified
 and waiting, in both directions. The diagnosis pass into `find_references` left it at 7 (287 plus six
@@ -25292,7 +25482,10 @@ back at 6: 287, 291, 292, 293, 296, 299. Every movement in either direction has 
 some session in this series generated rather than from inherited backlog. The pass that measured
 item 305's exemption surface filed 307 and 308 and moved nothing into this bucket — deliberately:
 its measurement concluded that neither guard shape item 305 sketches is worth building, and
-"Actionable now" requires a fix specified in the entry, which a decision not to build is not.
+"Actionable now" requires a fix specified in the entry, which a decision not to build is not. The
+pass after it took the bucket from six to eight by running item 304's site 3 rather than reading it:
+309 and 310 both arrived with a fix already specified and measured to work, which is the criterion,
+and 311 went to Neither in the same commit because its remedy is a key choice nobody has made.
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (15): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250, 263
 
@@ -25301,7 +25494,7 @@ its measurement concluded that neither guard shape item 305 sketches is worth bu
 112, 114, 115, 118, 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152,
 154, 155, 158, 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199,
 200, 201, 202, 205, 206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230,
-232, 243, 244, 247, 248, 249, 254, 256, 261, 272, 294, 295, 297, 298, 300, 303, 305, 306, 307, 308
+232, 243, 244, 247, 248, 249, 254, 256, 261, 272, 294, 295, 297, 298, 300, 303, 305, 306, 307, 311
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
