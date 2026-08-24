@@ -50,10 +50,22 @@ describe("computeStreamingAnswerUpdate", () => {
     expect(s.buffer.length).toBe(cap);
   });
 
-  it("default tail cap is the exported STREAMING_ANSWER_TAIL_CAP constant, not a re-guessed literal", () => {
-    const long = "x".repeat(STREAMING_ANSWER_TAIL_CAP + 500);
+  // The cap bounds a region Ink re-renders every frame outside <Static>, and the frame-cost
+  // measurement taken at that value is what licensed shipping without a flag — so the value
+  // itself is load-bearing and is pinned to a literal here. An earlier version of this test
+  // derived BOTH its input length and its expected output from STREAMING_ANSWER_TAIL_CAP, which
+  // made it self-referential: it passed for every finite cap value and could only ever fail on
+  // Infinity, and then only because "x".repeat(Infinity) throws inside the test's own setup.
+  // A mutation is supposed to die on an assertion, not on the harness.
+  it("the default tail cap is 2000 — pinned to a literal, since the frame-cost budget is keyed to it", () => {
+    expect(STREAMING_ANSWER_TAIL_CAP).toBe(2000);
+  });
+
+  it("default-path input of a FIXED 5000 chars is capped to exactly 2000 — literals independent of the constant", () => {
+    const long = "x".repeat(5000);
     const s = computeStreamingAnswerUpdate(START, { runId: "run-1", iter: 1, delta: long });
-    expect(s.buffer.length).toBe(STREAMING_ANSWER_TAIL_CAP);
+    expect(s.buffer.length).toBe(2000);
+    expect(s.buffer).toBe("x".repeat(2000));
   });
 
   it("missing iter/runId (defensive — should not throw or silently accumulate forever under one blank key)", () => {

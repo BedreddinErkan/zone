@@ -42,9 +42,19 @@ describe("streamingAnswer frame-cost measurement (gates rollout — report the n
     expect(at2x).toBeLessThan(400);
   });
 
-  it("negative control — an empty streamingAnswer renders with no measurable region (sanity check on the measurement itself)", () => {
+  it("negative control / baseline — an empty streamingAnswer renders no preview region, and its cost is the reference the capped figures are read against", () => {
+    // Without this number the capped timings above have no reference: "2.5ms at the cap" is only
+    // meaningful beside the cost of the same render carrying no preview at all.
+    const start = performance.now();
     const h = renderTranscriptAt([], 80, "");
-    expect(h.lastFrame() ?? "").not.toContain("The answer keeps streaming");
+    const frame = h.lastFrame() ?? "";
+    const baseline = performance.now() - start;
     h.unmount();
+
+    // eslint-disable-next-line no-console
+    console.log(`[frame-cost] baseline (empty streamingAnswer) cols=80: ${baseline.toFixed(2)}ms`);
+
+    expect(frame).not.toContain("The answer keeps streaming");
+    expect(baseline).toBeLessThan(200);
   });
 });

@@ -47,28 +47,48 @@ describe("TUI.2 transcript rendering", () => {
     unmount();
   });
 
-  it("chat_chunk events accumulate in transcript", async () => {
+  // These two drive a real bus into a real <App>, which makes them the subscription-layer
+  // observer for chat_chunk's routing — the layer a reducer test cannot reach. Both previously
+  // asserted only that the text appeared *somewhere*, which stopped discriminating once
+  // chat_chunk was repointed from the narration/commit path to the live preview: the text is
+  // still on screen either way, so they passed for a changed reason. What distinguishes the two
+  // routings is WHERE the text lives, so that is what they assert now.
+  it("chat_chunk renders as a LIVE preview and is never committed to the transcript", async () => {
     const bus = createEventBus();
     const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
 
-    bus.emit("chat_chunk", makeEvt("chat_chunk", { delta: "Hello " }));
-    bus.emit("chat_chunk", makeEvt("chat_chunk", { delta: "world" }));
+    bus.emit("chat_chunk", makeEvt("chat_chunk", { delta: "Hello ", iter: 1 }));
+    bus.emit("chat_chunk", makeEvt("chat_chunk", { delta: "world", iter: 1 }));
     await wait(250);
 
+    // Visible while streaming — the live region below <Static>.
     expect(lastFrame()).toContain("Hello world");
+
+    // A run-terminal event clears liveTail. run_summary carries no `detail`, so it produces no
+    // ASSISTANT_FINAL — nothing re-adds the text. If chat_chunk were still routed through
+    // handleTextEvent/NARRATION_COMMIT it would have been committed to <Static> by now and would
+    // survive this clear; that it does NOT survive is the assertion that tells the two apart.
+    bus.emit("run_summary", makeEvt("run_summary"));
+    await wait(250);
+
+    expect(lastFrame()).not.toContain("Hello world");
     unmount();
   });
 
-  it("10 rapid chat_chunk events coalesce into one dispatch (debounce)", async () => {
+  it("10 rapid chat_chunk events coalesce into one concatenated preview (debounce)", async () => {
     const bus = createEventBus();
-    const { unmount } = render(<App bus={bus} initialPrompt="test task" />);
+    const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
 
     for (let i = 0; i < 10; i++) {
-      bus.emit("chat_chunk", makeEvt("chat_chunk", { delta: `chunk${i} ` }));
+      bus.emit("chat_chunk", makeEvt("chat_chunk", { delta: `chunk${i} `, iter: 1 }));
     }
     await wait(250);
-    // All 10 chunks should be visible as a single concatenated string
-    // Verified by checking the last frame contains the last chunk text
+
+    // Previously this test emitted, waited, and unmounted with no assertion at all — its comment
+    // claimed a verification it never performed. All ten fragments share one (runId, iter), so
+    // they accumulate rather than reset, and the 200ms debounce commits them as one string.
+    const frame = lastFrame() ?? "";
+    for (let i = 0; i < 10; i++) expect(frame).toContain(`chunk${i}`);
     unmount();
   });
 

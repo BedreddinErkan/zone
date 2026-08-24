@@ -479,3 +479,86 @@ describe("Phase F1.4 — worker subagent tool input streaming", () => {
     }
   });
 });
+
+// ── onTextDelta wiring (ledger item 327) ─────────────────────────────────────
+//
+// The loop-level half of the assistant-text streaming path: the adapter fires a bare string
+// fragment, and agentLoop's wrapper is what attaches `iter` and forwards it to input.onTextDelta.
+// The `iter` this attaches is the reset key's whole basis downstream, so it is asserted on
+// directly rather than inferred from a downstream effect.
+
+/** A createChatCompletion mock that streams assistant text, then returns a final response. */
+function makeTextStreamingMock(fragments: string[], finishReason = "stop") {
+  return vi.fn(async (_params: unknown, options: { onTextDelta?: (f: string) => void } = {}) => {
+    for (const f of fragments) options.onTextDelta?.(f);
+    const res = textResponse(fragments.join(""));
+    return { ...res, choices: [{ ...res.choices[0]!, finish_reason: finishReason }] };
+  });
+}
+
+describe("agentLoop onTextDelta wiring", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    resetToolExecutorMock(toolExecutorMock);
+    toolExecutorMock.executeTool.mockResolvedValue({ success: true, output: "ok" });
+    toolExecutorMock.withStagingTempFlush.mockImplementation((_: unknown, fn: () => unknown) => fn());
+  });
+
+  it("forwards each fragment with the iteration number attached", async () => {
+    const onTextDelta = vi.fn();
+    mocks.createChatCompletion.mockImplementation(makeTextStreamingMock(["Hello", " world"]));
+
+    await runAgentLoop({ task: "test", repoPath: "/tmp", runId: "run-text-1", onTextDelta });
+
+    expect(onTextDelta).toHaveBeenCalledTimes(2);
+    expect(onTextDelta.mock.calls.map((c) => c[0])).toEqual([
+      { iter: 1, delta: "Hello" },
+      { iter: 1, delta: " world" },
+    ]);
+  });
+
+  it("passes onTextDelta into request options only when the input callback is present", async () => {
+    const captured: Array<{ onTextDelta?: unknown }> = [];
+    mocks.createChatCompletion.mockImplementation(async (_p: unknown, options: unknown) => {
+      captured.push(options as { onTextDelta?: unknown });
+      return textResponse("Done.");
+    });
+
+    await runAgentLoop({ task: "test", repoPath: "/tmp", runId: "run-text-2", onTextDelta: vi.fn() });
+    expect(typeof captured[0]!.onTextDelta).toBe("function");
+
+    captured.length = 0;
+    await runAgentLoop({ task: "test", repoPath: "/tmp", runId: "run-text-3" });
+    expect(captured[0]!.onTextDelta).toBeUndefined();
+  });
+
+  // The continuation call site is reached only on finish_reason:"length". Without this case the
+  // continuation wiring has no observer at all, and removing it there would look inert rather
+  // than broken. Both sites deliberately share one iter — a continuation extends the same answer
+  // rather than starting a new turn — so this also pins that sharing.
+  it("fires on the continuation call site too, carrying the SAME iter as the main call", async () => {
+    const onTextDelta = vi.fn();
+    mocks.createChatCompletion
+      .mockImplementationOnce(makeTextStreamingMock(["cut off mid-"], "length"))
+      .mockImplementationOnce(makeTextStreamingMock(["sentence, continued."], "stop"));
+
+    await runAgentLoop({ task: "test", repoPath: "/tmp", runId: "run-text-cont", onTextDelta });
+
+    const calls = onTextDelta.mock.calls.map((c) => c[0]);
+    expect(calls).toEqual([
+      { iter: 1, delta: "cut off mid-" },
+      { iter: 1, delta: "sentence, continued." },
+    ]);
+    expect(new Set(calls.map((c: { iter: number }) => c.iter)).size).toBe(1);
+  });
+
+  it("negative control — a run with no streamed text fires nothing, so a non-zero count means something", async () => {
+    const onTextDelta = vi.fn();
+    mocks.createChatCompletion.mockImplementation(async () => textResponse("Done."));
+
+    await runAgentLoop({ task: "test", repoPath: "/tmp", runId: "run-text-none", onTextDelta });
+
+    expect(onTextDelta).not.toHaveBeenCalled();
+  });
+});
