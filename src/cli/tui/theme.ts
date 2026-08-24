@@ -104,7 +104,7 @@ export const glyph = {
    *  with it (role.accent or role.muted) varies by entry kind; the glyph itself does not. */
   entryMarker: "◆ ",
   /** Horizontal rule, drawn to the terminal width. Also used undivided as a short decorative
-   *  flourish (IterMarker) — same character, same role, shorter run. Also the spinner's 180°
+   *  flourish — same character, same role, shorter run. Also the spinner's 180°
    *  rotation frame (the palette pass) — the diagonal mark, momentarily horizontal, is the same
    *  glyph as the rule rather than a disconnected local literal of the same character. */
   separator: "─",

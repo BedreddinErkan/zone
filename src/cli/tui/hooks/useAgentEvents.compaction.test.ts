@@ -36,7 +36,7 @@ describe("Compact.3: handlers", () => {
     expect(calls).toEqual([{ type: "SPINNER_UPDATE", label: "Compacting context…" }]);
   });
 
-  it("handleCompactionStatus dispatches SPINNER_STOP → narration → NARRATION_COMMIT", () => {
+  it("handleCompactionStatus dispatches SPINNER_RESUME → narration → NARRATION_COMMIT", () => {
     const { calls, dispatch } = capture();
     handleCompactionStatus({
       type: "compaction_status",
@@ -45,7 +45,10 @@ describe("Compact.3: handlers", () => {
       tokensAfter: 15000,
       savedTokens: 35000,
     } as ZoneStructuredProgressEvent, dispatch);
-    expect(calls[0]).toEqual({ type: "SPINNER_STOP" });
+    // RESUME, not STOP: compaction happens mid-run and the loop continues afterwards. A STOP here
+    // left no spinner at all for the remainder of the run, because nothing downstream restarts one
+    // before RUN_DONE. Contrast handleCompactionExhausted below, which is genuinely terminal.
+    expect(calls[0]).toEqual({ type: "SPINNER_RESUME" });
     expect(calls[1]).toEqual({
       type: "TRANSCRIPT_APPEND_NARRATION",
       text: "Context compacted: ~50k → ~15k tokens (−70%, #1)",
@@ -69,10 +72,11 @@ describe("Compact.3: handlers", () => {
     });
   });
 
-  it("handleCompactionOverflow dispatches SPINNER_STOP + TOAST_PUSH(warning)", () => {
+  it("handleCompactionOverflow dispatches SPINNER_RESUME + TOAST_PUSH(warning)", () => {
     const { calls, dispatch } = capture();
     handleCompactionOverflow({}, dispatch);
-    expect(calls[0]).toEqual({ type: "SPINNER_STOP" });
+    // Mid-run warning: the loop continues, so the spinner is handed back rather than stopped.
+    expect(calls[0]).toEqual({ type: "SPINNER_RESUME" });
     expect(calls[1]).toMatchObject({
       type: "TOAST_PUSH",
       entry: {

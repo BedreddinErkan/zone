@@ -27,8 +27,18 @@ export function eventToActions(
   ctx: EventCtx
 ): { actions: StoreAction[]; intents: ResolverIntent[] } {
   switch (evt.type) {
+    // Honours evt.title, mirroring the plan_generation_started arm below. Before this it
+    // hardcoded the constant and discarded the title the producer had already set — which meant
+    // the *more* specific "Working…" standing from dispatch.ts was replaced by the *less*
+    // specific "Starting…" at the exact moment execution began. The producers do send a title:
+    // "Starting agent tool loop" (runLlmPatchFlow.ts) and "Starting investigation"
+    // (investigationFlow.ts). The constant remains the fallback for producers that send none.
+    //
+    // NOTE: this fixes a discarded field, NOT the standing-label problem. Whatever label lands
+    // here still stands unchanged through every iteration of the loop — see the ledger entry on
+    // per-iteration labelling for the remaining half.
     case "agent_loop_start":
-      return { actions: [{ type: "SPINNER_START", label: SPINNER_LABEL_STARTING }], intents: [] };
+      return { actions: [{ type: "SPINNER_START", label: evt.title ?? SPINNER_LABEL_STARTING }], intents: [] };
 
     case "agent_loop_complete": {
       const actions: StoreAction[] = [];
@@ -115,7 +125,7 @@ export function eventToActions(
     case "verification_fixing":
     case "verification_fixed":
     case "llm_retry_in_progress":
-    case "scope_audit_started":
+    case "final_report_started":
       return { actions: [{ type: "SPINNER_UPDATE", label: evt.title ?? "" }], intents: [] };
 
     case "iter_cost_update":
@@ -147,9 +157,6 @@ export function eventToActions(
 
     case "patch_rejected":
       return { actions: [{ type: "ERROR_LINE", text: evt.title ?? "Patch rejected" }], intents: [] };
-
-    case "phase_changed":
-      return { actions: [{ type: "PHASE_MARKER", phase: String(evt.phase ?? "") }], intents: [] };
 
     case "loop_warning_emitted":
       return {
@@ -267,7 +274,7 @@ export function eventToActions(
       });
       return {
         actions: [
-          { type: "SPINNER_STOP" },
+          { type: "SPINNER_RESUME" },
           { type: "TRANSCRIPT_APPEND_NARRATION", text },
           { type: "NARRATION_COMMIT" },
         ],
@@ -294,7 +301,7 @@ export function eventToActions(
     case "compaction_overflow_warning":
       return {
         actions: [
-          { type: "SPINNER_STOP" },
+          { type: "SPINNER_RESUME" },
           {
             type: "TOAST_PUSH",
             entry: {

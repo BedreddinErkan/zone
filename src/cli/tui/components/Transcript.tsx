@@ -3,7 +3,6 @@ import { useStore, type TranscriptEntry } from "../store.js";
 import { ToolCall } from "./ToolCall.js";
 import { ToolCallGroup } from "./ToolCallGroup.js";
 import { ErrorLine } from "./ErrorLine.js";
-import { IterMarker } from "./IterMarker.js";
 import { getToolDisplayName, formatToolArgs } from "./toolCallFormat.js";
 import { MarkdownText } from "./MarkdownText.js";
 import { DiffView } from "./DiffView.js";
@@ -56,8 +55,6 @@ function renderEntry(entry: TranscriptEntry, index: number, colWidth: number): R
       );
     case "error":
       return <ErrorLine key={index} text={entry.text} />;
-    case "phase_marker":
-      return <IterMarker key={index} phase={entry.phase} />;
     case "user_prompt":
       return (
         <Box key={index} backgroundColor={role.surface} width={colWidth}

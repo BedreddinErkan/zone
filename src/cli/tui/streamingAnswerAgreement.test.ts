@@ -22,6 +22,8 @@ import { describe, expect, it } from "vitest";
 
 const FLOW = path.join(process.cwd(), "src", "core", "runLlmPatchFlow.ts");
 const HOOK = path.join(process.cwd(), "src", "cli", "tui", "hooks", "useAgentEvents.ts");
+const SINK = path.join(process.cwd(), "src", "cli", "sink.ts");
+const WIRE = path.join(process.cwd(), "src", "remote", "toWireFrame.ts");
 
 /** The type literal `textDeltaStream` actually emits. */
 function producerType(): string {
@@ -50,6 +52,11 @@ function committedTypes(): string[] {
   return [...src.matchAll(/bus\.on\("([a-z_]+)",\s*handleTextEvent\)/g)].map((m) => m[1]!);
 }
 
+/** Does a consumer file carry a switch arm for this type? */
+function hasCaseArm(file: string, type: string): boolean {
+  return new RegExp(`case "${type}":`).test(fs.readFileSync(file, "utf8"));
+}
+
 describe("assistant-text streaming — producer and consumer name the same event type", () => {
   it("the type textDeltaStream emits is the type the live-preview handler is registered for", () => {
     expect(producerType()).toBe(consumerType());
@@ -60,6 +67,25 @@ describe("assistant-text streaming — producer and consumer name the same event
     // Floor: an empty list would make the containment check vacuous.
     expect(committed.length, "no handleTextEvent registrations found — extraction is broken").toBeGreaterThan(0);
     expect(committed).not.toContain(producerType());
+  });
+
+  // The TUI is one of THREE consumers. The first version of this file crossed the producer with
+  // the TUI registration only, so a rename coordinated across those two would have silently
+  // stopped headless stdout and the remote wire relay from matching — both fail open (a switch
+  // falls through to a default), so neither would have raised anything.
+  it("the headless sink carries an arm for the type the producer actually emits", () => {
+    expect(hasCaseArm(SINK, producerType())).toBe(true);
+  });
+
+  it("the remote wire frame carries an arm for the type the producer actually emits", () => {
+    expect(hasCaseArm(WIRE, producerType())).toBe(true);
+  });
+
+  it("negative control — hasCaseArm discriminates: a type no consumer handles is not reported as handled", () => {
+    // Without this, hasCaseArm returning true unconditionally would make both assertions above
+    // pass for any producer string at all.
+    expect(hasCaseArm(SINK, "definitely_not_an_event_type")).toBe(false);
+    expect(hasCaseArm(WIRE, "definitely_not_an_event_type")).toBe(false);
   });
 
   it("negative control — the extractors discriminate: they do not both return the same constant regardless of input", () => {

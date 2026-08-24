@@ -152,13 +152,10 @@ export type ZoneStructuredProgressEvent = {
     /** Phase AS: scope revision proposal emitted between plan approval and execute. */
     | "scope_revision_proposed"
     | "scope_revision_resolved"
-    | "scope_audit_started"
-    | "scope_audit_completed"
-    | "scope_audit_skipped"
     /** Phase Z: plan generation summary emitted inline (replaces plan card). */
     | "plan_summary"
     /** Phase D-S1: emitted exactly once when Phase 1 (investigation) hands off to Phase 2 (execution). */
-    | "phase_changed"
+    | "final_report_started"
     /** Compact.1: compaction lifecycle events. compaction_started is typed but not yet emitted
      *  (wired in Compact.3 together with the TUI spinner consumer). */
     | "compaction_started"
@@ -337,6 +334,14 @@ export type ZoneStructuredProgressEvent = {
 
 /** Documentation type for `narration` progress events: a one-line intent
  * statement the agent emits before invoking each tool. */
+/**
+ * Spinner label for the final-report synthesis wait. Defined here, beside the event type it
+ * travels on, and imported by the producer — so the string has ONE definition. A label repeated
+ * at producer and consumer can drift with both tests still passing; this pass has already had a
+ * type literal survive the whole suite for exactly that reason.
+ */
+export const FINAL_REPORT_SPINNER_LABEL = "Writing the run report…";
+
 export type NarrationPayload = {
   text: string;
   iter?: number;

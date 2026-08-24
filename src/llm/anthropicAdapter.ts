@@ -96,7 +96,11 @@ export class AnthropicAdapter implements LLMClient {
     options: LLMRequestOptions = {}
   ): Promise<ChatCompletionWithReasoning> {
     try {
-      if (options.onToolArgumentsDelta) {
+      // Either callback enters the streaming path. onTextDelta alone must work: it is a
+      // separate capability from tool-argument streaming, and gating it on its sibling made it
+      // silently inert for any caller that wanted text but not tool args (ledger item 334).
+      // The call site below is optional-chained for exactly this reason — see the note there.
+      if (options.onToolArgumentsDelta || options.onTextDelta) {
         // await required: without it a streaming-path rejection bypasses this try/catch
         return await this._streamWithToolCallbacks(params, options);
       }
@@ -193,7 +197,11 @@ export class AnthropicAdapter implements LLMClient {
                 const entry = toolsByIndex.get(idx);
                 if (entry) {
                   entry.argsAccum += argFrag;
-                  options.onToolArgumentsDelta!(entry.id, entry.name, argFrag);
+                  // Optional-chained, not asserted: since the branch above admits an
+                  // onTextDelta-only caller, this callback can legitimately be absent while the
+                  // model still emits tool-argument fragments. A non-null assertion here threw a
+                  // TypeError on the first such fragment.
+                  options.onToolArgumentsDelta?.(entry.id, entry.name, argFrag);
                 }
               }
             }

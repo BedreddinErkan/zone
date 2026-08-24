@@ -215,18 +215,6 @@ export function buildCliSink(opts: CliSinkOptions, spinner: Spinner): CliSink {
         if (verbose) out(`${dim}[tier constraints applied]${reset}`);
         break;
 
-      case "scope_audit_started":
-        if (!quiet) spinner.update("Auditing scope...");
-        break;
-
-      case "scope_audit_skipped":
-        if (verbose) out(`${dim}(scope audit skipped${evt.detail ? `: ${evt.detail}` : ""})${reset}`);
-        break;
-
-      case "scope_audit_completed":
-        if (!quiet) out(`${green}  ✓${reset} ${dim}Scope audit complete${reset}`);
-        break;
-
       case "command_approval_required": {
         const approvalId = evt.approvalId;
         const command = evt.command ?? evt.title ?? "";
@@ -306,10 +294,6 @@ export function buildCliSink(opts: CliSinkOptions, spinner: Spinner): CliSink {
         if (!quiet && evt.planSummaryFiles?.length) {
           out(`${dim}Plan: ${evt.planSummaryFiles.join(", ")}${reset}`);
         }
-        break;
-
-      case "phase_changed":
-        if (!quiet) out(`${dim}── Phase ${evt.phase ?? ""} ──${reset}`);
         break;
 
       case "compaction_started":

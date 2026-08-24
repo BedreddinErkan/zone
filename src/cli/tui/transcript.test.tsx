@@ -160,17 +160,6 @@ describe("TUI.2 transcript rendering", () => {
     unmount();
   });
 
-  it("phase_changed renders IterMarker", async () => {
-    const bus = createEventBus();
-    const { frames, unmount } = render(<App bus={bus} initialPrompt="test task" />);
-
-    bus.emit("phase_changed", makeEvt("phase_changed", { phase: 2 }));
-    await wait(50);
-
-    expect(frames.some(f => f?.includes("── Phase 2 ──"))).toBe(true);
-    unmount();
-  });
-
   it("patch_rejected renders ErrorLine", async () => {
     const bus = createEventBus();
     const { frames, unmount } = render(<App bus={bus} initialPrompt="test task" />);
@@ -511,12 +500,6 @@ describe("Transcript harness — entry kinds", () => {
     const h = renderTranscript([{ kind: "error", text: "Patch rejected" }]);
     expect(h.anyFrameContains("⚠")).toBe(true);
     expect(h.anyFrameContains("Patch rejected")).toBe(true);
-    h.unmount();
-  });
-
-  it("phase_marker renders phase label", () => {
-    const h = renderTranscript([{ kind: "phase_marker", phase: "Phase 2" }]);
-    expect(h.anyFrameContains("Phase 2")).toBe(true);
     h.unmount();
   });
 

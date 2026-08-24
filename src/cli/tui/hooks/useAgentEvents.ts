@@ -282,11 +282,9 @@ export function useAgentEvents(
     bus.on("verification_fixing",      simple);
     bus.on("verification_fixed",       simple);
     bus.on("llm_retry_in_progress",    simple);
-    bus.on("scope_audit_started",      simple);
     bus.on("iter_cost_update",         simple);
     bus.on("token_budget_status",      simple);
     bus.on("patch_rejected",           simple);
-    bus.on("phase_changed",            flushFirst);
     bus.on("loop_warning_emitted",     simple);
     bus.on("loop_detected_terminal",   simple);
     bus.on("command_approval_required", handleCommandApproval);
@@ -338,11 +336,9 @@ export function useAgentEvents(
       bus.off("verification_fixing",      simple);
       bus.off("verification_fixed",       simple);
       bus.off("llm_retry_in_progress",    simple);
-      bus.off("scope_audit_started",      simple);
       bus.off("iter_cost_update",         simple);
       bus.off("token_budget_status",      simple);
       bus.off("patch_rejected",           simple);
-      bus.off("phase_changed",            flushFirst);
       bus.off("loop_warning_emitted",     simple);
       bus.off("loop_detected_terminal",   simple);
       bus.off("command_approval_required", handleCommandApproval);

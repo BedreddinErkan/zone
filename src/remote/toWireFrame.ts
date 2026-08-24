@@ -203,7 +203,6 @@ export function toWireFrame(evt: ZoneStructuredProgressEvent): RemoteControlFram
     // Membership is asserted, not assumed — see the default arm below.
     case "command_auto_approved":
     case "command_trusted":
-    case "phase_changed":
     case "plan_generation_started":
     case "llm_retry_in_progress":
       return base;

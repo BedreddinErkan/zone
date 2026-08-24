@@ -52,7 +52,6 @@ const EXTRACTED_FILES = [
   "src/cli/tui/components/DiffView.tsx",
   "src/cli/tui/components/FeedbackModal.tsx",
   "src/cli/tui/components/HookTrustModal.tsx",
-  "src/cli/tui/components/IterMarker.tsx",
   "src/cli/tui/components/LimitsModal.tsx",
   "src/cli/tui/components/McpTrustModal.tsx",
   "src/cli/tui/components/MetricsModal.tsx",

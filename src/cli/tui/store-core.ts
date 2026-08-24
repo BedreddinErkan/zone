@@ -73,7 +73,6 @@ export type TranscriptEntry =
   | { kind: "tool_call"; toolName: string; args: string; patch?: string; results: { ok: boolean; detail: string; blocked?: true }[] }
   | { kind: "tool_call_group"; calls: Array<{ toolName: string; arg: string }> }
   | { kind: "error"; text: string }
-  | { kind: "phase_marker"; phase: string }
   | { kind: "user_prompt"; text: string }
   | { kind: "assistant_final"; text: string }
   /** `diffShownInline` lists the paths whose diff a preceding `tool_call` entry already rendered
@@ -161,6 +160,8 @@ export type StoreState = {
   isResumed: boolean;
   liveTail: LiveTailState;
   spinner: { active: boolean; label: string } | null;
+  /** Label of the last SPINNER_START, so SPINNER_RESUME can restore it after a transient one. */
+  spinnerBaseLabel?: string;
   statusBar: StatusBarState;
   runState: RunState;
   /** Wall-clock start of the CURRENT task (reset per run, not per session). */
@@ -344,6 +345,7 @@ export function buildInitialState(initialValues?: {
 export type StoreAction =
   | { type: "SPINNER_START"; label: string }
   | { type: "SPINNER_UPDATE"; label: string }
+  | { type: "SPINNER_RESUME" }
   | { type: "SPINNER_STOP" }
   | { type: "TRANSCRIPT_APPEND_NARRATION"; text: string }
   | { type: "TRANSCRIPT_ADD_THINKING"; text: string }
@@ -354,7 +356,6 @@ export type StoreAction =
   | { type: "DAILY_USED_UPDATE"; dailyUsedUsd: number }
   | { type: "TOAST_PUSH"; entry: ToastEntry }
   | { type: "TOAST_POP" }
-  | { type: "PHASE_MARKER"; phase: string }
   | { type: "STREAMING_ANSWER_SET"; text: string }
   | { type: "ERROR_LINE"; text: string }
   | { type: "RUN_DONE" }
@@ -531,6 +532,12 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
       return {
         ...state,
         spinner: { active: true, label: action.label },
+        // Remembered so a transient label (compaction) can hand the spinner BACK to whatever was
+        // standing, rather than to a generic constant. Restoring a specific label with a vaguer
+        // one is the same defect as discarding evt.title at agent_loop_start; a shared resume
+        // constant would have reintroduced it. SPINNER_UPDATE deliberately does not touch this —
+        // that is what makes an update transient and a start durable.
+        spinnerBaseLabel: action.label,
         runState: "running",
         // Reset the per-task timer only when ENTERING a run. A mid-run
         // SPINNER_START (e.g. a nested/subagent loop) keeps the original start.
@@ -550,6 +557,16 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
       };
     case "SPINNER_UPDATE":
       return { ...state, spinner: { active: true, label: action.label } };
+    // Ends a transient label without ending the spinner. A mid-run SPINNER_STOP left no spinner
+    // at all for the remainder of the run, since nothing downstream restarts one before RUN_DONE.
+    // Resumes the remembered start label; falls back to the current label, then to a stopped
+    // spinner, so it can never invent one for a run that never started.
+    case "SPINNER_RESUME": {
+      const resumed = state.spinnerBaseLabel ?? state.spinner?.label;
+      return resumed === undefined
+        ? { ...state, spinner: null }
+        : { ...state, spinner: { active: true, label: resumed } };
+    }
     case "SPINNER_STOP":
       return { ...state, spinner: null };
 
@@ -621,12 +638,6 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
 
     case "TOAST_POP":
       return { ...state, toastQueue: state.toastQueue.slice(1) };
-
-    case "PHASE_MARKER":
-      return {
-        ...state,
-        transcript: [...state.transcript, { kind: "phase_marker", phase: action.phase }],
-      };
 
     // Wholesale set, not append — accumulation/turn-boundary reset/tail-cap all happen in the
     // ref-backed buffer in useAgentEvents.ts before this ever dispatches. Never touches

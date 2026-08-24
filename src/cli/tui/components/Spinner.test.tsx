@@ -13,6 +13,14 @@ function makeEvt(type: ZoneStructuredProgressEvent["type"]): ZoneStructuredProgr
   return { runId: "test-run", ts: Date.now(), type, title: type } as ZoneStructuredProgressEvent;
 }
 
+/** Same, minus the title. agent_loop_start now honours evt.title (it previously discarded it), and
+ *  makeEvt sets title to the type NAME — so these spinner tests would assert against the literal
+ *  string "agent_loop_start". They are about the label not rotating over time, not about which
+ *  label it is, so they emit titleless and let the fallback constant stand. */
+function makeUntitledEvt(type: ZoneStructuredProgressEvent["type"]): ZoneStructuredProgressEvent {
+  return { runId: "test-run", ts: Date.now(), type } as ZoneStructuredProgressEvent;
+}
+
 function wait(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
@@ -32,7 +40,7 @@ describe("Spinner", () => {
   it("renders a diagonal frame when agent_loop_start activates spinner", async () => {
     const bus = createEventBus();
     const { lastFrame, unmount } = render(<App bus={bus} />);
-    bus.emit("agent_loop_start", makeEvt("agent_loop_start"));
+    bus.emit("agent_loop_start", makeUntitledEvt("agent_loop_start"));
     await wait(50);
     const frame = lastFrame() ?? "";
     expect(frame.includes("╱")).toBe(true);
@@ -50,7 +58,7 @@ describe("Spinner", () => {
     vi.useFakeTimers();
     const bus = createEventBus();
     const { lastFrame, unmount } = render(<App bus={bus} />);
-    bus.emit("agent_loop_start", makeEvt("agent_loop_start"));
+    bus.emit("agent_loop_start", makeUntitledEvt("agent_loop_start"));
     await vi.advanceTimersByTimeAsync(50);
     expect(lastFrame()).toContain(SPINNER_LABEL_STARTING);
     // Advance well past where the old RUNNING_WORDS rotation would have fired twice; the label
@@ -64,7 +72,7 @@ describe("Spinner", () => {
     vi.useFakeTimers();
     const bus = createEventBus();
     const { lastFrame, unmount } = render(<App bus={bus} />);
-    bus.emit("agent_loop_start", makeEvt("agent_loop_start"));
+    bus.emit("agent_loop_start", makeUntitledEvt("agent_loop_start"));
     bus.emit("compaction_started", makeEvt("compaction_started"));
     await vi.advanceTimersByTimeAsync(50);
     await vi.advanceTimersByTimeAsync(6050);
@@ -79,7 +87,7 @@ describe("Spinner — no context parenthetical (b045f350 reverted)", () => {
   it("while running, the spinner line contains the gerund and no parenthetical", async () => {
     const bus = createEventBus();
     const { lastFrame, unmount } = render(<App bus={bus} />);
-    bus.emit("agent_loop_start", makeEvt("agent_loop_start"));
+    bus.emit("agent_loop_start", makeUntitledEvt("agent_loop_start"));
     await wait(50);
     const line = spinnerLine(lastFrame() ?? "");
     expect(line).toContain(SPINNER_LABEL_STARTING);

@@ -98,6 +98,7 @@ import {
   type RunSummaryPayload,
   type ZoneHandoffReport,
   type ZoneStructuredProgressEvent,
+  FINAL_REPORT_SPINNER_LABEL,
 } from "./agentLifecycleEvents.js";
 import { cacheHitRatio, type IterCostUpdatePayload } from "../usage/iterCostMeter.js";
 import { costLogPath, appendIterCostRecord, appendRunSummary } from "../usage/costLogger.js";
@@ -6214,6 +6215,16 @@ const initializeTodosFromPlan = (): void => {
       warnings.push("[AGENT_LOOP] A run_command step failed; forcing preview-only.");
     }
 
+    // generateFinalRunReport makes a real provider call and emits no progress of its own, so
+    // without this the spinner sat on the agent-loop's label for the whole synthesis. This runs on
+    // the interactive path — runLlmPatchFlow has no headless gating anywhere — so a TUI user waits
+    // through it. The report itself is not rendered by the TUI (nothing under src/cli/ reads
+    // finalRunReport); it is the WAIT that is user-visible, not the artifact.
+    emitStructuredProgress({
+      type: "final_report_started",
+      title: FINAL_REPORT_SPINNER_LABEL,
+      status: "active",
+    });
     const finalRunReport = await generateFinalRunReport({
       task: input.task,
       contextFilesMeta: [],
