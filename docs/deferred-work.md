@@ -26161,6 +26161,327 @@ The pattern to carry: a test that keeps passing across a behavioural change has 
 confirmed the change was safe. It may have stopped discriminating, and only a deliberate swap of the
 two behaviours distinguishes those cases.
 
+## 338. No lever forces a write-capable toolset, and tier never removed write tools in the first place
+
+**Bucket: Neither.** There is nothing to fix — the levers do what their own code says. What is
+recorded is that a recipe this series relied on rested on two false premises, and what to use
+instead.
+
+**Corrects item 330 in both directions.** That entry says `--force-tier` governs tier limits but not
+the tier-derived tool subset, which implies the subset was the thing that mattered. It was not.
+`tierToolFilter` (`src/tools/tierToolSubsets.ts:46-50`) returns `{allowToolNames: SIMPLE_TIER_TOOLS}`
+for simple, the medium list for medium, and `undefined` — no restriction at all — for complex. And
+`SIMPLE_TIER_TOOLS` (`:5-11`) is `read_file, write_file, apply_patch, multi_edit, run_command`.
+**Every tier is write-capable.** So `--force-tier` was irrelevant to write availability twice over:
+it never reaches the tool filter, and the filter it never reaches would not have removed a write
+tool anyway. The only thing a working `--force-tier complex` buys is complex-only tools such as
+`fetch_url`.
+
+**What actually removes a write tool** is a `capabilityFilter` carrying `allow:
+READ_ONLY_CAPABILITIES` (`src/tools/capabilities.ts:47`), which wins outright at the top of an
+`if/else if` ladder in `agentLoop.ts:2433` — ahead of the tier filter, `allowedTools`, and the mode
+default. `resolveToolList` requires a tool's every capability to be in `allow`
+(`src/tools/toolRegistry.ts:77`), so anything declaring `fs.write` is denied by construction.
+
+**The archetype env flags do not close that door.** With both `ZONE_ARCHETYPE_ENABLE_QUESTION=0` and
+`ZONE_ARCHETYPE_ENABLE_INVESTIGATION=0`, `buildPipelineConfig` falls through to `return null` and no
+dispatcher filter is built. But `runLlmPatchFlow.ts:5808-5810` constructs the same cage directly
+from the frozen `INVESTIGATION_PIPELINE` constant whenever the run's plan comes back stepless with
+an answer reason — ungated by every archetype flag including the master `ZONE_ARCHETYPE_DISPATCHER=0`.
+That condition is a property of model output, not of configuration, so no flag can pre-empt it.
+
+**The instrument to use instead.** `[zone-write-capability-absent]` (`agentLoop.ts:2613-2626`) fires
+when no `fs.write`-capable tool survived into the offered set, and carries `filterSource` naming
+which precedence arm caged the run. It is observation-only — its own comment says it does not affect
+`toolsForLLM`, `effectiveAllowedSet`, or control flow. **Its absence is evidence only on a
+`mode === "patch"`, non-subagent run**, which is its own guard condition; outside that, absence
+means nothing because it never fires there. For the exact offered list, `ZONE_VERBOSE_LOGS=1` and
+`toolsAvailable` on `[zone-agent-loop-entry]`.
+
+**Fourth instance of a setting's name not telling you which code path it triggers**, after the
+`--otp` reading, `ZONE_HOME`, and `--force-tier` itself.
+
+## 339. `pipelineApplied` in the cost log is orthogonal to whether a capability filter was applied
+
+**Bucket: Neither.** Recorded as a reading hazard on an existing field; the field is correct for what
+it actually reports.
+
+A prior pass verified that a run was not read-only caged by observing `pipelineApplied:false` in its
+cost log. That inference does not hold, in either direction.
+
+**False in the negative direction.** `capabilityFilter` reaches the agent loop through three
+independent spreads in `runLlmPatchFlow.ts`, and two of them fire when `pipelineCfg` is null:
+`:5959-5961` (`!pipelineCfg && !isAnswerOnlyRun && _dispatcherCapabilityFilter`) and `:5986` (inside
+the `isAnswerOnlyRun` spread). Neither sets `pipelineApplied`. So a run classified `debug` — which
+has no pipeline at all — with an answer-only plan receives a full write-denying cage while every
+cost-log line reads `pipelineApplied:false`.
+
+**False in the positive direction too.** `readOnlyPipelineSuppressed` (`:5775-5778`) sets
+`_dispatcherCapabilityFilter = undefined` while `pipelineCfg` stays non-null, so `pipelineApplied`
+reads true for a run that carries no filter.
+
+What the field does report faithfully is `inputIterCap !== null` (`agentLoop.ts:2389-2392` and the
+six `recordLLMCall` sites), i.e. whether a pipeline supplied an iteration cap. That is a different
+question from whether the tools were caged, and the two are not correlated. Use item 338's marker
+for the caging question.
+
+## 340. Plan generation emits JSON, so the streaming mechanism is not the remedy for its silence
+
+**Bucket: Neither.** Corrects the framing of item 318 rather than reopening it; the remedy the entry
+implied does not fit the call site.
+
+Item 318 records plan generation as a non-streamed call site alongside the token-budget and
+max-iterations wrapups, which reads as though the assistant-text streaming shipped for the report
+path would apply to it. It would not. `executionPlan.ts:529-539` passes
+`response_format: { type: "json_object" }` and **no `tools`**, and the result is parsed by a zod
+schema with `superRefine` and `.transform()`. Streaming that call surfaces raw JSON tokens —
+`{"objective":"…","steps":[{"title":"…` — into a live preview box, which is not what the silence
+complaint is about.
+
+Three further obstacles, each independent of the first: `PLAN_READY_PROPOSED`
+(`src/cli/tui/store-core.ts`) does not clear `liveTail.streamingAnswer`, so streamed plan text would
+sit below the committed plan and the approval prompt until a run-terminal action; the preview's
+turn-boundary reset keys on the `iter` each fragment carries, and plan generation has no iteration
+counter to supply one; and entering the streaming path changes behaviour beyond firing callbacks
+(item 341).
+
+**The plan-generation span is not unlabelled either** — `dispatch.ts:306` emits
+`plan_generation_started` with `"Planning…"`, honoured at `eventToActions.ts`, and nothing overwrites
+it through plan investigation. So the perceived silence there is not a missing label and not a
+missing stream.
+
+## 341. Entering the streaming path changes four behaviours besides firing callbacks
+
+**Bucket: Neither.** These are consequences already live on the two streamed call sites, recorded so
+that any future decision to stream a further site weighs them rather than treating the branch as
+callback-only.
+
+All four are differences between `createChatCompletion`'s two paths in `src/llm/anthropicAdapter.ts`:
+
+- **JSON-fence stripping is lost.** The non-streaming path computes `wasJsonMode` and passes it to
+  `convertResponse`, which calls `stripJsonFences` (`convertResponse.ts:82-84`). The streaming
+  assembly builds `content` from the accumulated text with no equivalent. A caller using
+  `response_format: json_object` that also streams would receive fenced output it does not expect —
+  `executionPlan.ts` happens to strip fences itself, which is a property of that caller, not of the
+  path.
+- **`refusal` is always null.** The streaming assembly hardcodes it, while `convertResponse` builds
+  a real message from `stop_reason === "refusal"`. Downstream refusal detection still fires on
+  `finish_reason`, but always with a generic message rather than the provider's own.
+- **The retry budget roughly doubles.** The stream is wrapped in `withExponentialBackoff`, and an
+  `UpstreamUnavailableError` that is not a timeout then runs a second full non-streaming attempt
+  under its own backoff.
+- **Thinking capture becomes fail-soft.** Blocks come from `stream.finalMessage()` inside a
+  `try/catch` that only warns, where the non-streaming path has no such degradation.
+
+## 342. `generateFinalRunReport` runs on the interactive path but nothing in the TUI reads its output
+
+**Bucket: Neither.** Both halves are true and they are easy to conflate; the entry exists to keep
+them apart.
+
+`grep -rn "finalRunReport" src/cli/ --include="*.ts" --include="*.tsx"` returns nothing outside
+tests — the TUI never reads the artifact. The report a user sees is `agent_loop_complete.detail`,
+which carries `loop.summary` from the agent loop's own streamed call, so the assistant-text
+streaming shipped earlier does cover the visible report.
+
+But the call still happens on the interactive path: it is an unconditional `await` inside the
+agent-loop branch of `runLlmPatchFlow`, and that file has no headless or output-format gating
+anywhere (positive control: `_useAgentLoop` appears seven times in the same file). So a TUI user
+waits through a real provider call whose result they never see. **It is the wait that is
+user-visible, not the artifact** — which is why the fix for it was a spinner label rather than
+anything to do with the report's content.
+
+**Scope of the label fix.** There are **twelve** `await generateFinalRunReport(` call sites in
+`runLlmPatchFlow.ts`. `ec70e702` labels one — the agent-loop path's. The others sit on early-exit
+paths and on the legacy plan-full-patch path, and remain unlabelled. That figure was found by a test
+that anchored on the wrong one of the twelve and failed on a clean tree.
+
+## 343. Closed — the streaming branch gated on one callback while the call site asserted it
+
+**Bucket: Closed** by `ec70e702`.
+
+Item 334 recorded that `onTextDelta` could not fire unless `onToolArgumentsDelta` was also supplied,
+and named the remedy as branching on either callback. **That remedy was incomplete, and applying it
+alone would have introduced a crash.** `anthropicAdapter.ts` called
+`options.onToolArgumentsDelta!(...)` under a non-null assertion, which was safe only because the
+entry condition guaranteed the callback was present. Widening the branch makes an absent callback
+reachable at that line, so an `onTextDelta`-only caller would have thrown a `TypeError` on the first
+tool-argument fragment the model emitted — escaping the stream loop, escaping the backoff wrapper,
+and surfacing as a request error.
+
+Both changes landed together: the branch now admits either callback, and the call site is
+optional-chained. Two tests pin it — one that `onTextDelta` alone enters the streaming path and
+fires, one that a tool-argument fragment with no such callback supplied does not throw. Both die
+under the corresponding mutation.
+
+**Not a live defect before the change** — no production caller supplied `onTextDelta` alone, since
+`runLlmPatchFlow.ts` gates both callbacks on the same `runId`. The value of the change is that the
+trap is now disarmed rather than latent, and the widened branch is inert in production until a
+caller wants text without tool args.
+
+## 344. Closed — agent_loop_start discarded the title its own producers send
+
+**Bucket: Closed** by `ec70e702`.
+
+`eventToActions.ts`'s `agent_loop_start` arm hardcoded `SPINNER_LABEL_STARTING` and ignored
+`evt.title`, while the `plan_generation_started` arm two hundred lines below honours
+`evt.title ?? SPINNER_LABEL_PLANNING`. The producers do send titles — `"Starting agent tool loop"`
+(`runLlmPatchFlow.ts`) and `"Starting investigation"` (`investigationFlow.ts`) — so the field was
+being computed and thrown away.
+
+The visible effect was a regression at the boundary that matters most: `dispatch.ts` sets
+`"Working…"` on plan approval, and the agent loop then replaced it with the *less* specific
+`"Starting…"` at the exact moment execution began.
+
+**This does not fix the standing-label problem, and should not be read as having done so.** Whatever
+label lands at `agent_loop_start` still stands unchanged through every iteration of the loop —
+nothing between the first iteration and the run's end touches the spinner. The remaining half is
+item 346.
+
+## 345. Closed — compaction stopped the spinner mid-run and nothing restarted it
+
+**Bucket: Closed** by `ec70e702`.
+
+`compaction_status` and `compaction_overflow_warning` both dispatched `SPINNER_STOP`. Both are
+emitted mid-run — the first after a successful compaction, the second as a warning — and the agent
+loop continues afterwards. Nothing downstream dispatches a `SPINNER_START` before `RUN_DONE`, so
+after the first compaction a run displayed no spinner at all for its entire remainder.
+
+**The fix is not a shared resume constant.** Handing the spinner back to a generic label would
+overwrite whatever specific label was standing with a vaguer one, which is the same defect as item
+344. The reducer now remembers the label of the last `SPINNER_START` as `spinnerBaseLabel`, and a
+new `SPINNER_RESUME` action restores it. `SPINNER_UPDATE` deliberately does not touch that field —
+that is exactly what makes an update transient and a start durable — and `SPINNER_RESUME` on a run
+that never started leaves the spinner stopped rather than inventing one.
+
+**`compaction_exhausted` keeps its `SPINNER_STOP`, and that is the finding worth carrying.** It was
+inside the proposed defect class on the observable "nothing restarts the spinner before RUN_DONE",
+which is identical for a defect and for a correct terminal stop. It is terminal: `agentLoop.ts`
+emits it from a `catch` for `CompactionExhaustedError` and immediately returns
+`synthesizeCompactionExhaustedExit`. Checking each member of a proposed class for the property that
+defines it turned a class of three into a class of two plus a negative control.
+
+## 346. The spinner label is set once per run and never updated across iterations
+
+**Bucket: Neither.** The remedy is a design choice nobody has made: what a per-iteration label should
+say, and how often it should change without becoming noise.
+
+This is the original complaint, and items 344 and 345 do not close it. After `ec70e702` the label at
+the start of execution is correct and specific, and it survives compaction rather than vanishing —
+but from the first iteration to the last, nothing dispatches a spinner action at all. A run of forty
+iterations displays one string throughout.
+
+The mechanism is available and cheap: `SPINNER_UPDATE` exists, takes a label, and reaches the screen
+immediately — rendering was established not to be the constraint, since there is no `React.memo`
+anywhere in the TUI, `Spinner.tsx` reads full state through a plain `useContext`, and the provider
+allocates a fresh context value on every render. What is missing is a decision about content. The
+candidates each have a cost: an iteration counter is accurate and almost contentless; the current
+tool name is informative but changes several times a second; a phase name requires a notion of phase
+the loop does not currently have.
+
+Related: seven of the eight event types that funnel into the `SPINNER_UPDATE` arm are legacy
+plan-full-patch-path events that the agent-loop path never emits, and the eighth
+(`llm_retry_in_progress`) never arrives under its own type (item 347). So that arm is close to dead
+on the modern path, which is why the label sits still.
+
+## 347. `llm_retry_in_progress` never reaches the bus under its own type, so its consumers cannot fire
+
+**Bucket: Actionable now.** The fix is specified: emit it as a structured event rather than a
+stringified payload on the string-shaped `onProgress` channel.
+
+`onRetryEvent` (`agentLoop.ts:3537-3556`) calls `input.onProgress` with
+`JSON.stringify({type: "llm_retry_in_progress", title: "Upstream API slow, retrying…", …})` — a
+**string**. The receiving handler (`runLlmPatchFlow.ts:5567-5578`) re-types any string that is not
+`[tool]`-prefixed as `{type: "tool_call", title: <the raw JSON, truncated to 200 characters>}`. The
+telemetry filter it passes through matches `"event":"zone-`, and this payload uses `"type"`, so it
+is not suppressed.
+
+Two consequences. The `bus.on("llm_retry_in_progress", …)` registration and the matching
+`eventToActions` arm can never fire, so **the spinner never displays a retry label** — a defect
+previously recorded on this surface described a retry label that was set and never reverted, and
+that description was wrong in the other direction: it is never set. And a `tool_call` transcript
+entry appears whose title is raw JSON, which is a worse symptom than the missing label.
+
+This confirms at a second site the earlier finding that this event arrives mistyped; the two were in
+tension and this resolves which held.
+
+## 348. Closed — four event types had wired consumers and no producer
+
+**Bucket: Closed** by `ec70e702`, which deleted `phase_changed`, `scope_audit_started`,
+`scope_audit_completed` and `scope_audit_skipped`.
+
+Each had consumers — switch arms in the headless sink and the remote wire frame, a bus registration,
+a store action, a reducer case, a transcript entry kind, and a renderer — and no site anywhere
+constructed one. `phase_changed` drove a numeric transcript marker rendering as `── Phase 2 ──`,
+with no name for what the phase was; the scope-audit family are leftovers from the scope-audit
+mechanism removed as dead code under item 111.
+
+Deleted as a family rather than one at a time: `scope_audit_started` alone would have left its two
+siblings in exactly the state that made it worth recording. `themeCoverage.test.ts`'s manifest was
+updated in the same commit, since it fails if the deleted renderer vanishes un-delisted.
+
+**An interaction worth carrying:** `toolCallRecord.guard.test.ts` builds its scan set from
+`git ls-files`, so between deleting a tracked file and staging that deletion it reads a path that no
+longer exists and fails with `ENOENT` — in the working tree and in a clean clone alike. The failure
+is transient and resolves on staging, but it presents as three unrelated structural-guard failures.
+
+## 349. The producerless-event class has twelve members, ten of them still present
+
+**Bucket: Neither.** Ten members remain and each needs its own disposition; deleting them is a larger
+change than the one that has been made, and the entry records the population rather than proposing
+the sweep.
+
+A mechanical sweep of the `ZoneStructuredProgressEvent` type union — 70 members — found twelve types
+with no producer anywhere outside the type declaration and pure-consumer files: `chat_done`,
+`chat_start`, `hook_started`, `mcp_connected`, `phase_changed`, `plan_summary`,
+`scope_audit_completed`, `scope_audit_skipped`, `scope_audit_started`, `scope_revision_resolved`,
+`terminal_done`, `terminal_output`. Item 348 deleted four; **ten remain**.
+
+**The instrument was validated in both directions**, which is what makes the figure usable: four
+known-produced types (`chat_chunk`, `tool_input_delta`, `agent_loop_complete`, `compaction_exhausted`)
+are correctly not flagged, and two known-producerless ones are correctly flagged. Four of the twelve
+were additionally spot-checked for the shorthand-emission pattern that would make a producer
+invisible to a literal search — none was a false positive.
+
+Two earlier versions of the sweep were discarded rather than reported: one returned 35 members and
+failed to flag a type known to be producerless, and one returned 81 by leaking a sibling stage-union
+from the same file. Both were caught by floor checks asserting that a known member is present and
+that no stage name leaked, which is why the final figure cross-checks against the independently
+established union size.
+
+## 350. A registered prediction was revised mid-pass and reported as though it had been the original
+
+**Bucket: Neither.** A discipline record, not a code defect.
+
+A prior pass registered its ledger delta before starting, revised it in response to review while the
+work was still in flight, and then reported the revised figure as having been predicted and matched
+exactly. Revising a prediction before running is legitimate — the revision was itself recorded in
+the plan at the time. Presenting the revised figure as the original is not: it converts a corrected
+forecast into an apparently unbroken one, and the distinction is invisible to anyone reading only
+the report.
+
+The rule this fixes: a prediction that changes between registration and execution is reported as
+**corrected**, with both figures shown. The value of registering a number in advance is that it can
+come out wrong; silently updating it removes exactly that.
+
+## 351. Closed — the streaming type's agreement test covered one of its three consumers
+
+**Bucket: Closed** by `ec70e702`.
+
+The cross-site agreement test introduced for the assistant-text streaming type crossed the producer
+with the TUI's `bus.on` registration, and stopped there. That type has three consumers: the TUI, the
+headless sink, and the remote wire frame. A rename coordinated across the producer and the TUI would
+have passed the test while silently ending the stream on the other two — both fail open, since an
+unmatched switch falls through to a default that does nothing.
+
+The test now asserts a case arm exists in the sink and the wire frame for whatever type the producer
+actually emits, with a negative control proving the arm-detector discriminates rather than returning
+true for any string.
+
+**The structural alternative, not taken:** a single exported constant referenced by all four sites
+would make drift impossible rather than detectable. That is a larger refactor of an event-type
+system where every other type is a bare literal, and it is recorded here as the option rather than
+performed piecemeal for one type.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
@@ -26171,16 +26492,16 @@ priority ordering" cautions against ranking by importance, which this section do
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (154): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42,
+**Closed** (159): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42,
 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113,
 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167,
 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228,
 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260,
 262, 264, 265, 266, 267, 268, 269, 270, 271, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285,
-286, 288, 289, 290, 301, 302, 304, 308, 309, 310, 327, 336, 337
+286, 288, 289, 290, 301, 302, 304, 308, 309, 310, 327, 336, 337, 343, 344, 345, 348, 351
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (11): 287, 291, 292, 293, 296, 299, 313, 320, 328, 329, 334
+first (12): 287, 291, 292, 293, 296, 299, 313, 320, 328, 329, 334, 347
 
 Six, down from seven, and the movement is the ledger's own signal about whether anything is specified
 and waiting, in both directions. The diagnosis pass into `find_references` left it at 7 (287 plus six
@@ -26205,21 +26526,25 @@ noted here rather than silently left, since a bucket header and its own prose di
 a count was reached is exactly the kind of drift this document's own discipline exists to catch.
 That pass landed `buildModels()` dropping `recommendedTier` as 320 — a mechanical one-line projection
 fix, carried forward from an earlier pass's unlanded draft rather than newly discovered — reaching
-eight: 287, 291, 292, 293, 296, 299, 313, 320. The remediation pass after it adds three, reaching
+eight: 287, 291, 292, 293, 296, 299, 313, 320. The remediation pass after it added three, reaching
 eleven: 328 and 329, the two halves of a telemetry mis-record that a run's own cost log exposed and
 which split by direction rather than by area; and 334, a latent callback coupling whose remedy is a
 single condition. All three arrived with the fix named in the entry, which is what this bucket
-requires; none was inherited backlog.
+requires; none was inherited backlog. The pass after that closed 334 as 343 — its named remedy
+turned out incomplete, and applying it alone would have introduced a crash — while filing 347, a
+retry event that never reaches the bus under its own type, whose remedy is likewise named. Net
+eleven to twelve.
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (16): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250, 263, 318
 
-**Neither — a structural fact recorded, with no fix proposed** (156): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
+**Neither — a structural fact recorded, with no fix proposed** (164): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
 74, 76, 77, 78, 79, 80, 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109,
 112, 114, 115, 118, 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152,
 154, 155, 158, 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199,
 200, 201, 202, 205, 206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230,
 232, 243, 244, 247, 248, 249, 254, 256, 261, 272, 294, 295, 297, 298, 300, 303, 305, 306, 307, 311, 312,
-314, 315, 316, 317, 319, 321, 322, 323, 324, 325, 326, 330, 331, 332, 333, 335
+314, 315, 316, 317, 319, 321, 322, 323, 324, 325, 326, 330, 331, 332, 333, 335,
+338, 339, 340, 341, 342, 346, 349, 350
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
