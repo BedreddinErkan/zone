@@ -24987,6 +24987,147 @@ closure.** Item 304's site 2 (`apply/applyPatchPlan.ts`) moved from uncontained 
 this entry states is unaffected: nothing enforces that the *next* new write path gets the same
 treatment, and two of item 304's four sites (3 and 4) are still uncontained as of this commit.
 
+**The gate count in this entry's own "the fact" paragraph is now stale, which is this entry's
+thesis applied to this entry.** `checkPathBoundary` has **nine** invocation sites as of this
+commit, not eight: `apply/applyPatchPlan.ts` gained one at `3c6362e1`, joining the one in
+`core/applyLlmPatches.ts` and the seven in `toolExecutor.ts`. Nothing failed when the eighth
+became a ninth. The count was correct when written and went stale on the next commit that touched
+the surface, exactly as this entry predicts a census will.
+
+**The measurement this entry deferred, run — and it says do not build either shape.** The
+condition to change recorded here was to size the exempt population and build the guard if the
+non-exempt remainder turned out auditable. The exempt population is now sized. The guard is still
+not built, but for a stronger reason than an unmeasured surface: **neither shape catches either of
+the two defects that motivated this entry**, and both are blind to the one site still known to be
+defective. What follows is that measurement.
+
+**The denominator, three instruments, and item 304's figures reconciled exactly rather than
+adopted.** Scope held identical to item 304's so the comparison means something: tracked
+`src/**/*.ts` and `src/**/*.tsx` minus `*.test.*`, `__tests__/` and `src/test/` — **399 files**,
+returned byte-identical by `git ls-files` and by a filesystem walk. A **name-keyed** AST walk over
+a 70-primitive list written from first principles returns **209 call sites across 46 files**. A
+**binding-keyed** AST walk — which resolves each call back to an `fs` import binding and therefore
+uses *no primitive list at all*, discovering the vocabulary from the code instead of assuming it —
+returns **114 write sites across 30 files**. That second instrument is what breaks the common-mode
+risk items 258 and 259 name: a name-keyed walk and a regex share their primitive list, so a
+primitive missing from it is invisible to both. Nothing the binding-keyed walk found was missing
+from the name-keyed list.
+
+Item 304 records "36 filesystem write primitives" and enumerates none, and its script no longer
+exists, so its 139 looked unreproducible — the defect class items 276 and 277 name, recurring.
+It is reproducible after all: dropping `write` (65 hits, every one of them `process.stdout`,
+`socket` or `stdin`) and `copy` (5 hits, every one `Buffer.copy`) from the 70-primitive list yields
+**139 sites across 37 files**, both figures exactly; dropping `truncate` (16 hits, a local string
+helper in three files) and `remove` (1, a Babel node removal) as well yields **122 sites across 33
+files**, matching item 304's post-decoy file count exactly. So
+
+> item 304's 139 = **114 real filesystem write sites + 8 wrapper calls + 17 decoys**,
+
+and 139 − 16 − 1 − 8 = 114 closes the loop on the binding-keyed figure. Recorded as a fit rather
+than a recovered list: matching 139, then 37, then 33 is strong evidence, but two different lists
+could in principle coincide.
+
+**The partition, and the exemption fraction.** Each of the 114 sites is assigned to exactly one
+bucket — (a) model-path-controlled, (b) fixed-destination, (c) derived from config but not from
+model output, (d) wrapper writing on a caller's behalf, (e) decoy — by a per-site reading, with
+the counts taken mechanically from that assignment.
+
+| bucket | sites | share |
+|---|---|---|
+| (a) model-path-controlled | 24 | 21.1% |
+| (b) fixed-destination | 61 | 53.5% |
+| (c) derived, not model-controlled | 19 | 16.7% |
+| (d) wrapper | 10 | 8.8% |
+| (e) decoy | 0 | 0.0% |
+
+**Bucket (e) is empty by construction, and that is a finding rather than an omission.** A
+binding-keyed population cannot admit a decoy. Decoys are a property of the *name-keyed* shape —
+which is the shape this entry's own sketch describes — and under that shape the same tree reads
+209 = 114 filesystem writes + 8 wrapper calls + **87 non-filesystem decoys**. So the exemption
+fraction is **(61+0)/114 = 53.5%** under one instrument and **(61+87)/209 = 70.8%** under the
+other: over half either way. This entry's warning that a guard whose allowlist is mostly exemptions
+reads as coverage is confirmed on its own terms.
+
+**What separates bucket (a) from bucket (c), stated as the test rather than as the appearance,
+because that pair is where a misclassification would hide a real defect.** Ask whether *a different
+model output could change which file gets written*. For (c) the answer is no: the filename is a
+literal inside the callee and only a root — `repoPath`, `cwd`, `homedir()` — comes from process or
+CLI state fixed before the model runs. For (a) the answer is yes. That test, not "is the
+destination inside the repository", is what puts `memory/projectMemory.ts` (writes
+`.zone/memory.md`, filename literal) in (c) and `apply/applyPatchPlan.ts` (writes `patch.filePath`)
+in (a). The (b)/(c) neighbour is the easy one: (b)'s root is Zone-owned, where a repository
+boundary check is not merely unnecessary but wrong.
+
+**Two corrections to this entry's own false-positive list.** It names "every test fixture" as part
+of the surface, but its sketch scopes the walk to production `src/`, which excludes fixtures by
+scope, not by allowlist — measured, the excluded population is **873 write sites across 176 files,
+7.66× the production population**, large enough to have dominated had scope not already handled it.
+And of the two wrappers it names, `utils/atomicWrite.ts`'s `atomicWriteFileSync` has **zero
+production callers** — `git grep` and `command grep` agree; its only non-test references are its
+own definition, its own test, and ranker-fixture score rows that are data rather than calls.
+
+**Bucket (a) in full, 24 sites across 7 files.** Gated on the write's own branch (10):
+`apply/applyPatchPlan.ts:17`; `core/applyLlmPatches.ts:50` and `:51`; `tools/toolExecutor.ts:2714`,
+`:2754`, `:2770` (the `apply_patch` branch, gate at 1852) and `:3072`, `:3076`, `:3082`, `:3149`
+(the `write_file` branch, gate at 2949). Not gated within their own function (14):
+`core/runLlmPatchFlow.ts:10104` and `:10110`; `llm/verification/staging.ts:495`;
+`patch/apply/runApplyFlow.ts:42`, `:43`, `:53`, `:60`; `snapshots/snapshotStore.ts:223` and `:227`;
+`tools/toolExecutor.ts:867`, `:905`, `:906`, `:926`, `:932`. Most of that 14 is gated one or two
+frames upstream — the five in `toolExecutor.ts` and the one in `staging.ts` all write entries of a
+staging map whose keys were gated at `stagedWrite` (`toolExecutor.ts:801`). The genuinely
+uncontained remainder is item 304's already-recorded sites 3 and 4, plus the two in
+`snapshotStore.ts` and the two in `runLlmPatchFlow.ts`.
+
+**Shape 1 — a frozen allowlist keyed on `(file, primitive)` — has a second hole larger than the
+one it was expected to have.** The expected hole is real: an allowlisted site whose path handling
+drifts from contained to uncontained keeps its key, so the guard cannot see the drift. The larger
+one is that **a brand-new write site added under an existing key is equally invisible**. Measured:
+the key collapses 114 call sites into **84 distinct pairs**, so **30 sites (26.3%) are already
+unrepresented**; 21 pairs carry more than one site. The extreme case is
+`tools/toolExecutor.ts | writeFileSync`, which carries **seven** sites under one key — four gated
+ones in the `write_file` and `apply_patch` branches and three ungated ones in `attemptRestore` and
+`withStagingTempFlush`. An eighth `fs.writeFileSync` anywhere in that 3,756-line file, gated or
+not, changes nothing the guard can observe.
+
+**Shape 2 — every model-path-controlled site preceded by a `checkPathBoundary` call in the same
+function — is expressible, but its apparent advantage is not real and it is vacuous where it
+matters most.** Expressible: yes, and it was implemented and run (innermost enclosing function of
+the write, searched for a `checkPathBoundary` call starting earlier). The apparent advantage — that
+it needs no exemption list because bucket (a) is the whole population — does not survive contact
+with the fact that bucket (a) is a per-site judgement rather than a mechanical property: shape 2
+trades a 61-entry exemption list for a 24-entry inclusion list, shrinking the list rather than
+removing it. And `executeTool` is a **2,804-line function** carrying six gates and seven writes
+across five unrelated `if (toolName === "…")` branches, so the distinguishing question — would the
+verdict change if the gate on the write's own branch were deleted? — answers **no for all seven**
+of its writes, each of which has two or three further gates from unrelated branches preceding it in
+the same function. Eleven of that function's sixteen branches carry no gate at all, so a write
+added to `update_memory`, `search_in_files`, `run_command`, `Task` or `fetch_url` would pass on
+gates belonging to `read_file` and `list_files`. On today's tree shape 2 flags 14 of 24 sites,
+most of them legitimately gated upstream — a 58% false-positive rate to go with that vacuity.
+
+**The retrospective, which is the decisive part.** Read at `2452803e^` and at `3c6362e1^`: both
+defective files already imported `promises as fs` and already called `fs.writeFile`. The
+`(file, primitive)` pair is **identical before and after each fix**, so shape 1 sees nothing in
+either case — 0 of 2. Shape 2 catches both, because neither function held a `checkPathBoundary`
+call before its fix — 2 of 2. Both miss item 304's site 3, for a reason item 307 records. And
+shape 1's one trigger, a *newly added* write site, has **no historical instance among the defects
+that motivated this entry**: all four patch-apply implementations were created on 2026-04-01 and
+2026-04-03 (`e3256993`, `6808ff91`, `961f10bb`, `e7000af9`), while `checkPathBoundary` first
+existed on 2026-08-04 (`6802d0c7`), four months later — so any freeze taken after the gate existed
+already contains all four. Shape 1 addresses a failure mode this repository has not yet had, while
+the failure it has had twice is a long-standing site with no gate.
+
+**Bucket, re-decided on the measurement: still Neither, and stated as a decision rather than left
+as an absent verdict.** Not because the measurement was inconclusive — it was conclusive — but
+because what it concluded is *do not build either shape*. Shape 1 carries a 53.5%–70.8% exemption
+surface, catches 0 of 2 known defects, and is blind to 26.3% of the population it does enumerate.
+Shape 2 catches 2 of 2 but is not mechanically scoped, is vacuous for the file holding seven of the
+24 sites it would police, and false-positives at 58%. Both are blind to the site still known to be
+defective. **The condition to change is now specific rather than a quantity that does not exist: a
+shape whose population is defined by write DESTINATION rather than by write primitive.** That shape
+is named as unmeasured, not recommended — nothing here has measured its own exemption surface, and
+four vacuous guards have been caught in this project already.
+
 ## 306. Three frozen absolutes have no disposition mechanism, so a legitimate mention of the pattern they detect cannot be written
 
 **Bucket: Neither.** A structural fact recorded, with no fix proposed — the two available remedies
@@ -25020,11 +25161,109 @@ teach them a mention form, a fenced or otherwise marked span excluded from count
 real instance. The condition to change is a second occurrence: one entry that could not quote its own
 subject is an inconvenience, and a second would make it a recurring cost worth paying code for.
 
+## 307. A write-primitive census reports the one site still known to be defective as covered, because that file's unrelated directory calls put it on the list
+
+**Bucket: Neither.** A structural fact recorded, with no fix proposed — the remedy is a census
+keyed on something other than the primitive, and item 305 records why no shape measured so far
+earns being built.
+
+**The fact, and the loose version of it is false.** Item 304's site 3 is
+`src/patch/applyPatchPlan.ts`, whose model-derived write is
+`writeTextFile(path.join(input.targetPath, patch.path), content)`. That file contains **no
+`node:fs` import and no `fs.` call of any kind** — `git grep -a -n "fs\.\|from \"node:fs\""` over
+it returns nothing. The write reaches disk through `utils/files.ts`, two frames away.
+
+The tempting statement is that the file is therefore absent from the write census. It is not, and
+the difference is the whole entry. `src/patch/applyPatchPlan.ts` **is** one of item 304's 33 files
+— it earns its place through two `ensureDir` calls at lines 39 and 40, which create
+`.agent-patches` and `.agent-backups`, both fixed-name directories that no boundary check needs to
+guard. **The file is on the list; the write that matters is the one call the list cannot see.** A
+`(file, primitive)`-keyed allowlist would carry an entry for this file and report it as accounted
+for. `src/patch/backupFile.ts` (listed via `ensureDir` at line 19, its write at line 22 invisible)
+and `src/core/saveAgentResult.ts` (listed via `ensureDir` at line 264, its write at line 269
+invisible) have the identical shape.
+
+**Why this is a different defect class from item 305 rather than a sentence inside it.** Item 305
+is about *binding*: nothing forces a new write path to adopt the gate. This is about *population*:
+the set a guard would police is defined by "calls a filesystem primitive", and a write that calls a
+wrapper is outside it however the guard is keyed. Fixing item 305 — building a working guard on the
+primitive-keyed population — would leave this entry untouched, and would make it worse by putting a
+coverage claim behind it.
+
+**Measured, so the size of the gap is on record rather than argued.** Of 114 binding-resolved write
+sites in tracked production `src/`, ten sit in six wrappers whose callers own the destination:
+`ensureDir` and `writeTextFile` (`utils/files.ts`), `atomicWriteFileSync` (`utils/atomicWrite.ts`,
+which has zero production callers), `writeAuditSnapshot` (`audit/snapshotWriter.ts`),
+`ensureParentDir`/`writeJsonFile` (`cli/index.ts`), and a second, local `ensureDir` inside
+`snapshots/snapshotStore.ts` — a fourth duplicate-name pair, after the three item 304 records.
+Those wrappers have **16 external caller sites**, of which **2 are model-path-controlled**:
+`patch/applyPatchPlan.ts:83`, which is site 3, and `snapshots/snapshotStore.ts:222`. Exactly one of
+the two — site 3 — is a destination no direct primitive call reaches. So the gap is small in count
+and maximal in consequence: a single uncovered write, and it is the one already known to be
+defective.
+
+**A correction to item 304's census scope, recorded here rather than by reopening it.** That entry
+counted `ensureDir` among its "36 filesystem write primitives"; it is a repository wrapper, not a
+primitive, and eight of its 139 call sites are wrapper calls counted as primitives. Item 304 found
+site 3 by reading the chain, not by the census — the census's own shape could not have surfaced it.
+**Item 304 stays Closed**; this is the same treatment item 304 gave item 301's conflated caller
+list. See `08b374cd` for the census and `3c6362e1` for the site-2 fix that left site 3 open.
+
+**The condition to change.** A census whose population is derived from write *destination* rather
+than from the callee's name — reaching a wrapper's callers transitively — would contain site 3.
+Nothing here has measured that shape's own exemption surface, and item 305 records what happens
+when a guard shape is adopted before its false-positive population is sized.
+
+## 308. Two instruments in this repository drop matches silently, and a regex census that trusts either understates itself with no error
+
+**Bucket: Neither.** A structural fact recorded, with no fix proposed — the working practice
+(`-a`, and strip the carriage return) is cheap and already stated; there is no code change to make
+and no counter to freeze.
+
+**Why this is worth an entry when the workaround is one flag.** Both failures are silent. Neither
+prints a warning, neither exits nonzero, and both produce a *smaller, plausible* number rather than
+an obvious error — which is the same hazard class item 244 records for
+`src/repo/rankerBaseline.snapshot.json`, an instrument that answers confidently and wrongly, but a
+different mechanism. Both were found during item 305's measurement, and both would have corrupted
+it: between them they hide the repository's CLI entry point and its snapshot store, two of the
+write-heaviest files in the tree.
+
+**Hazard one — `git grep` classifies a source file as binary.**
+`src/snapshots/snapshotStore.ts` contains a **single literal NUL byte** at byte 1082, on the line
+declaring `RUN_ID_INVALID`, whose character class is written with raw control bytes rather than
+escapes — dumped byte by byte it reads `/[\\/<00>-<1f><7f>]/`, three unprintable characters sitting
+in the source. Git's binary detection keys on a NUL near the start of a file, so without `-a` the
+output is `Binary file … matches` with no line numbers, and **all eight of that file's write sites
+vanish**. The repository's own `grep` shell function
+(ugrep) refuses it the same way, so a second textual instrument does not catch it. The file has
+carried this since `fec1dd2b` and was last edited at `ba7f4959`; nothing about it looks unusual in
+an editor.
+
+**Hazard two — CRLF plus JavaScript's `$`.** `src/cli/index.ts` is CRLF at HEAD, so lines of
+`git grep` output end in a carriage return. In a JavaScript regular expression the carriage return
+is a line terminator: `.` will not cross it and `$` without the multiline flag requires end of
+input, so a parser shaped `/^([^:]+):(\d+):(.*)$/` **matches nothing at all** on those lines. Every
+hit in the repository's CLI entry point disappeared — not in `git grep`, which found them, but in
+the code reading its output. The CRLF hazard is already recorded as a constraint on editing that
+file; this is the same fact reaching a tool that has nothing to do with editing.
+
+**A third, smaller instance from the same measurement, recorded because the shape recurs.** A probe
+for NUL bytes written as `command grep -c $'\x00'` cannot work: a shell cannot pass a NUL inside an
+argument, so the pattern arrives empty and matches every line, returning the file's line count
+dressed as a hit count. And an unrelated probe using `git grep -lI -e ''` to list "text" files
+reported eight files as non-text, of which **seven were simply zero bytes** — an empty file has no
+line for an empty pattern to match. Both probes were discarded rather than reported.
+
+**Working practice, for any future census over this tree.** Pass `-a` to `git grep`; strip a
+trailing carriage return before parsing each line, or match with `[\s\S]` rather than `.`; and
+treat a per-file zero from a textual instrument as a question rather than an answer, since the two
+hazards named here both present as one.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 306 to find out which ones still need something. No index of
+reader the trouble of reading all 308 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -25050,16 +25289,19 @@ to 6, and the pass after that (`0c938d11`) filed the symlink-escape finding as 3
 `2452803e` closed 301, landing back at 6. A later pass filed 304 — the census that finds the closed
 site was one of four implementations — returning it to 7, and this pass closes 304's site 2, landing
 back at 6: 287, 291, 292, 293, 296, 299. Every movement in either direction has come from a finding
-some session in this series generated rather than from inherited backlog.
+some session in this series generated rather than from inherited backlog. The pass that measured
+item 305's exemption surface filed 307 and 308 and moved nothing into this bucket — deliberately:
+its measurement concluded that neither guard shape item 305 sketches is worth building, and
+"Actionable now" requires a fix specified in the entry, which a decision not to build is not.
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (15): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250, 263
 
-**Neither — a structural fact recorded, with no fix proposed** (137): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
+**Neither — a structural fact recorded, with no fix proposed** (139): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
 74, 76, 77, 78, 79, 80, 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109,
 112, 114, 115, 118, 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152,
 154, 155, 158, 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199,
 200, 201, 202, 205, 206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230,
-232, 243, 244, 247, 248, 249, 254, 256, 261, 272, 294, 295, 297, 298, 300, 303, 305, 306
+232, 243, 244, 247, 248, 249, 254, 256, 261, 272, 294, 295, 297, 298, 300, 303, 305, 306, 307, 308
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
