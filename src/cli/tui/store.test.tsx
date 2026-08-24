@@ -677,3 +677,74 @@ describe("RUN_FAILED", () => {
   });
 });
 
+
+describe("STREAMING_ANSWER_SET", () => {
+  it("sets liveTail.streamingAnswer wholesale, and only that field", () => {
+    const s0 = initialState();
+    expect(s0.liveTail.streamingAnswer).toBe("");
+    const s1 = reducer(s0, { type: "STREAMING_ANSWER_SET", text: "Hello wor" });
+    expect(s1.liveTail.streamingAnswer).toBe("Hello wor");
+    const s2 = reducer(s1, { type: "STREAMING_ANSWER_SET", text: "Hello world" });
+    expect(s2.liveTail.streamingAnswer).toBe("Hello world");
+    // Wholesale set, not append: a shorter next value replaces rather than concatenates.
+    const s3 = reducer(s2, { type: "STREAMING_ANSWER_SET", text: "new" });
+    expect(s3.liveTail.streamingAnswer).toBe("new");
+  });
+
+  it("never appends to transcript — the duplicate-content guarantee ASSISTANT_FINAL depends on", () => {
+    const s0 = initialState();
+    const before = s0.transcript.length;
+    const s1 = reducer(s0, { type: "STREAMING_ANSWER_SET", text: "some streamed text" });
+    expect(s1.transcript.length).toBe(before);
+    expect(s1.transcript).toEqual(s0.transcript);
+  });
+
+  it("leaves every other liveTail field untouched", () => {
+    let s = initialState();
+    s = reducer(s, { type: "TOOL_CALL_OPEN", toolName: "read_file", args: "a.ts" });
+    s = reducer(s, { type: "STREAMING_ANSWER_SET", text: "partial answer" });
+    expect(s.liveTail.currentToolCall).toEqual({ toolName: "read_file", args: "a.ts", patch: undefined });
+    expect(s.liveTail.streamingAnswer).toBe("partial answer");
+  });
+});
+
+describe("streamingAnswer cleared at every run-terminal/park transition", () => {
+  function withStreamingAnswer() {
+    return reducer(initialState(), { type: "STREAMING_ANSWER_SET", text: "in progress…" });
+  }
+
+  it("RUN_DONE clears it", () => {
+    const s = reducer(withStreamingAnswer(), { type: "RUN_DONE" });
+    expect(s.liveTail.streamingAnswer).toBe("");
+  });
+
+  it("RUN_ABORTED clears it", () => {
+    const s = reducer(withStreamingAnswer(), { type: "RUN_ABORTED" });
+    expect(s.liveTail.streamingAnswer).toBe("");
+  });
+
+  it("RUN_FAILED clears it", () => {
+    const s = reducer(withStreamingAnswer(), { type: "RUN_FAILED" });
+    expect(s.liveTail.streamingAnswer).toBe("");
+  });
+
+  it("USER_QUESTION_ASKED (park-for-input) clears it — a stale preview must not sit behind a question prompt", () => {
+    const s = reducer(withStreamingAnswer(), {
+      type: "USER_QUESTION_ASKED",
+      questionId: "q1",
+      runId: "run-1",
+      question: "Which file?",
+    });
+    expect(s.liveTail.streamingAnswer).toBe("");
+    expect(s.runState).toBe("awaiting_input");
+  });
+
+  it("ASSISTANT_FINAL alone does NOT clear it — RUN_DONE (dispatched immediately after, same batch) is what does", () => {
+    // Mirrors currentToolCall's existing asymmetry: ASSISTANT_FINAL commits the transcript
+    // entry; the run-boundary actions clear liveTail. Documented here so the two don't drift
+    // apart silently if either reducer case is touched later.
+    const s = reducer(withStreamingAnswer(), { type: "ASSISTANT_FINAL", text: "The answer." });
+    expect(s.liveTail.streamingAnswer).toBe("in progress…");
+    expect(s.transcript.some(e => e.kind === "assistant_final")).toBe(true);
+  });
+});

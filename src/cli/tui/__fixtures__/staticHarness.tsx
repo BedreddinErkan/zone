@@ -27,7 +27,11 @@ export function renderTranscript(transcript: TranscriptEntry[]): HarnessInstance
 }
 
 /** Renders at a specific column width. Uses Ink's render directly (ink-testing-library hardcodes columns=100). */
-export function renderTranscriptAt(transcript: TranscriptEntry[], columns: number): HarnessInstance {
+export function renderTranscriptAt(
+  transcript: TranscriptEntry[],
+  columns: number,
+  seedStreamingAnswer?: string
+): HarnessInstance {
   const frames: string[] = [];
   const stdout = Object.assign(new EventEmitter(), {
     columns,
@@ -35,7 +39,7 @@ export function renderTranscriptAt(transcript: TranscriptEntry[], columns: numbe
     write: (frame: string) => { frames.push(frame); return true; },
   });
   const instance = inkRender(
-    <StoreProvider initialValues={{ model: "test-model", capUsd: 10, resumedTranscript: transcript }}>
+    <StoreProvider initialValues={{ model: "test-model", capUsd: 10, resumedTranscript: transcript, seedStreamingAnswer }}>
       <Transcript />
     </StoreProvider>,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

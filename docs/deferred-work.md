@@ -25855,6 +25855,54 @@ today only because `:5815` and `:5707` (the read-only counterpart) are mutually 
 between the two — found while establishing item 318, not by any dedicated investigation of
 `composer.ts` itself.
 
+## 327. Closed — a normally-completing run streamed tool-argument deltas and surfaced no assistant text at all
+
+**Bucket: Closed**, in the same commit as this entry. Item 314's shared delivery channel and
+`emitStructuredProgress` (item 315) already carried everything needed; the gap was that no
+callback existed to surface assistant-text fragments the way `onToolArgumentsDelta` already
+surfaced tool-argument ones.
+
+**The fix.** `src/llm/anthropicAdapter.ts`'s `_streamWithToolCallbacks` already accumulated
+assistant text into `textAccum` from `convertStream`'s normalized `delta.content` — a plain
+string, not Anthropic's raw `content_block_delta`/`text_delta` shape, and already sitting in the
+same loop, same iteration, as the tool-argument accumulation. A one-line addition
+(`options.onTextDelta?.(delta.content)`) surfaces it. `src/llm/agentLoop.ts` mirrors
+`onToolArgumentsDelta`'s exact closure-reuse shape for a new `onTextDelta`, tagging each fragment
+with `iter`, at both streamed call sites (`:4351`, `:5577`). `src/core/runLlmPatchFlow.ts` mirrors
+`toolInputStream` with a new `textDeltaStream`, calling `emitStructuredProgress` directly (item
+314's Route 2) under the dormant `chat_chunk` type — chosen over a new type name because it had
+zero existing producers (no regression risk) and `src/remote/toWireFrame.ts` already had a ready
+case for it.
+
+**The TUI side needed more than a producer.** `chat_chunk`'s existing (dormant) wiring shared
+`narration`/`chat_response`'s debounced buffer, which commits into the same transcript entries
+`ASSISTANT_FINAL` also writes — reusing it as-is would have either duplicated the final answer or
+downgraded its rendering from a formatted `assistant_final` entry to plain narration text.
+`chat_chunk` is repointed to its own dedicated handler and store field
+(`liveTail.streamingAnswer`), rendered live outside `<Static>` and never committed — `ASSISTANT_FINAL`
+remains the sole writer of the authoritative entry. The reset key is `${runId}:${iter}`, not `iter`
+alone: the main call and its own auto-continuation share one `iter` by construction (so a
+continuation correctly appends), while `runId` closes the case two runs coincidentally share an
+`iter` value that `iter` alone would misread as a continuation.
+
+**Measured, not assumed.** A live run (isolated `HOME`, `ZONE_TRUST_ALL=1`,
+`ZONE_ARCHETYPE_ENABLE_INVESTIGATION=0`, `--force-tier complex`, one JSDoc-comment task, n=1, cost
+$0.0538) recorded 6 `chat_chunk` arrivals and 38 `tool_input_delta` arrivals at the bus in the same
+log — both the new mechanism and the pre-existing tool-argument-delta positive control fired
+together, and `apply_patch` is confirmed `outcome:"ok"` in the tool-call sink (keyed on `.tool`,
+item 316). Reducer/pure-function unit tests (`src/cli/tui/store.test.tsx`,
+`src/cli/tui/hooks/useAgentEvents.streamingAnswer.test.ts`) cover turn-boundary reset, the
+2,000-character tail cap, clearing at every run-terminal/park transition, and — the assertion that
+matters most — that `STREAMING_ANSWER_SET` never appends to `transcript`. A frame-cost measurement
+(`src/cli/tui/streamingAnswerFrameCost.test.ts`) at the cap and at 2× it showed sub-linear scaling
+(n=4 runs, ~2.5ms → ~3.5ms), which is why this shipped with no feature flag.
+
+**What this does not cover.** Plan generation and the token-budget/max-iterations wrapup calls
+remain genuinely non-streamed (item 318, still blocked on data). OpenAI gets neither mechanism
+(item 323). Subagent-dispatched text is deliberately not forwarded into this path — whether a
+worker's own streamed text should surface in the parent's live preview is a separate design
+question this pass did not answer.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
@@ -25865,13 +25913,13 @@ priority ordering" cautions against ranking by importance, which this section do
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (151): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42,
+**Closed** (152): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42,
 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113,
 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167,
 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228,
 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260,
 262, 264, 265, 266, 267, 268, 269, 270, 271, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285,
-286, 288, 289, 290, 301, 302, 304, 308, 309, 310
+286, 288, 289, 290, 301, 302, 304, 308, 309, 310, 327
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (8): 287, 291, 292, 293, 296, 299, 313, 320

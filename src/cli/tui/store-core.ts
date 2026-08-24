@@ -57,6 +57,14 @@ export type LiveTailState = {
    * what was actually touched.
    */
   pendingReadOnlyBatch: Array<{ toolName: string; arg: string }>;
+  /**
+   * Live-only preview of the assistant's streamed final-answer text. Set wholesale by
+   * STREAMING_ANSWER_SET from a debounced, tail-capped buffer assembled in
+   * useAgentEvents.ts — this field itself does no accumulation. Never committed to
+   * `transcript`/`<Static>`: ASSISTANT_FINAL remains the sole writer of the authoritative,
+   * markdown-formatted entry, so this string is discarded, not promoted, once a turn ends.
+   */
+  streamingAnswer: string;
 };
 
 export type TranscriptEntry =
@@ -263,13 +271,20 @@ export function buildInitialState(initialValues?: {
   pendingMcpTrust?: { config: import("../../api/diskMcp.js").McpConfig; hash: string; projectPath: string } | null;
   /** --resume/--continue landing on an envelope that stopped mid-question. */
   carriedQuestion?: Extract<PendingQuestion, { kind: "carried" }> | null;
+  /** Test-only seed for the live streaming-answer preview (frame-cost measurement harness). */
+  seedStreamingAnswer?: string;
 }): StoreState {
   return {
     transcript: initialValues?.resumedTranscript ?? [],
     sessionId: initialValues?.resumedSessionId ?? randomUUID(),
     sessionStartedAt: initialValues?.resumedStartedAt ?? new Date().toISOString(),
     isResumed: !!initialValues?.resumedTranscript,
-    liveTail: { currentToolCall: null, narrationBuffer: "", pendingReadOnlyBatch: [] },
+    liveTail: {
+      currentToolCall: null,
+      narrationBuffer: "",
+      pendingReadOnlyBatch: [],
+      streamingAnswer: initialValues?.seedStreamingAnswer ?? "",
+    },
     spinner: null,
     statusBar: {
       iter: 0,
@@ -340,6 +355,7 @@ export type StoreAction =
   | { type: "TOAST_PUSH"; entry: ToastEntry }
   | { type: "TOAST_POP" }
   | { type: "PHASE_MARKER"; phase: string }
+  | { type: "STREAMING_ANSWER_SET"; text: string }
   | { type: "ERROR_LINE"; text: string }
   | { type: "RUN_DONE" }
   | { type: "RUN_ABORTED" }
@@ -612,6 +628,16 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         transcript: [...state.transcript, { kind: "phase_marker", phase: action.phase }],
       };
 
+    // Wholesale set, not append — accumulation/turn-boundary reset/tail-cap all happen in the
+    // ref-backed buffer in useAgentEvents.ts before this ever dispatches. Never touches
+    // `transcript`: this is the one guarantee that keeps ASSISTANT_FINAL the sole writer to
+    // `<Static>` for the same content.
+    case "STREAMING_ANSWER_SET":
+      return {
+        ...state,
+        liveTail: { ...state.liveTail, streamingAnswer: action.text },
+      };
+
     case "ERROR_LINE":
       return {
         ...state,
@@ -635,7 +661,7 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         // Freeze the duration at completion (excludes idle / reading time).
         runEndMs: Date.now(),
         pendingQuestion: null,
-        liveTail: { ...flushed.liveTail, currentToolCall: null },
+        liveTail: { ...flushed.liveTail, currentToolCall: null, streamingAnswer: "" },
       };
     }
 
@@ -653,7 +679,7 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         parkStartedMs: undefined,
         runEndMs: Date.now(),
         pendingQuestion: null,
-        liveTail: { ...flushed.liveTail, currentToolCall: null },
+        liveTail: { ...flushed.liveTail, currentToolCall: null, streamingAnswer: "" },
       };
     }
 
@@ -668,7 +694,7 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         parkStartedMs: undefined,
         runEndMs: Date.now(),
         pendingQuestion: null,
-        liveTail: { ...flushed.liveTail, currentToolCall: null },
+        liveTail: { ...flushed.liveTail, currentToolCall: null, streamingAnswer: "" },
       };
     }
 
@@ -737,7 +763,7 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         // Nothing is being computed while we wait, and a spinner next to a
         // question reads as "still working", i.e. "don't type".
         spinner: null,
-        liveTail: { ...flushed.liveTail, currentToolCall: null },
+        liveTail: { ...flushed.liveTail, currentToolCall: null, streamingAnswer: "" },
       };
     }
 
@@ -897,7 +923,7 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         // Reset, not flush: the transcript this batch would flush into is about to
         // be replaced wholesale by the resumed session's own, so there is nothing
         // to preserve it for.
-        liveTail: { currentToolCall: null, narrationBuffer: "", pendingReadOnlyBatch: [] },
+        liveTail: { currentToolCall: null, narrationBuffer: "", pendingReadOnlyBatch: [], streamingAnswer: "" },
         spinner: null,
         runState: "idle",
         pendingQuestion: null,

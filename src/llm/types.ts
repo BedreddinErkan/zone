@@ -46,6 +46,12 @@ export interface LLMRequestOptions {
    */
   onToolArgumentsDelta?: (toolCallId: string, toolName: string, argDelta: string) => void;
   /**
+   * When provided the Anthropic adapter fires this callback for every assistant-text
+   * fragment it accumulates into textAccum while streaming. Anthropic only — the OpenAI
+   * adapter never reads this option, matching onToolArgumentsDelta's own precedent.
+   */
+  onTextDelta?: (fragment: string) => void;
+  /**
    * Y.1.6.3/Y.1.6.4: receives retry lifecycle events emitted by
    * withExponentialBackoff (zone_llm_retry_started, llm_retry_in_progress).
    * Threaded from agentLoop so the caller can emit SSE narration and write

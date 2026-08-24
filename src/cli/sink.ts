@@ -373,7 +373,14 @@ export function buildCliSink(opts: CliSinkOptions, spinner: Spinner): CliSink {
 
       case "chat_chunk":
       case "chat_response":
-        if (!quiet && evt.text) process.stdout.write(evt.text);
+        // chat_chunk carries its fragment in `delta` (matching tool_input_delta's naming for
+        // a streamed increment, not a complete block); chat_response carries the whole text in
+        // `text`. Same fallback chain the TUI's own handleTextEvent already uses for this
+        // trio, so headless mode and the TUI agree on which field each type actually uses.
+        if (!quiet) {
+          const chunk = evt.text ?? evt.delta;
+          if (chunk) process.stdout.write(chunk);
+        }
         break;
 
       case "chat_start":

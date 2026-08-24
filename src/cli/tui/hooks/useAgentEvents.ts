@@ -130,6 +130,39 @@ function flushBuffer(
 }
 
 // ---------------------------------------------------------------------------
+// computeStreamingAnswerUpdate — pure; extracted so the reset/accumulate/cap
+// logic is unit-testable without a hook-rendering harness, the same reason
+// formatCompactionNarration above is separated from its own stateful handler.
+// ---------------------------------------------------------------------------
+
+/**
+ * Reset key is `${runId}:${iter}`, not `iter` alone and not a run/turn boundary event: the
+ * main call and its own auto-continuation deliberately share one `iter` within a run
+ * (agentLoop.ts's onTextDelta closure comment explains why — a continuation extends the same
+ * answer), so they correctly append; a genuinely new LLM turn within the same run carries a
+ * new `iter` and correctly resets. `runId` in the key closes a gap `iter` alone cannot: two
+ * runs can coincidentally end/start on the same iter number (e.g. both are one-iteration
+ * runs), and `iter` alone would misread that as a continuation. `runId` is never reused
+ * across runs, so folding it in resets correctly at every run boundary — including
+ * RUN_ABORTED (Esc) and a fresh USER_PROMPT submission, neither of which is a bus event this
+ * hook can listen for directly.
+ */
+export const STREAMING_ANSWER_TAIL_CAP = 2000;
+
+export function computeStreamingAnswerUpdate(
+  prev: { buffer: string; key: string | null },
+  event: { runId?: string; iter?: number; delta?: string },
+  tailCap: number = STREAMING_ANSWER_TAIL_CAP
+): { buffer: string; key: string } {
+  const fragment = event.delta ?? "";
+  const key = `${event.runId ?? ""}:${event.iter ?? ""}`;
+  const isNewTurn = key !== prev.key;
+  let buffer = (isNewTurn ? "" : prev.buffer) + fragment;
+  if (buffer.length > tailCap) buffer = buffer.slice(-tailCap);
+  return { buffer, key };
+}
+
+// ---------------------------------------------------------------------------
 // useAgentEvents hook
 // ---------------------------------------------------------------------------
 
@@ -141,6 +174,14 @@ export function useAgentEvents(
 ): void {
   const localBuffer = useRef("");
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Assistant-text deltas: a dedicated buffer, deliberately NOT localBuffer/debounceTimer
+  // above — reusing those would commit streamed fragments into the same narration entries
+  // ASSISTANT_FINAL also writes. Reset/accumulate/cap logic lives in the pure
+  // computeStreamingAnswerUpdate above (see its own doc comment); these refs just hold its
+  // running state across events.
+  const streamingAnswerBuffer = useRef("");
+  const streamingAnswerLastKey = useRef<string | null>(null);
+  const streamingAnswerTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!bus) return;
@@ -155,6 +196,25 @@ export function useAgentEvents(
         dispatch({ type: "TRANSCRIPT_APPEND_NARRATION", text: localBuffer.current });
         localBuffer.current = "";
         debounceTimer.current = null;
+      }, 200);
+    }
+
+    function handleStreamingAnswerEvent(evt: ZoneStructuredProgressEvent): void {
+      if (!evt.delta) return;
+      const { buffer, key } = computeStreamingAnswerUpdate(
+        { buffer: streamingAnswerBuffer.current, key: streamingAnswerLastKey.current },
+        evt
+      );
+      streamingAnswerBuffer.current = buffer;
+      streamingAnswerLastKey.current = key;
+      if (streamingAnswerTimer.current !== null) clearTimeout(streamingAnswerTimer.current);
+      streamingAnswerTimer.current = setTimeout(() => {
+        // Intentionally NOT cleared after dispatch, unlike localBuffer above: this ref holds
+        // the full accumulated text for the current turn, because STREAMING_ANSWER_SET is a
+        // wholesale set, not an append — the store field must receive the complete string on
+        // every flush, not just the newest increment.
+        dispatch({ type: "STREAMING_ANSWER_SET", text: streamingAnswerBuffer.current });
+        streamingAnswerTimer.current = null;
       }, 200);
     }
 
@@ -209,7 +269,7 @@ export function useAgentEvents(
     bus.on("run_summary",              flushFirst);
     bus.on("narration",                handleTextEvent);
     bus.on("thinking",                 simple);
-    bus.on("chat_chunk",               handleTextEvent);
+    bus.on("chat_chunk",               handleStreamingAnswerEvent);
     bus.on("chat_response",            handleTextEvent);
     bus.on("tool_call",                flushFirst);
     bus.on("tool_result",              simple);
@@ -265,7 +325,7 @@ export function useAgentEvents(
       bus.off("run_summary",              flushFirst);
       bus.off("narration",                handleTextEvent);
       bus.off("thinking",                 simple);
-      bus.off("chat_chunk",               handleTextEvent);
+      bus.off("chat_chunk",               handleStreamingAnswerEvent);
       bus.off("chat_response",            handleTextEvent);
       bus.off("tool_call",                flushFirst);
       bus.off("tool_result",              simple);

@@ -122,6 +122,7 @@ export function Transcript(): React.ReactElement {
   const { stdout } = useStdout();
   const liveToolCall = state.liveTail.currentToolCall;
   const liveNarration = state.liveTail.narrationBuffer;
+  const liveStreamingAnswer = state.liveTail.streamingAnswer;
   const pendingBatchCount = state.liveTail.pendingReadOnlyBatch.length;
 
   return (
@@ -141,6 +142,14 @@ export function Transcript(): React.ReactElement {
           <Box flexGrow={1}>
             <Text>{liveNarration}</Text>
           </Box>
+        </Box>
+      )}
+      {liveStreamingAnswer && (
+        // Live-only, never committed — see STREAMING_ANSWER_SET's own comment in
+        // store-core.ts. ASSISTANT_FINAL commits the authoritative, markdown-formatted
+        // entry to <Static> separately; this box always disappears when that happens.
+        <Box>
+          <Text dimColor>{liveStreamingAnswer}</Text>
         </Box>
       )}
       {liveToolCall && (

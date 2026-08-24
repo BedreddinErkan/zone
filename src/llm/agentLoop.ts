@@ -239,6 +239,16 @@ export interface AgentLoopInput {
      *  is writing" in the side-panel slot. */
     subagentId?: string | null;
   }) => void;
+  /**
+   * Fires for each assistant-text fragment while streaming a normal final answer or its
+   * continuation (agentLoop's two streamed createChatCompletion call sites only — never
+   * plan generation or the token-budget/max-iterations wrapup calls, which are not
+   * streamed). iter identifies the LLM turn a fragment belongs to: the main call and any
+   * auto-continuation of it (finish_reason:"length") deliberately share one iter value,
+   * since a continuation extends the same answer rather than starting a new one. Not
+   * forwarded into subagent dispatch — see the closure site for why.
+   */
+  onTextDelta?: (event: { iter: number; delta: string }) => void;
   abortSignal?: AbortSignal;
   /** Optional import-ecosystem context block built by buildImportContextSummary. Injected by runLlmPatchFlow. */
   importContextSummary?: string;
@@ -4345,6 +4355,16 @@ Example:
           });
         }
       : undefined;
+    // Same closure-reuse shape as onToolArgumentsDelta above, and deliberately not forwarded
+    // into the subagent dispatch construction below (contrast onToolInputStream) — whether a
+    // worker subagent's own text should surface in the parent's live preview is a separate
+    // design question this pass does not answer. input.onTextDelta is therefore always
+    // undefined inside a subagent's recursive agentLoop call.
+    const onTextDelta = input.onTextDelta
+      ? (fragment: string) => {
+          input.onTextDelta!({ iter: iter + 1, delta: fragment });
+        }
+      : undefined;
 
     let response: Awaited<ReturnType<typeof client.createChatCompletion>>;
     try {
@@ -4357,7 +4377,7 @@ Example:
           max_tokens: getMaxOutputTokens(modelName),
           ...(promptCacheKey ? { prompt_cache_key: promptCacheKey } : {}),
         },
-        { signal: input.abortSignal, onToolArgumentsDelta, onRetryEvent, effort: requestCtx?.effort, webSearch: input.webSearchEnabled }
+        { signal: input.abortSignal, onToolArgumentsDelta, onTextDelta, onRetryEvent, effort: requestCtx?.effort, webSearch: input.webSearchEnabled }
       );
     } catch (llmErr: unknown) {
       if (llmErr instanceof UpstreamUnavailableError) {
@@ -5583,7 +5603,7 @@ Example:
               tool_choice: "none",
               max_tokens: getMaxOutputTokens(modelName),
             },
-            { signal: input.abortSignal, onToolArgumentsDelta, onRetryEvent, effort: requestCtx?.effort, webSearch: input.webSearchEnabled }
+            { signal: input.abortSignal, onToolArgumentsDelta, onTextDelta, onRetryEvent, effort: requestCtx?.effort, webSearch: input.webSearchEnabled }
           );
           // Record continuation cost/tokens so budget.snapshot() in finalizeRun is accurate.
           budget.recordLLMCall({

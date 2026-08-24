@@ -175,6 +175,7 @@ export class AnthropicAdapter implements LLMClient {
 
           if (typeof delta.content === "string" && delta.content) {
             textAccum += delta.content;
+            options.onTextDelta?.(delta.content);
           }
 
           const tcArr = (delta as { tool_calls?: Array<{

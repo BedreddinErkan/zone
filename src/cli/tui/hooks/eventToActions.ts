@@ -51,7 +51,11 @@ export function eventToActions(
       return { actions, intents: [] };
     }
 
-    // narration/chat_chunk/chat_response are handled by the caller's debounce — not here
+    // narration/chat_response share one debounced handler in the caller (handleTextEvent);
+    // chat_chunk has its own, separate one (handleStreamingAnswerEvent) — neither reaches
+    // this switch either way. This never actually runs for any of the three; it exists so
+    // adding logic here later doesn't look plausible for a type the bus.on wiring intercepts
+    // first.
     case "narration":
     case "chat_chunk":
     case "chat_response":

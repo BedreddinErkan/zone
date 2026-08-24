@@ -5452,6 +5452,21 @@ const initializeTodosFromPlan = (): void => {
       });
     };
 
+    // Mirrors toolInputStream above, for assistant-text fragments rather than tool-argument
+    // JSON. No local accumulation here — the turn-boundary reset (main call vs. a genuinely
+    // new LLM turn) happens store-side in the TUI, keyed on the iter this event carries; the
+    // main call and its own auto-continuation deliberately share one iter (see agentLoop.ts's
+    // onTextDelta closure comment) so a continued answer appends instead of resetting.
+    const textDeltaStream = (event: { iter: number; delta: string }): void => {
+      emitStructuredProgress({
+        type: "chat_chunk",
+        title: "Assistant is responding…",
+        status: "active",
+        delta: event.delta,
+        iter: event.iter,
+      });
+    };
+
     const agentLoopCallbacks = {
       onStructuredEvent: (evt: unknown) => {
         if (!runId) return;
@@ -5667,6 +5682,9 @@ const initializeTodosFromPlan = (): void => {
       },
       onToolInputStream: runId
         ? toolInputStream
+        : undefined,
+      onTextDelta: runId
+        ? textDeltaStream
         : undefined,
     } as const;
 
