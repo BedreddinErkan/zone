@@ -25903,6 +25903,264 @@ remain genuinely non-streamed (item 318, still blocked on data). OpenAI gets nei
 worker's own streamed text should surface in the parent's live preview is a separate design
 question this pass did not answer.
 
+## 328. Cost telemetry records the classifier's tier, not the tier a run was forced to
+
+**Bucket: Actionable now.** The fix is specified: derive one effective-tier string
+(`input.forceTier ?? input.taskClassification?.tier`) and pass it at the six sites that currently
+read the classifier directly. Nothing new needs to be learned first.
+
+**What is and is not broken.** `--force-tier` genuinely works. It is defined at
+`src/cli/index.ts:1252`, read under the name commander actually produces (`:122`, structurally
+guarded by `src/cli/cliOptionsCoverage.test.ts:66-70`, an AST scan over every `options.X` read),
+threaded through `CliFlags`/`CliConfig` into `runLlmPatchFlow` and on to
+`resolveTierLimits(input.taskClassification, { forceTierOverride: input.forceTier })`
+(`src/llm/agentLoop.ts:2502-2504`), which gives the override top priority and returns early
+(`src/llm/tierLimits.ts:52-60`). The forced limits are real: at complex they are a 800k token cap
+and a 120-iteration ceiling rather than 45.
+
+**Where it stops.** All six `recordLLMCall` sites in `agentLoop.ts` (3613, 4427, 5414, 5616, 5755,
+5878) carry the same text: `tier: input.taskClassification?.tier ?? ""`. That value flows through
+`TokenBudgetMeter.recordLLMCall` → `src/usage/iterCostMeter.ts:143` → `src/usage/costLogger.ts:32`
+into every per-iteration line of `~/.zone/cost-logs/*.jsonl`, and into the `iter_cost_update`
+event. `input.forceTier` is never consulted on that path. There is no effective-tier *string*
+anywhere in the tree — the forced value exists only as a `TierLimits` object — so the log faithfully
+records the classifier and mis-records the run.
+
+**Measured, twice.** A run invoked `--force-tier complex` on a one-line JSDoc task logged
+`"tier":"simple"` on every iteration line. A second run, research-shaped, did the same. Both are
+reproduced without any API call by the characterization test at
+`src/llm/agentLoop.forceTierTelemetry.test.ts`, which asserts `iter_cost_update` reports `simple`
+on a run forced to complex.
+
+**Why this is a labelling defect and not a gate-weakening one.** Nothing reads the field.
+`grep -rn "cost-logs\|costLogs" src/ scripts/` returns exactly one hit, the writer's own path
+builder (`src/usage/costLogger.ts:7`); the same grep shape against a string known to be present
+returns it, so the absence is instrumented rather than assumed. The `/metrics` path reads a
+different file entirely — `readRecords` (`src/usage/usageTracker.ts:99`) reads
+`~/.zone/usage/<userId>.jsonl`. So no gate consumes the wrong value; the cost is that any later
+analysis of these logs would attribute forced runs to the wrong tier, and this series' own audit
+runs are the population that carries the flag.
+
+**Split from item 329 deliberately.** Six sites reading the wrong *source* and one field hardcoded
+to a literal are two mechanisms with two different fixes, in the sense items 294/295 and 310/311
+already use: same area, different direction, separate entries.
+
+**The pin must be updated, never deleted.** `agentLoop.forceTierTelemetry.test.ts` asserts the
+defect, not the specification. When this fix lands, change that assertion to the corrected value —
+deleting it returns the field to the unobserved state that let the mis-record survive in the first
+place.
+
+## 329. `emitArchetype` hardcodes `userOverride` to null — the one field designed to record the override
+
+**Bucket: Actionable now.** The fix is to pass the value that already exists in scope
+(`input.forceTier ?? null`) where a literal `null` is written today.
+
+`src/llm/agentLoop.ts:2285` sends `userOverride: null` in the `[zone-archetype]` marker payload,
+inside a call that otherwise carries real values from the classification. The field's name states
+its purpose exactly, and the marker is the primary signal for archetype and tier analysis, so a
+forced run is indistinguishable from an unforced one in the sink that exists to distinguish them.
+Its sibling `tier` field on the same call reads `input.taskClassification?.tier ?? null` — the same
+source item 328 describes, which is why the two entries are neighbours but not one.
+
+Confirmed at runtime without an API call by `src/llm/agentLoop.forceTierTelemetry.test.ts`, which
+parses the emitted marker and asserts `userOverride` is null on a run invoked with a forced tier.
+That assertion is a characterization of the defect: when the fix lands it must be **updated to the
+corrected value, not removed**.
+
+Contrast `src/llm/agentLoop.ts:2802`, which populates a `userOverride` field from
+`readDailyUsdCapOverride()` — the same field name, wired, on a different marker. So the pattern is
+established elsewhere in the same file and simply was not applied here.
+
+## 330. `--force-tier` governs tier limits but not the tier-derived tool subset
+
+**Bucket: Neither.** The remedy is a key choice nobody has made: whether a debugging override that
+exists to relax budgets should also change which tools the model is offered. Making it do so is a
+behavioural change to every forced run, not a correction.
+
+`src/llm/agentLoop.ts:2416-2417` builds the tool filter from the classifier:
+`tierToolFilter(input.taskClassification.tier)` — so a run forced to complex is still handed the
+simple-tier whitelist (`src/tools/tierToolSubsets.ts:46-50` returns the five-tool simple subset for
+`simple` and `undefined`, meaning no allowlist, for `complex`). The forced value reaches
+`resolveTierLimits` and nothing else.
+
+**Why this matters beyond the flag.** The cage-removal recipe this series of diagnostic passes has
+been using is `ZONE_ARCHETYPE_ENABLE_INVESTIGATION=0` plus `--force-tier complex`, on the
+understanding that the second lever guaranteed the write tools were available. It does not.
+
+**Prior runs' controls survive, and the reason is the interesting part.** The runs that depended on
+a write tool being available asserted on the **tool-call sink** — that `apply_patch` was actually
+invoked, read from the `tool` field of `~/.zone/tool-calls.jsonl` — rather than on the flag having
+been passed. Asserting the property instead of the setting is what kept those conclusions valid
+while the premise underneath them was wrong. The simple tier's five-tool subset happens to include
+`write_file` and `apply_patch`, so the write path was available regardless; the control held, but
+not for the reason recorded at the time.
+
+**Residual limit to carry forward.** `fetch_url` is complex-tier-only and absent from both smaller
+subsets, so a future run that needs a complex-tier-only tool will not get it from this flag. Such a
+run needs a task the classifier itself rates complex.
+
+**Third instance of one pattern.** A setting's name does not tell you which code path it triggers.
+The first was an `--otp` flag whose absence was read as an auth failure when the npm version had
+moved to a browser flow; the second was `ZONE_HOME`, a plausible variable that does not exist, where
+`HOME` is the real lever. This is the third: `--force-tier` names a tier and governs a budget.
+
+## 331. `/metrics` computes a tier distribution from a field nothing ever populates
+
+**Bucket: Neither.** Two directions are available — plumb a tier into the usage records, or drop the
+display — and choosing between them is a product decision rather than a specified fix.
+
+`src/llm/metricsAggregator.ts:12` declares `tier?: RunTier` on `RunRecord`, and `:87`, `:105-106`
+and `:161` compute and expose `tierDistribution` to the `/metrics` modal. But `buildRunRecords`
+(`:181`) reads `readRecords(userId)` — the usage JSONL at `~/.zone/usage/<userId>.jsonl`, whose
+records carry token counts and dollars and no tier at all — and neither its internal accumulator
+(`:183-191`) nor the `RunRecord` objects it returns (`:241-250`) ever assign the field. A count of
+assignment-position occurrences in that file gives `costUsd:` five and `tier:` zero.
+
+So `if (run.tier)` at `:105` is never true and the distribution is permanently
+`{simple: 0, medium: 0, complex: 0}`. The modal renders a real-looking zero rather than an absence,
+which is the failure mode worth recording: a display that cannot distinguish "no runs" from
+"never wired". Found while tracing item 328's consumers, not by an audit of the metrics path.
+
+## 332. `recordingClient` is a usage-telemetry wrapper, not a record/replay cassette, and streaming deltas never cross it
+
+**Bucket: Neither.** A structural fact recorded so the next person does not plan work around a
+replay capability that does not exist. Nothing is proposed to change.
+
+The name invites the assumption that captured interactions can be replayed offline. They cannot.
+`src/llm/recordingClient.ts` imports no `fs`, has no read path, no fixture lookup, no mode flag,
+and a one-argument constructor. Its only persistence is `recordExecution` →
+`src/usage/usageTracker.ts:95` `fs.appendFileSync`, writing `{userId, runId, provider, model,
+token counts, est_cost_usd, timestamp}` — no prompt, no response, no chunks.
+
+Two independent reasons it could not serve as a cassette even if a read path were added. First, the
+assembled `ChatCompletion` is returned to the caller and dropped, never persisted. Second, and more
+decisive, the per-fragment callbacks never reach it at all: `_streamWithToolCallbacks` is invoked
+from *inside* `AnthropicAdapter.createChatCompletion` (`src/llm/anthropicAdapter.ts:99`), so the
+wrapper sees one already-assembled response, and its own `createChatCompletionStream` chunk-wrapper
+is a different code path that the agent's streaming does not take.
+
+**What to use instead**, established while answering this: the hoisted `@anthropic-ai/sdk` mock in
+`src/llm/anthropicAdapter.streamRetry.test.ts` drives the real adapter and the real `convertStream`
+with hand-built events, and `src/llm/anthropicAdapter.toolStream.test.ts` drives the loop with a
+`createChatCompletion` mock that fires callbacks. Both exercise the delta path with no API call.
+
+## 333. The eleven exported `handleXxx` wrappers in `useAgentEvents.ts` have no production callers
+
+**Bucket: Neither.** Whether to delete them, mark them test-only, or wire them is a choice nobody
+has made; they are harmless where they sit.
+
+`handleCompactionStarted`, `handleCompactionStatus`, `handleCompactionExhausted`,
+`handleCompactionOverflow`, `handleTodosInitialized`, `handleTodoRevised`, `handleTodoStatusChanged`,
+`handleEditApproval`, `handlePlanGenerationStarted`, `handlePlanReadyForApprovalExported` and
+`handleStagedDiffsReadyExported` (`src/cli/tui/hooks/useAgentEvents.ts`, roughly `:23`-`:111`) each
+wrap a call to `eventToActions` and dispatch the result. Grepping each name individually returns its
+own export line and test files only — the production subscriptions all use the in-hook `simple`,
+`flushFirst` and `handleCommandApproval` wrappers instead.
+
+They are therefore test-only seams that look like production handlers. The consequence to record:
+a test exercising one of them proves the translation is correct but proves nothing about the wiring,
+because no bus event reaches these functions. Found while establishing that no path can deliver a
+`chat_chunk` event to `eventToActions`.
+
+## 334. `onTextDelta` cannot fire unless `onToolArgumentsDelta` is also supplied
+
+**Bucket: Actionable now.** The fix is one condition: branch the streaming path on either callback
+(`if (options.onToolArgumentsDelta || options.onTextDelta)`) at `src/llm/anthropicAdapter.ts:99`.
+
+That line reads `if (options.onToolArgumentsDelta) { return await this._streamWithToolCallbacks(...) }`
+— it is the sole entry to the streaming path, and it tests one callback only. A caller supplying
+`onTextDelta` alone gets the non-streaming path and no text fragments, silently: no error, no
+warning, an empty result indistinguishable from a model that produced no prose.
+
+Not currently a live defect. Both callbacks are wired together in production — `agentLoop.ts` builds
+each from its own `AgentLoopInput` field and passes both in the same options object at the two
+streamed call sites, and `runLlmPatchFlow.ts` supplies both gated on the same `runId`. So the
+coupling is latent, and it is recorded because the failure it produces is silent and the two
+features read as independent from their names and types.
+
+Every test of the text-delta path must pass `onToolArgumentsDelta` as well, for this reason, and
+`src/llm/anthropicAdapter.textStream.test.ts` says so at each call site.
+
+## 335. Remote-control clients receive per-fragment frames with no debounce and no size cap
+
+**Bucket: Neither.** Whether unbounded per-fragment framing is acceptable for that transport is a
+design question, and it cannot be answered by the measurement this pass could take.
+
+`src/remote/remoteControlAdapter.ts` converts every arriving progress event through `toWireFrame`
+and calls `broadcast(frame)` unconditionally; `src/remote/controlServer.ts:292` is a raw
+`client.send(...)` with no batching, throttle or size limit. The 200 ms debounce and the 2,000-char
+tail cap that bound the terminal preview live only in the TUI's own handler
+(`src/cli/tui/hooks/useAgentEvents.ts`) and do not apply on this path. `tool_input_delta` already
+exhibits the pattern — every JSON argument fragment broadcast individually — and `chat_chunk` now
+joins it, so this is a pre-existing shape extended to one more kind rather than something the
+streaming change introduced.
+
+**Why no rate is recorded here.** The wire path could not be measured from the runs available.
+`startRemoteControlServer` and `createRemoteControlAdapter` are called only inside
+`onRemoteControlCommand` (`src/cli/tui/index.tsx:1094-1131`), an explicit slash-command handler, so
+a plain session never instantiates either. More restrictive still, the adapter's `onProgress` is
+created inside its own `startRun` and handed to `runOneShot`, so it observes only runs the remote
+itself starts — a TUI-initiated run's events reach the TUI's `onProgress` and never `toWireFrame`,
+whether or not a client is connected. The relationship between fragments and frames is one-to-one by
+construction rather than by measurement, which is a code fact no run could refute.
+
+**What would move this to Actionable now:** a remote-initiated run with a connected client,
+measuring frames per second at the wire. If that shows a rate that degrades the client, the entry
+gains a specified bound.
+
+## 336. Closed — a tail-cap assertion that derived its own expectation from the value under test
+
+**Bucket: Closed** by `bde886d4`, which replaced the assertion with fixed literals.
+
+The streaming preview's tail cap bounds a region Ink re-renders every frame outside `<Static>`, and
+the frame-cost measurement taken at that value is what licensed shipping the feature without a flag.
+Its test read:
+
+```ts
+const long = "x".repeat(STREAMING_ANSWER_TAIL_CAP + 500);
+expect(s.buffer.length).toBe(STREAMING_ANSWER_TAIL_CAP);
+```
+
+Both the input length and the expected output derive from the constant under test, so the assertion
+holds for every finite cap value. Changing the cap to 4,000 leaves it passing. It failed only when
+the cap was mutated to `Infinity`, and then because `"x".repeat(Infinity)` throws a `RangeError`
+while building the fixture — the harness died, not the assertion, and a mutation killed by its own
+setup is indistinguishable from one killed by a check.
+
+**Demonstrated rather than argued.** With the cap mutated 2000 → 4000, the original assertion was
+re-run in isolation and passed; the replacements fail with `expected 4000 to be 2000`. The
+replacements pin the constant to a literal and separately drive a fixed 5,000-character input
+expecting exactly 2,000 out, so neither side of the check moves when the constant does.
+
+The general shape is worth carrying: a test whose fixture is computed from the subject cannot
+observe the subject changing, and its passing is evidence about arithmetic rather than behaviour.
+
+## 337. Closed — two TUI tests that kept passing while what they verified changed underneath
+
+**Bucket: Closed** by `bde886d4`.
+
+When `chat_chunk` was repointed from the narration/commit handler to the live-preview handler, two
+tests in `src/cli/tui/transcript.test.tsx` continued to pass, for a different reason than before:
+the text they searched for was now coming from the never-committed preview rather than from a
+committed transcript entry. Both asserted only that the text appeared *somewhere* in a frame, and
+the text appears under both routings, so neither could tell the two apart. One of them — titled for
+debounce coalescing — carried no assertion whatsoever, only a comment claiming a verification it
+never performed.
+
+That mattered because these two are the only tests that drive a real event bus into a real `<App>`,
+which makes them the sole observer at the subscription layer: the layer where a routing change
+actually happens and one a reducer test cannot reach.
+
+Both now assert **where** the text lives — visible in the live frame while streaming, then absent
+after a run-terminal event clears the preview, which distinguishes a live preview from a committed
+entry because a committed one would survive the clear. Verified by swapping the routing back: with
+`chat_chunk` bound again to the narration handler, the strengthened test fails on the surviving
+text, glyph and all.
+
+The pattern to carry: a test that keeps passing across a behavioural change has not necessarily
+confirmed the change was safe. It may have stopped discriminating, and only a deliberate swap of the
+two behaviours distinguishes those cases.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
@@ -25913,16 +26171,16 @@ priority ordering" cautions against ranking by importance, which this section do
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (152): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42,
+**Closed** (154): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42,
 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113,
 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167,
 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228,
 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260,
 262, 264, 265, 266, 267, 268, 269, 270, 271, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285,
-286, 288, 289, 290, 301, 302, 304, 308, 309, 310, 327
+286, 288, 289, 290, 301, 302, 304, 308, 309, 310, 327, 336, 337
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (8): 287, 291, 292, 293, 296, 299, 313, 320
+first (11): 287, 291, 292, 293, 296, 299, 313, 320, 328, 329, 334
 
 Six, down from seven, and the movement is the ledger's own signal about whether anything is specified
 and waiting, in both directions. The diagnosis pass into `find_references` left it at 7 (287 plus six
@@ -25945,19 +26203,23 @@ pass filed 313 (the dist-orphan `prepack` fix, its own fix specified in the same
 corresponding update to this paragraph's own narrative, reaching seven without this text saying so —
 noted here rather than silently left, since a bucket header and its own prose disagreeing about how
 a count was reached is exactly the kind of drift this document's own discipline exists to catch.
-This pass lands `buildModels()` dropping `recommendedTier` as 320 — a mechanical one-line projection
+That pass landed `buildModels()` dropping `recommendedTier` as 320 — a mechanical one-line projection
 fix, carried forward from an earlier pass's unlanded draft rather than newly discovered — reaching
-eight: 287, 291, 292, 293, 296, 299, 313, 320.
+eight: 287, 291, 292, 293, 296, 299, 313, 320. The remediation pass after it adds three, reaching
+eleven: 328 and 329, the two halves of a telemetry mis-record that a run's own cost log exposed and
+which split by direction rather than by area; and 334, a latent callback coupling whose remedy is a
+single condition. All three arrived with the fix named in the entry, which is what this bucket
+requires; none was inherited backlog.
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (16): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250, 263, 318
 
-**Neither — a structural fact recorded, with no fix proposed** (151): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
+**Neither — a structural fact recorded, with no fix proposed** (156): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
 74, 76, 77, 78, 79, 80, 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109,
 112, 114, 115, 118, 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152,
 154, 155, 158, 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199,
 200, 201, 202, 205, 206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230,
 232, 243, 244, 247, 248, 249, 254, 256, 261, 272, 294, 295, 297, 298, 300, 303, 305, 306, 307, 311, 312,
-314, 315, 316, 317, 319, 321, 322, 323, 324, 325, 326
+314, 315, 316, 317, 319, 321, 322, 323, 324, 325, 326, 330, 331, 332, 333, 335
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
