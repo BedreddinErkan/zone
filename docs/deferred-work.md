@@ -24151,6 +24151,17 @@ exception to the existing ignore, or replace them with a committed synthetic fix
 two-group split. Until one of those lands, the describe block should at least say working-tree-only in
 its name so no reader mistakes a green CI run for coverage.
 
+**Encountered a second time, and the way it recurred is the part worth keeping.** A later pass met the
+same eight-test delta — the same 17-versus-25 skip counts, reproducing exactly even though the suite
+had grown by roughly ninety tests between them — and again read it as a puzzle about its own change
+rather than as this gate. That pass's clean-clone claim failed twice over. It omitted the documented
+`dist` symlink, so the three failures it did see were its own procedure rather than anything
+structural; and it then reported those failures as confirmed by an unmodified clone, a control that
+could not discriminate because both runs shared the identical omission. The bar it believed it had
+cleared was, separately and already, known to be weaker by exactly these eight tests. Two readers
+independently mistaking a standing gate for a local symptom is the argument for closing it rather
+than annotating it.
+
 ## 293. The dependency-graph cache key samples only the first 500 sorted paths, so two different file lists of equal length can collide
 
 **Bucket: Actionable now.** A one-expression change at a named site.
@@ -26482,6 +26493,268 @@ would make drift impossible rather than detectable. That is a larger refactor of
 system where every other type is a bare literal, and it is recorded here as the option rather than
 performed piecemeal for one type.
 
+## 352. A writer outside Ink reaches the terminal once per run, and the shield does not catch it
+
+**Bucket: Actionable now.** The remedy is specified below and needs nothing new learned first.
+
+`runOneShotInner` builds the CLI sink's spinner unconditionally at `src/cli/dispatch.ts:131`
+(`createSpinner(process.stdout.isTTY === true, …)`), hands it to `buildCliSink` at `:141`, and calls
+`spinner.stop()` from a `finally` at `:806`. In TUI mode the sink itself is inert — the TUI always
+supplies its own `onProgress`, so `dispatch.ts:143`'s `opts.onProgress ?? sink.onProgress` never
+selects the sink — but the `finally` runs regardless. `stop()` is `stopTimer(); clear();`
+(`src/cli/sink.ts:53`), and `clear()` is `process.stderr.write("\r\x1b[K")` gated only on `isTTY`
+(`sink.ts:39-41`). So a carriage return plus erase-to-end-of-line lands on the terminal once per
+prompt run, from outside Ink's render, where Ink cannot account for it.
+
+**Neither shield pattern catches it**, checked by running the two regexes against the literal chunk
+rather than by reading them: `TELEMETRY_RE` requires `[` at position 0 and sees `\x1b[K` after
+`trimStart`; `RESULT_LINE_RE` allows an optional complete SGR group before `✓✗⚠`, and `\x1b[K` never
+closes with `m`. Controls in the same check discriminate — `[zone-archetype] {}` matches,
+`[INFO 2026] hi` and bare prose do not.
+
+**Every other spinner method is unreachable in this mode, which is what makes the remedy safe.** The
+plausible escape hatch is `src/cli/approvals.ts`'s `pauseForPrompt`/`resumeAfterPrompt`, but their
+only production callers are two switch arms of `handleStructuredEvent` (`sink.ts:223`, `:261`), whose
+own only caller sits inside the returned `onProgress` closure (`sink.ts:402`). So they are
+transitively dead alongside it. `stop()` is the sole live method, and no null-object stand-in is
+needed for the others.
+
+**Remedy.** Derive the progress callback once and construct the sink and its spinner only on the
+fallback branch, so nothing is built *or* stopped when the caller supplies `onProgress`. The
+one-line alternative — guarding the `stop()` call alone — is smaller but leaves the inert object
+constructed and the hazard latent for any future caller.
+
+**Why a test has to come first.** `stop()` has no observer anywhere: `src/cli/sink.test.ts`
+increments a `stopped` counter it never asserts on, and all thirteen dispatch test files stub
+`createSpinner` as `() => ({ stop: vi.fn() })` without asserting the call. Deleting or guarding
+`dispatch.ts:806` therefore fails nothing today. The observer has to assert the property — that no
+`"\r\x1b[K"` reaches stderr across a TUI-shaped run — rather than the setting, or it pins this call
+site instead of the behaviour.
+
+## 353. Two crash handlers save no session, and the save they need can itself throw
+
+**Bucket: Actionable now.** The fix mirrors an existing handler in the same file, line for line.
+
+`process.on("uncaughtException", …)` (`src/cli/tui/index.tsx:1049-1055`) and
+`process.on("unhandledRejection", …)` (`:1056-1062`) each kill the MCP manager, stop the remote
+server, call `instance?.unmount()`, log, and `process.exit(1)`. Neither builds or writes a session.
+The fatal-signal handler at `:762-802` does, on the same data, in the same closure — `storeCapture`,
+`buildDiskSession` and the module-scope `saveSessionSync` import are all already in scope at both
+crash handlers, so no plumbing is required.
+
+**The save is not safe to add unwrapped, in three named places.** `saveSessionSync`
+(`src/api/diskSessions.ts:78-90`) leaves `mkdirSync`, `writeFileSync` and `renameSync` unguarded —
+only `chmodSync` carries a catch. `buildDiskSession` (`index.tsx:1011-1024`) calls `process.cwd()`,
+which throws `ENOENT` when the working directory has been removed underneath the process — a
+plausible co-cause of the very crash being handled, and therefore the most likely route to a double
+fault. And `_reportSaveFailure` (`:410-426`) can throw itself, through `String(err)` on an error
+value with a hostile `toString`, or through its `emitLog` default reaching `console.log` on a closed
+stdout.
+
+**The shape to copy** is the signal handler's, including two details that read as incidental and are
+not: a `built` flag rather than a truthiness test on the result, so a build that throws can never
+fall through into the write; and a bare `try`/`catch` wrapped around each `_reportSaveFailure` call,
+so failure reporting cannot itself block the exit.
+
+**One window stays empty by design.** `storeCapture.state` is `null` until React's first passive
+effect flushes, and both handlers are registered before `render()`. A crash inside that window has no
+transcript to write, and the existing `s && s.transcript.length > 0` guard is the honest expression
+of that, not a gap.
+
+**No observer exists.** Nothing in the suite references either handler; deleting one outright passes.
+The signal path carries twelve cases in `src/cli/tui/fatalSignalHandlers.test.ts` — including a
+throwing unmount, a throwing write, and a throwing reporter — precisely because it was extracted
+behind an injectable-dependency seam. The crash handlers need the same extraction, or the added save
+is as unobserved as the handlers that hold it.
+
+## 354. The React render-crash path does not reach the uncaught-exception handler
+
+**Bucket: Neither.** Nothing is proposed: the path currently works, and recording why is worth more
+than changing it.
+
+`ErrorBoundary.componentDidCatch` (`src/cli/tui/components/ErrorBoundary.tsx`) calls `onCrash`, and
+`onCrash` (`index.tsx:1005-1009`) unmounts and then rethrows. The rethrow reads as though it escapes
+into `process.on("uncaughtException")`. It does not. `componentDidCatch` is invoked from React's
+class-callback commit step, whose caller wraps it and routes any throw into
+`captureCommitPhaseError`; that walk reaches the host root and calls the root's `onUncaughtError`
+handler, and **Ink installs no-ops for all four root error callbacks** —
+`node_modules/ink/build/ink.js:236` passes `() => {}` four times to `createContainer`, against
+`react-reconciler` 0.33.0. The throw is swallowed there.
+
+What happens instead is benign: `instance?.unmount()` at `:1007` resolves Ink's exit promise, the
+`await instance.waitUntilExit()` at `:1325` returns, and control falls into the normal exit path at
+`:1332-1351`, which builds and saves the session with its own error handling. **So this path is
+covered — by accident rather than by design**, and it is worth knowing that the coverage rests on
+Ink resolving rather than rejecting its exit promise, on that root callback staying a no-op, and on
+`runTui` still being parked at its await.
+
+Two adjacent facts recorded while establishing this. If `onCrash` fires during the initial
+synchronous mount, `instance` is still `undefined`, so the unmount is a no-op, the exit promise is
+never resolved, and the process hangs with nothing saved — worse than the loss item 353 addresses,
+and reachable only in that narrow window. And `onCrash` omits the
+`armedMcpManager?.killAllSync()` that the signal handler and both crash handlers perform, so a crash
+on this path can leak child processes.
+
+## 355. The alternate screen was asserted as the shell mechanism across passes, and it is not what the comparison target uses
+
+**Bucket: Neither.** A premise is retired; there is no code change to propose.
+
+A handoff carried the reading that the terminal-capture behaviour being chased was the alternate
+screen buffer, and that reading drove an establish pass's exit-path work and a three-branch fork over
+what to do about `<Static>` once scrollback disappeared. The premise was never checked.
+
+**It is false, measured.** A pty capture of the comparison tool's own startup (n=1, one version, one
+terminal, startup only, 1330 bytes) contains **no** `\x1b[?1049h` and no `\x1b[?1049l`. Its opening
+bytes are `\x1b7` `\x1b[r` `\x1b8` — save cursor, **reset** any inherited scroll region, restore
+cursor — followed by cursor show/hide, bracketed paste (`\x1b[?2004h`), focus reporting
+(`\x1b[?1004h`), theme-change notification (`\x1b[?2031h`) and synchronized output (`\x1b[?2026h`).
+It renders in the primary buffer and leaves scrollback intact. The capture instrument was validated
+on a known-different input first: the same pty harness on a `--version` invocation returns 23 bytes
+and no mode-setting sequences at all.
+
+The tool's compiled bundle does carry an alternate-screen subsystem — fourteen distinct named APIs,
+including re-entry, parking and handoff — and the sequences appear in it. **Capability is not use**:
+the field initialises to false, activation runs through a setter with a cleanup closure, and the
+normal startup path in the capture never calls it.
+
+**What this retires.** The three-branch fork over `<Static>` under an alternate buffer was answering
+a question nobody had asked, and a scroll-region approach modelled on the target is undercut as an
+imitation, since the target explicitly clears the scroll region rather than setting one. Neither is
+ruled out on its own merits by this entry — only as imitations of a mechanism that is not in use.
+
+**Fifth instance in this series of a named mechanism not being the mechanism**, after an `--otp`
+reading, `ZONE_HOME`, `--force-tier`, and `pipelineApplied`. The distinguishing feature here is that
+the claim was architectural and travelled across passes on one unverified reading, shaping work in
+two of them before anyone ran the check that disproves it in a single command.
+
+## 356. Ink's console patching is what keeps four hundred logging sites off the terminal
+
+**Bucket: Neither.** A structural dependency recorded; nothing to change while it holds.
+
+`render()` is called with `{ exitOnCtrlC: false, alternateScreen: false }` (`index.tsx:1293`) and no
+`patchConsole` key, and Ink 7.0.3 defaults that option to `true` — read from the resolved artifact
+(`require.resolve("ink")` → `build/index.js`, version 7.0.3, `patchConsole: true` in the adjacent
+`render.js`) rather than from a source tree that might not be what runs. Ink then swaps nineteen
+console methods for writers it mediates.
+
+The consequence worth recording: roughly four hundred `console.*` call sites across this repository
+are safe from corrupting the render **because of a default nobody set**. Passing `patchConsole: false`,
+or moving to a renderer that does not patch, converts all of them into direct writers at once. The
+sites themselves are almost all `[tag]`-prefixed and would additionally meet the stdout shield, but
+the shield is a narrow filter rather than a capture-all, and the two protections are independent.
+
+## 357. The stdout shield suppresses and redirects, and a debug flag inverts it
+
+**Bucket: Neither.** Recorded because the behaviour is easy to describe wrongly in either direction.
+
+`applyStdoutInterception` (`src/cli/tui/stdoutShield.ts`) tests each chunk against two patterns: a
+marker form owned by `src/utils/markerSink.ts` and a local result-line form matching a leading
+`✓`, `✗` or `⚠` after an optional SGR group. On a marker match it **appends the record to
+`~/.zone/markers.jsonl`** and then swallows the chunk — so the sink is fed exclusively by writes that
+were suppressed on their way to the terminal. On a result-glyph match it swallows with **no** record,
+because the append is gated on the marker branch alone. Everything else passes through untouched.
+
+Under `ZONE_TUI_DEBUG=1` or `ZONE_VERBOSE_LOGS=1` the same branch **forwards instead of swallowing** —
+stdout matches are re-routed to stderr, stderr matches go to real stderr. So the debug flag turns a
+suppressor into a forwarder, which is the opposite of what a reader might assume a debug flag does to
+a filter, and it is the mode in which a per-turn diagnostic write reaches the terminal.
+
+## 358. A warning documented as surviving the shield is swallowed by it
+
+**Bucket: Actionable now.** Intent is stated in the code, so the remedy is determined by it.
+
+`src/llm/openaiClient.ts` warns when a model override does not match the resolved provider, and its
+comment states the purpose — surface the swap loudly *"so a run can never appear to use the selected
+model while actually running another"* — and then reasons that the warning survives interception
+because it is on stderr and not a `[zone-*]` stdout line. Both halves of that reasoning are wrong.
+The call is `console.warn`, which Ink's console patching routes through its own stderr writer and
+into `applyStderrInterception`; and the message begins `[zone] `, which the marker pattern matches —
+verified by executing the pattern against the literal string, with controls in the same check that
+discriminate.
+
+So the warning is swallowed in TUI mode, which is the mode where a user is most likely to be
+selecting a model interactively. Because the intent is recorded, the remedy is not a fork: make the
+warning reach the user, most simply by not opening it with a marker-shaped prefix.
+
+## 359. A test imports a type from a module that does not exist
+
+**Bucket: Actionable now.** The fix is to import from the real module.
+
+`src/cli/sink.test.ts` opens with `import type { Spinner } from "./spinner.js"`. There is no
+`src/cli/spinner.ts` — the interface is declared in `src/cli/sink.ts`, which the same file imports
+from on the following line. Positive control on the absence: `src/cli/sink.ts` resolves.
+
+It survives for two compounding reasons. `import type` is erased before runtime, so nothing fails to
+resolve when the suite executes; and `tsconfig.json` excludes `src/**/*.test.ts` from the typecheck,
+so nothing checks the specifier either. The consequence is not cosmetic: the file's mock spinner is
+annotated against that phantom import, so it is never structurally validated against the real
+interface and can drift from it silently — which is exactly what a mock of a seven-method interface
+is most likely to do. Same enabling condition as item 107.
+
+## 360. Every tier subset is write-capable, so no flag was ever the lever for write availability
+
+**Bucket: Neither.** Corrects the framing of item 330 rather than reopening it; the levers behave as
+their own code says.
+
+Item 330 records that `--force-tier` governs tier limits but not the tier-derived tool subset, which
+leaves the impression that the subset was the thing worth forcing. It was not.
+`src/tools/tierToolSubsets.ts` gives simple the five tools `read_file, write_file, apply_patch,
+multi_edit, run_command`, medium those plus four, and complex no restriction at all. **Write tools
+are present at every tier**, so tier never removed them and forcing it could never have granted them.
+
+What removes them is a capability filter carrying the read-only capability set, which wins the
+precedence chain ahead of every tier-derived filter. The archetype environment flags suppress only
+one route to that filter; an answer-only override builds the same cage directly whenever the run's
+plan comes back stepless with an answer reason — a property of model output rather than of
+configuration, so no flag pre-empts it. The post-hoc instrument is the write-capability marker, whose
+absence is evidence only on a patch-mode, non-subagent run, that being its own guard condition.
+
+## 361. A field in the cost log is orthogonal to whether the tools were caged
+
+**Bucket: Neither.** A reading hazard on a field that is correct for what it actually reports.
+
+A prior pass concluded a run had not been read-only caged by observing `pipelineApplied:false` in its
+cost log. The inference does not hold in either direction. The capability filter reaches the agent
+loop through three separate spreads in `src/core/runLlmPatchFlow.ts`, two of which fire when no
+pipeline config exists and neither of which sets `pipelineApplied` — so a run with no pipeline at all
+can carry a full write-denying cage while every cost line reads false. Conversely, a suppression path
+clears the filter while the pipeline config remains, so the field reads true for a run that carries
+no cage.
+
+What the field does report faithfully is whether a pipeline supplied an iteration cap. That is a
+different question from whether the tools were restricted, and the two are uncorrelated.
+
+## 362. Streaming a call site changes four behaviours besides firing callbacks
+
+**Bucket: Neither.** These are live on the two streamed call sites already; the entry exists so a
+future decision to stream a third weighs them.
+
+All four are differences between the two paths inside `src/llm/anthropicAdapter.ts`. JSON-fence
+stripping happens only on the non-streaming path, so a caller requesting a JSON response format
+would receive fenced output it does not expect unless it strips fences itself. The refusal field is
+hardcoded null on the streaming assembly, so refusal detection still fires on the finish reason but
+always carries a generic message rather than the provider's own. The retry budget roughly doubles,
+because an upstream failure that is not a timeout runs a second full non-streaming attempt under its
+own backoff after the streaming attempt exhausts. And thinking-block capture moves from a direct read
+to a fail-soft one that warns and continues.
+
+## 363. The alternate screen self-gates, and its teardown discards what was committed
+
+**Bucket: Neither.** Recorded as the standing constraint on any future buffer decision, now that the
+premise which motivated one has been retired by item 355.
+
+Two facts about Ink 7.0.3, read from the installed build. Entry is conditional:
+`alternateScreen && interactive && stdout.isTTY`, so a pipe or a CI run silently stays on the primary
+buffer and the option cannot corrupt non-interactive output. Teardown writes the exit sequence and
+restores the cursor under an explicit comment that it restores the primary buffer *"without replaying
+prior frames, hook writes, or diagnostics onto it"*, keeping the sequence *"intentionally simple and
+best-effort"* — and the write itself goes through a helper that swallows its own errors.
+
+So committed `<Static>` output would be discarded on exit by design rather than by omission, and any
+design that switched buffers would have to own the transcript itself. What already survives is the
+structured entry array, persisted as the semantic model rather than the rendered frame, on every exit
+path except the two crash handlers item 353 covers.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
@@ -26501,7 +26774,7 @@ first.
 286, 288, 289, 290, 301, 302, 304, 308, 309, 310, 327, 336, 337, 343, 344, 345, 348, 351
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (12): 287, 291, 292, 293, 296, 299, 313, 320, 328, 329, 334, 347
+first (16): 287, 291, 292, 293, 296, 299, 313, 320, 328, 329, 334, 347, 352, 353, 358, 359
 
 Six, down from seven, and the movement is the ledger's own signal about whether anything is specified
 and waiting, in both directions. The diagnosis pass into `find_references` left it at 7 (287 plus six
@@ -26537,14 +26810,14 @@ eleven to twelve.
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (16): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250, 263, 318
 
-**Neither — a structural fact recorded, with no fix proposed** (164): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
+**Neither — a structural fact recorded, with no fix proposed** (172): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
 74, 76, 77, 78, 79, 80, 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109,
 112, 114, 115, 118, 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152,
 154, 155, 158, 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199,
 200, 201, 202, 205, 206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230,
 232, 243, 244, 247, 248, 249, 254, 256, 261, 272, 294, 295, 297, 298, 300, 303, 305, 306, 307, 311, 312,
 314, 315, 316, 317, 319, 321, 322, 323, 324, 325, 326, 330, 331, 332, 333, 335,
-338, 339, 340, 341, 342, 346, 349, 350
+338, 339, 340, 341, 342, 346, 349, 350, 354, 355, 356, 357, 360, 361, 362, 363
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
