@@ -25583,11 +25583,56 @@ own that neither fix touches. Item 304 gave the same treatment to its own site 4
 later census to rediscover, and deletion is named as the cheapest remedy if the module is ever
 revived rather than proposed as work for this pass.
 
+## 313. Nothing cleans or rebuilds dist/ at pack time, so a release ships whatever orphaned output has accumulated
+
+**Bucket: Actionable now.** The fix is one `package.json` script — a `prepack` that rebuilds from an
+emptied `dist/` — and nothing new needs to be learned first.
+
+**The mechanism.** `package.json` declares no `prepack`, no `prepublishOnly` and no `prepare`
+script, so `npm publish` and `npm pack` package `dist/` exactly as it sits on the publisher's
+machine. `tsc` never deletes output whose source has been removed, and `dist/` is gitignored, so a
+clone-and-build produces a clean tree while a long-lived working tree accumulates orphans
+indefinitely. The `files` allowlist admits `dist` wholesale, so every orphan ships.
+
+**Measured at the release this entry was filed from.** A rebuild into a temporary `--outDir`
+followed by `diff -r` against the working `dist/` found **zero content differences** — every file
+the current source produces was current — and **66 orphaned files, roughly 520 KB unpacked**, that
+a fresh build does not produce at all: `dist/roles/` entire, most of `dist/prompts/`
+(`buildFinalPrompt`, `dataAnalystPrompt`, `developerPrompt`, `frameworkPrompts/`, `globalPrompt`,
+`rolePrompts/`, `testEngineerContext`, `testEngineerPrompt`), and
+`dist/cli/tui/components/Splash.{js,d.ts,js.map}`. Two instruments agree on the count: a file-count
+difference of 1278 − 1212, and a tree walk giving 72 files under the two directories less the 9 that
+are live and the 3 splash files counted separately. The sources died at `2efee011` (the role flow,
+`--role`, `roles/` and part of `prompts/`) and `aa46f885` (the splash), three weeks and one week
+before the release respectively.
+
+**Checked before being called harmless, rather than assumed.** No live file in `dist/` imports any
+orphan. The three live modules that reference `prompts/` — `dist/llm/planPatchPreview.js`,
+`dist/llm/planFullPatch.js`, `dist/llm/planFeature.js` — import `patchPreviewPrompt`,
+`fullPatchPrompt` and `planFeaturePrompt`, all three of which have live sources and appear in a
+fresh build. So the defect is dead weight in the published artifact, not a broken import, and it
+would not have surfaced as a consumer-visible failure.
+
+**Why this is filed rather than closed, with the instance already gone.** The release this was found
+in ships clean: `rm -rf dist && npm run build` reduced the tree to 1212 files, and a repeat of the
+temp-`outDir` diff then reported the two trees identical. That removes the *instance*. The
+*mechanism* is untouched — the next release from a working tree that has since deleted a source file
+repeats it exactly, and nothing fails when it does. The same split items 310 and 311 already use:
+closing the instance does not address the key choice that produced it.
+
+**The condition to change, and the one caution attached to it.** A `prepack` script running
+`rm -rf dist && npm run build` closes it, because npm runs `prepack` for both `npm pack` and
+`npm publish`. The caution is that `prepack` also runs on `npm install` from a git URL, so the
+script must be one a consumer's environment can execute — this repository's build is a bare
+`tsc -p tsconfig.json`, which qualifies, but a build that reached for a dev-only tool would not.
+See `efc8e758` for the previous release commit and item 37 for the last time this tarball's contents
+needed correcting.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 312 to find out which ones still need something. No index of
+reader the trouble of reading all 313 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -25602,7 +25647,7 @@ first.
 286, 288, 289, 290, 301, 302, 304, 308, 309, 310
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (6): 287, 291, 292, 293, 296, 299
+first (7): 287, 291, 292, 293, 296, 299, 313
 
 Six, down from seven, and the movement is the ledger's own signal about whether anything is specified
 and waiting, in both directions. The diagnosis pass into `find_references` left it at 7 (287 plus six

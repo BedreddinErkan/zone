@@ -1,6 +1,6 @@
 {
   "name": "zone-ai-agent",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "type": "module",
   "description": "Self-host AI coding agent. Tier-bounded execution, atomic safety, BYOK transparency.",
   "engines": {
