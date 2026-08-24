@@ -24943,6 +24943,14 @@ symlink still escapes as a read into an in-repo backup. Site 4 is still dead cod
 of its own. Neither was touched this pass; both remain exactly as open as this entry's own
 "condition to change" paragraph left them.
 
+**Site 3's classification changed in a later pass — an addendum, not a reopening; this entry stays
+Closed.** Items 309 and 310 replaced the lexical `isPathOutsideRepo` comparison this paragraph
+describes with `checkPathBoundary`, closing both the symlink-shaped read this entry found and a
+symlink-shaped write item 309 found and this entry's own text did not anticipate ("the `create`
+branch skips because the target exists" — true only when the symlink's target exists). Site 3's write
+itself is still a call with no direct check of its own — item 307's finding, unaffected and untouched
+by this addendum — but nothing reaches it now that has not passed a realpath-aware validator.
+
 ## 305. Nothing binds a new filesystem write to the containment gate, so the census in item 304 expires on the next commit that adds one
 
 **Bucket: Neither.** A structural fact recorded; this entry sketches a guard as condition and site
@@ -25297,9 +25305,9 @@ trailing carriage return before parsing each line, or match with `[\s\S]` rather
 treat a per-file zero from a textual instrument as a question rather than an answer, since the two
 hazards named here both present as one.
 
-## 309. Item 304's site 3 escapes in both directions, and its write-side "contained by construction" is wrong
+## 309. Closed — item 304's site 3 escaped in both directions, and its write-side "contained by construction" was wrong
 
-**Bucket: Actionable now.** The fix is the one item 304's own "condition to change" already
+**Bucket: Actionable now → Closed.** The fix is the one item 304's own "condition to change" already
 specifies — replace `isPathOutsideRepo`'s lexical comparison with `checkPathBoundary` — and this
 entry measures that it closes both escapes rather than assuming it. **Item 304 stays Closed and
 stays open on sites 3 and 4; nothing here reopens it.**
@@ -25375,9 +25383,74 @@ checked immediately before and immediately after each one and was identical, and
 removed with removal confirmed by the probe's own output. See `2452803e` for the same class fixed
 at item 301's site, `3c6362e1` for site 2, and `08b374cd` for the census that named site 3.
 
-## 310. The patch validator classifies an unresolved path and contains a resolved one, so the protected-file list is bypassed by re-spelling
+**Fixed, in this commit.** `isPathOutsideRepo` is deleted; its one call site in
+`src/patch/validatePatchPlan.ts` now computes the target's absolute path once and calls
+`checkPathBoundary` on it — the same exported function item 301 and item 304's site 2 already reuse,
+not a fourth reimplementation. `"escape"` folds `outside_repo` and `unresolvable` into the single
+existing `PATH_OUTSIDE_REPO` code, matching every other caller of this function today: none of the
+four (`apply/applyPatchPlan.ts`, `core/applyLlmPatches.ts`, and `toolExecutor.ts`'s `read_file` and
+`write_file` handlers) differentiate the two reasons either, so this is not a new choice.
 
-**Bucket: Actionable now.** The fix is one change in `src/patch/validatePatchPlan.ts`: classify the
+**Re-run exactly as constructed, against the built artifact, gated the way `runFeatureAgent` actually
+gates them** (`validatePatchPlan` first; `applyPatchPlan` only reached when zero error-level issues
+survive) **— the acceptance test a fix earns, not an assertion that the gate exists.** R-dry-run: the
+symlink-to-existing construction now fails validation (`PATH_OUTSIDE_REPO`) and `applyPatchPlan` is
+never reached — before, `.agent-patches/` held the leaked marker; after, zero files under it contain
+it. R-apply: same construction under apply mode — before, `.agent-backups/` held it too; after,
+neither sink does. W: the dangling-symlink construction — before, the outside file existed after the
+call with the model's content; after, validation refuses it, `applyPatchPlan` is never reached, and
+the outside target does not exist, asserted on the filesystem rather than on a return value, with the
+symlink itself confirmed still a symlink (the property adjacent to containment, not the property).
+Controls: a legitimate in-repo create still reaches the writer and lands on disk; an
+`.agent-patches/` path still validates clean; plain `.env` is still refused. `git status` here was
+clean immediately before and after every construction, and every fixture was removed with removal
+confirmed.
+
+**Mutation, five named mutants against this site, each applied and reverted independently by diff,
+none by `git checkout`.** Reverting to the old lexical comparison entirely kills 2 — the
+symlink-to-existing and the dangling-symlink hostile cases, and *not* the pre-existing plain-traversal
+case, which the old code already caught (confirmed by tracing which reason branch each construction
+hits before running, not assumed from the mutant's name). An asymmetric-realpath call-site mutation —
+target realpathed, repository root left lexical — kills exactly 1: a repository root itself reached
+through a symlink, legitimate write, still allowed by the real fix and wrongly refused by the mutant;
+this mutation is scoped to `validatePatchPlan.ts`'s own call site by design and does not touch the
+shared `checkPathBoundary`, confirmed by re-running `apply/applyPatchPlan.test.ts` and
+`applyLlmPatches.test.ts` unchanged (27 passed) after applying it. A fail-open-on-unresolvable
+mutation, this one inside `toolExecutor.ts`'s shared `checkPathBoundary` and reverted the same way
+item 304's own FF5 was, kills the dangling-symlink case here and, because the gate is shared across
+nine call sites in four files, was run against every test file exercising it: 1 in
+`apply/applyPatchPlan.test.ts`, 1 in `toolExecutor.pathBoundary.test.ts`, and, contrary to a
+three-case prediction registered before running, only 1 — not 3 — in `applyLlmPatches.test.ts`. The
+other two predicted cases ("fails when repo path does not exist" and its empty-content sibling) are
+independently guarded by an `await fs.access(resolvedRepo)` call preceding `checkPathBoundary` in the
+same try block, a fact the prediction was made without re-reading; both still fail under the mutant,
+just for a reason this mutation does not touch. Checking only the first patch in a multi-patch batch
+kills exactly 1: the case built to name it, asserting the *specific* patch's own issue rather than
+overall validity, so a mutant that lets a later patch through cannot hide behind an unrelated `false`.
+A reorder of two independent local declarations kills 0, the predicted-inert negative control,
+confirmed.
+
+**What this guarantees, and what it does not.** The check proves the resolved target does not sit
+outside `input.targetPath` at the instant it runs — the same point-in-time property item 303 already
+names for the site fixed at `2452803e`, and item 304 restated for its own site 2. `validatePatchPlan`
+is a pure validation pass with no write of its own between the check and its return, so nothing
+intervenes here that a later write could race against; the window this property bounds is the gap
+between this validation and whichever write eventually consumes it, unchanged by this fix.
+
+**A residual named, not fixed, because the brief scopes this pass to the validator.** `patch/applyPatchPlan.ts`,
+the writer, computes its own destination by joining the **raw** `patch.path`, not this validator's
+normalized-and-resolved form. Run as pure path arithmetic across six constructions (a
+backslash-bearing traversal, a leading-space traversal, a trailing-space leaf name, an absolute
+outside path, and two already-caught controls): for every input the fixed validator actually passes
+through, the writer's join lands at the identical location or an equally in-repo one — POSIX
+backslashes are not separators, so they cannot open a traversal the writer's `path.join` would
+follow, and an absolute outside path is rejected by the validator before the writer ever sees it. No
+live escape found. The one real divergence: trailing whitespace on a leaf name survives into the
+written filename, one byte different from what was validated, never outside the repository.
+
+## 310. Closed — the patch validator classified an unresolved path and contained a resolved one, so the protected-file list was bypassed by re-spelling
+
+**Bucket: Actionable now → Closed.** The fix is one change in `src/patch/validatePatchPlan.ts`: classify the
 same path the boundary check already resolves.
 
 **Three notions of one path inside one call chain.** `validatePatchPlan` normalizes the patch path —
@@ -25410,6 +25483,41 @@ collapses them. It does not close the writer's third computation: a validator-le
 `applyPatchPlan` joining the raw path, so the check and the write continue to disagree about what
 "the path" is whenever normalization changes the string. Recorded so the narrower fix is not
 mistaken for the wider one.
+
+**A fourth spelling, found while establishing the fix rather than assumed from the first three.** An
+**absolute** path naming the repository's own `.env` directly passes `isPathOutsideRepo` (it resolves
+inside the repository) but was, before this fix, unresolved-and-absolute when handed to
+`isProtectedFilePath` — matching nothing. It is the genuine discriminator between "resolve and anchor
+to the repository root" and "merely collapse `.` and `..` lexically": the three original spellings
+collapse under **either** treatment, so they cannot tell the two apart on their own, and a fix that
+only lexically normalized without anchoring would have looked complete against them and still missed
+this one.
+
+**Fixed, in this commit.** `isProtectedFilePath` now receives `path.relative` of the same resolved
+repository root and resolved target `checkPathBoundary` already computed for item 309's fix — not a
+second, independent resolution — with the result re-normalized to forward slashes for
+platform-consistency with the rest of this file's own convention. Confirmed by running the arithmetic
+before writing any test: all four spellings collapse to `.env`; all seven existing protected-list
+entries (`.env`, `.env.local`, `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`,
+`.github/workflows/ci.yml`, `.git/config`) still match unchanged; all six existing non-protected
+controls from the test file still do not match.
+
+**Mutation, three named mutants, each reverted independently by diff.** Reverting to classifying the
+unresolved path kills 4 — all three original spellings plus the absolute one — and *not* the plain
+`.env` control, which that shape of defect never touched. Classifying the absolute resolved path
+instead of the repository-relative form kills 5 — the same four hostile cases *plus* the plain `.env`
+control, exactly the regression this fix must not introduce, confirmed rather than assumed. A
+lexical-only mutation — `path.normalize()` with no anchor to the resolved repository root — kills
+**exactly 1**: the absolute-in-repo case, confirmed by running it, not inferred from the mutant's
+description; the three original spellings survive this mutant unkilled, because lexical `.`/`..`
+collapse alone is already sufficient for a self-contained relative traversal and only fails on a path
+that needs external anchoring to be recognized as the repository's own file.
+
+**Re-run against the built artifact.** The four-step sequence from this entry's own opening — `.env`
+refused directly, `./.env` validating clean, a dry-run copy landing in `.agent-patches/`, and that
+copy being served back — now fails at the second step: `./.env` is refused with
+`TARGETS_PROTECTED_FILE`, and `applyPatchPlan` is never reached. `git status` here was clean before
+and after; the fixture was removed with removal confirmed.
 
 ## 311. read_file's sensitive-path blocklist is keyed on basename, so any step that copies a file under a new name defeats it
 
@@ -25449,26 +25557,52 @@ narrower still. The condition to change is a **second** live instance arising fr
 copying step, which would settle whether the weakness is worth code or whether removing instances as
 they appear is the proportionate answer.
 
+## 312. A fifth duplicate-name pair and a fifth lexical containment check, entirely dead
+
+**Bucket: Neither.** No fix proposed — dead code needs none.
+
+**Found establishing items 309 and 310, not sought.** `src/patch/patchValidationRules.ts` (with its
+sibling `src/patch/patchValidationTypes.ts`) defines its own `isPathOutsideRepo` — same lexical
+shape as the one item 309 fixed, no `realpath` on either side — its own `isProtectedPath`
+(regex-based, additionally covering `dist/` and `node_modules/` where the live validator's list does
+not), and its own `ValidatePatchPlanInput`/`PatchValidationIssue`/`ValidatePatchPlanResult` types.
+`isPathOutsideRepo` is now a **fifth** duplicate name on this surface, after `applyPatchPlan`,
+`runApplyFlow`, `decideExecutionMode` and `ensureDir`; the input type is a **fifth** patch-plan shape,
+after item 304's four, and even supports a `"delete"` operation neither live validator does.
+
+**Confirmed unreachable, two instruments.** `collectPatchValidationIssues`, the module's sole export,
+has no caller anywhere in tracked source — `git grep -a` and `command grep -r` over `src/` and
+`scripts/` both return only the function's own definition. No test file exists for either module.
+Both are present at the initial commit (`a914e7d5`) and have never been imported since — not
+wired-then-orphaned, scaffolding that was never connected.
+
+**Why a new entry rather than a line inside 309 or 310.** It is not the site either of those entries
+fixes — a different file, a different validation pass, a different type system, with a defect of its
+own that neither fix touches. Item 304 gave the same treatment to its own site 4
+(`patch/apply/runApplyFlow.ts`): dead code with no containment is recorded, not silently left for a
+later census to rediscover, and deletion is named as the cheapest remedy if the module is ever
+revived rather than proposed as work for this pass.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 311 to find out which ones still need something. No index of
+reader the trouble of reading all 312 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (149): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42,
+**Closed** (151): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42,
 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113,
 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167,
 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228,
 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260,
 262, 264, 265, 266, 267, 268, 269, 270, 271, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285,
-286, 288, 289, 290, 301, 302, 304, 308
+286, 288, 289, 290, 301, 302, 304, 308, 309, 310
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (8): 287, 291, 292, 293, 296, 299, 309, 310
+first (6): 287, 291, 292, 293, 296, 299
 
 Six, down from seven, and the movement is the ledger's own signal about whether anything is specified
 and waiting, in both directions. The diagnosis pass into `find_references` left it at 7 (287 plus six
@@ -25484,17 +25618,18 @@ item 305's exemption surface filed 307 and 308 and moved nothing into this bucke
 its measurement concluded that neither guard shape item 305 sketches is worth building, and
 "Actionable now" requires a fix specified in the entry, which a decision not to build is not. The
 pass after it took the bucket from six to eight by running item 304's site 3 rather than reading it:
-309 and 310 both arrived with a fix already specified and measured to work, which is the criterion,
-and 311 went to Neither in the same commit because its remedy is a key choice nobody has made.
+309 and 310 both arrived with a fix already specified and measured to work, and 311 went to Neither
+in the same commit because its remedy is a key choice nobody has made. This pass built both — 309 and
+310 closed, landing the bucket back at six: 287, 291, 292, 293, 296, 299.
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (15): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250, 263
 
-**Neither — a structural fact recorded, with no fix proposed** (139): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
+**Neither — a structural fact recorded, with no fix proposed** (140): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
 74, 76, 77, 78, 79, 80, 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109,
 112, 114, 115, 118, 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152,
 154, 155, 158, 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199,
 200, 201, 202, 205, 206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230,
-232, 243, 244, 247, 248, 249, 254, 256, 261, 272, 294, 295, 297, 298, 300, 303, 305, 306, 307, 311
+232, 243, 244, 247, 248, 249, 254, 256, 261, 272, 294, 295, 297, 298, 300, 303, 305, 306, 307, 311, 312
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.

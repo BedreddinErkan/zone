@@ -5,6 +5,7 @@ import type {
   PatchValidationIssue,
 } from "../types/patch.js";
 import { fileExists } from "../utils/files.js";
+import { checkPathBoundary } from "../tools/toolExecutor.js";
 
 function isSupportedOperation(value: string): value is "create" | "modify" {
   return value === "create" || value === "modify";
@@ -18,12 +19,14 @@ function resolvePatchPath(targetPath: string, patchPath: string): string {
   return path.resolve(targetPath, patchPath);
 }
 
-function isPathOutsideRepo(targetPath: string, patchPath: string): boolean {
-  const resolvedRepoRoot = path.resolve(targetPath);
-  const resolvedPatchPath = resolvePatchPath(targetPath, patchPath);
-  const relative = path.relative(resolvedRepoRoot, resolvedPatchPath);
-
-  return relative.startsWith("..") || path.isAbsolute(relative);
+// Repo-relative form of an already-resolved absolute path — the SAME resolution
+// checkPathBoundary just proved is inside the repo, not a second, independent
+// computation. isProtectedFilePath must see this, not the merely-normalized
+// (backslash-swapped, untrimmed-of-"."/".." ) path: "./.env", "src/../.env" and an
+// absolute path naming the repo's own ".env" all resolve to the same file and must
+// classify identically (item 310).
+function toRepoRelative(targetPath: string, absolutePath: string): string {
+  return path.relative(path.resolve(targetPath), absolutePath).replace(/\\/g, "/");
 }
 
 function isProtectedFilePath(normalizedPath: string): boolean {
@@ -133,7 +136,15 @@ export async function validatePatchPlan(input: {
       seenPaths.add(normalizedPath);
     }
 
-    if (isPathOutsideRepo(input.targetPath, normalizedPath)) {
+    const absoluteTargetPath = resolvePatchPath(input.targetPath, normalizedPath);
+
+    // checkPathBoundary realpaths both sides (symlink-aware, matches item 301/304's fix) —
+    // isPathOutsideRepo's old path.relative comparison never resolved a symlink, letting an
+    // in-repo symlink to an outside target validate clean (item 309). "escape" collapses two
+    // reasons (outside_repo, unresolvable) into one signal, same as every other caller of this
+    // function today (apply/applyPatchPlan.ts, core/applyLlmPatches.ts, toolExecutor.ts) — none
+    // of them differentiate the two either, so this isn't a new choice.
+    if (checkPathBoundary(absoluteTargetPath, input.targetPath, "validatePatchPlan") === "escape") {
       issues.push(
         buildIssue({
           level: "error",
@@ -145,7 +156,9 @@ export async function validatePatchPlan(input: {
       continue;
     }
 
-    if (isProtectedFilePath(normalizedPath)) {
+    const repoRelativePath = toRepoRelative(input.targetPath, absoluteTargetPath);
+
+    if (isProtectedFilePath(repoRelativePath)) {
       issues.push(
         buildIssue({
           level: "error",
@@ -156,7 +169,6 @@ export async function validatePatchPlan(input: {
       );
     }
 
-    const absoluteTargetPath = resolvePatchPath(input.targetPath, normalizedPath);
     const exists = await fileExists(absoluteTargetPath);
 
     if (patch.operation === "create" && exists) {
