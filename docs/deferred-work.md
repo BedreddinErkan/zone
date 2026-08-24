@@ -26493,9 +26493,10 @@ would make drift impossible rather than detectable. That is a larger refactor of
 system where every other type is a bare literal, and it is recorded here as the option rather than
 performed piecemeal for one type.
 
-## 352. A writer outside Ink reaches the terminal once per run, and the shield does not catch it
+## 352. Closed — a writer outside Ink reached the terminal once per run, and the shield did not catch it
 
-**Bucket: Actionable now.** The remedy is specified below and needs nothing new learned first.
+**Bucket: Closed** by `8d567df6`. The entry was filed Actionable now and the fix landed in the very
+next commit; the bucket line was not updated with it, which is the miss recorded in item 350's terms.
 
 `runOneShotInner` builds the CLI sink's spinner unconditionally at `src/cli/dispatch.ts:131`
 (`createSpinner(process.stdout.isTTY === true, …)`), hands it to `buildCliSink` at `:141`, and calls
@@ -26531,9 +26532,10 @@ increments a `stopped` counter it never asserts on, and all thirteen dispatch te
 `"\r\x1b[K"` reaches stderr across a TUI-shaped run — rather than the setting, or it pins this call
 site instead of the behaviour.
 
-## 353. Two crash handlers save no session, and the save they need can itself throw
+## 353. Closed — two crash handlers saved no session, and the save they needed could itself throw
 
-**Bucket: Actionable now.** The fix mirrors an existing handler in the same file, line for line.
+**Bucket: Closed** by `8d567df6`, which extracted `registerCrashHandlers` and mirrored the signal
+handler's guarding. Filed Actionable now and fixed in the next commit without the bucket line moving.
 
 `process.on("uncaughtException", …)` (`src/cli/tui/index.tsx:1049-1055`) and
 `process.on("unhandledRejection", …)` (`:1056-1062`) each kill the MCP manager, stop the remote
@@ -26755,6 +26757,120 @@ design that switched buffers would have to own the transcript itself. What alrea
 structured entry array, persisted as the semantic model rather than the rendered frame, on every exit
 path except the two crash handlers item 353 covers.
 
+## 364. Closed — the render-crash path skipped the MCP kill every other exit path performs
+
+**Bucket: Closed** by the commit carrying this entry.
+
+`onCrash` (`src/cli/tui/index.tsx`) stopped the remote-control server and unmounted, but did not
+call `storeCapture.state?.armedMcpManager?.killAllSync()`. The fatal-signal handler and both
+process-level crash handlers all do. So a React render crash — the one path that reaches `onCrash` —
+left armed MCP servers running as child processes while the TUI tore down around them.
+
+One line, in the same locality as the two handlers repaired alongside it, and with no ordering risk:
+the kill is optional-chained throughout, so it is inert when no manager is armed and when state is
+still null in the pre-mount window.
+
+## 365. A render crash during the initial mount hangs the process instead of exiting
+
+**Bucket: Actionable now.** The remedy is specified — resolve the exit path when the Ink instance is
+absent — but it changes mount-time control flow and is deliberately not bundled with the smaller
+repairs beside it.
+
+`onCrash` calls `instance?.unmount()`. If the crash arrives during Ink's initial synchronous mount,
+`instance` has not been assigned yet, so the call is a no-op, Ink's exit promise is never resolved,
+`runTui` never returns from its await, and the process hangs holding the terminal. That is worse
+than the loss repaired in item 353: a lost session is recoverable work, a hung terminal is not.
+
+Two facts bound it. The window is narrow — from handler registration to Ink's first commit — and
+`storeCapture.state` is null throughout it, so there is nothing to save in that window regardless.
+The damage is therefore the hang alone, not the hang plus a loss.
+
+**Why it is filed rather than fixed here.** A fix has to make the exit path resolve without an
+instance, which means touching how `runTui` waits — and a mistake there produces a different hang,
+in a wider window, on a path no test reaches today. It needs its own verification pass with the
+seam that items 353 and 364 established.
+
+## 366. Both terminals are held the same way, and the difference is how each frame is painted
+
+**Bucket: Neither.** A comparison result. Nothing is proposed, because nothing measured here is a
+defect on either side.
+
+An assumption carried across several passes held that the comparison tool captures the terminal by a
+mechanism Zone lacks — see item 355 for the alternate-screen half of that, which was refuted. The
+remaining question was whether some other capture mechanism explained the perception. Measured under
+one pty harness at a forced 40×100, idle, one version each, n=1 per side, it does not.
+
+**Occupancy is not the difference, and it runs the other way.** Both wrote 21 text lines on startup.
+Counting non-blank lines, the tool wrote 13 and Zone wrote 18. Zone occupies more of the viewport,
+not less, so a hypothesis that the tool fills the screen while Zone sits in a corner is refuted by
+its own measurement.
+
+**What does differ is paint style.** For the same 21 lines the tool emitted 1,392 bytes and Zone
+3,179 — roughly 2.3 times as many. The tool issued **no erase sequences at all** and positioned by
+absolute column 71 times, painting each line forward into place. Zone issued 13 erase-line sequences
+and 11 relative row moves, which is the clear-then-redraw shape its rendering library uses. Neither
+is wrong; they are different strategies with different byte costs, and the more expensive one is
+Zone's.
+
+**Three mode-setting differences, none of which captures a terminal.** The tool enables focus
+reporting and theme-change notification; Zone enables neither, because its rendering library sets
+neither — verified against the installed build with a positive control on a mode it does set. Both
+enable synchronized output and bracketed paste, both by way of that same library rather than their
+own code.
+
+**Negative control, which is what makes the sameness reportable.** Cursor visibility behaves
+identically: each hides the cursor once and leaves it hidden while idle. The tool's single
+cursor-show sits earlier in its stream than its hide — a startup show-then-hide, not a later
+restore — which is only visible by comparing positions rather than presence. An instrument that
+reported nothing but differences would not have been shown able to report sameness, and the
+conclusion here rests on sameness.
+
+**What is not established.** Steady state during an actual run is uncaptured on Zone's side, because
+producing it requires a provider call and that budget is exhausted; capturing only the other side
+would be a one-sided inventory. The exit comparison covers abrupt teardown only — both behave
+identically there, restoring nothing — and a matched graceful pair would need the harness to drive
+each program's own quit path, which it cannot do. And a counterpart to Zone's own frame-composition
+figure (200 committed rows written once against 1 row redrawn) is not obtainable from a byte capture
+of a program whose source is unavailable, since committed and redrawn output cannot be told apart in
+the stream.
+
+## 367. Zone repaints by erasing and rewriting, at roughly twice the byte cost of painting forward
+
+**Bucket: Neither.** No remedy is proposed: the behaviour belongs to the rendering library rather
+than to Zone's code, and whether it is worth changing depends on a comparison against alternatives
+nobody has made.
+
+Measured beside item 366's capture, at a forced 40×100 with one version and one terminal, n=1: for
+an identical 21 lines of startup output Zone emitted 3,179 bytes against the comparison tool's
+1,392. The composition differs rather than the content. Zone's stream carries 13 erase-line
+sequences and 11 relative cursor moves; the tool's carries none of the former and one of the latter,
+using 71 absolute column addresses instead.
+
+The practical consequence is confined to bytes on the wire and whatever a terminal does between an
+erase and the write that follows it. It is recorded because a future rendering change would want the
+baseline, and because the figure is easy to mistake for a defect when it is a strategy.
+
+## 368. Zone renders into whatever scroll region a previous program left behind
+
+**Bucket: Actionable now.** Reachability is established rather than assumed, and the remedy is three
+bytes at startup.
+
+A terminal's scroll region persists across programs. A prior command that sets one and exits without
+resetting leaves it in force for whatever runs next. Demonstrated directly: with a region set to
+rows 5 through 20 immediately before Zone starts, the capture shows the region set, shows Zone
+emitting no reset of its own, and shows nothing else resetting it either. Zone would then render into
+a restricted window without any indication that it was doing so.
+
+The comparison tool guards against exactly this, and its guard is the first thing in its stream:
+save the cursor, reset the scroll region unconditionally, restore the cursor. Three bytes of payload
+between two one-byte cursor operations, issued once at startup, costing nothing when no region is
+set.
+
+**The scope of the claim.** This establishes that the tool defends against an inherited region. It
+does not establish anything about pinning a header with a scroll region, which is a different use of
+the same facility — the tool clears the region rather than setting one, so it says only that this is
+not how the tool pins its input area, and leaves the option to be judged on its own terms.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
@@ -26765,16 +26881,17 @@ priority ordering" cautions against ranking by importance, which this section do
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (159): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42,
+**Closed** (162): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42,
 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113,
 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167,
 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228,
 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260,
 262, 264, 265, 266, 267, 268, 269, 270, 271, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285,
-286, 288, 289, 290, 301, 302, 304, 308, 309, 310, 327, 336, 337, 343, 344, 345, 348, 351
+286, 288, 289, 290, 301, 302, 304, 308, 309, 310, 327, 336, 337, 343, 344, 345, 348, 351,
+352, 353, 364
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (16): 287, 291, 292, 293, 296, 299, 313, 320, 328, 329, 334, 347, 352, 353, 358, 359
+first (16): 287, 291, 292, 293, 296, 299, 313, 320, 328, 329, 334, 347, 358, 359, 365, 368
 
 Six, down from seven, and the movement is the ledger's own signal about whether anything is specified
 and waiting, in both directions. The diagnosis pass into `find_references` left it at 7 (287 plus six
@@ -26810,14 +26927,14 @@ eleven to twelve.
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (16): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250, 263, 318
 
-**Neither — a structural fact recorded, with no fix proposed** (172): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
+**Neither — a structural fact recorded, with no fix proposed** (174): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
 74, 76, 77, 78, 79, 80, 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109,
 112, 114, 115, 118, 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152,
 154, 155, 158, 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199,
 200, 201, 202, 205, 206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230,
 232, 243, 244, 247, 248, 249, 254, 256, 261, 272, 294, 295, 297, 298, 300, 303, 305, 306, 307, 311, 312,
 314, 315, 316, 317, 319, 321, 322, 323, 324, 325, 326, 330, 331, 332, 333, 335,
-338, 339, 340, 341, 342, 346, 349, 350, 354, 355, 356, 357, 360, 361, 362, 363
+338, 339, 340, 341, 342, 346, 349, 350, 354, 355, 356, 357, 360, 361, 362, 363, 366, 367
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.

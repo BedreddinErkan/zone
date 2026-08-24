@@ -1080,6 +1080,10 @@ export async function runTui(
   }
 
   function onCrash(error: Error): void {
+    // Mirrors the signal handler and both crash handlers, which all kill armed MCP servers before
+    // tearing down. Omitting it here leaked child processes on the one path that reaches it
+    // (ledger item 364).
+    storeCapture.state?.armedMcpManager?.killAllSync();
     void stopRemoteControlServer(false);
     instance?.unmount();
     throw error;
