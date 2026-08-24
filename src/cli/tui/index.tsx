@@ -745,6 +745,83 @@ export interface FatalSignalDeps {
  * (async write, pre-sync-write) produced no session file, which this proof says should have
  * stood down and saved instead. Recorded rather than resolved.
  */
+export interface CrashHandlerDeps {
+  /** Read at crash time, not registration time — state is null until React mounts, and these
+   *  handlers are registered before render(). A crash in that window has nothing to save, which the
+   *  transcript-length guard expresses honestly rather than papering over. */
+  getState: () => { transcript: unknown[]; sessionId: string; armedMcpManager?: { killAllSync(): void } } | null;
+  buildSession: (state: never) => unknown;
+  /** SYNC by design — a crash handler cannot await, and nothing may sit between write and exit. */
+  saveSessionSync: (cwd: string, session: never) => unknown;
+  stopRemoteControlServer: (v: boolean) => unknown;
+  unmount: () => void;
+  reportError: (err: unknown) => void;
+  exit: (code: number) => void;
+  on?: (event: string, handler: (err: unknown) => void) => void;
+  cwd?: () => string;
+  log?: (name: string, payload: string) => void;
+}
+
+/**
+ * Registers the two process-level crash handlers, which previously unmounted and exited without
+ * writing a session — so a crash lost the whole transcript while every signal path preserved it
+ * (ledger item 353).
+ *
+ * Extracted rather than fixed in place for the reason registerFatalSignalHandlers was: both
+ * handlers lived inside runTui, which renders Ink and awaits waitUntilExit(), so nothing in the
+ * suite could reach them and a mutation deleting either passed. Adding an unobserved save to an
+ * unobserved handler would have compounded that.
+ *
+ * The guarding mirrors the signal handler deliberately, including two details that read as
+ * incidental and are not. The `built` flag rather than a truthiness test on the result: a build
+ * that throws must never fall through into the write. And a bare try/catch around each
+ * _reportSaveFailure call: the reporter can itself throw, via String(err) on a hostile value or via
+ * its log reaching a closed stdout, and failure reporting must not be what prevents the exit.
+ *
+ * NOTE: the React render-crash path does NOT arrive here. componentDidCatch's rethrow is captured
+ * by React and routed into Ink's no-op root error callback, after which the resolved exit promise
+ * carries that path into the normal exit — which already saves. See item 354.
+ */
+export function registerCrashHandlers(deps: CrashHandlerDeps): void {
+  const on = deps.on ?? ((event, h) => { process.on(event as "uncaughtException", h as (e: unknown) => void); });
+  const cwd = deps.cwd ?? (() => process.cwd());
+  const emitLog = deps.log ?? log;
+
+  for (const event of ["uncaughtException", "unhandledRejection"]) {
+    on(event, (err: unknown) => {
+      deps.getState()?.armedMcpManager?.killAllSync();
+      void deps.stopRemoteControlServer(false);
+      try {
+        deps.unmount();
+      } catch { /* terminal may already be gone — must not prevent the save below */ }
+
+      const s = deps.getState();
+      if (s && s.transcript.length > 0) {
+        let session: unknown;
+        let built = false;
+        try {
+          session = deps.buildSession(s as never);
+          built = true;
+        } catch (e) {
+          try { _reportSaveFailure(e, false, s.sessionId, "build", event, emitLog); }
+          catch { /* reporting itself must not block exit */ }
+        }
+        if (built) {
+          try {
+            deps.saveSessionSync(cwd(), session as never);
+          } catch (e) {
+            try { _reportSaveFailure(e, false, s.sessionId, "write", event, emitLog); }
+            catch { /* reporting itself must not block exit */ }
+          }
+        }
+      }
+
+      try { deps.reportError(err); } catch { /* surfacing the cause must not block exit */ }
+      deps.exit(1);
+    });
+  }
+}
+
 export function registerFatalSignalHandlers(deps: FatalSignalDeps): void {
   const on = deps.on ?? ((sig, h) => { process.on(sig as NodeJS.Signals, h); });
   const cwd = deps.cwd ?? (() => process.cwd());
@@ -1046,19 +1123,14 @@ export async function runTui(
     stampEnvelopeOnExit,
     exit: (code) => process.exit(code),
   });
-  process.on("uncaughtException", (err) => {
-    storeCapture.state?.armedMcpManager?.killAllSync();
-    void stopRemoteControlServer(false);
-    instance?.unmount();
-    console.error(err);
-    process.exit(1);
-  });
-  process.on("unhandledRejection", (err) => {
-    storeCapture.state?.armedMcpManager?.killAllSync();
-    void stopRemoteControlServer(false);
-    instance?.unmount();
-    console.error(err);
-    process.exit(1);
+  registerCrashHandlers({
+    getState: () => storeCapture.state as never,
+    buildSession: (state) => buildDiskSession(state as never),
+    saveSessionSync: (c, session) => saveSessionSync(c, session as never),
+    stopRemoteControlServer,
+    unmount: () => instance?.unmount(),
+    reportError: (err) => { console.error(err); },
+    exit: (code) => process.exit(code),
   });
 
   const bus = createEventBus();

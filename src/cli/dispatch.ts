@@ -12,7 +12,7 @@ import type { ExecutionPlan } from "../llm/executionPlan.js";
 import { loadCliConfig, validateCliConfig, applyDiskKeyFallbacks, type CliConfig, type CliFlags } from "./config.js";
 import { loadDiskModelSync } from "../api/diskModel.js";
 import { runPlanInvestigation } from "../llm/planInvestigation.js";
-import { createSpinner, buildCliSink } from "./sink.js";
+import { createSpinner, buildCliSink, type Spinner } from "./sink.js";
 import type { LlmPatchProgressUpdate, ZoneStructuredProgressEvent } from "../core/agentLifecycleEvents.js";
 import { preparePlanContext } from "../core/preparePlanContext.js";
 import { generateExecutionPlan, isNoChangePlan, isCannotVerifyPlan, isAnswerOnlyPlan, synthesizeMinimalPlan, planTerminalShape } from "../llm/executionPlan.js";
@@ -128,19 +128,31 @@ export async function runOneShotInner(
     }
   }
 
-  const spinner = createSpinner(process.stdout.isTTY === true, effectiveConfig.noColor);
-  const sink = buildCliSink(
-    {
-      verbose: effectiveConfig.verbose,
-      quiet: effectiveConfig.quiet,
-      noColor: effectiveConfig.noColor,
-      isTTY: process.stdout.isTTY === true,
-      autoApprove: effectiveConfig.autoApprove,
-      noRevision: effectiveConfig.noRevision,
-    },
-    spinner
-  );
-  const progressCallback = opts.onProgress ?? sink.onProgress;
+  // The CLI sink and its spinner are built only when this run actually owns the terminal. A caller
+  // that supplies onProgress — the TUI, remote control — renders progress itself, and the sink is
+  // inert for it; but the spinner is not, because stop() runs from the finally below and writes a
+  // clear-line to stderr from outside Ink, which Ink cannot account for and neither shield pattern
+  // catches. Ledger item 352. stop() is the only spinner method reachable in that mode (the
+  // approvals-path calls are transitively inside the sink's own onProgress closure), so skipping
+  // construction needs no no-op stand-in for the rest of the interface.
+  let spinner: Spinner | undefined;
+  let progressCallback: OneShotOpts["onProgress"] & ((update: LlmPatchProgressUpdate) => void);
+  if (opts.onProgress) {
+    progressCallback = opts.onProgress;
+  } else {
+    spinner = createSpinner(process.stdout.isTTY === true, effectiveConfig.noColor);
+    progressCallback = buildCliSink(
+      {
+        verbose: effectiveConfig.verbose,
+        quiet: effectiveConfig.quiet,
+        noColor: effectiveConfig.noColor,
+        isTTY: process.stdout.isTTY === true,
+        autoApprove: effectiveConfig.autoApprove,
+        noRevision: effectiveConfig.noRevision,
+      },
+      spinner
+    ).onProgress;
+  }
 
   // --- Phase 2 trust gate ---
   {
@@ -803,7 +815,7 @@ export async function runOneShotInner(
     rejectPendingStagedForRun(runId);
     rejectPendingQuestionsForRun(runId);
     clearTrustedCommandsForRun(runId);
-    spinner.stop();
+    spinner?.stop();
   }
 }
 
