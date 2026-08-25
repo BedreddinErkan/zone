@@ -78,6 +78,26 @@ export const role = {
   selectionForeground: "#0B0E0F",
   /** Quiet chrome borders, de-emphasized block text. */
   muted: "gray",
+  /** The foreground for text rendered on top of `role.surface`'s fill. Fixed hex for the same
+   *  reason `role.selectionForeground` is one, and it is the second half of the same class: an
+   *  app-painted background with a terminal-owned foreground has no computable contrast ratio at
+   *  all, because the application controls only one side. That is not merely an unknown number —
+   *  it inverts. Measured against this role's partner: 1.08:1 on a terminal whose default
+   *  foreground is black, which is effectively invisible; 16.35:1 against this value.
+   *
+   *  **What chose "set a foreground" over "carry no fill".** `aa46f885` concluded that carrying no
+   *  background is the only treatment immune to this whole class, and that clause is true — but the
+   *  choice it records was made by rendering three alternatives against a real multi-block patch,
+   *  so it is a judgment about the diff view, which is where it was applied. The selection-contrast
+   *  pass resolved the same class the other way and applied it at six call sites, every one pairing
+   *  a fill with an explicit foreground. Two sites were left unpaired; this role is what pairs them,
+   *  which makes it the settled remedy here rather than a new one.
+   *
+   *  Defined independently rather than as a reference to another role, per the precedent
+   *  `role.activity` and `role.selectionForeground` each set for themselves — so the two can
+   *  diverge later without coupling. `surfacePairing.test.ts` fails if either site paints the fill
+   *  without setting this. */
+  surfaceForeground: "#E6EDEF",
   /** Neutral background fill for a distinct content block. Fixed hex (the landing's `--ink`), not
    *  theme-relative, like `role.brand`/`role.activity` — a bare ANSI index such as `blackBright`
    *  is resolved entirely by the terminal's own colour scheme (confirmed: `ansi-styles` emits only

@@ -2,34 +2,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { role, glyph } from "./theme.js";
+// Extracted to contrast.ts so this file and surfacePairing.test.ts read one implementation.
+import { contrastRatio } from "./contrast.js";
 
 const REPO_ROOT = path.resolve(__dirname, "../../..");
-
-/**
- * WCAG relative-luminance contrast formula (https://www.w3.org/TR/WCAG21/#dfn-contrast-ratio).
- * Test-only: nothing in src/ needs this outside verifying a fixed-hex colour pair is legible by
- * construction, which only became possible once both sides of a pairing are real hex rather than
- * a theme-relative name the terminal resolves.
- */
-function hexToLinear(component: number): number {
-  const c = component / 255;
-  return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
-}
-
-function relativeLuminance(hex: string): number {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  return 0.2126 * hexToLinear(r) + 0.7152 * hexToLinear(g) + 0.0722 * hexToLinear(b);
-}
-
-function contrastRatio(hexA: string, hexB: string): number {
-  const lA = relativeLuminance(hexA);
-  const lB = relativeLuminance(hexB);
-  const lighter = Math.max(lA, lB);
-  const darker = Math.min(lA, lB);
-  return (lighter + 0.05) / (darker + 0.05);
-}
 
 describe("theme — role values, pinned", () => {
   it("is exactly these eleven roles, so adding or removing one is a visible edit", () => {
@@ -46,6 +22,7 @@ describe("theme — role values, pinned", () => {
         "selectionForeground",
         "success",
         "surface",
+        "surfaceForeground",
       ].sort()
     );
   });
@@ -78,6 +55,10 @@ describe("theme — role values, pinned", () => {
       // contrast against role.selectionBackground, independently reasoned and independently
       // revertible, same precedent as role.activity.
       selectionForeground: "#0B0E0F",
+      // This pass: new twelfth role. The second half of the class role.selectionForeground closed
+      // for the selected-row pairing — an app-painted fill whose foreground the app did not set.
+      // 16.35:1 against role.surface, past the 7:1 threshold stated before the value was chosen.
+      surfaceForeground: "#E6EDEF",
     });
   });
 
@@ -92,6 +73,18 @@ describe("theme — selection contrast is a computable fact, not a terminal gues
    */
   it("selectionForeground on selectionBackground clears the WCAG AA floor for normal text", () => {
     expect(contrastRatio(role.selectionBackground, role.selectionForeground)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("surfaceForeground on surface clears the AAA floor for normal text", () => {
+    // Threshold stated before the value was chosen: 7:1, the same bar selectionForeground already
+    // clears. Fixed literal, not a figure read back out of the pair being checked.
+    expect(contrastRatio(role.surface, role.surfaceForeground)).toBeGreaterThanOrEqual(7);
+  });
+
+  it("and the pairing it replaces does NOT — this is the defect, stated as a number", () => {
+    // "#000000" is a light-themed terminal's default foreground, which is what sits on role.surface
+    // today. Nothing in the app chooses it, which is why no ratio existed before this role.
+    expect(contrastRatio(role.surface, "#000000")).toBeLessThan(1.2);
   });
 });
 

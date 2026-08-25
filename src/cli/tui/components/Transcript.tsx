@@ -57,11 +57,16 @@ function renderEntry(entry: TranscriptEntry, index: number, colWidth: number): R
       return <ErrorLine key={index} text={entry.text} />;
     case "user_prompt":
       return (
+        // Same pairing as Composer's box: role.surface is an app-painted fill, so the text on it
+        // sets role.surfaceForeground rather than inheriting the terminal's default. The marker
+        // keeps role.accent deliberately — it is the one run here that should read as a colour
+        // rather than as body text, and its ratio against the fill stays terminal-dependent, which
+        // surfacePairing.test.ts does not claim to fix.
         <Box key={index} backgroundColor={role.surface} width={colWidth}
              paddingX={2} marginTop={1} marginBottom={1}>
           <Text bold color={role.accent}>{glyph.promptMarker}</Text>
           <Box flexGrow={1}>
-            <Text bold>{entry.text}</Text>
+            <Text bold color={role.surfaceForeground}>{entry.text}</Text>
           </Box>
         </Box>
       );

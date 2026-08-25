@@ -27057,9 +27057,40 @@ component blanked its entire modal under a test that mocked the store with a par
 unguarded length read on an absent array. Both halves were fixed: the reader degrades to showing
 every row, and the fixture states the value rather than omitting it.
 
-## 378. The composer paints a fixed dark background and sets no text colour, so its contrast is whatever the user's terminal happens to be
+## 378. Closed — the composer paints a fixed dark background and sets no text colour, so its contrast is whatever the user's terminal happens to be
 
-**Bucket: Actionable now.** Two components fill a box with the theme's fixed dark surface hex and
+**Bucket: Closed** by the commit carrying this line. A twelfth theme role now supplies the missing
+half, set on every text run inside both painted boxes.
+
+**Which remedy, and what chose it.** A census of every box fill in the tree found eight: six pair
+their fill with an explicit foreground, and the two named here did not. So the codebase had already
+settled this class six times in the pair-both-sides direction, and the two unpaired sites were the
+ones an earlier pass did not reach rather than a different problem. The recorded conclusion pointing
+the other way is real but narrower than it reads: its own words say three alternatives were rendered
+against a real multi-block patch before choosing, which makes it a judgment about the diff view,
+where it was applied.
+
+Stated because it matters to how much weight the choice carries: the remedy agrees with the
+complaint that prompted it, making the composer more distinct rather than less, and agreement with a
+complainant is not evidence. The census is the independent part, and it was taken before the fork
+was decided.
+
+**The numbers, with the threshold fixed in advance at seven to one.** Against a terminal defaulting
+to black text the old pairing measures 1.08 to 1, which is not a low ratio but an inverted one.
+Against a terminal defaulting to white it measures 19.37, which is why the defect is invisible to
+anyone whose terminal is dark and is not a defence. The new pairing measures 16.35. The formula was
+extracted from the theme's test file into its own module so both readers share one implementation;
+it reproduces the 7.67 figure the existing pairing recorded independently, which is what validates
+it.
+
+**One pairing is deliberately left uncomputable.** The transcript's prompt marker keeps its accent
+colour, which is a name the terminal resolves. That run should read as a colour rather than as body
+text, and the guard asserts only that every run on a fill sets *some* colour — that the application
+chooses rather than the terminal. It does not claim to have made every ratio computable.
+
+The original entry follows.
+
+**Bucket when filed: Actionable now.** Two components fill a box with the theme's fixed dark surface hex and
 then render every text run inside it without a colour property. The foreground is therefore the
 terminal's default, which the application does not control and cannot read.
 
@@ -27087,9 +27118,30 @@ state a user looks at longest. Separately, the input marker is a bare two-charac
 than a member of the glyph seam, so the completeness sweep that forbids seam values appearing as
 literals elsewhere does not reach it.
 
-## 379. A composer test renders a shape the composer stopped rendering
+## 379. Closed — a composer test renders a shape the composer stopped rendering
 
-**Bucket: Actionable now.** The file guarding the composer's box structure builds its own local
+**Bucket: Closed** by the commit carrying this line. Repointed rather than deleted, and renamed,
+since the word in its old name described the shape it wrongly assumed.
+
+**The repair is demonstrated, not asserted.** With the placeholder run removed from the real
+composer, the old file reported five passed and zero failed; the repointed file fails two. A second
+substitution, changing the input marker, fails four in the new file and none in the old. It now
+renders through the real tree rather than a partial store mock, since the mock that hid a missing
+state field and blanked an entire modal is the standing example of what that shortcut costs.
+
+**The first choice of demonstration was wrong, and the measurement says so.** The obvious candidate
+was the layout property the original file existed to guard — a grow flag on the buffer box. Removing
+it from the real composer changed nothing the old file could see, which looked like proof. It is
+not: frames rendered with and without that flag were compared byte for byte across two hundred and
+two configurations, every buffer length from empty to a full row, with and without the hint, at
+truecolor, and were identical in all of them. A positive control confirmed the comparison detects a
+real difference. The flag is inert with respect to anything renderable in the current structure — it
+was added for a bordered box that no longer exists — so neither file could see it, and a
+demonstration built on it would have proved nothing about either.
+
+The original entry follows.
+
+**Bucket when filed: Actionable now.** The file guarding the composer's box structure builds its own local
 component rather than importing the real one, and that local copy carries a rounded border with a
 colour that changes on run state. The shipped composer has no border on that box at all — it uses a
 background fill — so every assertion in the file describes a shape that is not rendered anywhere.
@@ -27149,27 +27201,68 @@ survived several passes before a capture refuted it. What distinguishes this ins
 claim was never load-bearing on its own — it was load-bearing on how other evidence would be read,
 which is harder to notice and does not surface as a failed assertion.
 
+## 382. A retired provider's calls are still in the usage ledger, and that is correct
+
+**Bucket: Neither.** Reading the billing records for item 376 turned up a model identifier belonging
+to a provider Zone does not support: thirty-six calls, about fifteen cents, all of them real.
+
+Two readings were possible and they have different consequences — a stale record from an era when
+that provider was wired, or a writer still reachable outside the catalog. Dates settle it. Support
+was added on the first of June and excised on the third; every one of the records falls on the first
+and second. So it is history, correctly recorded, and no writer exists today. Item 223 covers the
+excision itself and is not restated here.
+
+Worth one line for anyone aggregating the ledger by provider: a naive grouping sees three providers
+where the code admits two, and the extra one is not a bug in either.
+
+## 383. A component test that mocks its store with a hand-built object cannot see a new field
+
+**Bucket: Actionable now.** Two shapes were counted across the TUI test tree, and they are not the
+same shape.
+
+The first is a test file that renders its own local copy of the component instead of importing it.
+Censused across every test file under the tree, searching for top-level definitions that return
+markup: **one** instance, the file item 379 repairs. Three other local definitions exist and are
+legitimate — two logging harnesses, and one that renders a primitive deliberately, as the reference
+frame a byte comparison needs. So this is an instance, not a class, which is the opposite of what
+was assumed going in.
+
+The second shape is a test that imports the real component but supplies a partial hand-built state
+in place of the store. **Two** instances, one repaired in the pass that found it — a required field
+absent from the mock made an unguarded array read blank the entire modal, silently, with every
+assertion in the file reporting a frame containing nothing. The other is the feedback view's test,
+which reads exactly one field today, so its exposure is small but its shape is identical.
+
+The remedy is the one the repaired instance now uses: render through the real tree, so the state a
+component reads is the state the application builds. Nothing new needs to be learned first.
+
+**Why the smaller class is the more dangerous one.** A local copy is visible on inspection — the
+imports name primitives instead of the component, and a reader notices. A partial mock looks correct
+and fails only when the component starts reading something the mock never had, which is a change to
+a *different* file. The first shape is caught by reading; the second is caught only by a field being
+added, and by then every assertion in the file has quietly stopped meaning anything.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 381 to find out which ones still need something. No index of
+reader the trouble of reading all 383 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (167): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42,
+**Closed** (169): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42,
 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113,
 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167,
 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228,
 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260,
 262, 264, 265, 266, 267, 268, 269, 270, 271, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285,
 286, 288, 289, 290, 301, 302, 304, 308, 309, 310, 327, 336, 337, 343, 344, 345, 348, 351,
-320, 352, 353, 364, 370, 371, 372, 377
+320, 352, 353, 364, 370, 371, 372, 377, 378, 379
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (19): 287, 291, 292, 293, 296, 299, 313, 328, 329, 334, 347, 358, 359, 365, 368, 373, 375, 378, 379
+first (18): 287, 291, 292, 293, 296, 299, 313, 328, 329, 334, 347, 358, 359, 365, 368, 373, 375, 383
 
 Six, down from seven, and the movement is the ledger's own signal about whether anything is specified
 and waiting, in both directions. The diagnosis pass into `find_references` left it at 7 (287 plus six
@@ -27205,14 +27298,14 @@ eleven to twelve.
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (17): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250, 263, 318, 376
 
-**Neither — a structural fact recorded, with no fix proposed** (178): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
+**Neither — a structural fact recorded, with no fix proposed** (179): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
 74, 76, 77, 78, 79, 80, 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109,
 112, 114, 115, 118, 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152,
 154, 155, 158, 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199,
 200, 201, 202, 205, 206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230,
 232, 243, 244, 247, 248, 249, 254, 256, 261, 272, 294, 295, 297, 298, 300, 303, 305, 306, 307, 311, 312,
 314, 315, 316, 317, 319, 321, 322, 323, 324, 325, 326, 330, 331, 332, 333, 335,
-338, 339, 340, 341, 342, 346, 349, 350, 354, 355, 356, 357, 360, 361, 362, 363, 366, 367, 369, 374, 380, 381
+338, 339, 340, 341, 342, 346, 349, 350, 354, 355, 356, 357, 360, 361, 362, 363, 366, 367, 369, 374, 380, 381, 382
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.

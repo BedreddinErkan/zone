@@ -109,6 +109,11 @@ function cleanPastedInput(input: string, singleChar: boolean): string {
   return s.replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "");
 }
 
+/** The idle hint. Exported so composer.layout.test.tsx locates and asserts it from THIS source
+ *  rather than repeating the sentence — a test carrying its own copy pins the wording while
+ *  claiming to pin layout, which is exactly what its negative control caught. */
+export const COMPOSER_PLACEHOLDER = "Type a task or /help · /model /commit /resume";
+
 const PASTE_THRESHOLD_LINES = 6;
 const PASTE_THRESHOLD_BYTES = 400;
 
@@ -746,12 +751,16 @@ export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, onRemot
       {paletteOpen && filteredCommands.length > 0 && (
         <SlashCommandPalette commands={filteredCommands} selectedIdx={paletteIdx} />
       )}
+      {/* Every run inside this box sets role.surfaceForeground. The fill is a fixed hex the app
+          controls; leaving the foreground to the terminal made the pairing uncomputable and, on a
+          light theme, near-invisible at 1.08:1. dimColor still applies on top — it modulates a
+          known colour now rather than an unknown one. */}
       <Box backgroundColor={role.surface} paddingX={2} width={stdout.columns ?? 80}>
-        <Text dimColor={disabled}>{disabled ? "  " : "> "}</Text>
+        <Text color={role.surfaceForeground} dimColor={disabled}>{disabled ? "  " : "> "}</Text>
         <Box flexGrow={1}>
-          <Text dimColor={disabled}>{displayBuffer}</Text>
+          <Text color={role.surfaceForeground} dimColor={disabled}>{displayBuffer}</Text>
           {!disabled && !buffer && (
-            <Text dimColor>{"Type a task or /help · /model /commit /resume"}</Text>
+            <Text color={role.surfaceForeground} dimColor>{COMPOSER_PLACEHOLDER}</Text>
           )}
         </Box>
       </Box>
