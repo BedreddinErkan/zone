@@ -51,6 +51,25 @@ function _getGitBranch(): string {
   } catch { return ""; }
 }
 
+/**
+ * Which providers have a usable key, read off the CliConfig the run itself uses.
+ *
+ * Deliberately NOT a second resolution: loadCliConfig collapses env var and config file, and
+ * applyDiskKeyFallbacks then fills either field from ~/.zone/keys.json — both complete before
+ * render(), so this reads the already-collapsed answer. Keying a filter on process.env alone would
+ * hide providers the user can actually use, which is a worse failure than a long list.
+ *
+ * Presence is not validity: a present-but-revoked key still lists its models. That is correct —
+ * nothing here can tell the difference without spending a call, and guessing wrong in the other
+ * direction hides a working provider.
+ */
+function providersWithResolvedKey(cfg: CliConfig): string[] {
+  const out: string[] = [];
+  if (cfg.anthropicApiKey) out.push("anthropic");
+  if (cfg.openaiApiKey) out.push("openai");
+  return out;
+}
+
 function writeBannerToStdout(opts: { isResumed: boolean }): void {
   // Construction lives in banner.ts so it can be asserted on byte-for-byte; this side of it is
   // only the stdout write.
@@ -1346,6 +1365,7 @@ export async function runTui(
         initialSessionId={localSessionId}
         onStateChange={(s) => { storeCapture.state = s; }}
         initialModelSettings={diskModelSettings}
+      initialProvidersWithKey={providersWithResolvedKey(config)}
         initialUserCommands={initialUserCommands}
         initialArmedUserHooks={initialArmedUserHooks}
         initialPendingHookTrust={initialPendingHookTrust}

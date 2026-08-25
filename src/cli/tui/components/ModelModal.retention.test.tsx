@@ -7,7 +7,10 @@ import type { StoreAction } from "../store.js";
 
 vi.mock("../store.js", () => ({
   useStore: () => ({
-    state: { modelSelectedIndex: 0, modelSettings: { model: "claude-sonnet-4-6" } },
+    // providersWithKey stated explicitly rather than omitted: empty means "no key resolved for
+    // any provider", which the picker renders as every row — the unfiltered list these retention
+    // assertions expect. Leaving it absent made the whole modal render blank.
+    state: { modelSelectedIndex: 0, modelSettings: { model: "claude-sonnet-4-6" }, providersWithKey: [] },
   }),
 }));
 vi.mock("../../../api/diskModel.js", () => ({ saveDiskModel: vi.fn() }));

@@ -1,4 +1,4 @@
-import { MODEL_CATALOG } from "./models.js";
+import { MODEL_CATALOG, type ZoneModelTier } from "./models.js";
 import { normalizeModelId } from "./modelIdNormalize.js";
 import type { LLMProvider } from "./types.js";
 
@@ -11,6 +11,11 @@ export interface ModelEntry {
   supportsEffort: boolean;
   costNote?: string;
   retention?: { minDays: number; zdrAvailable: boolean };
+  /** The catalog's own tier recommendation, carried through rather than dropped (ledger item 320).
+   *  Populated on four of seventeen entries. NOT an ordering: two values over seventeen rows cannot
+   *  rank them, and getDefaultModelForTier reads it as a first-match lookup key. Picker order comes
+   *  from the catalog literal's own sequence — see MODEL_CATALOG's header. */
+  recommendedTier?: ZoneModelTier;
 }
 
 const EFFORT_SUPPORTED_MODELS = new Set([
@@ -136,6 +141,7 @@ function buildModels(): readonly ModelEntry[] {
         supportsEffort: EFFORT_SUPPORTED_MODELS.has(m.id),
         costNote: m.costNote,
         retention: m.retention,
+        recommendedTier: m.recommendedTier,
       });
     }
   }

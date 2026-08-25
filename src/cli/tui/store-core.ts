@@ -4,7 +4,8 @@ import type { DiskApiKey, ApiKeyProvider } from "../../api/diskKeys.js";
 import type { DiskSession, SessionMeta } from "../../api/diskSessions.js";
 import type { TuiMode } from "../dispatch.js";
 import type { DiskModelSettings } from "../../api/diskModel.js";
-import { supportsEffort, effortLevelsFor } from "../../llm/modelRegistry.js";
+import { visibleModelRows, selectedIndexForCurrent } from "./modelPickerList.js";
+import { supportsEffort, effortLevelsFor, USER_FACING_MODELS, getDefaultModelId } from "../../llm/modelRegistry.js";
 import type { EffortLevel } from "../../llm/modelRegistry.js";
 import type { RunTodo, TodoStatus } from "../../core/todoLifecycle.js";
 import { startTodo, completeTodo } from "../../core/todoLifecycle.js";
@@ -232,6 +233,11 @@ export type StoreState = {
   } | null;
   modelSettings: DiskModelSettings | null;
   modelSelectedIndex: number;
+  /** Providers with a resolved API key, from the SAME CliConfig the run uses — env var, config
+   *  file, or ~/.zone/keys.json, all three already collapsed by loadCliConfig +
+   *  applyDiskKeyFallbacks before the tree mounts. Empty means no key anywhere, not "not checked
+   *  yet": the picker shows every row in that case. */
+  providersWithKey: string[];
   effortSelectedIndex: number;
   permissionsList: DiskTrustEntry[];
   permissionsSelectedIndex: number;
@@ -264,6 +270,7 @@ export function buildInitialState(initialValues?: {
   resumedSessionId?: string;
   resumedStartedAt?: string;
   modelSettings?: DiskModelSettings | null;
+  providersWithKey?: string[];
   userCommands?: UserCommand[];
   mode?: TuiMode;
   armedUserHooks?: UserHooksConfig | null;
@@ -318,6 +325,7 @@ export function buildInitialState(initialValues?: {
     feedbackData: null,
     modelSettings: initialValues?.modelSettings ?? null,
     modelSelectedIndex: 0,
+    providersWithKey: initialValues?.providersWithKey ?? [],
     effortSelectedIndex: 1,
     summarySelectedIndex: 0,
     planModeSelectedIndex: 0,
@@ -1063,8 +1071,14 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
       return { ...state, transcript: newTranscript, liveTail: { ...state.liveTail, narrationBuffer: "" } };
     }
 
-    case "MODEL_MODAL_OPEN":
-      return { ...state, modalView: "model" };
+    case "MODEL_MODAL_OPEN": {
+      // Seeded against the rows the modal will RENDER, never against the unfiltered catalog —
+      // the two differ whenever a provider is filtered out, and an index into the wrong one lands
+      // the cursor on a different model than the one in use. modelPickerList.ts owns both halves.
+      const current = state.modelSettings?.model ?? getDefaultModelId();
+      const rows = visibleModelRows(USER_FACING_MODELS, state.providersWithKey, current);
+      return { ...state, modalView: "model", modelSelectedIndex: selectedIndexForCurrent(rows, current) };
+    }
 
     case "MODEL_MODAL_CLOSE":
       return { ...state, modalView: "none" };

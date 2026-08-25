@@ -61,6 +61,8 @@ interface AppProps {
   initialSessionId?: string;
   onStateChange?: (state: StoreState) => void;
   initialModelSettings?: DiskModelSettings | null;
+  /** Providers with a resolved key, from the already-collapsed CliConfig — see StoreState. */
+  initialProvidersWithKey?: string[];
   onModelApply?: (model: string, provider: "anthropic" | "openai", effort?: EffortLevel, summaryFormat?: "compact" | "detailed", memoryEnabled?: boolean, commitOnSuccess?: boolean) => void;
   getCommitData?: () => { filePaths: string[]; message: string; repoPath: string } | null;
   getFeedbackData?: () => { runId: string; sessionId: string; logs: string; version: string; repoPath: string } | null;
@@ -320,7 +322,7 @@ function AppInner({ bus, initialPrompt, initialMode, onSubmit, onUndoRequest, on
   );
 }
 
-export function App({ initialPrompt, initialMode, bus, initialModel, capUsd, initialDailyUsedUsd, onSubmit, onUndoRequest, onRemoteControlCommand, onEnvelopeResume, onCarriedAnswer, onCarriedDiscard, initialTrustedPrefixes, resumedSession, initialSessionId, onStateChange, initialModelSettings, onModelApply, getCommitData, getFeedbackData, onDispatchCapture, onSessionClear, initialUserCommands, initialArmedUserHooks, initialPendingHookTrust, initialArmedMcpManager, initialPendingMcpTrust, initialCarriedQuestion }: AppProps): React.ReactElement {
+export function App({ initialPrompt, initialMode, bus, initialModel, capUsd, initialDailyUsedUsd, onSubmit, onUndoRequest, onRemoteControlCommand, onEnvelopeResume, onCarriedAnswer, onCarriedDiscard, initialTrustedPrefixes, resumedSession, initialSessionId, onStateChange, initialModelSettings, initialProvidersWithKey, onModelApply, getCommitData, getFeedbackData, onDispatchCapture, onSessionClear, initialUserCommands, initialArmedUserHooks, initialPendingHookTrust, initialArmedMcpManager, initialPendingMcpTrust, initialCarriedQuestion }: AppProps): React.ReactElement {
   return (
     <StoreProvider initialValues={{
       model: initialModel ?? "",
@@ -331,6 +333,7 @@ export function App({ initialPrompt, initialMode, bus, initialModel, capUsd, ini
       resumedSessionId: initialSessionId,
       resumedStartedAt: resumedSession?.startedAt,
       modelSettings: initialModelSettings,
+      providersWithKey: initialProvidersWithKey ?? [],
       userCommands: initialUserCommands ?? [],
       mode: initialMode,
       armedUserHooks: initialArmedUserHooks,

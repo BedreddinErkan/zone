@@ -25770,9 +25770,22 @@ unregistered type produces no effect anywhere, silently. A new event kind needs 
 `handleTextEvent`'s buffer, if sharing it would have a side effect (there, committing into the same
 narration entries `ASSISTANT_FINAL` also writes).
 
-## 320. `buildModels()` drops `recommendedTier` between `ModelOption` and `ModelEntry`
+## 320. Closed — `buildModels()` drops `recommendedTier` between `ModelOption` and `ModelEntry`
 
-**Bucket: Actionable now.** `src/llm/models.ts:10`'s `ModelOption` declares `recommendedTier?`
+**Bucket: Closed** by the commit carrying items 369 through 377. The projection now carries the
+field. Two things are worth recording alongside the close, because the entry is easy to over-read.
+
+First, this entry's line references describe the file as it stood when the entry was filed; the
+pass that closed it reordered the same literal, so they no longer point where they did. They are
+left as written rather than silently refreshed.
+
+Second, carrying the field is **not** what orders the picker, and this entry never claimed it was —
+it says the projection drops a field, which was true and is now fixed. Whether the field could order
+the list is a separate question, answered in item 371: it cannot. Two values across seventeen rows
+cannot rank them, and the field is read as a first-match lookup key, which item 372 records the
+consequences of.
+
+`src/llm/models.ts:10`'s `ModelOption` declares `recommendedTier?`
 (populated on 4 of the catalog's 17 entries) and `ESCALATION_LADDERS` (`models.ts:94-97`) encodes a
 strength ordering, but `buildModels()` (`src/llm/modelRegistry.ts:128-143`) does not carry
 `recommendedTier` into the `ModelEntry` shape the model picker actually reads. The fix is
@@ -26871,27 +26884,200 @@ does not establish anything about pinning a header with a scroll region, which i
 the same facility — the tool clears the region rather than setting one, so it says only that this is
 not how the tool pins its input area, and leaves the option to be judged on its own terms.
 
+## 369. Zone's redraw costs 2.3x the comparison tool's for the same screen, and the strategy belongs to Ink
+
+**Bucket: Neither.** Measured at idle only, and the remedy is not Zone's to specify.
+
+At a forced 40 columns by 100 rows, idle, one capture per side: the comparison tool writes 1392
+bytes with zero erase sequences and 71 absolute column addresses; Zone writes 3179 bytes carrying 13
+erase-line sequences and 11 relative row moves. Same 21 lines of text on both sides. The tool paints
+forward by addressing columns and never erases; Zone erases and rewrites.
+
+**Whose strategy it is was established before the entry was bucketed, because the bucket depends on
+the answer.** It is Ink's. The vendored `ansi-escapes` builds an erase-lines primitive as one
+erase-line per row, a relative up-move between each pair, and one column-one move at the end;
+Ink's log-update module and its renderer call it at seven sites. Two calls covering twelve rows and
+one row produce twelve plus one erases, eleven plus zero up-moves, and one plus one column moves —
+thirteen, eleven and two, which is the measured triple exactly. Zone's own sources contain no erase
+sequence and no call to that primitive, checked with two textual instruments and a positive control
+proving both could see a different sequence that is present.
+
+So changing this means changing or replacing the renderer, which is a different undertaking from any
+defect Zone can fix in its own tree.
+
+**What is not established.** The figure is one idle frame. Per-frame cost during a run is where a
+2.3x multiplier would actually compound, and that measurement needs provider calls the budget does
+not currently allow. No claim is made about it in either direction.
+
+## 370. Closed — the model picker opened on row one while the model in use sat twelve rows down
+
+**Bucket: Closed** by the commit carrying this entry. The action that opens the picker set only the view, leaving the selected index
+at the zero it was initialised with. With the catalog order that shipped, the default model was the
+thirteenth of seventeen rows, so opening the picker and pressing enter selected a different model
+than the one already in use, and reaching the current one took twelve key presses.
+
+Fixed by seeding the index from the current model when the modal opens. The same reducer already had
+a precedent for maintaining an index across a transition, in the branch that clamps the effort index
+when a model change shortens the effort list.
+
+The seed reads the rows the modal will actually render, never the whole catalog — see item 371 for
+why those two can differ and what happens when they do.
+
+## 371. Closed — nothing asserted the order of the model picker's rows
+
+**Bucket: Closed** by the commit carrying this entry. The row order came from the order of the catalog literal, and no test referenced
+that list by index or asserted any sequence of identifiers. The only two tests touching the list
+asserted a single disclosure field. A new model dropped into the wrong place would have shipped with
+nothing to catch it.
+
+The order is editorial: a judgment about what a coding agent's user wants to see first. No field
+encodes it and none was invented to. The tier-recommendation field cannot serve: it holds two values,
+four of seventeen entries carry one, and it is read as a first-match lookup key rather than a rank.
+The escalation ladders cover three identifiers per provider. So the literal's own sequence is the
+order, nothing sorts anywhere, and a test pins the exact sequence against a fixed list written in
+that test rather than derived from the subject it checks.
+
+A consequence worth recording: because nothing sorts, the trap where a textual comparison places a
+tenth minor version above a ninth cannot arise here. It is avoided by construction rather than by a
+comparator someone has to keep correct.
+
+The picker groups rows under a provider heading emitted whenever a row's provider differs from its
+predecessor's, so the rows for one provider must stay in a single run. Filtering preserves that; reordering
+into an interleaved sequence would emit repeated headings.
+
+## 372. Closed — reordering the catalog was one entry away from silently changing a tier default
+
+**Bucket: Closed** by the commit carrying this entry. The function resolving a tier's default model scans that provider's entries and
+takes the first whose recommendation matches. Counted before anything moved: within each provider,
+each of the two recommendation values is carried by exactly one entry, so first-match cannot depend
+on position and the reorder in item 371 was safe.
+
+That margin is one entry wide and invisible in the source. Rather than restructure the lookup, a
+guard asserts the count directly, so a second carrier fails a test instead of quietly handing the
+tier default to whichever entry someone happened to place higher.
+
+Demonstrated rather than argued: adding a second high recommendation above the existing one changed
+the resolved default from the sonnet entry to the opus entry, and the guard failed on the count with
+both identifiers named in its message.
+
+**The scope of the guard, stated so it is not later deleted as redundant.** It guards this
+first-match lookup. It is not a claim that the field must be unique in general — it is the condition
+under which display order and lookup order stay independent of each other.
+
+## 373. Deprecation is prose inside a cost note, so nothing can act on it
+
+**Bucket: Actionable now.** One catalog entry marks itself superseded in the free-text note the
+picker prints beside its name. That is the only record of the fact anywhere.
+
+Collapsing superseded entries in the picker was considered in the pass that reordered the list and
+was refused: driving behaviour by matching substrings in a human-written note is the shape this
+ledger keeps recording defects for. The remedy is a real boolean on the catalog entry type, carried
+through the projection the picker reads exactly as the tier recommendation now is, with the note
+free to keep saying whatever reads best. Nothing new needs to be learned first.
+
+## 374. The default model is a generation behind one the catalog already carries
+
+**Bucket: Neither.** The default returned for a fresh install names the 4.6 sonnet entry while a 5
+sonnet entry sits in the same catalog, three rows above it under the order that now ships.
+
+Deliberately not decided in the pass that noticed it. Cursor placement, which is what made the gap
+visible, is handled by item 370; which model should be the default is a product judgment about cost
+and behaviour, not a defect with a specified remedy. Recorded so it is a decision someone makes
+rather than one that keeps happening by default.
+
+## 375. Fable's safeguard routing is disclosed nowhere, and it now sits at the top of the picker
+
+**Bucket: Actionable now.** The Fable entry is a Mythos-tier model whose safeguards can route
+certain queries — cybersecurity work among them — to a different model than the one selected. For an
+agent that edits code, that is worth knowing before selecting it, and the reorder in item 371 places
+it in the first row.
+
+Nothing in the tree mentions it: a search for the tier's name across sources and documentation
+returns nothing.
+
+The remedy is specified by an existing precedent rather than invented. The same entry already
+carries a structured retention field that the picker renders inline as its own line, and a test
+asserts the free-text note does not duplicate what that field says. A routing disclosure takes the
+same shape — a field on the entry, rendered by the same branch — and specifically not prose in the
+note, for the reason item 373 records.
+
+## 376. Whether every catalog entry is still served cannot be settled from here
+
+**Bucket: Blocked on data.** Twelve of the seventeen entries are proven live locally, from records
+this machine already holds. Five are unrecorded, and unrecorded means unused, not dead.
+
+The instrument is the usage ledger and the per-run cost logs under the user-level directory. Both are
+outside version control, so a repository-wide text search is structurally incapable of reading them;
+both were read as JSON with the identifier field confirmed against a raw record before any counting,
+because this series has already been burned once by reading a sink on the wrong field name. Any entry
+with a recorded call that returned token counts was really called and really billed. The two families
+have separate writers, separate directories, and different names for their cost field; the cost logs
+proved a strict subset of the usage ledger, which is the expected relationship and not a contradiction.
+
+The five unrecorded entries are two of the 5.6 family, the nano entry, the 4.7 opus entry, and the
+4.5 sonnet entry. That the absence proves nothing is not a hedge but a demonstrated fact: the nano
+entry is unrecorded here, and a comment beside its capability entry records a live measurement
+against the real API made this August, with token counts. So at least one of the five is live and the
+ledger simply never saw it.
+
+**What would close this.** A per-entry check against what each vendor currently serves, which needs
+a network read this pass did not perform. Absence from a vendor's published list would still not
+settle it on its own, since it cannot separate an entry that was retired from one that was never
+served under that exact identifier.
+
+One thing the same reading did settle: the pricing table carries rates for a 4.6 opus identifier
+that no catalog entry names. It is billed by nothing and read by nothing.
+
+## 377. Closed — the model picker offered nine rows for a provider with no key
+
+**Bucket: Closed** by the commit carrying this entry. Seventeen rows were shown unconditionally. With one provider configured, nine of
+them named models that could not be selected into a working state.
+
+The picker now hides a provider with no resolved key and prints a dimmed count of what it hid,
+naming the command that adds one — verified to exist end to end before being named in text a user
+reads.
+
+**Where the key comes from matters more than the filter does.** A key resolves from an environment
+variable, from the configuration file, or from the user-level key store, and a filter keyed on only
+the first would hide providers the user can actually use, which is worse than a long list. No second
+resolution was written: the entry point already builds the full configuration and then fills either
+key from the key store, both before the tree renders, so the picker reads the answer the run itself
+uses.
+
+Three rules, each with a test. No key anywhere shows every row, because an empty picker is worse than
+a long one. The current model is never hidden, whatever its provider, and renders at its natural
+position as the only row in its own section. Filtering removes and never reorders, so the pinned
+sequence in item 371 still describes whatever survives.
+
+**Presence is not validity.** A revoked key still lists its models. Nothing here can tell the
+difference without spending a call, and erring the other way would hide a working provider.
+
+**One thing this surfaced that is worth carrying.** Reading a new required state field from a
+component blanked its entire modal under a test that mocked the store with a partial object — an
+unguarded length read on an absent array. Both halves were fixed: the reader degrades to showing
+every row, and the fixture states the value rather than omitting it.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 313 to find out which ones still need something. No index of
+reader the trouble of reading all 377 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (162): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42,
+**Closed** (167): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42,
 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113,
 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167,
 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228,
 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260,
 262, 264, 265, 266, 267, 268, 269, 270, 271, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285,
 286, 288, 289, 290, 301, 302, 304, 308, 309, 310, 327, 336, 337, 343, 344, 345, 348, 351,
-352, 353, 364
+320, 352, 353, 364, 370, 371, 372, 377
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (16): 287, 291, 292, 293, 296, 299, 313, 320, 328, 329, 334, 347, 358, 359, 365, 368
+first (17): 287, 291, 292, 293, 296, 299, 313, 328, 329, 334, 347, 358, 359, 365, 368, 373, 375
 
 Six, down from seven, and the movement is the ledger's own signal about whether anything is specified
 and waiting, in both directions. The diagnosis pass into `find_references` left it at 7 (287 plus six
@@ -26925,16 +27111,16 @@ turned out incomplete, and applying it alone would have introduced a crash — w
 retry event that never reaches the bus under its own type, whose remedy is likewise named. Net
 eleven to twelve.
 
-**Blocked on data** — closing requires an observation that doesn't exist yet (16): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250, 263, 318
+**Blocked on data** — closing requires an observation that doesn't exist yet (17): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250, 263, 318, 376
 
-**Neither — a structural fact recorded, with no fix proposed** (174): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
+**Neither — a structural fact recorded, with no fix proposed** (176): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
 74, 76, 77, 78, 79, 80, 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109,
 112, 114, 115, 118, 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152,
 154, 155, 158, 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199,
 200, 201, 202, 205, 206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230,
 232, 243, 244, 247, 248, 249, 254, 256, 261, 272, 294, 295, 297, 298, 300, 303, 305, 306, 307, 311, 312,
 314, 315, 316, 317, 319, 321, 322, 323, 324, 325, 326, 330, 331, 332, 333, 335,
-338, 339, 340, 341, 342, 346, 349, 350, 354, 355, 356, 357, 360, 361, 362, 363, 366, 367
+338, 339, 340, 341, 342, 346, 349, 350, 354, 355, 356, 357, 360, 361, 362, 363, 366, 367, 369, 374
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.

@@ -15,42 +15,19 @@ export interface ModelOption {
   supportsVision?: boolean;
 }
 
+/**
+ * Row order is EDITORIAL and this literal is the only thing that encodes it: `buildModels()`
+ * iterates, nothing sorts, so the array's order is the picker's order. Anthropic first (Zone's
+ * default provider); within it three pinned leaders, then each family newest-first with the pinned
+ * member not repeated. OpenAI second: newest family first, strongest first inside a family, legacy
+ * families last. `modelCatalogOrder.test.ts` pins the exact sequence — a new entry dropped in the
+ * wrong place fails there, which is the only place it can be caught.
+ *
+ * Reordering is safe against `getDefaultModelForTier`'s first-match `.find` ONLY while each
+ * provider carries at most one entry per `recommendedTier` value; that same test guards it.
+ */
 export const MODEL_CATALOG: Record<LLMProvider, ModelOption[]> = {
-  openai: [
-    { id: "gpt-5.6-sol",   label: "GPT-5.6 Sol",
-      costNote: formatCostNote("openai", "gpt-5.6-sol") },
-    { id: "gpt-5.6-terra", label: "GPT-5.6 Terra",
-      costNote: formatCostNote("openai", "gpt-5.6-terra") },
-    { id: "gpt-5.6-luna",  label: "GPT-5.6 Luna",
-      costNote: formatCostNote("openai", "gpt-5.6-luna") },
-    { id: "gpt-4o",       label: "GPT-4o",       recommendedTier: "high",
-      costNote: formatCostNote("openai", "gpt-4o") },
-    {
-      id: "gpt-4o-mini",
-      label: "GPT-4o mini",
-      recommendedTier: "standard",
-      costNote: formatCostNote("openai", "gpt-4o-mini"),
-      workerSuitable: false,
-      workerSuitabilityNote: "Not recommended as Worker subagent — may corrupt file content during write_file operations",
-    },
-    { id: "gpt-5.4",      label: "GPT-5.4",
-      costNote: formatCostNote("openai", "gpt-5.4") },
-    { id: "gpt-5.4-mini", label: "GPT-5.4 mini",
-      costNote: formatCostNote("openai", "gpt-5.4-mini") },
-    {
-      id: "gpt-5.5",
-      label: "GPT-5.5",
-      costNote: formatCostNote("openai", "gpt-5.5"),
-    },
-    { id: "gpt-5.4-nano", label: "GPT-5.4 nano",
-      costNote: formatCostNote("openai", "gpt-5.4-nano") },
-  ],
   anthropic: [
-    {
-      id: "claude-opus-5",
-      label: "Claude Opus 5",
-      costNote: "Frontier — $5/$25 per MTok",
-    },
     {
       id: "claude-fable-5",
       label: "Claude Fable 5",
@@ -59,17 +36,12 @@ export const MODEL_CATALOG: Record<LLMProvider, ModelOption[]> = {
       costNote: "Opt-in frontier — $10/$50 per MTok · verify budget",
       retention: { minDays: 30, zdrAvailable: false },
     },
+    {
+      id: "claude-opus-5",
+      label: "Claude Opus 5",
+      costNote: "Frontier — $5/$25 per MTok",
+    },
     { id: "claude-sonnet-5", label: "Claude Sonnet 5" },
-    {
-      id: "claude-sonnet-4-6",
-      label: "Claude Sonnet 4.6",
-      recommendedTier: "high",
-    },
-    {
-      id: "claude-haiku-4-5",
-      label: "Claude Haiku 4.5",
-      recommendedTier: "standard",
-    },
     {
       id: "claude-opus-4-8",
       label: "Claude Opus 4.8",
@@ -80,7 +52,46 @@ export const MODEL_CATALOG: Record<LLMProvider, ModelOption[]> = {
       label: "Claude Opus 4.7",
       costNote: "Frontier model — ~1.7× Sonnet output cost; verify usage budget",
     },
+    {
+      id: "claude-sonnet-4-6",
+      label: "Claude Sonnet 4.6",
+      recommendedTier: "high",
+    },
     { id: "claude-sonnet-4-5", label: "Claude Sonnet 4.5", costNote: "Legacy — Sonnet 4.6 recommended" },
+    {
+      id: "claude-haiku-4-5",
+      label: "Claude Haiku 4.5",
+      recommendedTier: "standard",
+    },
+  ],
+  openai: [
+    { id: "gpt-5.6-sol",   label: "GPT-5.6 Sol",
+      costNote: formatCostNote("openai", "gpt-5.6-sol") },
+    { id: "gpt-5.6-terra", label: "GPT-5.6 Terra",
+      costNote: formatCostNote("openai", "gpt-5.6-terra") },
+    { id: "gpt-5.6-luna",  label: "GPT-5.6 Luna",
+      costNote: formatCostNote("openai", "gpt-5.6-luna") },
+    {
+      id: "gpt-5.5",
+      label: "GPT-5.5",
+      costNote: formatCostNote("openai", "gpt-5.5"),
+    },
+    { id: "gpt-5.4",      label: "GPT-5.4",
+      costNote: formatCostNote("openai", "gpt-5.4") },
+    { id: "gpt-5.4-mini", label: "GPT-5.4 mini",
+      costNote: formatCostNote("openai", "gpt-5.4-mini") },
+    { id: "gpt-5.4-nano", label: "GPT-5.4 nano",
+      costNote: formatCostNote("openai", "gpt-5.4-nano") },
+    { id: "gpt-4o",       label: "GPT-4o",       recommendedTier: "high",
+      costNote: formatCostNote("openai", "gpt-4o") },
+    {
+      id: "gpt-4o-mini",
+      label: "GPT-4o mini",
+      recommendedTier: "standard",
+      costNote: formatCostNote("openai", "gpt-4o-mini"),
+      workerSuitable: false,
+      workerSuitabilityNote: "Not recommended as Worker subagent — may corrupt file content during write_file operations",
+    },
   ],
 };
 

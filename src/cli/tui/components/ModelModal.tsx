@@ -6,6 +6,7 @@ import { USER_FACING_MODELS, getDefaultModelId } from "../../../llm/modelRegistr
 import { saveDiskModel } from "../../../api/diskModel.js";
 import type { DiskModelSettings } from "../../../api/diskModel.js";
 import { role, glyph } from "../theme.js";
+import { visibleModelRows, hiddenRowCount } from "../modelPickerList.js";
 
 interface Props {
   dispatch: Dispatch<StoreAction>;
@@ -17,7 +18,10 @@ export function ModelModal({ dispatch }: Props): React.ReactElement {
   const cols = process.stdout.columns ?? 80;
   const narrow = cols < 60;
   const currentModelId = state.modelSettings?.model ?? getDefaultModelId();
-  const visibleModels = USER_FACING_MODELS;
+  // Same helper the reducer seeds modelSelectedIndex with, so `sel` indexes THIS array. Deriving
+  // the list here independently is the defect this module exists to prevent.
+  const visibleModels = visibleModelRows(USER_FACING_MODELS, state.providersWithKey, currentModelId);
+  const hidden = hiddenRowCount(USER_FACING_MODELS, visibleModels);
   const count = visibleModels.length;
 
   useInput((_input, key) => {
@@ -90,6 +94,9 @@ export function ModelModal({ dispatch }: Props): React.ReactElement {
       <Text> </Text>
       {rows}
       <Text> </Text>
+      {hidden > 0 && (
+        <Text dimColor>{` ${hidden} hidden — no API key for that provider · /keys to add`}</Text>
+      )}
       <Text dimColor> ↑↓ navigate · Enter select · Esc cancel</Text>
     </Box>
   );
