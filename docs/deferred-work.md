@@ -27057,11 +27057,103 @@ component blanked its entire modal under a test that mocked the store with a par
 unguarded length read on an absent array. Both halves were fixed: the reader degrades to showing
 every row, and the fixture states the value rather than omitting it.
 
+## 378. The composer paints a fixed dark background and sets no text colour, so its contrast is whatever the user's terminal happens to be
+
+**Bucket: Actionable now.** Two components fill a box with the theme's fixed dark surface hex and
+then render every text run inside it without a colour property. The foreground is therefore the
+terminal's default, which the application does not control and cannot read.
+
+The consequence is not that the ratio is merely unknown. It is user-dependent and can invert: on a
+light-themed terminal the default foreground is near-black, which lands near-black text on a
+near-black fill. The theme module's own test file states that the contrast formula becomes
+applicable only once both sides of a pairing are real hex, and names an earlier pairing that was
+confirmed unreadable on a real terminal for exactly this reason. That earlier fix introduced a
+dedicated foreground role for the one pairing it repaired, and left these two sites alone.
+
+There is also a recorded conclusion pointing the other way. The commit that fixed the surface
+value considered three treatments against a real patch, chose to carry no background at all as the
+only option immune to this whole class, and applied that choice to the diff view alone — while its
+own message notes the other two components share the role and had the identical defect.
+
+**Two remedies, either of which closes it, which is why this is specified rather than open.** Set an
+explicit foreground on every run sitting on an application-painted fill, which makes the pairing
+computable and is what the dedicated foreground role already exists to do; or carry no fill, which
+is what the earlier commit concluded in writing. Which one ships is an aesthetic judgment. That the
+current state is a defect is not.
+
+**A smaller finding in the same file, recorded so it is not lost.** The composer's placeholder is
+dimmed unconditionally, and every run inside the box dims while a task is running — which is the
+state a user looks at longest. Separately, the input marker is a bare two-character literal rather
+than a member of the glyph seam, so the completeness sweep that forbids seam values appearing as
+literals elsewhere does not reach it.
+
+## 379. A composer test renders a shape the composer stopped rendering
+
+**Bucket: Actionable now.** The file guarding the composer's box structure builds its own local
+component rather than importing the real one, and that local copy carries a rounded border with a
+colour that changes on run state. The shipped composer has no border on that box at all — it uses a
+background fill — so every assertion in the file describes a shape that is not rendered anywhere.
+
+The header comment names a line range in the composer for the shape it claims to mirror. That range
+no longer contains the box.
+
+This is the absent-observer class again, in its least visible form: the tests pass, they exercise
+real layout behaviour, and the ghost-row defect they were written for was genuine. Nothing fails.
+The file simply stopped describing the subject while continuing to look like it does.
+
+The remedy is to point the assertions at the shipped structure so the guard covers what ships, and
+to correct the header rather than leave a reference that resolves to unrelated code.
+
+## 380. The startup mark is declined rather than deferred
+
+**Bucket: Neither.** Recorded as a decision so the question is not re-derived from scratch a third
+time.
+
+The layout constraint is settled and measured: the static region occupies the top of the render
+tree, a node placed above it floats as the transcript scrolls rather than staying put, and no
+reserved top region exists. The persistent startup line is written to raw output before the tree
+mounts specifically so it survives in native scrollback. That makes it the only place a mark can sit
+without floating.
+
+Which is also exactly why adding one there is refused. The mark was removed once already at the
+product owner's own request, and the reason recorded at the time was that it duplicated the line
+beneath it — the line that is now the only available slot. Putting a mark back into the one place
+that already carries the identity re-creates the duplication that motivated the removal.
+
+A second, independent objection was measured separately and still stands: the diagonal glyph the
+mark used carries a font-substitution risk. Two instruments confirmed the source encodes the
+intended code point, which is what establishes that this is a rendering question and therefore not
+answerable from this machine at all. The surviving startup line dropped its own small marker for the
+same reason.
+
+**What would count as attention to this instead.** Strengthening the line that already exists, which
+is a treatment question and belongs with item 378, not a second mark.
+
+## 381. A carried claim framed a measurement before the instrument ran
+
+**Bucket: Neither.** Recorded for the shape, which is what generalises.
+
+A stored note asserted that the model catalog used a deliberately fictional, forward-dated
+namespace, and named three identifiers as examples of entries that were not real. Item 376's reading
+of this machine's own billing records refutes it on all three, and on nine more besides.
+
+The damage the note nearly did was not a wrong answer to a question. It was a frame. A pass had been
+planned to check catalog freshness against vendor documentation, and the note supplied, in advance,
+the interpretation that most absences would be by design — which would have made a genuinely stale
+entry indistinguishable from an intended one, and would have been reported as a finding rather than
+as a failure. The note was refuted only because a stronger local instrument was demanded first.
+
+The class it belongs to is already represented here twice: a battery figure carried between passes
+that had been wrong when written, and a premise about how the comparison tool holds the screen that
+survived several passes before a capture refuted it. What distinguishes this instance is that the
+claim was never load-bearing on its own — it was load-bearing on how other evidence would be read,
+which is harder to notice and does not surface as a failed assertion.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 377 to find out which ones still need something. No index of
+reader the trouble of reading all 381 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -27077,7 +27169,7 @@ first.
 320, 352, 353, 364, 370, 371, 372, 377
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (17): 287, 291, 292, 293, 296, 299, 313, 328, 329, 334, 347, 358, 359, 365, 368, 373, 375
+first (19): 287, 291, 292, 293, 296, 299, 313, 328, 329, 334, 347, 358, 359, 365, 368, 373, 375, 378, 379
 
 Six, down from seven, and the movement is the ledger's own signal about whether anything is specified
 and waiting, in both directions. The diagnosis pass into `find_references` left it at 7 (287 plus six
@@ -27113,14 +27205,14 @@ eleven to twelve.
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (17): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250, 263, 318, 376
 
-**Neither — a structural fact recorded, with no fix proposed** (176): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
+**Neither — a structural fact recorded, with no fix proposed** (178): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
 74, 76, 77, 78, 79, 80, 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109,
 112, 114, 115, 118, 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152,
 154, 155, 158, 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199,
 200, 201, 202, 205, 206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230,
 232, 243, 244, 247, 248, 249, 254, 256, 261, 272, 294, 295, 297, 298, 300, 303, 305, 306, 307, 311, 312,
 314, 315, 316, 317, 319, 321, 322, 323, 324, 325, 326, 330, 331, 332, 333, 335,
-338, 339, 340, 341, 342, 346, 349, 350, 354, 355, 356, 357, 360, 361, 362, 363, 366, 367, 369, 374
+338, 339, 340, 341, 342, 346, 349, 350, 354, 355, 356, 357, 360, 361, 362, 363, 366, 367, 369, 374, 380, 381
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
