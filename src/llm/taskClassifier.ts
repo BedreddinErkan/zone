@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import { createLLMClient } from "./factory.js";
 import {
+  isGatewayProfile,
   priceForProfile,
   providerOf,
   resolveProfile,
@@ -11,6 +12,7 @@ import type { LLMProvider } from "./types.js";
 import {
   extractResponsesApiOutputText,
   formatOpenAiThrownErrorPayload,
+  type ZoneModelOverride,
 } from "./openaiClient.js";
 import { extractUsage } from "./recordingClient.js";
 import { getRequestContext } from "./openaiContext.js";
@@ -295,23 +297,53 @@ function hashTask(taskDescription: string): string {
   return (hash >>> 0).toString(36);
 }
 
-function pickClassifierModel(provider: LLMProvider): string {
-  // Cheapest registered model per provider. Rates are not restated here — they
-  // live in PRICING_USD_PER_MTOK (usage/pricing.ts), and a copy in a comment
-  // drifts from the table that actually bills.
-  //
-  // Cost is dominated by the uncached prompt, not by the response:
-  // CLASSIFIER_SYSTEM_PROMPT is ~1.5k tokens by the four-chars-per-token proxy,
-  // while the response is the ~110 tokens CLASSIFIER_OUTPUT_CEILING's own comment
-  // records as measured. This replaces an earlier claim of a sub-$0.0005 ceiling
-  // conditioned on prompts of a few hundred tokens. That ceiling was never
-  // reachable on claude-haiku-4-5: the response alone costs $0.00055 at the
-  // table's $5/Mtok output rate, so no prompt size gets a call under it. See
-  // docs/deferred-work.md items 112 and 113.
-  if (provider === "anthropic") {
-    return process.env.ZONE_CLASSIFIER_MODEL_ANTHROPIC?.trim() || "claude-haiku-4-5";
+/**
+ * The model id this run's classifier call should target, or `null` when nothing is servable.
+ *
+ * `null` is reachable only when a gateway profile is active, no env var override is set, and the
+ * request context carries no model — genuinely nothing to try. `classifyTask` skips the call
+ * entirely in that case rather than letting it 400 (docs/deferred-work.md items 396/398).
+ */
+function pickClassifierModel(
+  provider: LLMProvider,
+  activeProfile: ProviderProfile,
+  override: ZoneModelOverride | undefined
+): string | null {
+  // Explicit env override wins regardless of profile — a deliberate, fixed choice a user set,
+  // outranking both the vendor default below and a gateway's inferred model.
+  const envOverride = provider === "anthropic"
+    ? process.env.ZONE_CLASSIFIER_MODEL_ANTHROPIC?.trim()
+    : process.env.ZONE_CLASSIFIER_MODEL_OPENAI?.trim();
+  if (envOverride) return envOverride;
+
+  if (!isGatewayProfile(activeProfile)) {
+    // Cheapest registered model per provider. Rates are not restated here — they
+    // live in PRICING_USD_PER_MTOK (usage/pricing.ts), and a copy in a comment
+    // drifts from the table that actually bills.
+    //
+    // Cost is dominated by the uncached prompt, not by the response:
+    // CLASSIFIER_SYSTEM_PROMPT is ~1.5k tokens by the four-chars-per-token proxy,
+    // while the response is the ~110 tokens CLASSIFIER_OUTPUT_CEILING's own comment
+    // records as measured. This replaces an earlier claim of a sub-$0.0005 ceiling
+    // conditioned on prompts of a few hundred tokens. That ceiling was never
+    // reachable on claude-haiku-4-5: the response alone costs $0.00055 at the
+    // table's $5/Mtok output rate, so no prompt size gets a call under it. See
+    // docs/deferred-work.md items 112 and 113.
+    return provider === "anthropic" ? "claude-haiku-4-5" : "gpt-4o-mini";
   }
-  return process.env.ZONE_CLASSIFIER_MODEL_OPENAI?.trim() || "gpt-4o-mini";
+
+  // A gateway serves its own model namespace, which Zone's catalog does not describe — the vendor
+  // default above is guaranteed invalid here, the same category error item 397 fixed for
+  // getModelName, one layer up. Draw from the run's own configured model instead: it is what the
+  // main loop is about to use, so it is provably servable by this exact endpoint.
+  //
+  // capabilities.models is NOT a viable source: no gateway profile populates it today
+  // (gatewayProfiles.ts's own doc comment says so, deliberately), and nothing in the codebase
+  // enumerates it anyway — its one existing consumer (capabilitiesFor) always already has a model
+  // id in hand and asks "what does this profile say about model X," never "what models exist."
+  // See docs/deferred-work.md item 398.
+  const candidate = (override?.standard ?? override?.high)?.trim();
+  return candidate || null;
 }
 
 interface ParsedClassifierResponse {
@@ -500,7 +532,8 @@ type ClassifierFallbackReason =
   | "truncated"
   | "invalid_tier"
   | "low_tier_confidence"
-  | "error";
+  | "error"
+  | "no_model_for_profile";
 
 interface ClassifierFallbackEvent {
   reason: ClassifierFallbackReason;
@@ -576,8 +609,11 @@ export async function classifyTask(
   }
 
   const ctx = getRequestContext();
-  // Resolved once, here; the profile object is what reaches computeResponseCost below, so the
-  // pricing table is never re-derived from a string further down (providerProfile.ts's R4).
+  // `profile` here is ALWAYS a built-in — resolveProfile resolves only from strings, never from a
+  // real ProviderProfile object — so it answers "which vendor would this run default to," and is
+  // what createLLMClient falls back to when options.profile is absent. It is NOT the run's actual
+  // active profile, which may be a gateway: that is `options.profile`, threaded straight through
+  // since step 5 (providerProfile.ts's R4 — thread the object, never re-derive it).
   // `fallback: "anthropic"` is this site's own historical default, passed explicitly.
   const profile = resolveProfile({
     explicit: options.provider,
@@ -585,7 +621,45 @@ export async function classifyTask(
     fallback: "anthropic",
   });
   const provider = providerOf(profile);
-  const model = pickClassifierModel(provider);
+  // The one to price and pick a classifier model against — real gateway if one is active, else the
+  // same built-in `profile` used today. Using the built-in-only `profile` for either previously
+  // meant a gateway run asked the endpoint for a vendor catalog model it does not serve, and (had
+  // that call ever succeeded) would have priced the response against the wrong table
+  // (docs/deferred-work.md items 396/398).
+  const activeProfile = options.profile ?? profile;
+  const model = pickClassifierModel(provider, activeProfile, ctx?.modelOverride);
+  if (model === null) {
+    // Reachable only defensively today — dispatch.ts always populates ctx.modelOverride, so this
+    // is a gateway active with no env override and no context model. Skip outright rather than let
+    // it 400 and degrade silently (item 398).
+    const fallback = buildFallback("(none)", 0, startTime, "no usable model for provider profile");
+    emitClassifierFallback({
+      reason: "no_model_for_profile",
+      taskHash: cacheKey,
+      classifierModel: "(none)",
+      provider,
+      impact:
+        "no classification at all; the archetype is ZONE_FALLBACK_ARCHETYPE and carries no " +
+        "signal about this task — reached before any request was attempted, so nothing was spent " +
+        `finding this out; provider profile "${activeProfile.id}" has no model configured to ` +
+        "classify against",
+    });
+    classificationCache.set(cacheKey, fallback);
+    log(
+      "[zone-task-classified]",
+      JSON.stringify({
+        taskHash: cacheKey,
+        tier: fallback.tier,
+        confidence: 0,
+        classifierModel: fallback.classifierModel,
+        classifierCostUsd: 0,
+        classifierLatencyMs: fallback.classifierLatencyMs,
+        fallbackUsed: true,
+        fallbackReason: "no_model_for_profile",
+      })
+    );
+    return fallback;
+  }
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   let costUsd = 0;
@@ -615,7 +689,7 @@ export async function classifyTask(
     ]);
     if (timeoutHandle) clearTimeout(timeoutHandle);
 
-    costUsd = computeResponseCost(response, profile, model);
+    costUsd = computeResponseCost(response, activeProfile, model);
 
     const extraction = extractResponsesApiOutputText(response);
     if (!extraction.ok) {

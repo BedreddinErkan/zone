@@ -27818,10 +27818,13 @@ worse: `pickClassifierModel` returns a VENDOR catalog id, so the task classifier
 model it does not serve, takes a 400, and falls back to `medium`/`refactor` on EVERY gateway run.
 The main loop is unaffected and the fallback is graceful, so nothing looks broken — the run simply
 carries no classification signal, and `[zone-classifier-fallback]`'s own `impact` field says so.
-The same shape as item 397 one layer up: a model id chosen from the wrong namespace. Second and
-cosmetic: `[zone-pricing]`'s message interpolates `${provider}/${model}`, which for a gateway id that
-already contains a slash renders `openai/openai/gpt-4o-mini` and reads as a doubling bug that is not
-one. Both are recorded rather than fixed, because both are outside what this pass set out to change.
+The same shape as item 397 one layer up: a model id chosen from the wrong namespace. **Closed by item
+398**, fixed the same way item 397 fixed the main loop's equivalent defect, plus a second, adjacent
+wrong-profile-object bug item 398 found alongside it. Second and cosmetic: `[zone-pricing]`'s message
+interpolates `${provider}/${model}`, which for a gateway id that already contains a slash renders
+`openai/openai/gpt-4o-mini` and reads as a doubling bug that is not one — **still open**, untouched by
+item 398, which does not touch `usage/pricing.ts`. Both were recorded rather than fixed in this
+entry's own pass, because both were outside what that pass set out to change.
 
 **What this did NOT deliver.** A gateway's cost is recorded as unknown rather than guessed, which is
 correct and also means the daily and per-run USD gates do not constrain a gateway run. Nothing
@@ -27866,11 +27869,90 @@ population the predicate's data describes, and whether the caller's case is insi
 catalog describes two vendors and the caller was a third party, so the check could only ever return
 the wrong answer — the guard was not too strict or too loose, it was answering a different question.
 
+## 398. The classifier's own model choice had item 397's category error, plus a second, adjacent bug that fixing the first would have newly activated
+
+**Bucket: Neither.** The defect and its fix are both recorded here, matching item 397's own precedent
+for an entry that applies its fix in the same pass that files it — distinct from a "Closed —" heading
+(item 394's), which this document uses to mark a RECLASSIFICATION of an entry that had previously
+been filed as "Actionable now" and is fixed only later.
+
+**The defect, in item 397's own words, one layer up.** `pickClassifierModel(provider)` picked a
+model the same way `getModelName` used to: an exact match against Zone's catalog, which describes
+the two VENDORS. For a gateway, an id the catalog has never heard of is UNKNOWN, not INVALID — and
+`pickClassifierModel` had no branch for that distinction at all, so it always returned the vendor's
+own cheap default (`"claude-haiku-4-5"`/`"gpt-4o-mini"`). Item 396 measured the consequence directly
+against the running lab proxy: every gateway run's classification call asked the endpoint for a
+model it does not serve, took a 400, and fell back to `medium`/`refactor` — silently, because the
+fallback is graceful and nothing else in the run depends on classification succeeding.
+
+**A second, adjacent bug was found while fixing the first, and fixing only the first would have made
+it newly reachable rather than newly harmless.** `computeResponseCost(response, profile, model)` was
+called with the same LOCAL `profile` variable `pickClassifierModel` used — resolved via
+`resolveProfile({explicit: options.provider, context: ctx?.provider, fallback: "anthropic"})`, which
+can only ever return a BUILT-IN. `options.profile` — the run's actual profile, possibly a gateway,
+already threaded into the very same function's own `createLLMClient` call — was never consulted by
+either function.
+Before this pass, that was invisible: the call always 400s before `computeResponseCost` runs, so its
+`known: false` branch is never exercised for a gateway and `costUsd` stays at its initial `0` by
+accident. Fixing model selection alone would have made the call succeed for the first time on a
+gateway, and `computeResponseCost` would then have priced that response against the wrong (built-in)
+table — a confident, WRONG, non-zero dollar figure, worse than the honest zero it replaces.
+
+**This is not item 299, and the two should not be conflated or one mistaken for closing the other.**
+299 (Actionable now, unaddressed by this pass) is about an unrecognized provider STRING being
+coerced into `"openai"` before a pricing lookup runs. This is an OBJECT being wrong — a genuinely
+resolved, correctly-typed `ProviderProfile` simply never reaching the two functions that needed it —
+the exact class of bug the whole `ProviderProfile` split (R4/R8) exists to prevent, at one call site
+that never got updated when `options.profile` arrived in step 5. 299's own specified remedy
+(exporting `pickClassifierModel`/`computeResponseCost`, refusing an unrecognized provider string
+loudly) is still unapplied by this pass; 299 stays open exactly as it was.
+
+**`capabilities.models` was considered and rejected as the source — measured, not assumed.**
+`gatewayProfilesFrom`'s own doc comment states plainly that it declares no capabilities for any real
+gateway profile, and a repo-wide search for anything enumerating `capabilities.models`'s keys
+(`Object.keys`/`Object.entries`/`Object.values` combined with "capabilit"/"models") returns nothing:
+every existing consumer already has a model id in hand and asks "what does this profile say about
+model X," never "what models exist." Building an enumeration path against data nothing writes today
+would have been a materially larger change than the defect required.
+
+**Reusing `getModelName` wholesale was considered and rejected too.** `dispatch.ts` sets
+`modelOverride.high = modelOverride.standard = effectiveConfig.model` unconditionally, so calling
+`getModelName(..., profile)` for the classifier would make it run on whatever `--model` the user
+picked for the WHOLE RUN — for BUILT-IN providers too, not only gateways — a real cost regression
+against the exact minimization `pickClassifierModel`'s own comment (items 112/113) exists for. The
+fix instead draws from the run's own configured model ONLY when a gateway is active, gated strictly
+on `isGatewayProfile`; the built-in path is byte-identical to today in every branch, confirmed by
+seven pre-existing pinned tests that pass unmodified.
+
+**When nothing is servable, the call is skipped outright — never a silent 400, never a silent pick.**
+Reachable only defensively (`dispatch.ts` always populates the model override in production), but
+handled rather than assumed away: a gateway active with no env override and no context model returns
+`null` from model selection, and `classifyTask` returns a fallback classification before any request
+is attempted. This reuses the existing `[zone-classifier-fallback]`/`[zone-task-classified]`
+vocabulary with one new `reason`/`fallbackReason` value (`"no_model_for_profile"`) rather than a new
+marker name — `markerAttribution`'s absolutes are unchanged by this pass.
+
+**Verified against the running lab proxy, not test-only.** Same `lab` profile as item 396's own
+verification, `--provider lab --model openai/gpt-4o-mini --print "What is 3+5?..."`, with
+`ZONE_VERBOSE_LOGS=1` to surface markers past the stdout shield. The success-path
+`[zone-task-classified]` line reads
+`{"tier":"simple",...,"confidence":1,"classifierModel":"openai/gpt-4o-mini","classifierCostUsd":0,
+"classifierLatencyMs":1552}` — the gateway's own model id, not the vendor default; confidence 1, not
+the fallback's 0; cost correctly landing at the unpriced 0, not a wrong non-zero figure.
+`[zone-tier-constraints-applied]` and `[zone-archetype]` both carry `"fallbackUsed":false`, and no
+`[zone-classifier-fallback]` line appears anywhere in the run — no 400, no skip, a real
+classification.
+
+**What this did NOT do.** Item 299's own remedy remains unapplied. The `[zone-pricing]` double-slash
+cosmetic message (item 396's second finding, `${provider}/${model}` rendering
+`openai/openai/gpt-4o-mini` for a gateway id that already contains a slash) remains untouched — this
+pass does not touch `usage/pricing.ts`.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 397 to find out which ones still need something. No index of
+reader the trouble of reading all 398 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -27922,14 +28004,14 @@ eleven to twelve.
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (17): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250, 263, 318, 376
 
-**Neither — a structural fact recorded, with no fix proposed** (185): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
+**Neither — a structural fact recorded, with no fix proposed** (186): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
 74, 76, 77, 78, 79, 80, 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109,
 112, 114, 115, 118, 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152,
 154, 155, 158, 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199,
 200, 201, 202, 205, 206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230,
 232, 243, 244, 247, 248, 249, 254, 256, 261, 272, 294, 295, 297, 298, 300, 303, 305, 306, 307, 311, 312,
 314, 315, 316, 317, 319, 321, 322, 323, 324, 325, 326, 330, 331, 332, 333, 335,
-338, 339, 340, 341, 342, 346, 349, 350, 354, 355, 356, 357, 360, 361, 362, 363, 366, 367, 369, 374, 380, 381, 382, 386, 387, 392, 393, 396, 397
+338, 339, 340, 341, 342, 346, 349, 350, 354, 355, 356, 357, 360, 361, 362, 363, 366, 367, 369, 374, 380, 381, 382, 386, 387, 392, 393, 396, 397, 398
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.

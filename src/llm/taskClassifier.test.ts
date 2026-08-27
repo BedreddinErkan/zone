@@ -5,6 +5,8 @@ import {
   CLASSIFIER_CONFIDENCE_THRESHOLD,
 } from "./taskClassifier.js";
 import { totalCost } from "../usage/pricing.js";
+import { withRequestContext } from "./openaiContext.js";
+import type { ProviderProfile } from "./providerProfile.js";
 
 const mocks = vi.hoisted(() => ({
   createChatCompletion: vi.fn(),
@@ -630,6 +632,158 @@ describe("Phase BYOM.1.1 — classifier provider routing", () => {
       classifierModel: "claude-haiku-4-5",
       provider: "anthropic",
     });
+  });
+});
+
+describe("classifier model selection under an active gateway profile (items 396/398)", () => {
+  const LAB_PROFILE: ProviderProfile = {
+    id: "lab",
+    protocol: "openai-chat",
+    adapterProvider: "openai",
+    keyRef: { envVar: "ZONE_GATEWAY_KEY_LAB", keyExample: "the key your gateway expects" },
+    // No pricing block — the unpriced case every real gateway profile is today.
+  };
+
+  it("NEGATIVE CONTROL: a built-in run ignores a request-context model override, not merely lacks one", async () => {
+    // Proves the built-in path is gated on isGatewayProfile, not merely on modelOverride being
+    // absent — a future change that read it unconditionally would regress cost for every
+    // built-in user who passes --model, and this is the test that would catch it.
+    mocks.createChatCompletion.mockResolvedValue(
+      buildResponse(
+        JSON.stringify({
+          tier: "simple", estimatedFiles: 1, estimatedIterations: 4,
+          needsSubagent: false, confidence: 0.9,
+        }),
+        "gpt-4o-mini"
+      )
+    );
+
+    const result = await withRequestContext(
+      { modelOverride: { standard: "gpt-5.6-sol", high: "gpt-5.6-sol" } },
+      () => classifyTask("built-in run with a context override present", { provider: "openai", skipCache: true })
+    );
+
+    expect(result.classifierModel).toBe("gpt-4o-mini");
+    expect(mocks.createChatCompletion.mock.calls[0]?.[0]).toMatchObject({ model: "gpt-4o-mini" });
+  });
+
+  it("a gateway profile with modelOverride.standard set classifies against that model, verbatim", async () => {
+    mocks.createChatCompletion.mockResolvedValue(
+      buildResponse(
+        JSON.stringify({
+          tier: "medium", estimatedFiles: 2, estimatedIterations: 8,
+          needsSubagent: false, confidence: 0.85,
+        }),
+        "openai/gpt-4o-mini"
+      )
+    );
+
+    const result = await withRequestContext(
+      { modelOverride: { standard: "openai/gpt-4o-mini", high: "openai/gpt-4o-mini" } },
+      () => classifyTask("gateway run, standard tier", { provider: "openai", profile: LAB_PROFILE, skipCache: true })
+    );
+
+    expect(mocks.createChatCompletion.mock.calls[0]?.[0]).toMatchObject({ model: "openai/gpt-4o-mini" });
+    expect(result.classifierModel).toBe("openai/gpt-4o-mini");
+    expect(result.fallbackUsed).toBe(false);
+  });
+
+  it("falls back to modelOverride.high when .standard is absent", async () => {
+    mocks.createChatCompletion.mockResolvedValue(
+      buildResponse(
+        JSON.stringify({
+          tier: "medium", estimatedFiles: 2, estimatedIterations: 8,
+          needsSubagent: false, confidence: 0.85,
+        }),
+        "openai/gpt-5.6-hi"
+      )
+    );
+
+    await withRequestContext(
+      { modelOverride: { high: "openai/gpt-5.6-hi" } },
+      () => classifyTask("gateway run, high-only override", { provider: "openai", profile: LAB_PROFILE, skipCache: true })
+    );
+
+    expect(mocks.createChatCompletion.mock.calls[0]?.[0]).toMatchObject({ model: "openai/gpt-5.6-hi" });
+  });
+
+  it("a gateway with genuinely no model anywhere SKIPS classification rather than 400ing", async () => {
+    // emitClassifierFallback uses console.warn, which neither module-level spy above covers —
+    // the file's existing tests never asserted on [zone-classifier-fallback] directly, only on
+    // the log()-routed markers. Scoped to this one test.
+    const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const result = await classifyTask("gateway run, no override at all", {
+      provider: "openai",
+      profile: LAB_PROFILE,
+      skipCache: true,
+    });
+
+    // The whole point: no request was ever attempted.
+    expect(mocks.createChatCompletion).not.toHaveBeenCalled();
+    expect(result.fallbackUsed).toBe(true);
+    expect(result.classifierModel).toBe("(none)");
+    expect(result.tier).toBe("medium");
+
+    const fallbackLogCall = consoleWarnSpy.mock.calls.find(
+      (call) => String(call[0] ?? "") === "[zone-classifier-fallback]"
+    );
+    expect(fallbackLogCall).toBeDefined();
+    const payload = JSON.parse(String(fallbackLogCall![1]));
+    expect(payload).toMatchObject({ reason: "no_model_for_profile", classifierModel: "(none)" });
+
+    const classifiedLogCall = consoleLogSpy.mock.calls.find(
+      (call) => String(call[0] ?? "") === "[zone-task-classified]"
+    );
+    const classifiedPayload = JSON.parse(String(classifiedLogCall![1]));
+    expect(classifiedPayload).toMatchObject({ fallbackUsed: true, fallbackReason: "no_model_for_profile" });
+
+    consoleWarnSpy.mockRestore();
+  });
+
+  it("an env var override wins over the gateway's own context model", async () => {
+    vi.stubEnv("ZONE_CLASSIFIER_MODEL_OPENAI", "openai/pinned-classifier-model");
+    mocks.createChatCompletion.mockResolvedValue(
+      buildResponse(
+        JSON.stringify({
+          tier: "simple", estimatedFiles: 1, estimatedIterations: 4,
+          needsSubagent: false, confidence: 0.85,
+        }),
+        "openai/pinned-classifier-model"
+      )
+    );
+
+    const result = await withRequestContext(
+      { modelOverride: { standard: "openai/gpt-4o-mini" } },
+      () => classifyTask("gateway run with env override set", { provider: "openai", profile: LAB_PROFILE, skipCache: true })
+    );
+
+    expect(result.classifierModel).toBe("openai/pinned-classifier-model");
+    vi.unstubAllEnvs();
+  });
+
+  it("prices an unpriced gateway's response as $0 (unknown), not against the built-in table", async () => {
+    // The regression test for the computeResponseCost argument fix. Before it, this call reused
+    // the built-in-only local `profile`, which HAS a pricing table — so a gateway response with
+    // real usage tokens would price at OpenAI's real rate instead of correctly landing at 0.
+    mocks.createChatCompletion.mockResolvedValue(
+      buildResponse(
+        JSON.stringify({
+          tier: "medium", estimatedFiles: 3, estimatedIterations: 10,
+          needsSubagent: false, confidence: 0.8,
+        }),
+        "openai/gpt-4o-mini"
+      )
+    );
+
+    const result = await withRequestContext(
+      { modelOverride: { standard: "openai/gpt-4o-mini" } },
+      () => classifyTask("gateway run, pricing check", { provider: "openai", profile: LAB_PROFILE, skipCache: true })
+    );
+
+    // buildResponse's usage (100 prompt / 30 completion tokens) is non-zero, so a positive
+    // number here would mean the wrong (built-in) table priced it.
+    expect(result.classifierCostUsd).toBe(0);
   });
 });
 
