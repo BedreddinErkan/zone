@@ -61,7 +61,7 @@ describe("seed alone", () => {
     expect(selectedIndexForCurrent(OPENAI_FIRST, "a-2")).toBe(4);
   });
 
-  it("falls back to 0 for an id outside the list — a custom --model", () => {
+  it("falls back to 0 for an id outside the list — a custom --model, or a gateway model id", () => {
     expect(selectedIndexForCurrent(OPENAI_FIRST, "not-a-catalog-id")).toBe(0);
   });
 });

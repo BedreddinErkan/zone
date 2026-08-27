@@ -45,6 +45,9 @@ export interface TaskClassification {
 
 export interface ClassifyTaskOptions {
   provider?: LLMProvider;
+  /** The run's provider profile, when it has one — the classifier bills a real call, so it must
+   *  reach the same endpoint as the run it is classifying for. */
+  profile?: ProviderProfile;
   userApiKey?: string;
   skipCache?: boolean;
   /** Test hook: override the 5s timeout. */
@@ -588,7 +591,7 @@ export async function classifyTask(
   let costUsd = 0;
   let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
   try {
-    const client = createLLMClient({ apiKey: options.userApiKey, provider });
+    const client = createLLMClient({ apiKey: options.userApiKey, provider, profile: options.profile });
 
     const response = await Promise.race([
       client.createChatCompletion({

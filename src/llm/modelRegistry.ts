@@ -194,12 +194,27 @@ export function isKnownModelId(id: string): boolean {
   return USER_FACING_MODELS.some((m) => m.id === id);
 }
 
-/** True when the model accepts image input. Defaults to true for unknown/unlisted models. */
-export function supportsVision(modelId: string): boolean {
+/**
+ * True when the model accepts image input.
+ *
+ * Resolution order, matching every other capability lookup: profile override, then the catalog,
+ * then a conservative default. `caps` comes from `capabilitiesFor(profile, model)`.
+ *
+ * THE DEFAULT FOR AN UNKNOWN MODEL IS `false`, AND THE TWO HALVES OF THAT CHANGE ARE COUPLED
+ * (ledger item 394). It used to return `true` for an unknown id, which — since the optional catalog
+ * field is declared on zero entries — made this function a constant that returned `true` for every
+ * possible input, guard included. Flipping it ALONE would have blocked image sends for exactly the
+ * gateway and unlisted-model users a provider profile exists to serve, with no way for them to say
+ * otherwise. So the flip lands together with the override parameter and with the composer threading
+ * its profile capabilities in: a profile that declares `supportsVision: true` re-enables images for
+ * its own models, which is the escape hatch the flip requires in order not to be a regression.
+ */
+export function supportsVision(modelId: string, caps?: ModelCapabilities): boolean {
+  if (caps?.supportsVision !== undefined) return caps.supportsVision;
   const normalized = normalizeModelId(modelId);
   for (const options of Object.values(MODEL_CATALOG)) {
     const entry = options.find((m) => normalizeModelId(m.id) === normalized);
     if (entry) return entry.supportsVision !== false;
   }
-  return true; // unknown model: optimistic default
+  return false; // unknown model: no claim of support, and a profile can override
 }

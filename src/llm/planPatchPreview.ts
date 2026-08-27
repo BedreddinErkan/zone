@@ -40,7 +40,7 @@ export async function planPatchPreviewWithLlm(input: {
 }): Promise<LlmPatchPlan> {
   const client = createLLMClient();
   const ctx = getRequestContext();
-  const model = getModelName("standard", client.provider, ctx?.modelOverride);
+  const model = getModelName("standard", client.provider, ctx?.modelOverride, client.profile);
 
   const combinedContext = input.fileContexts
     .map((file) => `FILE: ${file.path}\n\`\`\`\n${file.content}\n\`\`\``)

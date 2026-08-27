@@ -33,7 +33,7 @@ export async function refinePrompt(input: {
 }): Promise<string> {
   const client = createLLMClient();
   const ctx = getRequestContext();
-  const model = getModelName("standard", client.provider, ctx?.modelOverride);
+  const model = getModelName("standard", client.provider, ctx?.modelOverride, client.profile);
   const role = input.role || "developer";
   const relevantFiles = (input.relevantFiles ?? []).slice(0, 8).join(", ") || "unknown";
   const planSteps =

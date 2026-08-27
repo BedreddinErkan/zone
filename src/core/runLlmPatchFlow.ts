@@ -1,4 +1,5 @@
 import { extractPriorRunSummary } from "../llm/applyRollbackFeedback.js";
+import type { ProviderProfile } from "../llm/providerProfile.js";
 import { computeFileDiff } from "./fileDiff.js";
 import type { DiffLine } from "./fileDiff.js";
 import { readFsConversationEvents } from "./conversationFilesystemStore.js";
@@ -4369,6 +4370,9 @@ export async function runLlmPatchFlow(input: {
    */
   userApiKey?: string;
   provider?: LLMProvider;
+  /** The run's provider profile, when the config resolved one. Forwarded verbatim to the agent
+   *  loop, plan generation and the classifier so every LLM call in the flow reaches one endpoint. */
+  profile?: ProviderProfile;
   // "plan" kept as backward-compat alias; normalizes to "patch" internally
   mode?: "patch" | "plan";
   /** Pre-generated (and pre-approved) plan; skips both generateExecutionPlan call sites. */
@@ -5171,6 +5175,7 @@ const initializeTodosFromPlan = (): void => {
           relevantFiles: agentLoopPlanFiles,
           userApiKey: input.userApiKey,
           provider: input.provider,
+          profile: input.profile,
           archetype: (input.preClassifiedTask?.archetype as string | undefined),
         });
         debugLog(`[zone-plan] generated steps=${executionPlan.steps.length} (agent_loop)`);
@@ -5732,6 +5737,7 @@ const initializeTodosFromPlan = (): void => {
         taskClassification = await classifyTask(input.task, {
           userApiKey: input.userApiKey,
           provider: input.provider,
+          profile: input.profile,
           repoRoot: path.resolve(__dirname, "../.."),
         });
       } catch (err) {
@@ -5866,6 +5872,7 @@ const initializeTodosFromPlan = (): void => {
       abortSignal: input.abortSignal,
       userApiKey: input.userApiKey,
       provider: input.provider,
+      profile: input.profile,
       // Usage-tracker Tur: attribute spend to the requesting user so the
       // Settings → Usage tab can show per-user totals. Falls back to
       // "local-dev" inside agentLoop when missing.
@@ -6905,6 +6912,7 @@ const initializeTodosFromPlan = (): void => {
         relevantFiles: relevantFiles.map((file) => file.path),
         userApiKey: input.userApiKey,
         provider: input.provider,
+        profile: input.profile,
         archetype: (input.preClassifiedTask?.archetype as string | undefined),
       });
       debugLog(`[zone-plan] generated steps=${executionPlan.steps.length}`);

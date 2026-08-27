@@ -181,7 +181,7 @@ export async function plannerStep(input: {
   async function requestPlannerOutput(promptText: string): Promise<string> {
     const ctx = getRequestContext();
     const response = await client.createChatCompletion({
-      model: getModelName("standard", client.provider, ctx?.modelOverride),
+      model: getModelName("standard", client.provider, ctx?.modelOverride, client.profile),
       temperature: 0,
       messages: [{ role: "user", content: promptText }],
     });

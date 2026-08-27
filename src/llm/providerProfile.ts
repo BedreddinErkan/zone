@@ -230,6 +230,19 @@ function isBuiltinId(value: string): value is LLMProvider {
 }
 
 /**
+ * True for a profile that came from user configuration rather than being one of the two built-ins.
+ *
+ * The one behavioural consequence today is in `getModelName`: Zone's model catalog describes the two
+ * VENDORS, so for a gateway an id absent from it is UNKNOWN, not INVALID, and substituting a vendor
+ * default would send the call to an endpoint that does not serve that model. Measured before the
+ * distinction was drawn: `openai/gpt-4o-mini` — the id the LiteLLM lab proxy actually serves —
+ * resolved to `gpt-4o-mini` under provider "openai" and to `claude-haiku-4-5` under "anthropic".
+ */
+export function isGatewayProfile(profile: ProviderProfile | undefined): boolean {
+  return profile !== undefined && !isBuiltinId(profile.id);
+}
+
+/**
  * The one resolver the defaulting sites delegate to.
  *
  * `fallback` is a REQUIRED, EXPLICIT argument rather than a constant inside this function, and that

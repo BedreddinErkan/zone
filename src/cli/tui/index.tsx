@@ -9,6 +9,8 @@ const execAsync = promisify(exec);
 import { App } from "./App.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
 import type { CliFlags } from "../config.js";
+import { readGatewayProfilesSync } from "../../llm/gatewayProfiles.js";
+import { providerOf } from "../../llm/providerProfile.js";
 import { loadCliConfig, validateCliConfig, applyDiskKeyFallbacks, type CliConfig } from "../config.js";
 import { runOneShotInner, type TuiMode } from "../dispatch.js";
 import { ApiKeyError, ProviderRequestError, PlanRefusalError } from "../../llm/factory.js";
@@ -67,7 +69,15 @@ function providersWithResolvedKey(cfg: CliConfig): string[] {
   const out: string[] = [];
   if (cfg.anthropicApiKey) out.push("anthropic");
   if (cfg.openaiApiKey) out.push("openai");
+  // A gateway carries its own key under its own identity, so its presence in the store IS its
+  // resolved key — there is no CliConfig field to consult the way the two vendors have.
+  for (const g of readGatewayProfilesSync()) out.push(g.id);
   return out;
+}
+
+/** Just the gateway ids. `/model`'s free-text flow branches on the LENGTH of this. */
+function gatewayIdsFromStore(): string[] {
+  return readGatewayProfilesSync().map((g) => g.id);
 }
 
 function writeBannerToStdout(opts: { isResumed: boolean }): void {
@@ -1366,6 +1376,8 @@ export async function runTui(
         onStateChange={(s) => { storeCapture.state = s; }}
         initialModelSettings={diskModelSettings}
       initialProvidersWithKey={providersWithResolvedKey(config)}
+        gatewayIds={gatewayIdsFromStore()}
+        activeProfile={config.profile ?? null}
         initialUserCommands={initialUserCommands}
         initialArmedUserHooks={initialArmedUserHooks}
         initialPendingHookTrust={initialPendingHookTrust}
@@ -1373,7 +1385,20 @@ export async function runTui(
         initialPendingMcpTrust={initialPendingMcpTrust}
         onModelApply={(model, provider, effort, summaryFormat, memoryEnabled, commitOnSuccess) => {
           config.model = model;
-          config.provider = provider as typeof config.provider;
+          // A gateway id is NOT an LLMProvider, so casting it into `config.provider` would put a
+          // value there that no adapter branch matches. Resolve it to a profile instead and let
+          // `providerOf` supply the protocol selector; `applyDiskKeyFallbacks` fills the key on the
+          // next run, which is the same "active on next run" contract /keys already states.
+          const gw = readGatewayProfilesSync().find((g) => g.id === provider);
+          if (gw) {
+            config.profile = gw;
+            config.provider = providerOf(gw);
+            config.profileApiKey = undefined;
+          } else {
+            config.profile = undefined;
+            config.profileApiKey = undefined;
+            config.provider = provider as typeof config.provider;
+          }
           config.effort = effort;
           config.summaryFormat = summaryFormat;
           config.memoryEnabled = memoryEnabled;

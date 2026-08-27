@@ -3638,7 +3638,7 @@ Example:
     let finalSummary =
       "Token budget reached before a final answer was produced.";
     try {
-      const wrapupModel = escalatedModel ?? getModelName("high", client.provider, requestCtx?.modelOverride);
+      const wrapupModel = escalatedModel ?? getModelName("high", client.provider, requestCtx?.modelOverride, client.profile);
       const wrapupResponse = await client.createChatCompletion(
         {
           model: wrapupModel,
@@ -4274,7 +4274,7 @@ Example:
       client.provider === "openai"
         ? buildOpenAIPromptCacheKey(input.runId, input.conversationId)
         : undefined;
-    const modelName = escalatedModel ?? getModelName("high", client.provider, requestCtx?.modelOverride);
+    const modelName = escalatedModel ?? getModelName("high", client.provider, requestCtx?.modelOverride, client.profile);
 
     // Opus forensic E.2: env-gated per-iter content hash probe for cache-bust diagnosis.
     // v2 (replaces v1 7d9b469): every message hashed + manifest position + marker location.
@@ -5596,7 +5596,7 @@ Example:
         const persisting = computeAntiThrashSignal(buildAntiThrashCtx(iter));
         if (persisting) {
           if (escalateOnStall && escalatedModel === null && persisting.pattern !== "cost_burn") {
-            const currentModel = getModelName("high", client.provider, requestCtx?.modelOverride);
+            const currentModel = getModelName("high", client.provider, requestCtx?.modelOverride, client.profile);
             const up = nextStrongerModel(client.provider, currentModel);
             if (up !== null) {
               escalatedModel = up;
@@ -5784,7 +5784,7 @@ Example:
     );
     let finalSummary = "Max iterations reached before a final answer was produced.";
     try {
-      const chatAssessmentModel = escalatedModel ?? getModelName("high", client.provider, requestCtx?.modelOverride);
+      const chatAssessmentModel = escalatedModel ?? getModelName("high", client.provider, requestCtx?.modelOverride, client.profile);
       const assessmentResponse = await client.createChatCompletion({
         model: chatAssessmentModel,
         messages: [
@@ -5892,7 +5892,7 @@ Example:
   const effectiveArchetype = input.planApproved ? undefined : input.taskClassification?.archetype;
   const isReadOnlyArchetype = effectiveArchetype === "question" || effectiveArchetype === "investigation";
   try {
-    const finalAssessmentModel = escalatedModel ?? getModelName("high", client.provider, requestCtx?.modelOverride);
+    const finalAssessmentModel = escalatedModel ?? getModelName("high", client.provider, requestCtx?.modelOverride, client.profile);
     const assessmentResponse = await client.createChatCompletion({
       model: finalAssessmentModel,
       messages: [

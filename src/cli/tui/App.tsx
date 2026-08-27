@@ -1,6 +1,7 @@
 import { Box, useInput, useApp } from "ink";
 import { useEffect, useRef, type Dispatch } from "react";
 import { StoreProvider, useStore } from "./store.js";
+import type { ApiKeyProvider } from "../../api/diskKeys.js";
 import { useAgentEvents } from "./hooks/useAgentEvents.js";
 import { Transcript } from "./components/Transcript.js";
 import { Spinner } from "./components/Spinner.js";
@@ -63,7 +64,9 @@ interface AppProps {
   initialModelSettings?: DiskModelSettings | null;
   /** Providers with a resolved key, from the already-collapsed CliConfig — see StoreState. */
   initialProvidersWithKey?: string[];
-  onModelApply?: (model: string, provider: "anthropic" | "openai", effort?: EffortLevel, summaryFormat?: "compact" | "detailed", memoryEnabled?: boolean, commitOnSuccess?: boolean) => void;
+  gatewayIds?: string[];
+  activeProfile?: import("../../llm/providerProfile.js").ProviderProfile | null;
+  onModelApply?: (model: string, provider: ApiKeyProvider, effort?: EffortLevel, summaryFormat?: "compact" | "detailed", memoryEnabled?: boolean, commitOnSuccess?: boolean) => void;
   getCommitData?: () => { filePaths: string[]; message: string; repoPath: string } | null;
   getFeedbackData?: () => { runId: string; sessionId: string; logs: string; version: string; repoPath: string } | null;
   onDispatchCapture?: (dispatch: Dispatch<StoreAction>) => void;
@@ -88,7 +91,7 @@ interface AppInnerProps {
   onCarriedAnswer: ((answer: string, ac: AbortController) => void) | undefined;
   onCarriedDiscard: ((envelopeKey: string, iter: number) => void) | undefined;
   onStateChange: ((state: StoreState) => void) | undefined;
-  onModelApply: ((model: string, provider: "anthropic" | "openai", effort?: EffortLevel, summaryFormat?: "compact" | "detailed", memoryEnabled?: boolean, commitOnSuccess?: boolean) => void) | undefined;
+  onModelApply: ((model: string, provider: ApiKeyProvider, effort?: EffortLevel, summaryFormat?: "compact" | "detailed", memoryEnabled?: boolean, commitOnSuccess?: boolean) => void) | undefined;
   getCommitData: (() => { filePaths: string[]; message: string; repoPath: string } | null) | undefined;
   getFeedbackData: (() => { runId: string; sessionId: string; logs: string; version: string; repoPath: string } | null) | undefined;
   onDispatchCapture: ((dispatch: Dispatch<StoreAction>) => void) | undefined;
@@ -322,7 +325,7 @@ function AppInner({ bus, initialPrompt, initialMode, onSubmit, onUndoRequest, on
   );
 }
 
-export function App({ initialPrompt, initialMode, bus, initialModel, capUsd, initialDailyUsedUsd, onSubmit, onUndoRequest, onRemoteControlCommand, onEnvelopeResume, onCarriedAnswer, onCarriedDiscard, initialTrustedPrefixes, resumedSession, initialSessionId, onStateChange, initialModelSettings, initialProvidersWithKey, onModelApply, getCommitData, getFeedbackData, onDispatchCapture, onSessionClear, initialUserCommands, initialArmedUserHooks, initialPendingHookTrust, initialArmedMcpManager, initialPendingMcpTrust, initialCarriedQuestion }: AppProps): React.ReactElement {
+export function App({ initialPrompt, initialMode, bus, initialModel, capUsd, initialDailyUsedUsd, onSubmit, onUndoRequest, onRemoteControlCommand, onEnvelopeResume, onCarriedAnswer, onCarriedDiscard, initialTrustedPrefixes, resumedSession, initialSessionId, onStateChange, initialModelSettings, initialProvidersWithKey, gatewayIds, activeProfile, onModelApply, getCommitData, getFeedbackData, onDispatchCapture, onSessionClear, initialUserCommands, initialArmedUserHooks, initialPendingHookTrust, initialArmedMcpManager, initialPendingMcpTrust, initialCarriedQuestion }: AppProps): React.ReactElement {
   return (
     <StoreProvider initialValues={{
       model: initialModel ?? "",
@@ -334,6 +337,8 @@ export function App({ initialPrompt, initialMode, bus, initialModel, capUsd, ini
       resumedStartedAt: resumedSession?.startedAt,
       modelSettings: initialModelSettings,
       providersWithKey: initialProvidersWithKey ?? [],
+      gatewayIds: gatewayIds ?? [],
+      activeProfile: activeProfile ?? null,
       userCommands: initialUserCommands ?? [],
       mode: initialMode,
       armedUserHooks: initialArmedUserHooks,

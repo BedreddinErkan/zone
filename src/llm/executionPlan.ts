@@ -4,7 +4,7 @@ import { AUX_CALL_MAX_OUTPUT_TOKENS } from "./models.js";
 import { createLLMClient, PlanRefusalError } from "./factory.js";
 import { getRequestContext } from "./openaiContext.js";
 import { extractUsage } from "./recordingClient.js";
-import { priceForProfile, profileForProvider } from "./providerProfile.js";
+import { priceForProfile, profileForProvider, type ProviderProfile } from "./providerProfile.js";
 import type { LLMProvider } from "./types.js";
 import { log } from "../utils/logger.js";
 import { round4 } from "../usage/usageTracker.js";
@@ -395,6 +395,10 @@ export async function generateExecutionPlan(input: {
   relevantFiles: string[];
   userApiKey?: string;
   provider?: LLMProvider;
+  /** The run's provider profile, when it has one — so plan generation reaches the same endpoint
+   *  the loop will. Without it a gateway run would plan against the vendor the protocol selector
+   *  names, using the gateway's key. */
+  profile?: ProviderProfile;
   previousPlan?: ExecutionPlan;
   userFeedback?: string;
   /** Task archetype — tightens the filesLikely rule for refactor/rename tasks. */
@@ -415,9 +419,10 @@ export async function generateExecutionPlan(input: {
   const client = createLLMClient({
     apiKey: input.userApiKey,
     provider: input.provider,
+    profile: input.profile,
   });
   const ctx = getRequestContext();
-  const model = getModelName("standard", client.provider, ctx?.modelOverride);
+  const model = getModelName("standard", client.provider, ctx?.modelOverride, client.profile);
   // 9, not 8: matches the ranked+grep merge width (preparePlanContext.ts) so a
   // grep-only match at the last slot still reaches this prompt. See item 79.
   const relevantFiles = input.relevantFiles.slice(0, 9).join("\n") || "(none)";

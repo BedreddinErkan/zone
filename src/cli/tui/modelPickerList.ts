@@ -44,9 +44,13 @@ export function visibleModelRows(
  *
  * Before this existed the index stayed at its initial 0, so opening /model put the cursor on the
  * first row while the model in use sat further down — twelve arrow presses away at the catalog
- * order this shipped with. Returns 0 when the current id is absent from the rows, which happens
- * only for an id outside the catalog entirely (a custom `--model`), since the current model is
- * never filtered out.
+ * order this shipped with. Returns 0 when the current id is absent from the rows, which happens for
+ * an id outside the catalog entirely, since the current model is never filtered out.
+ *
+ * That used to read "only for … a custom `--model`". It is no longer only that: `/model`'s free-text
+ * entry can now set an off-catalog id from inside the modal itself, routed through a gateway
+ * profile. The fallback behaviour is unchanged — a gateway model has no catalog row to seek to, so
+ * the cursor starts at 0 — but the CAUSE is no longer unique, and the sentence claimed it was.
  */
 export function selectedIndexForCurrent(
   rows: readonly ModelEntry[],

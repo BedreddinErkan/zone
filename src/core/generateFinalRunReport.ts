@@ -372,7 +372,7 @@ async function generateAiFinalRunReport(
 ): Promise<FinalRunReport | null> {
   const client = createLLMClient();
   const ctx = getRequestContext();
-  const model = getModelName("standard", client.provider, ctx?.modelOverride);
+  const model = getModelName("standard", client.provider, ctx?.modelOverride, client.profile);
   const payload = buildModelPayload(input);
 
   const prompt = `

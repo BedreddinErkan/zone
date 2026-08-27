@@ -2,17 +2,48 @@ import { promises as fs } from "node:fs";
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 
-export type ApiKeyProvider = "anthropic" | "openai";
+/**
+ * A key's identity. The two built-ins are spelled out so they still autocomplete and so a typo in
+ * `"anthropic"` is still a type error at the call sites that mean the vendor; `(string & {})` widens
+ * the rest of the space for gateway profile ids (step 5 of the gateway recommendation).
+ *
+ * The constraint that mattered here was never the file's schema version — it was THIS type plus
+ * `setDiskKey`'s `findIndex(k => k.provider === provider)`, which makes the identity unique. A
+ * gateway id is its own identity, so a gateway key and both vendor keys coexist in one file.
+ */
+export type ApiKeyProvider = "anthropic" | "openai" | (string & {});
+
+/** The wire protocol a gateway endpoint speaks. Mirrors `llm/providerProfile.ts`'s `WireProtocol`;
+ *  spelled inline rather than imported so this module stays a node-builtins-only leaf. */
+export type DiskKeyProtocol = "openai-chat" | "anthropic-messages";
 
 export interface DiskApiKey {
   provider: ApiKeyProvider;
   key: string;
   addedAt: string;
+  /**
+   * Set only on a gateway row, and it is what MAKES the row a gateway: `gatewayProfilesFrom`
+   * treats a row with a `baseUrl` as a profile and a row without one as a plain vendor key.
+   * Additive — absent on every row an older Zone wrote, and ignored by every older Zone that
+   * reads one, because neither loader validates beyond `version === 1`.
+   */
+  baseUrl?: string;
+  /** Defaults to `"openai-chat"` when absent — the protocol every common proxy speaks. */
+  protocol?: DiskKeyProtocol;
+  /** Free-text display name for the keys list. Never used for resolution. */
+  label?: string;
 }
 
 export interface DiskKeysFile {
   version: 1;
   keys: DiskApiKey[];
+}
+
+/** The gateway-only fields `setDiskKey` accepts alongside the key itself. */
+export interface DiskKeyExtras {
+  baseUrl?: string;
+  protocol?: DiskKeyProtocol;
+  label?: string;
 }
 
 let _keysFilePathOverride: string | null = null;
@@ -63,7 +94,15 @@ async function saveDiskKeys(store: DiskKeysFile): Promise<void> {
   try { await fs.chmod(p, 0o600); } catch { /* Windows/non-POSIX — best effort */ }
 }
 
-export async function setDiskKey(provider: ApiKeyProvider, key: string): Promise<void> {
+/**
+ * `extras` is optional and defaults to absent, so every existing two-argument call — and the tests
+ * that pin them — writes exactly the same three-field row it always did. Only a gateway supplies it.
+ */
+export async function setDiskKey(
+  provider: ApiKeyProvider,
+  key: string,
+  extras?: DiskKeyExtras
+): Promise<void> {
   if (key.startsWith("<")) {
     throw new Error(`${provider} API key looks like a placeholder ("<…>") — set a real key.`);
   }
@@ -78,7 +117,17 @@ export async function setDiskKey(provider: ApiKeyProvider, key: string): Promise
   }
   const store = await loadDiskKeys();
   const idx = store.keys.findIndex(k => k.provider === provider);
-  const entry: DiskApiKey = { provider, key, addedAt: new Date().toISOString() };
+  // Spread the optional fields conditionally rather than assigning `undefined`: a row written with
+  // `baseUrl: undefined` serialises to no key at all through JSON.stringify, but an explicit
+  // `undefined` would still make `"baseUrl" in entry` true for any in-memory reader.
+  const entry: DiskApiKey = {
+    provider,
+    key,
+    addedAt: new Date().toISOString(),
+    ...(extras?.baseUrl ? { baseUrl: extras.baseUrl } : {}),
+    ...(extras?.protocol ? { protocol: extras.protocol } : {}),
+    ...(extras?.label ? { label: extras.label } : {}),
+  };
   if (idx >= 0) store.keys[idx] = entry;
   else store.keys.push(entry);
   await saveDiskKeys(store);

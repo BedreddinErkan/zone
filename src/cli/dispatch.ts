@@ -9,7 +9,7 @@ import {
 import { rejectPendingRevisionsForRun } from "../llm/revisionApprovals.js";
 import { requestPlanApproval, rejectPendingPlansForRun, emitPlanEmptyApproval } from "../llm/planApprovals.js";
 import type { ExecutionPlan } from "../llm/executionPlan.js";
-import { loadCliConfig, validateCliConfig, applyDiskKeyFallbacks, type CliConfig, type CliFlags } from "./config.js";
+import { loadCliConfig, validateCliConfig, applyDiskKeyFallbacks, keyForConfig, keyEnvVarForConfig, type CliConfig, type CliFlags } from "./config.js";
 import { loadDiskModelSync } from "../api/diskModel.js";
 import { runPlanInvestigation } from "../llm/planInvestigation.js";
 import { createSpinner, buildCliSink, type Spinner } from "./sink.js";
@@ -117,13 +117,14 @@ export async function runOneShotInner(
   // No-key pre-flight: surface a clear error before any LLM call rather than letting
   // the classifier/plan-gen silently swallow ApiKeyError.
   {
-    const _activeKey = effectiveConfig.provider === "openai"
-      ? effectiveConfig.openaiApiKey
-      : effectiveConfig.anthropicApiKey;
+    const _activeKey = keyForConfig(effectiveConfig);
     if (!_activeKey) {
-      const _envVar = effectiveConfig.provider === "openai" ? "OPENAI_API_KEY" : "ANTHROPIC_API_KEY";
+      const _envVar = keyEnvVarForConfig(effectiveConfig);
+      // The profile id, not the protocol selector: a gateway resolves `provider` to "openai", and
+      // naming that here would point the user at a vendor key they do not need.
+      const _label = effectiveConfig.profile?.id ?? effectiveConfig.provider;
       throw new ApiKeyError(
-        `No API key found for ${effectiveConfig.provider}. Add one with /keys, or set ${_envVar}.`
+        `No API key found for ${_label}. Add one with /keys, or set ${_envVar}.`
       );
     }
   }
@@ -264,9 +265,7 @@ export async function runOneShotInner(
       } as unknown as LlmPatchFlowResult;
     }
 
-    const planUserApiKey =
-      effectiveConfig.provider === "openai" ? effectiveConfig.openaiApiKey :
-                                             effectiveConfig.anthropicApiKey;
+    const planUserApiKey = keyForConfig(effectiveConfig);
 
     // Context for plan-gen: honors user's selected model (fixes silent-Sonnet bug).
     // runId included so generateExecutionPlan's usage records attribute to this run —
@@ -274,6 +273,7 @@ export async function runOneShotInner(
     // number the footer shows) silently excludes them.
     const planGenCtx = {
       provider: effectiveConfig.provider,
+            profile: effectiveConfig.profile,
       modelOverride: { high: effectiveConfig.model, standard: effectiveConfig.model },
       effort: effectiveConfig.effort,
       runId,
@@ -365,6 +365,7 @@ export async function runOneShotInner(
               repoSummary: planCtxRepoSummary,
               userApiKey: planUserApiKey,
               provider: effectiveConfig.provider,
+            profile: effectiveConfig.profile,
               abortSignal: ac.signal,
               progressCallback: investigationProgressCallback,
             })
@@ -394,6 +395,7 @@ export async function runOneShotInner(
               relevantFiles: planCtxRelevantFiles,
               userApiKey: planUserApiKey,
               provider: effectiveConfig.provider,
+            profile: effectiveConfig.profile,
               seededFileContents,
               onCostUsd: onPlanGenCostUsd,
             })
@@ -491,6 +493,7 @@ export async function runOneShotInner(
               relevantFiles: planCtxRelevantFiles,
               userApiKey: planUserApiKey,
               provider: effectiveConfig.provider,
+            profile: effectiveConfig.profile,
               forceSteps: true,
               onCostUsd: onPlanGenCostUsd,
             })
@@ -563,6 +566,7 @@ export async function runOneShotInner(
                     relevantFiles: planCtxRelevantFiles,
                     userApiKey: planUserApiKey,
                     provider: effectiveConfig.provider,
+            profile: effectiveConfig.profile,
                     previousPlan: currentPlan,
                     userFeedback: result.feedback,
                     abortSignal: ac.signal,
@@ -611,6 +615,7 @@ export async function runOneShotInner(
                     relevantFiles: planCtxRelevantFiles,
                     userApiKey: planUserApiKey,
                     provider: effectiveConfig.provider,
+            profile: effectiveConfig.profile,
                     previousPlan: currentPlan,
                     userFeedback: result.feedback,
                     abortSignal: ac.signal,
@@ -693,9 +698,7 @@ export async function runOneShotInner(
   }
 
   try {
-    const userApiKey =
-      effectiveConfig.provider === "openai" ? effectiveConfig.openaiApiKey :
-                                             effectiveConfig.anthropicApiKey;
+    const userApiKey = keyForConfig(effectiveConfig);
 
     if (useCheckpointLoop) {
       // R3 Stage 2b: investigate path — run straight to execution with staged-checkpoint seam.
@@ -722,6 +725,7 @@ export async function runOneShotInner(
             abortSignal: ac.signal,
             userApiKey,
             provider: effectiveConfig.provider,
+            profile: effectiveConfig.profile,
             forceTier: effectiveConfig.forceTier,
             userMaxTurns: effectiveConfig.maxTurns,
             runUsdCap: effectiveConfig.maxBudgetUsd,
@@ -784,6 +788,7 @@ export async function runOneShotInner(
         abortSignal: ac.signal,
         userApiKey,
         provider: effectiveConfig.provider,
+            profile: effectiveConfig.profile,
         forceTier: effectiveConfig.forceTier,
         userMaxTurns: effectiveConfig.maxTurns,
         runUsdCap: effectiveConfig.maxBudgetUsd,
@@ -889,8 +894,8 @@ export async function runHeadless(
       const nullSink = { onProgress: () => undefined };
       const ac = new AbortController();
       process.once("SIGINT", () => { rejectPendingApprovalsForRun(runId); rejectPendingRevisionsForRun(runId); clearTrustedCommandsForRun(runId); ac.abort(); });
-      const userApiKey = config.provider === "openai" ? config.openaiApiKey : config.anthropicApiKey;
-      result = await runLlmPatchFlow({ task, repoPath: config.repoPath, runId, sessionId, onProgress: nullSink.onProgress, abortSignal: ac.signal, userApiKey, provider: config.provider, forceTier: config.forceTier, userMaxTurns: config.maxTurns, runUsdCap: config.maxBudgetUsd, mode: "patch" }).finally(() => { rejectPendingApprovalsForRun(runId); rejectPendingRevisionsForRun(runId); clearTrustedCommandsForRun(runId); });
+      const userApiKey = keyForConfig(config);
+      result = await runLlmPatchFlow({ task, repoPath: config.repoPath, runId, sessionId, onProgress: nullSink.onProgress, abortSignal: ac.signal, userApiKey, provider: config.provider, profile: config.profile, forceTier: config.forceTier, userMaxTurns: config.maxTurns, runUsdCap: config.maxBudgetUsd, mode: "patch" }).finally(() => { rejectPendingApprovalsForRun(runId); rejectPendingRevisionsForRun(runId); clearTrustedCommandsForRun(runId); });
     } else {
       result = await runOneShotInner(task, config, runId, { sessionId });
     }
@@ -955,13 +960,13 @@ export async function buildResumeFlowInput(
   const config = loadCliConfig({ ...flags, repo: env.repoPath });
   try { await applyDiskKeyFallbacks(config); } catch { /* non-critical */ }
   const runId = randomUUID();
-  const userApiKey = config.provider === "openai" ? config.openaiApiKey : config.anthropicApiKey;
+  const userApiKey = keyForConfig(config);
   return {
     task: env.task,
     repoPath: env.repoPath,
     runId,
     sessionId: env.sessionId,
-    provider: config.provider,
+    provider: config.provider, profile: config.profile,
     userApiKey,
     abortSignal: undefined,
     preGeneratedPlan: env.executionPlan ?? undefined,

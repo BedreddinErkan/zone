@@ -27690,10 +27690,15 @@ Mitigated with a pointer in each module's header naming the other and stating wh
 reader who arrives at the wrong one is told so in the first paragraph. That is the whole remedy —
 the names themselves stay.
 
-## 394. Vision defaults to true for unknown models, and fixing only that half makes things worse
+## 394. Closed — vision defaulted to true for unknown models, and both halves landed together
 
-**Bucket: Actionable now.** The fix is specified here, and it is deliberately not applied in the
-pass that found it — the reason being that its two halves are coupled, not a lack of specification.
+**Bucket, re-decided rather than inherited: Actionable now becomes Closed.** The fix was specified
+here and deliberately not applied in the pass that found it, because its two halves are coupled and
+not because the specification was missing. Step 5 applied BOTH, in one change, as this entry
+required: `supportsVision` now defaults to `false` for an unknown model, and it takes a capability
+override that the composer supplies from the run's active profile — so a gateway user can declare
+support rather than being locked out by the corrected default. The rest of this entry is the
+measurement and the reasoning that produced it, kept as written. See item 396.
 
 **Measured, not read.** `supportsVision` has exactly ONE production reader, the composer's
 image-send gate. The optional catalog field it consults is declared on ZERO of the catalog's
@@ -27737,27 +27742,151 @@ the structural question the guard does not answer — whether two tables should 
 all, or whether the second should be derived from the first — and that is a consolidation this entry
 does not propose.
 
+## 396. A gateway profile is now something a user can build, which is what steps 3 and 4 could not do
+
+**Bucket: Neither.** Completed work recorded with no fix proposed, on items 386, 387 and 392's
+precedent. This is Option B step 5, the last of the five, and it closes the gap item 392 stated in
+its own words: "No configuration file or environment variable can define a profile yet, so the seam
+is programmatic."
+
+**The binding constraint was never the key store's schema version.** That was the assumption going
+in, and it was wrong in a way worth recording, because the version is the scary-looking number and
+the real constraint is two lines away from it. What actually made a gateway inexpressible was
+`ApiKeyProvider`'s two-value type together with `setDiskKey`'s `findIndex(k => k.provider ===
+provider)`, which makes the provider field the row's unique identity. Widening the field is
+therefore sufficient by itself: a gateway id becomes its own identity, and a gateway key sits
+alongside both vendor keys without either shadowing the other. `baseUrl`, `protocol` and `label`
+were added as optional fields and the version stayed at 1. A bump would have been the destructive
+choice — `loadDiskKeys` returns an empty store on a version mismatch SILENTLY, so every older binary
+on the machine would report having no keys at all.
+
+**The same measurement was taken for the model settings file, and the prediction was half wrong.**
+`.zone/model.json`'s `provider` widened the same way, and the older-binary behaviour was measured
+rather than reasoned about, because types erase and only the emitted JS runs: `dist/api/diskModel.js`
+contains ZERO occurrences of the string "provider", so both loaders gate on the version alone and
+return the record intact. Upstream then degrades in TWO independent steps, not one. The provider
+falls back to anthropic — and on the published v2.1.0 that fallback is SILENT, since its
+`resolveProvider` is nothing but `if (value === "openai") return "openai"; return "anthropic"`. The
+model then falls back separately, at `getModelName`, to that provider's standard-tier default. The
+end state is coherent and lossless, and v2.1.0 does emit the model warning, so the downgrade is
+visible even where the provider half is not. What the prediction got wrong was the count: a single
+warn-and-fall-back was expected, and there are two fallbacks with only one of them announced.
+
+**Where the profile is built, and why it is a third module rather than a function in either of the
+two it joins.** `llm/gatewayProfiles.ts` is new. It is not in `api/diskKeys.ts` because three test
+files mock that module with object-literal factories that enumerate its exports, so a new export
+there is a module-initialisation failure in each; and it is not in `llm/providerProfile.ts` because
+R1 of that module's own constraint block makes it an import leaf, and reading a file is not leaf
+behaviour. Both of its imports are type-only and erased, so it adds no runtime edge either way. It
+reads synchronously, which is what lets `loadCliConfig` stay synchronous and keeps item 385's
+unrecognized-provider warning where its tests already assert it.
+
+**The protocol selector and the endpoint identity are now genuinely separate values.**
+`CliConfig.provider` stays two-valued and means "which adapter and conversion modules run", so an
+openai-chat proxy resolves it to `"openai"` and every existing adapter branch, ternary and
+string-typed provider field keeps working untouched. The identity travels beside it as
+`CliConfig.profile`. The six duplicated `provider === "openai" ? … : …` key-selection ternaries were
+replaced by one `keyForConfig` rather than gaining a seventh copy — the same edit count, one place
+to be wrong instead of six, and it is where a gateway's key is selected without disturbing the
+vendor fields.
+
+**A gateway outranks the model-to-provider pin.** That pin exists so a catalog model cannot run on
+the wrong vendor. A proxy may legitimately serve a catalog id, and letting the pin win there would
+send the call to the vendor directly — the same "badge says one thing, loop runs another" failure
+the pin was built to prevent, pointed the other way.
+
+**The three gateway counts in `/model` are each decided, and that is the part most likely to be
+undone by a future pass.** Zero refuses and says why, writing nothing, because the consequence of writing is
+item 397's silent substitution. Exactly one applies, having DISPLAYED the routing before the user
+pressed Enter — shown, not inferred. Two or more asks, and never picks. Only the middle case falls
+out of an inference-shaped implementation, so the other two are pinned as first-class tests rather
+than left to emerge from it.
+
+**The vision pair landed together**, as item 394 required: `supportsVision` now defaults to `false`
+for an unknown model AND takes a capability override the composer supplies from the run's profile.
+Neither half is safe alone, which is why item 394 refused to specify one.
+
+**Verified against the running lab proxy, not just against tests.** A `lab` profile was configured
+through the key store, `--provider lab --model openai/gpt-4o-mini` was run headless against
+LiteLLM on `:4000`, and the answer came back. Four things are confirmed by that one run: the profile
+resolved from disk, the gateway's own key was selected (`[zone] llm key source=explicit
+provider=lab`), the free-text model id survived `getModelName` verbatim rather than being
+substituted, and the no-pricing warning fired.
+
+**Two defects that same run surfaced, neither of which any test would have caught.** First and
+worse: `pickClassifierModel` returns a VENDOR catalog id, so the task classifier asks a gateway for a
+model it does not serve, takes a 400, and falls back to `medium`/`refactor` on EVERY gateway run.
+The main loop is unaffected and the fallback is graceful, so nothing looks broken — the run simply
+carries no classification signal, and `[zone-classifier-fallback]`'s own `impact` field says so.
+The same shape as item 397 one layer up: a model id chosen from the wrong namespace. Second and
+cosmetic: `[zone-pricing]`'s message interpolates `${provider}/${model}`, which for a gateway id that
+already contains a slash renders `openai/openai/gpt-4o-mini` and reads as a doubling bug that is not
+one. Both are recorded rather than fixed, because both are outside what this pass set out to change.
+
+**What this did NOT deliver.** A gateway's cost is recorded as unknown rather than guessed, which is
+correct and also means the daily and per-run USD gates do not constrain a gateway run. Nothing
+validates that a configured base URL is reachable, so a typo surfaces at first use. And
+`AnthropicAdapter` still takes no base URL, so an anthropic-messages profile is expressible and
+unreachable — out of scope for every step of this arc, for the credential-shape reason the
+investigation document gives.
+
+## 397. A validity check answered a question nobody asked, and substituted a model silently
+
+**Bucket: Neither.** The defect and its fix are both recorded here; nothing further is proposed.
+
+`getModelName` guards a model override with `isValidModelId(provider, candidate)`, an exact match
+against Zone's catalog. The catalog describes the two VENDORS. So for any endpoint that is not one
+of them, the check answers "is this one of the ids we ship" when the question being asked is "may
+this run use this model" — and those come apart precisely where a gateway lives. An id the catalog
+has never heard of is UNKNOWN there, not INVALID.
+
+**Measured, against the live lab proxy's own model id.** `openai/gpt-4o-mini` resolved to
+`gpt-4o-mini` under provider "openai" and to `claude-haiku-4-5` under "anthropic" — in both cases a
+different model than the one named, and in the second case a different vendor. The warning does fire,
+which is the one mercy here and is why this is a wrong-answer defect rather than a silent one. But
+the fallback is to a CHEAPER, WEAKER model in both directions, so the failure mode is a run that
+completes, costs little, and quietly did not use what it was told to.
+
+**Why it mattered more than it looks.** Free-text model entry was the visible feature of step 5, and
+without this branch that feature would have been worse than absent: every id a user typed would have
+been accepted by the UI, written to disk, and then silently replaced at the moment of use. A
+"gateway" that runs Haiku is a worse outcome than a `/model` screen with no free-text field at all.
+
+**The fix, and why it was cheap.** A gateway profile passes its candidate through verbatim.
+`getModelName` gained an optional fourth parameter, which was affordable only because — unlike
+`getModelForRole`, whose two-argument shape R6 pins across five whole-args-array assertions — nothing
+anywhere asserts `getModelName`'s call shape. Reaching every call site needed no new plumbing either:
+`factory.ts` already hands the profile to `RecordingLLMClient`, which had been holding it privately
+since step 3, so publishing that one field put the profile in scope at all fourteen sites that were
+already passing `client.provider` beside it.
+
+**The shape to carry.** A predicate borrowed from one domain to gate another reads as a safety check
+and behaves as a category error. The give-away is available without running anything: ask what
+population the predicate's data describes, and whether the caller's case is inside it. Here the
+catalog describes two vendors and the caller was a third party, so the check could only ever return
+the wrong answer — the guard was not too strict or too loose, it was answering a different question.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 395 to find out which ones still need something. No index of
+reader the trouble of reading all 397 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (174): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42,
+**Closed** (175): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42,
 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113,
 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167,
 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228,
 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260,
 262, 264, 265, 266, 267, 268, 269, 270, 271, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285,
 286, 288, 289, 290, 301, 302, 304, 308, 309, 310, 327, 336, 337, 343, 344, 345, 348, 351,
-320, 352, 353, 364, 370, 371, 372, 377, 378, 379, 384, 385, 388, 390, 391
+320, 352, 353, 364, 370, 371, 372, 377, 378, 379, 384, 385, 388, 390, 391, 394
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (21): 287, 291, 292, 293, 296, 299, 313, 328, 329, 334, 347, 358, 359, 365, 368, 373, 375, 383, 389, 394, 395
+first (20): 287, 291, 292, 293, 296, 299, 313, 328, 329, 334, 347, 358, 359, 365, 368, 373, 375, 383, 389, 395
 
 Six, down from seven, and the movement is the ledger's own signal about whether anything is specified
 and waiting, in both directions. The diagnosis pass into `find_references` left it at 7 (287 plus six
@@ -27793,14 +27922,14 @@ eleven to twelve.
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (17): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250, 263, 318, 376
 
-**Neither — a structural fact recorded, with no fix proposed** (183): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
+**Neither — a structural fact recorded, with no fix proposed** (185): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
 74, 76, 77, 78, 79, 80, 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109,
 112, 114, 115, 118, 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152,
 154, 155, 158, 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199,
 200, 201, 202, 205, 206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230,
 232, 243, 244, 247, 248, 249, 254, 256, 261, 272, 294, 295, 297, 298, 300, 303, 305, 306, 307, 311, 312,
 314, 315, 316, 317, 319, 321, 322, 323, 324, 325, 326, 330, 331, 332, 333, 335,
-338, 339, 340, 341, 342, 346, 349, 350, 354, 355, 356, 357, 360, 361, 362, 363, 366, 367, 369, 374, 380, 381, 382, 386, 387, 392, 393
+338, 339, 340, 341, 342, 346, 349, 350, 354, 355, 356, 357, 360, 361, 362, 363, 366, 367, 369, 374, 380, 381, 382, 386, 387, 392, 393, 396, 397
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.

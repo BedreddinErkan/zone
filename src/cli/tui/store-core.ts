@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { DiskTrustEntry } from "../../api/diskTrust.js";
 import type { DiskApiKey, ApiKeyProvider } from "../../api/diskKeys.js";
+import type { ProviderProfile } from "../../llm/providerProfile.js";
 import type { DiskSession, SessionMeta } from "../../api/diskSessions.js";
 import type { TuiMode } from "../dispatch.js";
 import type { DiskModelSettings } from "../../api/diskModel.js";
@@ -233,19 +234,37 @@ export type StoreState = {
   } | null;
   modelSettings: DiskModelSettings | null;
   modelSelectedIndex: number;
+  /** Free-text model entry. `pick-gateway` is reached ONLY when more than one gateway is
+   *  configured — with exactly one the routing is shown and confirmed, never chosen. */
+  modelCustomMode: "none" | "input" | "pick-gateway";
+  modelCustomInput: string;
+  modelGatewayIndex: number;
   /** Providers with a resolved API key, from the SAME CliConfig the run uses — env var, config
    *  file, or ~/.zone/keys.json, all three already collapsed by loadCliConfig +
    *  applyDiskKeyFallbacks before the tree mounts. Empty means no key anywhere, not "not checked
    *  yet": the picker shows every row in that case. */
   providersWithKey: string[];
+  /** Gateway profile ids from the key store — the subset of `providersWithKey` that is not a
+   *  vendor. Its LENGTH is what decides the free-text flow: zero refuses, one displays, many pick. */
+  gatewayIds: string[];
+  /** The run's active provider profile, when one is configured. Read by Composer's image gate so a
+   *  profile can declare vision support for a model no catalog knows — the half of ledger item 394
+   *  that has to land with `supportsVision`'s default flip, not after it. */
+  activeProfile: ProviderProfile | null;
   effortSelectedIndex: number;
   permissionsList: DiskTrustEntry[];
   permissionsSelectedIndex: number;
   keysList: DiskApiKey[];
   keysSelectedIndex: number;
-  keysEditMode: "view" | "select-provider" | "input" | "confirm-delete";
+  /** `input-profile-id` and `input-base-url` are the gateway flow's two extra steps; the vendor
+   *  flow still goes `select-provider` -> `input` in one hop. */
+  keysEditMode: "view" | "select-provider" | "input-profile-id" | "input-base-url" | "input" | "confirm-delete";
   keysEditInput: string;
   keysEditProvider: ApiKeyProvider | null;
+  /** Gateway draft, carried across the three input steps. Empty for a vendor key, which is what
+   *  `setDiskKey` keys on to decide whether to write the gateway fields at all. */
+  keysDraftProfileId: string;
+  keysDraftBaseUrl: string;
   sessionsList: SessionMeta[];
   sessionsSelectedIndex: number;
   transcriptGeneration: number;
@@ -271,6 +290,8 @@ export function buildInitialState(initialValues?: {
   resumedStartedAt?: string;
   modelSettings?: DiskModelSettings | null;
   providersWithKey?: string[];
+  gatewayIds?: string[];
+  activeProfile?: ProviderProfile | null;
   userCommands?: UserCommand[];
   mode?: TuiMode;
   armedUserHooks?: UserHooksConfig | null;
@@ -325,7 +346,12 @@ export function buildInitialState(initialValues?: {
     feedbackData: null,
     modelSettings: initialValues?.modelSettings ?? null,
     modelSelectedIndex: 0,
+    modelCustomMode: "none",
+    modelCustomInput: "",
+    modelGatewayIndex: 0,
     providersWithKey: initialValues?.providersWithKey ?? [],
+    gatewayIds: initialValues?.gatewayIds ?? [],
+    activeProfile: initialValues?.activeProfile ?? null,
     effortSelectedIndex: 1,
     summarySelectedIndex: 0,
     planModeSelectedIndex: 0,
@@ -337,6 +363,8 @@ export function buildInitialState(initialValues?: {
     keysEditMode: "view",
     keysEditInput: "",
     keysEditProvider: null,
+    keysDraftProfileId: "",
+    keysDraftBaseUrl: "",
     sessionsList: [],
     sessionsSelectedIndex: 0,
     transcriptGeneration: 0,
@@ -400,6 +428,9 @@ export type StoreAction =
   | { type: "KEYS_INPUT_CHAR"; ch: string }
   | { type: "KEYS_INPUT_BACKSPACE" }
   | { type: "KEYS_INPUT_CANCEL" }
+  | { type: "KEYS_GATEWAY_START" }
+  | { type: "KEYS_GATEWAY_ID_SUBMIT" }
+  | { type: "KEYS_GATEWAY_URL_SUBMIT" }
   | { type: "KEYS_START_DELETE" }
   | { type: "KEYS_DELETE_CANCELED" }
   | { type: "SESSIONS_OPEN"; list: SessionMeta[] }
@@ -411,6 +442,12 @@ export type StoreAction =
   | { type: "MODEL_MODAL_CLOSE" }
   | { type: "MODEL_APPLY"; settings: DiskModelSettings }
   | { type: "MODEL_NAV"; direction: "up" | "down"; count: number }
+  | { type: "MODEL_CUSTOM_START" }
+  | { type: "MODEL_CUSTOM_CHAR"; ch: string }
+  | { type: "MODEL_CUSTOM_BACKSPACE" }
+  | { type: "MODEL_CUSTOM_CANCEL" }
+  | { type: "MODEL_CUSTOM_PICK_GATEWAY" }
+  | { type: "MODEL_GATEWAY_NAV"; direction: "up" | "down" }
   | { type: "EFFORT_MODAL_OPEN" }
   | { type: "EFFORT_MODAL_CLOSE" }
   | { type: "EFFORT_APPLY"; effort: EffortLevel }
@@ -869,7 +906,7 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
     }
 
     case "KEYS_OPEN":
-      return { ...state, modalView: "keys", keysList: action.list, keysSelectedIndex: 0, keysEditMode: "view", keysEditInput: "", keysEditProvider: null };
+      return { ...state, modalView: "keys", keysList: action.list, keysSelectedIndex: 0, keysEditMode: "view", keysEditInput: "", keysEditProvider: null, keysDraftProfileId: "", keysDraftBaseUrl: "" };
 
     case "KEYS_CLOSE":
       return { ...state, modalView: "none" };
@@ -884,7 +921,7 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
     }
 
     case "KEYS_START_ADD":
-      return { ...state, keysEditMode: "select-provider", keysEditInput: "", keysEditProvider: null };
+      return { ...state, keysEditMode: "select-provider", keysEditInput: "", keysEditProvider: null, keysDraftProfileId: "", keysDraftBaseUrl: "" };
 
     case "KEYS_START_EDIT":
       return { ...state, keysEditMode: "input", keysEditProvider: action.provider, keysEditInput: "" };
@@ -899,7 +936,26 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
       return { ...state, keysEditInput: state.keysEditInput.slice(0, -1) };
 
     case "KEYS_INPUT_CANCEL":
-      return { ...state, keysEditMode: "view", keysEditInput: "", keysEditProvider: null };
+      return { ...state, keysEditMode: "view", keysEditInput: "", keysEditProvider: null, keysDraftProfileId: "", keysDraftBaseUrl: "" };
+
+    // The gateway flow's three steps all reuse KEYS_INPUT_CHAR/BACKSPACE for the buffer; these
+    // three actions only move the buffer into a draft field and advance the mode.
+    case "KEYS_GATEWAY_START":
+      return { ...state, keysEditMode: "input-profile-id", keysEditInput: "", keysEditProvider: null, keysDraftProfileId: "", keysDraftBaseUrl: "" };
+
+    case "KEYS_GATEWAY_ID_SUBMIT": {
+      const id = state.keysEditInput.trim();
+      // A blank id, or one shadowing a built-in, cannot resolve: `resolveProviderProfile` checks
+      // gateways first but `resolveProfile` would still return the built-in for these two names.
+      if (!id || id === "anthropic" || id === "openai") return state;
+      return { ...state, keysDraftProfileId: id, keysEditMode: "input-base-url", keysEditInput: "" };
+    }
+
+    case "KEYS_GATEWAY_URL_SUBMIT": {
+      const url = state.keysEditInput.trim();
+      if (!url) return state;
+      return { ...state, keysDraftBaseUrl: url, keysEditMode: "input", keysEditProvider: state.keysDraftProfileId, keysEditInput: "" };
+    }
 
     case "KEYS_START_DELETE": {
       const entry = state.keysList[state.keysSelectedIndex];
@@ -1077,11 +1133,11 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
       // the cursor on a different model than the one in use. modelPickerList.ts owns both halves.
       const current = state.modelSettings?.model ?? getDefaultModelId();
       const rows = visibleModelRows(USER_FACING_MODELS, state.providersWithKey, current);
-      return { ...state, modalView: "model", modelSelectedIndex: selectedIndexForCurrent(rows, current) };
+      return { ...state, modalView: "model", modelSelectedIndex: selectedIndexForCurrent(rows, current), modelCustomMode: "none", modelCustomInput: "", modelGatewayIndex: 0 };
     }
 
     case "MODEL_MODAL_CLOSE":
-      return { ...state, modalView: "none" };
+      return { ...state, modalView: "none", modelCustomMode: "none", modelCustomInput: "", modelGatewayIndex: 0 };
 
     case "MODEL_APPLY": {
       const effortToKeep = supportsEffort(action.settings.model)
@@ -1098,7 +1154,36 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         statusBar: { ...state.statusBar, model: settings.model },
         effortSelectedIndex: clampedEffortIndex,
         modalView: "none",
+        modelCustomMode: "none" as const,
+        modelCustomInput: "",
+        modelGatewayIndex: 0,
       };
+    }
+
+    case "MODEL_CUSTOM_START":
+      return { ...state, modelCustomMode: "input", modelCustomInput: "", modelGatewayIndex: 0 };
+
+    case "MODEL_CUSTOM_CHAR":
+      return { ...state, modelCustomInput: state.modelCustomInput + action.ch };
+
+    case "MODEL_CUSTOM_BACKSPACE":
+      return { ...state, modelCustomInput: state.modelCustomInput.slice(0, -1) };
+
+    case "MODEL_CUSTOM_CANCEL":
+      return { ...state, modelCustomMode: "none", modelCustomInput: "", modelGatewayIndex: 0 };
+
+    // Reached only from the >=2 branch. With exactly one gateway the caller applies directly and
+    // the routing is DISPLAYED beforehand; it is never chosen on the user's behalf here.
+    case "MODEL_CUSTOM_PICK_GATEWAY":
+      return { ...state, modelCustomMode: "pick-gateway", modelGatewayIndex: 0 };
+
+    case "MODEL_GATEWAY_NAV": {
+      const len = state.gatewayIds.length;
+      if (len === 0) return state;
+      const next = action.direction === "up"
+        ? Math.max(0, state.modelGatewayIndex - 1)
+        : Math.min(len - 1, state.modelGatewayIndex + 1);
+      return { ...state, modelGatewayIndex: next };
     }
 
     case "MODEL_NAV": {

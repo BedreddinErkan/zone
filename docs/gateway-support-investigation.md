@@ -909,6 +909,31 @@ should not become the supported path. Two specific guards belong in the spike:
    images for exactly the unlisted-model users a gateway profile serves, with no override path,
    because the composer has no profile in scope. Ledger item 394 records the measurement and the
    coupling.
+   *As built (**step 5 DONE**):* the key store widened its `provider` field rather than gaining a
+   second `profileId` — the constraint was never the schema version but `provider`'s TYPE plus
+   `setDiskKey`'s `findIndex` uniqueness, so a widened value is itself the identity and a gateway
+   coexists with both vendor keys. `DiskApiKey` gained optional `baseUrl`/`protocol`/`label`; no
+   version bump. A new leaf module `llm/gatewayProfiles.ts` turns rows into profiles (kept out of
+   both `diskKeys.ts` and `providerProfile.ts` — the first has object-literal mock factories in
+   three test files, the second has R1). `cli/config.ts` resolves gateways before built-ins and
+   carries `profile`/`profileApiKey` on `CliConfig`, with `cfg.provider` staying two-valued as the
+   protocol selector. `/keys` gained `[G]ateway` (profile id → base URL → key); `/model` gained `C`
+   for free-text entry, branching explicitly on the gateway count — zero refuses, one displays the
+   routing, two or more ask. The vision pair landed together as specified.
+   **The blocker this step actually turned on, which the plan above does not mention:**
+   `getModelName`'s `isValidModelId` is an exact catalog match, so free-text entry ALONE was worse
+   than useless — `openai/gpt-4o-mini` resolved to `gpt-4o-mini` under provider "openai" and
+   `claude-haiku-4-5` under "anthropic". A gateway profile now passes its model id through verbatim.
+
+**What the five-step plan did and did not deliver.** Delivered: the protocol/identity split as a
+record (3), a per-profile capability and pricing layer consulted before the global tables (4), and a
+user-facing way to author a profile and route a model through it (5), plus the two bug fixes in
+step 1–2 that started the arc. NOT delivered, and none of it was in scope: a `baseURL` on
+`AnthropicAdapter` (see below), so an anthropic-messages gateway is expressible but unreachable;
+per-profile pricing that anyone can enter — a gateway's cost is recorded as UNKNOWN rather than
+guessed, which is correct but means the daily and per-run USD gates do not constrain a gateway run;
+and any validation that a configured base URL is reachable, so a typo surfaces as a request failure
+at first use rather than at configuration time.
 
 **Explicitly out of scope for all of the above**: a `baseURL` on `AnthropicAdapter`. Anthropic-protocol
 gateways (Bedrock, Vertex) are a separate problem with separate auth (SigV4, GCP tokens), and folding

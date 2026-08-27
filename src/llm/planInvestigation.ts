@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { runAgentLoop } from "./agentLoop.js";
 import { PlanRefusalError } from "./factory.js";
+import type { ProviderProfile } from "./providerProfile.js";
 import { INVESTIGATION_TOOLS } from "../tools/toolDefinitions.js";
 import {
   generateExecutionPlan,
@@ -45,6 +46,9 @@ export interface PlanInvestigationInput {
   repoSummary: string;
   userApiKey?: string;
   provider?: LLMProvider;
+  /** The run's provider profile, when it has one — this flow runs a full agent loop AND calls
+   *  generateExecutionPlan, so both must reach the same endpoint as the run they plan for. */
+  profile?: ProviderProfile;
   abortSignal?: AbortSignal;
   /** Passed directly from dispatch.ts — routes to TUI bus via index.tsx. */
   progressCallback: (update: LlmPatchProgressUpdate) => void;
@@ -153,6 +157,7 @@ export async function runPlanInvestigation(
     runId: runId || undefined,
     userApiKey: input.userApiKey,
     provider: input.provider,
+    profile: input.profile,
     abortSignal: input.abortSignal,
     mode: "investigation",
     // Item 166 stage one: this loop's output IS the ExecutionPlan the execution
@@ -301,6 +306,7 @@ export async function runPlanInvestigation(
     relevantFiles: input.relevantFiles,
     userApiKey: input.userApiKey,
     provider: input.provider,
+    profile: input.profile,
     seededFileContents,
   });
 }

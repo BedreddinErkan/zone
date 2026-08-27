@@ -102,7 +102,7 @@ Output ONLY the structured text — no preamble.`;
 }
 
 export async function summarize(input: SummarizerInput): Promise<SummarizerOutput> {
-  const model = getModelName("standard", input.client.provider);
+  const model = getModelName("standard", input.client.provider, undefined, input.client.profile);
 
   const serialized = input.candidateTurns
     .map((t, i) => `--- Turn ${i} (${t.role}) ---\n${stringifyTurn(t)}`)

@@ -10,7 +10,20 @@ vi.mock("../store.js", () => ({
     // providersWithKey stated explicitly rather than omitted: empty means "no key resolved for
     // any provider", which the picker renders as every row — the unfiltered list these retention
     // assertions expect. Leaving it absent made the whole modal render blank.
-    state: { modelSelectedIndex: 0, modelSettings: { model: "claude-sonnet-4-6" }, providersWithKey: [] },
+    //
+    // modelCustomMode is stated for the same reason and it is the same failure: the model list
+    // renders only in the "none" branch, so an absent value put the modal in the gateway-picker
+    // branch and blanked every row. gatewayIds is stated to match — a partial mock of a state the
+    // type system says is total is exactly how this file has been bitten twice.
+    state: {
+      modelSelectedIndex: 0,
+      modelSettings: { model: "claude-sonnet-4-6" },
+      providersWithKey: [],
+      modelCustomMode: "none",
+      modelCustomInput: "",
+      modelGatewayIndex: 0,
+      gatewayIds: [],
+    },
   }),
 }));
 vi.mock("../../../api/diskModel.js", () => ({ saveDiskModel: vi.fn() }));

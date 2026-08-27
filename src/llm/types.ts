@@ -119,6 +119,17 @@ export interface LLMRequestOptions {
 export interface LLMClient {
   readonly provider: LLMProvider;
 
+  /**
+   * The endpoint identity behind `provider`'s protocol selector, when the client was built from a
+   * profile. Optional so that the many hand-built `LLMClient` object literals in the test suite
+   * still satisfy this interface unchanged.
+   *
+   * `RecordingLLMClient` — which `createLLMClient` always returns — has held this since step 3 and
+   * merely exposes it now, so no construction site changed to make it reachable. It exists on the
+   * interface so a call site holding a plain `LLMClient` can pass it to `getModelName`.
+   */
+  readonly profile?: ProviderProfile;
+
   createChatCompletion(
     params: ChatCompletionCreateParamsNonStreaming,
     options?: LLMRequestOptions

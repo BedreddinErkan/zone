@@ -47,7 +47,7 @@ export async function planFeatureWithLlm(input: {
 }): Promise<LlmFeaturePlan> {
   const client = createLLMClient({ apiKey: input.userOpenAiKey });
   const ctx = getRequestContext();
-  const model = getModelName("high", client.provider, ctx?.modelOverride);
+  const model = getModelName("high", client.provider, ctx?.modelOverride, client.profile);
 
   const relevantFilesSummary = input.relevantFiles
     .map((file) => `- ${file.path} [${file.category}]`)

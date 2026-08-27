@@ -135,7 +135,9 @@ async function recordFromResponse(
 export class RecordingLLMClient implements LLMClient {
   readonly provider: LLMProvider;
   private readonly inner: LLMClient;
-  private readonly profile: ProviderProfile;
+  /** Public so `getModelName` call sites holding only the client can consult it — see the note on
+   *  `LLMClient.profile`. Still assigned exactly once in the constructor. */
+  readonly profile: ProviderProfile;
 
   /**
    * `profile` is optional and defaults to the built-in matching `inner.provider`, so every

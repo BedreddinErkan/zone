@@ -13,6 +13,7 @@ import { readMemoryAndShow } from "../memory.js";
 import { randomUUID } from "node:crypto";
 import { saveDiskModel, type DiskModelSettings } from "../../../api/diskModel.js";
 import { getDefaultModelId, supportsVision } from "../../../llm/modelRegistry.js";
+import { capabilitiesFor } from "../../../llm/providerProfile.js";
 import { readImageFromFile, validateAttachments, type ImageAttachment } from "../../../api/imageUpload.js";
 import { basename } from "node:path";
 
@@ -476,7 +477,11 @@ export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, onRemot
 
     // Capture staged images before any state changes; gate on vision support.
     const imagesToSend = stagedImages;
-    if (imagesToSend.length > 0 && !supportsVision(state.statusBar.model)) {
+    // Profile capabilities first, catalog second, conservative default last — the same resolution
+    // order every other capability lookup uses. This is the threading half of ledger item 394: with
+    // supportsVision now defaulting to false for an unknown id, a gateway user's only way to send an
+    // image is for their profile to declare it, so the gate has to be able to read that declaration.
+    if (imagesToSend.length > 0 && !supportsVision(state.statusBar.model, capabilitiesFor(state.activeProfile ?? undefined, state.statusBar.model))) {
       dispatch({ type: "TOAST_PUSH", entry: { id: randomUUID(), message: "Current model doesn't support images — switch to a vision-capable model", level: "warning" } });
       return;
     }

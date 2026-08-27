@@ -514,7 +514,7 @@ export async function planFullPatchWithLlm(input: {
 }): Promise<FullPatchResult> {
   const client = createLLMClient();
   const ctx = getRequestContext();
-  const model = getModelName("high", client.provider, ctx?.modelOverride);
+  const model = getModelName("high", client.provider, ctx?.modelOverride, client.profile);
   let openAiTransportErrorDetails: string | null = null;
   let lastSuccessfulResponsesCreateResult: unknown = null;
 

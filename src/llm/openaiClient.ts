@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import { getRequestUserApiKey } from "./openaiContext.js";
 import type { LLMProvider } from "./types.js";
 import { isValidModelId } from "./models.js";
+import { isGatewayProfile, type ProviderProfile } from "./providerProfile.js";
 
 export type ZoneInferenceMode = "hosted" | "local";
 
@@ -78,7 +79,13 @@ export interface ZoneModelOverride {
 export function getModelName(
   tier: ZoneModelTier = "standard",
   provider: LLMProvider = "openai",
-  override?: ZoneModelOverride
+  override?: ZoneModelOverride,
+  /**
+   * The run's provider profile, when it has one. Optional and defaulting to absent, so every
+   * existing three-argument call resolves exactly as before — and `getModelName` is not arity-pinned
+   * by any `toHaveBeenCalledWith`, unlike `getModelForRole` (R6), which is what makes this possible.
+   */
+  profile?: ProviderProfile
 ): string {
   const providerDefault =
     provider === "anthropic"
@@ -91,6 +98,14 @@ export function getModelName(
 
   if (override) {
     const candidate = tier === "high" ? override.high : override.standard;
+    // A gateway serves its own model namespace, which Zone has no catalog for. `isValidModelId`
+    // answers "is this in the catalog", and for a gateway that question is not the one being asked:
+    // an absent id is UNKNOWN, not INVALID. Substituting a vendor default here is what silently sent
+    // `openai/gpt-4o-mini` to `gpt-4o-mini`/`claude-haiku-4-5` — the measured blocker that made
+    // free-text model entry worse than useless without this branch.
+    if (candidate && isGatewayProfile(profile)) {
+      return candidate;
+    }
     if (candidate && isValidModelId(provider, candidate)) {
       return candidate;
     }

@@ -39,6 +39,48 @@ describe("diskKeys", () => {
     expect(store.keys[0].key).toBe("sk-ant-second0000000");
   });
 
+  // --- Gateway rows (step 5). Additive: no version bump, and a vendor row is byte-unchanged. ---
+
+  it("a vendor row still writes exactly three fields when no extras are passed", async () => {
+    await setDiskKey("anthropic", "sk-ant-test123456789");
+    const [row] = (await loadDiskKeys()).keys;
+    // The optional fields are spread conditionally rather than assigned undefined, so they are
+    // genuinely absent from the row and not merely undefined on it.
+    expect(Object.keys(row!).sort()).toEqual(["addedAt", "key", "provider"]);
+  });
+
+  it("a gateway row carries its base URL and protocol alongside the key", async () => {
+    await setDiskKey("lab", "sk-lab-key0000000000", { baseUrl: "http://localhost:4000/v1", protocol: "openai-chat" });
+    const [row] = (await loadDiskKeys()).keys;
+    expect(row!.provider).toBe("lab");
+    expect(row!.baseUrl).toBe("http://localhost:4000/v1");
+    expect(row!.protocol).toBe("openai-chat");
+  });
+
+  it("the file's schema version is UNCHANGED — the widening is in the field, not the version", async () => {
+    await setDiskKey("lab", "sk-lab-key0000000000", { baseUrl: "http://localhost:4000/v1" });
+    // A bump is what would make older Zone binaries read the store as empty, silently.
+    expect((await loadDiskKeys()).version).toBe(1);
+  });
+
+  it("a gateway and BOTH vendor keys coexist — identity is the row key, not the vendor", async () => {
+    await setDiskKey("anthropic", "sk-ant-test123456789");
+    await setDiskKey("openai", "sk-openai-test123456");
+    await setDiskKey("lab", "sk-lab-key0000000000", { baseUrl: "http://localhost:4000/v1" });
+    const store = await loadDiskKeys();
+    expect(store.keys).toHaveLength(3);
+    expect(store.keys.map(k => k.provider).sort()).toEqual(["anthropic", "lab", "openai"]);
+  });
+
+  it("one row per identity still holds for a gateway id", async () => {
+    await setDiskKey("lab", "sk-lab-first00000000", { baseUrl: "http://a/v1" });
+    await setDiskKey("lab", "sk-lab-second0000000", { baseUrl: "http://b/v1" });
+    const store = await loadDiskKeys();
+    expect(store.keys).toHaveLength(1);
+    expect(store.keys[0]!.key).toBe("sk-lab-second0000000");
+    expect(store.keys[0]!.baseUrl).toBe("http://b/v1");
+  });
+
   it("removeDiskKey removes the named provider", async () => {
     await setDiskKey("anthropic", "sk-ant-test123456789");
     await setDiskKey("openai", "sk-openai-test123456");
