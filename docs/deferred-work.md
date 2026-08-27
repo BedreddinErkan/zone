@@ -24411,7 +24411,7 @@ conflating them has already cost four wrong claims:
 | surface | consumer / gate | fed by | laundering point | shape |
 |---|---|---|---|---|
 | Daily ledger | `getUsage` → the daily USD cap, checked **once per run, pre-loop** (`agentLoop:2789`) | `recordExecution` (`recordingClient:113`) computing its own `est_cost_usd` | `toProviderName` (`recordingClient:90`) | if-return coercion |
-| Per-run meter + cost-log | **`--max-budget-usd`, checked every iteration** (`agentLoop:4099`, against `budget.snapshot().costUsd`) | `buildIterCostUpdate` → `totalCost` (`iterCostMeter:108`) | **`provider as ProviderName`** (`TokenBudgetMeter:99`) | **explicit cast** |
+| Per-run meter + cost-log | **`--max-budget-usd`, checked every iteration** (`agentLoop.ts:4108-4110`, against `budget.snapshot().costUsd`) | `buildIterCostUpdate` → `totalCost` (`iterCostMeter:108`) | **`provider as ProviderName`** (`TokenBudgetMeter:99`) | **explicit cast** |
 | Classifier telemetry | `classifierCostUsd` on `[zone-archetype]` — **telemetry only, gates nothing** | `computeResponseCost` (`taskClassifier:586`) | inline ternary (`taskClassifier:433`) | ternary coercion |
 
 **The correction this trace forced.** `computeResponseCost` — the site the original finding named as
