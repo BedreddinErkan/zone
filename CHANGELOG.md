@@ -4,6 +4,54 @@ All notable changes to Zone are documented in this file.
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [2.2.0] — 2026-08-28
+
+23 commits since 2.1.0 (`10a83f9c`). Every claim below names the commit or the
+`docs/deferred-work.md` item it comes from, so a reader can check it.
+
+### Added
+
+- **Connect to an OpenAI-compatible gateway** (LiteLLM, OpenRouter, a corporate hub) — `/keys` gains
+  a `[G]ateway` option alongside the two vendors, taking a profile id, a base URL, and a key
+  (item 396). The profile id then works as `--provider <id>`, and its models are reachable through
+  `/model`'s free-text entry (`C`). Model ids containing a slash — `openai/gpt-4o-mini` is the
+  common shape — pass through verbatim rather than being validated against Zone's own two-vendor
+  catalog, which previously substituted a cheaper vendor model in its place without saying so
+  (item 397).
+- **A gateway profile can declare its own prices** (item 399) — after saving a gateway key, `/keys`
+  offers per-model input/output rates in USD per million tokens, with cache-read and cache-write
+  asked separately and skippable. **If a profile declares no prices, nothing changes from before**:
+  its cost is recorded as unknown rather than guessed, `--max-budget-usd` and the daily spend cap
+  cannot bound it, and a one-time `[zone-budget-gate-inert]` warning says so. Nothing is inferred or
+  defaulted — a price is always the user's own declaration, never Zone's estimate.
+- **`--provider <id>`** (item 384) — previously referenced by an existing warning message but not a
+  real flag. An unrecognized value now warns naming the value instead of silently defaulting to
+  Anthropic (item 385).
+- **`/model` orders the catalog, seeks to your current model, and filters by key** (`cc535e51`) — the
+  picker opens with the cursor already on the model you're using, and hides providers you have no
+  key configured for.
+- **Assistant responses stream into the transcript as they're generated** (`a2367747`, `ec70e702`) —
+  on a normally-completing run, tool-call arguments already streamed live; the final answer's text
+  previously did not, and the TUI showed nothing while it was being produced.
+
+**Known limitation.** Only OpenAI-compatible (`openai-chat`) gateways are reachable — this covers the
+common case, including Anthropic models served *through* such a gateway. A gateway speaking
+Anthropic's own wire protocol directly (Amazon Bedrock, Google Vertex) is not: `AnthropicAdapter`
+takes no base URL, deliberately out of scope for this arc, since those endpoints authenticate with
+SigV4 and GCP tokens rather than a bearer key, and folding that in would put credential-shape
+variation into a design that currently has none.
+
+### Fixed
+
+- **A TUI crash mid-render while an MCP server was armed left that server's process running**
+  (`c6add1ce`) — the crash path now kills it, matching every other exit path.
+- **An uncaught exception or unhandled rejection lost the in-progress session entirely**
+  (`8d567df6`) — Ctrl+C already saved it; both crash paths now persist the session the same way, so
+  a crash is resumable like an interrupt.
+- **Two TUI panels painted a background fill with no explicit foreground colour** (`0128df6e`),
+  which measured as inverted, near-invisible contrast (1.08:1) against a dark terminal's default
+  foreground. Every painted surface now pairs its fill with an explicit, readable foreground.
+
 ## [2.1.0] — 2026-08-24
 
 431 commits since 2.0.0 (`efc8e758`). Every claim below names the commit or the

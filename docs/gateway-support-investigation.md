@@ -925,15 +925,31 @@ should not become the supported path. Two specific guards belong in the spike:
    than useless — `openai/gpt-4o-mini` resolved to `gpt-4o-mini` under provider "openai" and
    `claude-haiku-4-5` under "anthropic". A gateway profile now passes its model id through verbatim.
 
-**What the five-step plan did and did not deliver.** Delivered: the protocol/identity split as a
-record (3), a per-profile capability and pricing layer consulted before the global tables (4), and a
-user-facing way to author a profile and route a model through it (5), plus the two bug fixes in
-step 1–2 that started the arc. NOT delivered, and none of it was in scope: a `baseURL` on
-`AnthropicAdapter` (see below), so an anthropic-messages gateway is expressible but unreachable;
-per-profile pricing that anyone can enter — a gateway's cost is recorded as UNKNOWN rather than
-guessed, which is correct but means the daily and per-run USD gates do not constrain a gateway run;
-and any validation that a configured base URL is reachable, so a typo surfaces as a request failure
-at first use rather than at configuration time.
+**What the five-step plan did and did not deliver — SUPERSEDED in one clause; the rest still holds.**
+
+Originally recorded as: *"Delivered: the protocol/identity split as a record (3), a per-profile
+capability and pricing layer consulted before the global tables (4), and a user-facing way to author
+a profile and route a model through it (5), plus the two bug fixes in step 1–2 that started the arc.
+NOT delivered, and none of it was in scope: a `baseURL` on `AnthropicAdapter` (see below), so an
+anthropic-messages gateway is expressible but unreachable; per-profile pricing that anyone can enter
+— a gateway's cost is recorded as UNKNOWN rather than guessed, which is correct but means the daily
+and per-run USD gates do not constrain a gateway run; and any validation that a configured base URL
+is reachable, so a typo surfaces as a request failure at first use rather than at configuration
+time."*
+
+**"Per-profile pricing that anyone can enter" is delivered.** Ledger item 399, past the five-step
+plan's own scope: `/keys` gateway setup takes optional per-model input/output rates (cache-read and
+cache-write separately, skippable, each bucket's skip recorded as an explicit absence rather than a
+declared zero), written to the profile's inline `PricingRef.rates` table, which both USD gates now
+price through instead of a provider string. A gateway that declares prices is bounded by
+`--max-budget-usd` and the daily cap exactly as a built-in is; the "recorded as UNKNOWN" behaviour
+above is now what happens ONLY when a profile is left unpriced — a real, unchanged choice, not a
+limitation of the mechanism. Verified live against the lab proxy: a priced run recorded a non-zero,
+moving cost, and `--max-budget-usd` fired at a deliberately low cap.
+
+**The other two NOT-delivered items still hold, unchanged.** A `baseURL` on `AnthropicAdapter`
+remains out of scope (next paragraph). Nothing validates that a configured base URL is reachable at
+configuration time; a typo still surfaces as a request failure at first use.
 
 **Explicitly out of scope for all of the above**: a `baseURL` on `AnthropicAdapter`. Anthropic-protocol
 gateways (Bedrock, Vertex) are a separate problem with separate auth (SigV4, GCP tokens), and folding
