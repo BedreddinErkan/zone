@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from "node:fs";
 import type { LLMProvider } from "../llm/types.js";
 import type { TaskTier } from "../llm/taskClassifier.js";
 import { getProviderForModel, isKnownModelId, type EffortLevel } from "../llm/modelRegistry.js";
+import { providerOf, resolveProfile, type ProviderProfile } from "../llm/providerProfile.js";
 import { readDailyUsdCapOverride } from "../visual/tierSettings.js";
 import { loadDiskModelSync } from "../api/diskModel.js";
 import { loadDiskKeys } from "../api/diskKeys.js";
@@ -83,12 +84,22 @@ function envStr(key: string): string | undefined {
   return v?.trim() || undefined;
 }
 
-function resolveProvider(value: string | undefined): LLMProvider {
-  if (value === "openai") return "openai";
-  if (value !== undefined && value !== "anthropic") {
-    console.warn(`[zone] provider "${value}" is not recognized; falling back to anthropic.`);
-  }
-  return "anthropic";
+/**
+ * This file's own provider resolution, now delegating to the one resolver in
+ * `llm/providerProfile.ts`. `"anthropic"` is passed as THIS site's fallback rather than being a
+ * constant inside the resolver — the twelve defaulting sites do not agree on a default, and
+ * preserving that disagreement explicitly is the point (see `resolveProfile`'s own comment).
+ *
+ * The unrecognized-value warning is item 385's and is reproduced verbatim, including the raw value.
+ */
+function resolveProviderProfile(value: string | undefined): ProviderProfile {
+  return resolveProfile({
+    explicit: value,
+    fallback: "anthropic",
+    onUnrecognized: (raw) => {
+      console.warn(`[zone] provider "${raw}" is not recognized; falling back to anthropic.`);
+    },
+  });
 }
 
 function resolveForceTier(value: string | undefined): TaskTier | undefined {
@@ -126,14 +137,17 @@ export function loadCliConfig(
   let provider: LLMProvider;
   if (explicitModel && isKnownModelId(explicitModel)) {
     provider = getProviderForModel(explicitModel);
-    if (explicitProvider && resolveProvider(explicitProvider) !== provider) {
+    // Compared through providerOf, NEVER by profile object identity: identity is always-unequal
+    // once a profile is cloned or frozen, which would fire this conflict warning on pairs that
+    // actually agree (confirmed by trial edit — it turns config.test.ts to 5 failures).
+    if (explicitProvider && providerOf(resolveProviderProfile(explicitProvider)) !== provider) {
       console.warn(
         `[zone] provider "${explicitProvider}" conflicts with model "${explicitModel}" ` +
           `(${provider}); using ${provider} to match the selected model.`
       );
     }
   } else {
-    provider = resolveProvider(explicitProvider);
+    provider = providerOf(resolveProviderProfile(explicitProvider));
   }
 
   const anthropicApiKey = envStr("ANTHROPIC_API_KEY") ?? file.anthropicApiKey;

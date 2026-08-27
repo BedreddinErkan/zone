@@ -6,6 +6,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import fg from "fast-glob";
 import { buildFastGlobIgnore, ripgrepDenylistGlob } from "./searchIgnore.js";
+import { providerOf, resolveProfile } from "../llm/providerProfile.js";
 import { debugLog, errorLog, log } from "../utils/logger.js";
 import { writeCacheLog } from "../utils/commandCacheLog.js";
 import {
@@ -1114,7 +1115,13 @@ export async function executeTool(
       const { withRequestContext, getRequestContext } = await import("../llm/openaiContext.js");
       const { getModelForRole } = await import("../llm/modelRouting.js");
       const _requestCtx = getRequestContext();
-      const _provider = _requestCtx?.provider ?? "openai";
+      // `fallback: "openai"` is THIS site's own historical default. Like subagentDispatch's, it
+      // disagrees with the request path's `"anthropic"` for the same empty context; unlike that
+      // one it is load-bearing (it picks the model the subagent actually runs). Preserved as-is —
+      // item 386 pins it, and correcting it is a behaviour change, not a refactor.
+      const _provider = providerOf(
+        resolveProfile({ context: _requestCtx?.provider, fallback: "openai" })
+      );
       // Preset plumbing: if parent has a modelOverride.standard (e.g. quality preset sends
       // standard=sonnet), the worker inherits that. Otherwise falls back to role default (Haiku).
       const _parentStandard = _requestCtx?.modelOverride?.standard;

@@ -182,6 +182,8 @@ export function buildRunRecords(userId: string): RunRecord[] {
   const records = readRecords(userId);
   const runMap = new Map<string, {
     costUsd: number;
+    /** Records in this run whose cost was unknown and are therefore absent from `costUsd`. */
+    unknownCostRecords: number;
     cacheTokens: number;
     totalTokens: number;
     ts: number;
@@ -202,6 +204,7 @@ export function buildRunRecords(userId: string): RunRecord[] {
       } else {
         runMap.set(key, {
           costUsd: 0,
+          unknownCostRecords: 0,
           cacheTokens: 0,
           totalTokens: 0,
           ts: Number.isNaN(ts) ? Date.now() : ts,
@@ -217,9 +220,16 @@ export function buildRunRecords(userId: string): RunRecord[] {
       (r.cache_read || 0) +
       (r.output || 0);
     const cacheTokens = r.cache_read || 0;
+    // DECISION for this site (the metrics dashboard): an unknown cost is EXCLUDED from the run's
+    // money total and COUNTED instead, the same rule getUsage applies. A dashboard that renders an
+    // unpriceable run as `$0.0000` reads as "this run was free", which is the conflation the
+    // nullable field exists to end; the count lets the row say "partially unpriced" instead.
+    const knownCost = typeof r.est_cost_usd === "number" ? r.est_cost_usd : 0;
+    const unknownCost = typeof r.est_cost_usd !== "number" ? 1 : 0;
     const existing = runMap.get(key);
     if (existing) {
-      existing.costUsd += r.est_cost_usd || 0;
+      existing.costUsd += knownCost;
+      existing.unknownCostRecords += unknownCost;
       existing.cacheTokens += cacheTokens;
       existing.totalTokens += tokens;
       if (!Number.isNaN(ts)) existing.ts = Math.min(existing.ts, ts);
@@ -228,7 +238,8 @@ export function buildRunRecords(userId: string): RunRecord[] {
       if (r.terminationReason !== undefined) existing.terminationReason = r.terminationReason;
     } else {
       runMap.set(key, {
-        costUsd: r.est_cost_usd || 0,
+        costUsd: knownCost,
+        unknownCostRecords: unknownCost,
         cacheTokens,
         totalTokens: tokens,
         ts: Number.isNaN(ts) ? Date.now() : ts,

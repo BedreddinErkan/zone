@@ -36,7 +36,19 @@ export interface UsageRecord {
   output_reasoning?: number;
   /** Flat per-search count from Anthropic usage.server_tool_use.web_search_requests. */
   webSearchRequests?: number;
-  est_cost_usd: number;
+  /**
+   * `null` means the cost is UNKNOWN, not zero — the provider profile for this call carried no
+   * pricing table, so nothing can be said about what it cost. Distinct from `0`, which means a
+   * genuinely free call (and from the deliberate `0` sentinel on the run-summary and run-retry
+   * rows below). Every reader must decide what an unknown means in its own aggregate rather than
+   * coercing it; see `getUsage`/`getRunCost`.
+   */
+  est_cost_usd: number | null;
+  /**
+   * Set only when the profile could not price. Optional and additive so no existing writer changes
+   * and `expect.objectContaining` assertions on `recordExecution`'s argument keep matching.
+   */
+  unpriceable?: true;
   /** K.3.C3: total wall-clock duration of the run in ms. Set only on the terminal run-summary record. */
   latencyMs?: number;
   /** K.3.C3: why the run ended. Set only on the terminal run-summary record. */
@@ -46,6 +58,12 @@ export interface UsageRecord {
 export type UsagePeriod = "day" | "week" | "month" | "all";
 
 export interface UsageAggregate {
+  /**
+   * How many records in this period carried an unknown cost (`est_cost_usd: null`) and are
+   * therefore NOT represented in `totalCostUsd`. Non-zero means the total under-reports by an
+   * unmeasurable amount — the daily cap warns rather than silently gating on a low figure.
+   */
+  unknownCostRecords: number;
   period: UsagePeriod;
   totalRuns: number;
   totalTokens: number;
@@ -76,14 +94,19 @@ export async function recordExecution(
   rec: Omit<UsageRecord, "timestamp" | "est_cost_usd">,
   options?: { storageDir?: string }
 ): Promise<UsageRecord> {
-  const est_cost_usd = round4(
-    totalCost(rec.provider, rec.model, {
-      input_uncached: rec.input_uncached,
-      cache_write: rec.cache_write,
-      cache_read: rec.cache_read,
-      output: rec.output,
-    }) + webSearchFee(rec.webSearchRequests ?? 0)
-  );
+  // An unpriceable profile records cost as unknown rather than as 0. Note the web-search fee is
+  // dropped along with it deliberately: it is a real known charge, but reporting a partial figure
+  // as if it were the whole cost is the same conflation this field exists to end.
+  const est_cost_usd: number | null = rec.unpriceable
+    ? null
+    : round4(
+        totalCost(rec.provider, rec.model, {
+          input_uncached: rec.input_uncached,
+          cache_write: rec.cache_write,
+          cache_read: rec.cache_read,
+          output: rec.output,
+        }) + webSearchFee(rec.webSearchRequests ?? 0)
+      );
   const full: UsageRecord = {
     ...rec,
     timestamp: new Date().toISOString(),
@@ -183,6 +206,7 @@ export async function getUsage(
   const byModel: Record<string, { runs: number; tokens: number; costUsd: number; _runIds: Set<string>; _nullRuns: number }> = {};
   let totalTokens = 0;
   let totalCostUsd = 0;
+  let unknownCostRecords = 0;
 
   for (const r of filtered) {
     const tokens =
@@ -190,7 +214,13 @@ export async function getUsage(
       (r.cache_write || 0) +
       (r.cache_read || 0) +
       (r.output || 0);
-    const cost = r.est_cost_usd || 0;
+    // DECISION for this site (the daily USD cap reads this aggregate): an unknown cost is
+    // EXCLUDED from the money total and COUNTED instead. Summing it as 0 would silently weaken
+    // the cap — the exact laundering the nullable field exists to end — while inventing a figure
+    // for it would be worse. The count is what makes the under-report visible to the gate.
+    const isUnknown = typeof r.est_cost_usd !== "number";
+    const cost = typeof r.est_cost_usd === "number" ? r.est_cost_usd : 0;
+    if (isUnknown) unknownCostRecords += 1;
     totalTokens += tokens;
     totalCostUsd += cost;
 
@@ -233,6 +263,7 @@ export async function getUsage(
     totalRuns: countRuns(filtered),
     totalTokens,
     totalCostUsd: round2(totalCostUsd),
+    unknownCostRecords,
     byProvider: cleanProvider,
     byModel: cleanModel,
   };
@@ -306,9 +337,34 @@ export async function recordRunRetry(
   fs.appendFileSync(file, JSON.stringify(record) + "\n", "utf8");
 }
 
+/**
+ * How many of this run's records carried an unknown cost and are therefore absent from
+ * `getRunCost`'s sum.
+ *
+ * DECISION for this site: `getRunCost` keeps its `number` signature — it has two production
+ * callers and is mocked as `vi.fn(() => 0)` elsewhere, and widening its return would force both
+ * to handle a shape they have no way to render. So the unknown is surfaced through this sibling
+ * instead of being dropped: callers report the count alongside the figure.
+ */
+export function getRunCostUnknownCount(
+  userId: string,
+  runId: string,
+  options?: { storageDir?: string }
+): number {
+  if (!runId) return 0;
+  let unknown = 0;
+  for (const r of readRecords(userId, options)) {
+    if (r.runId === runId && (r.est_cost_usd === null || r.est_cost_usd === undefined)) unknown += 1;
+  }
+  return unknown;
+}
+
 // Per-run cost: sum of est_cost_usd across every record with this runId.
 // Used by the run lifecycle event so the UI can show inline cost next to
 // each completed run.
+//
+// Sums only the records whose cost is KNOWN. A record with an unknown cost is excluded rather
+// than counted as free; `getRunCostUnknownCount` reports how many were left out.
 export function getRunCost(
   userId: string,
   runId: string,
@@ -318,7 +374,7 @@ export function getRunCost(
   const records = readRecords(userId, options);
   let sum = 0;
   for (const r of records) {
-    if (r.runId === runId) sum += r.est_cost_usd || 0;
+    if (r.runId === runId && typeof r.est_cost_usd === "number") sum += r.est_cost_usd;
   }
   return round4(sum);
 }

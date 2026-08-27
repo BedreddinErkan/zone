@@ -86,6 +86,12 @@ export type RunSummaryPayload = {
   };
   cost: {
     totalUsd: number;
+    /**
+     * Usage records in this run whose cost could not be priced (the provider profile carried no
+     * pricing table) and are therefore ABSENT from `totalUsd`. Non-zero means `totalUsd` is a
+     * lower bound, not the run's cost. Optional so every existing producer stays valid.
+     */
+    unknownCostRecords?: number;
     iterCount: number;
     cacheHitPct: number;
     avgIterUsd: number;

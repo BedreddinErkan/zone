@@ -1,6 +1,12 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import { createLLMClient } from "./factory.js";
+import {
+  priceForProfile,
+  providerOf,
+  resolveProfile,
+  type ProviderProfile,
+} from "./providerProfile.js";
 import type { LLMProvider } from "./types.js";
 import {
   extractResponsesApiOutputText,
@@ -8,7 +14,6 @@ import {
 } from "./openaiClient.js";
 import { extractUsage } from "./recordingClient.js";
 import { getRequestContext } from "./openaiContext.js";
-import { totalCost, type ProviderName } from "../usage/pricing.js";
 import { getMaxOutputTokens } from "./models.js";
 import { log } from "../utils/logger.js";
 
@@ -423,22 +428,38 @@ function buildFallback(
   };
 }
 
+/**
+ * Takes the run's already-resolved ProviderProfile rather than a provider string, and prices
+ * against `profile.pricing`. This replaces an inline `provider === "anthropic" ? "anthropic" :
+ * "openai"` ternary that existed only because `LLMProvider` and `ProviderName` were separate
+ * declarations of the same union — one of the two lane-crossings the profile record deletes.
+ *
+ * Resolving here rather than receiving the profile would be wrong: a fallback applied at this
+ * depth would price an unrecognized provider at anthropic rates instead of refusing to price it
+ * (providerProfile.ts's R4).
+ *
+ * Returns `number`, and an unknown price collapses to `0`. That is a deliberate, bounded residue:
+ * `classifierCostUsd` is telemetry only — item 299 established it gates nothing — and widening it
+ * would ripple through `loopTelemetry.ts` and roughly fifteen test fixtures for a field nothing
+ * reads for a decision. The signal for an unpriceable run is the profile warning raised once at
+ * client construction, not this number.
+ */
 function computeResponseCost(
   response: unknown,
-  provider: LLMProvider,
+  profile: ProviderProfile,
   fallbackModel: string
 ): number {
   const usage = extractUsage((response as { usage?: unknown })?.usage);
   if (!usage) return 0;
-  const providerName: ProviderName = provider === "anthropic" ? "anthropic" : "openai";
   const responseModel =
     (response as { model?: string })?.model || fallbackModel;
-  return totalCost(providerName, responseModel, {
+  const priced = priceForProfile(profile, responseModel, {
     input_uncached: usage.input_uncached,
     cache_write: usage.cache_write,
     cache_read: usage.cache_read,
     output: usage.output,
   });
+  return priced.known ? priced.usd : 0;
 }
 
 /**
@@ -552,7 +573,15 @@ export async function classifyTask(
   }
 
   const ctx = getRequestContext();
-  const provider = options.provider ?? ctx?.provider ?? "anthropic";
+  // Resolved once, here; the profile object is what reaches computeResponseCost below, so the
+  // pricing table is never re-derived from a string further down (providerProfile.ts's R4).
+  // `fallback: "anthropic"` is this site's own historical default, passed explicitly.
+  const profile = resolveProfile({
+    explicit: options.provider,
+    context: ctx?.provider,
+    fallback: "anthropic",
+  });
+  const provider = providerOf(profile);
   const model = pickClassifierModel(provider);
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
@@ -583,7 +612,7 @@ export async function classifyTask(
     ]);
     if (timeoutHandle) clearTimeout(timeoutHandle);
 
-    costUsd = computeResponseCost(response, provider, model);
+    costUsd = computeResponseCost(response, profile, model);
 
     const extraction = extractResponsesApiOutputText(response);
     if (!extraction.ok) {

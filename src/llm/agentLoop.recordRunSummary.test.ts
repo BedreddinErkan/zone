@@ -60,6 +60,7 @@ vi.mock("../visual/tierSettings.js", () => ({
 }));
 
 import { runAgentLoop } from "./agentLoop.js";
+import { withRequestContext } from "./openaiContext.js";
 
 function makeDoneResponse() {
   return {
@@ -222,5 +223,46 @@ describe("agentLoop.ts:3564 — the retry-event provider fallback (gateway-suppo
 
     const call = mocks.recordRunRetry.mock.calls[0]?.[0] as { provider?: string } | undefined;
     expect(call?.provider).toBe("openai");
+  });
+});
+
+/**
+ * The context rung of the three-arm precedence, which nothing in this file exercised (item 387).
+ *
+ * `runAgentLoop` builds its own scoped context and never assigns `provider` to it, and no test
+ * here wrapped the call in an outer context — so `getRequestContext()?.provider` was `undefined`
+ * in all six cases above. That means a resolver call with the `context` argument DROPPED
+ * ENTIRELY, or with `context` and `explicit` inverted, passed every one of them. The site's own
+ * comment says it must match factory.ts's precedence exactly, so the rung needs a test that can
+ * tell the difference.
+ */
+describe("provider precedence: the request-context rung (item 387)", () => {
+  it("with no explicit provider, the request context supplies it — not the anthropic fallback", async () => {
+    await withRequestContext({ provider: "openai" }, async () => {
+      await runAgentLoop({
+        task: "do something",
+        repoPath,
+        userId: "user-1",
+        runId: "test-run-ctx-openai",
+      });
+    });
+
+    const call = mocks.recordRunSummary.mock.calls[0]?.[0] as { provider?: string } | undefined;
+    expect(call?.provider).toBe("openai");
+  });
+
+  it("an explicit provider outranks the request context", async () => {
+    await withRequestContext({ provider: "openai" }, async () => {
+      await runAgentLoop({
+        task: "do something",
+        repoPath,
+        userId: "user-1",
+        runId: "test-run-ctx-outranked",
+        provider: "anthropic",
+      });
+    });
+
+    const call = mocks.recordRunSummary.mock.calls[0]?.[0] as { provider?: string } | undefined;
+    expect(call?.provider).toBe("anthropic");
   });
 });

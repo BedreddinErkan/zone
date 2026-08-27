@@ -245,7 +245,7 @@ Collapsing the two `return` statements of a single if/return resolver into one s
 
 | Site | Shape | Condition tests | Default arm |
 |---|---|---|---|
-| `cli/config.ts:86–88` `resolveProvider` | if-return, no else | `value === "openai"` (raw config string) | **anthropic** |
+| `cli/config.ts:86–88` `resolveProvider` (now `:86–92` since `aa0711f0` added the warn branch; default arm unchanged) | if-return, no else | `value === "openai"` (raw config string) | **anthropic** |
 | `llm/factory.ts:63–69` `resolveProvider` | precedence chain, trailing return | *presence* of explicit / ctx | **anthropic** |
 | `llm/modelRegistry.ts:155` `getProviderForModel` | catalog `.find` + `??` | **catalog membership**, not a name | **anthropic** |
 | `llm/agentLoop.ts:2250` | `input.provider ?? ctx?.provider ?? …` | presence | **anthropic** |
@@ -295,6 +295,9 @@ Three things this establishes:
 
 1. **An unrecognised provider is silently coerced to `anthropic`.** No warning, no log line.
    `resolveProvider` (`config.ts:86–88`) is `if (value === "openai") return "openai"; return "anthropic";`.
+   **SUPERSEDED by `aa0711f0`** (Option B step 2): the coercion now warns, naming the value —
+   `[zone] provider "<value>" is not recognized; falling back to anthropic.` The `← silent`
+   annotation in the trace block above records what was measured before that commit.
 2. **The contrast is stark**: a *known-model/provider conflict* warns loudly —
    `[zone] provider "anthropic" conflicts with model "gpt-4o" (openai); using openai to match the
    selected model.` (measured, `config.ts:127–130`). An *unknown provider* says nothing.
@@ -303,7 +306,7 @@ Three things this establishes:
    and a defaulted model is not explicit. Downstream, `getModelName` (`openaiClient.ts:97–109`)
    detects this and warns, falling back to `gpt-4o`.
 
-### 2.6 There is no `--provider` flag
+### 2.6 There is no `--provider` flag — SUPERSEDED by `aa0711f0`: the flag now exists
 
 ```
 $ git grep -an 'provider' -- src/cli/index.ts | tr -d '\r'      → (empty)
@@ -317,6 +320,12 @@ is declared and read (`config.ts:114`), but commander never sets it and no produ
 it (`git grep -anE 'loadCliConfig\(' -- 'src/**' | grep -v '\.test\.' | grep -i provider` → empty;
 confirmed by `command grep`). Provider is therefore settable only via `ZONE_PROVIDER`,
 `<repo>/.zone/model.json`, or `~/.zone/config.json`'s `defaultProvider`.
+
+> **Status.** Superseded by `aa0711f0` (Option B step 1). `--provider <name>` is declared in
+> `src/cli/index.ts`, wired through `CliOptions` and `buildCliFlags`, and covered by
+> `index.optionsBoundary.test.ts`. Re-running this section's own four instruments at that commit
+> returns three hits, not empty. Everything below is preserved as the measurement that motivated
+> the flag, not as a description of the code today.
 
 This is the exact shape of ledger item 258: `program.opts<CliOptions>()` asserts a hand-written
 interface rather than checking it. Note also that `openaiClient.ts:107`'s own warning text tells the user
@@ -746,7 +755,7 @@ gain a per-profile override consulted before the global tables. `webSearchWarnin
 `llm/modelRouting.ts:47`; `cli/dispatch.ts` ×6 key ternaries; `api/diskKeys.ts` (key identity);
 `api/diskModel.ts:12`; `cli/tui/components/ApiKeysView.tsx`, `ModelModal.tsx`,
 `cli/tui/modelPickerList.ts`. Plus a `--provider` flag in `cli/index.ts`, which **does not exist
-today** (§2.6) and which every option needs.
+today** (§2.6) — *superseded by `aa0711f0`, which added it* — and which every option needs.
 
 **What breaks for existing installs.** `model.json`'s `provider` field must map onto a profile id;
 keeping `"anthropic"`/`"openai"` as built-in ids means **nothing breaks and no version bump is
@@ -811,7 +820,8 @@ was tested.
    protocol selector. I have no commit-level evidence that a gateway was intended, and the dead
    `getHostedInferenceBaseUrl` suggests the `baseUrl` parameter is a leftover from a hosted-service
    design rather than a gateway one.
-2. **The silent `resolveProvider` coercion is likely the single worst-felt defect**, because it makes
+2. **The silent `resolveProvider` coercion is likely the single worst-felt defect** *(superseded by
+   `aa0711f0`: the coercion is no longer silent — see §2.5's status note)*, because it makes
    every gateway configuration attempt fail in the same confusing way: the user sets a provider, sees
    no error, and gets an Anthropic 400 about a model they never named. This is a judgement about user
    experience, not a measurement.
@@ -852,20 +862,35 @@ should not become the supported path. Two specific guards belong in the spike:
 
 **Then B, in this order**, each step independently shippable:
 
-1. **Add `--provider` to commander** (`cli/index.ts`). It is referenced by an existing warning
+> **Progress.** Steps 1 and 2 are **DONE** (`aa0711f0`). Step 3's stated prerequisite — pinning
+> current behaviour first — is **DONE** (`368e01e7`, ledger item 386), and step 3 itself is
+> **DONE** (ledger item 387; the commit that added `src/llm/providerProfile.ts` —
+> `git log --diff-filter=A -- src/llm/providerProfile.ts`). Steps 4 and 5 and the Option C spike
+> remain open.
+> Each step's text below is left as written; the status markers are appended, not substituted.
+
+1. **[DONE — `aa0711f0`] Add `--provider` to commander** (`cli/index.ts`). It is referenced by an existing warning
    message and does not exist. One line, no design required, and it makes every later step testable
    from the CLI.
-2. **Make `resolveProvider` loud** (`config.ts:86–88`). An unrecognised value must warn naming the
+2. **[DONE — `aa0711f0`] Make `resolveProvider` loud** (`config.ts:86–88`). An unrecognised value must warn naming the
    value, the way the model/provider conflict already does at `:127`. This is a bug fix on its own
    merits.
-3. **Introduce `ProviderProfile`** with built-in `anthropic` and `openai` profiles that reproduce
+3. **[DONE — see item 387; prerequisite `368e01e7`] Introduce `ProviderProfile`** with built-in `anthropic` and `openai` profiles that reproduce
    current behaviour exactly, and route the six-and-six defaulting sites through one resolver.
    Pin the current behaviour with tests *before* the refactor — the defaults disagree today, so
    "preserve current behaviour" needs a written-down baseline or the refactor will silently pick a
    winner.
+   *As built:* `src/llm/providerProfile.ts` is the record and the one resolver; each site passes its
+   OWN fallback so the six-and-six split is preserved rather than unified by accident. Eight sites
+   route through it, two lane-crossing conversions are deleted, and two constructor/parameter
+   defaults are deliberately left alone because they already are the protocol selector. The
+   step-4 pricing warning was pulled forward in reduced form: a profile with no pricing table now
+   records cost as unknown rather than `$0`. See ledger item 387 for what was NOT done.
 4. **Give profiles optional capability and pricing overrides**, consulted before the global tables.
    Make a missing pricing entry on a *gateway* profile a startup warning rather than a silent `$0`
-   — the daily and per-run gates depend on it.
+   — the daily and per-run gates depend on it. *(The startup-warning half of this landed early with
+   step 3; the capability and pricing OVERRIDE tables remain open — `ProviderProfile.capabilities`
+   is declared and unpopulated.)*
 5. **Widen the key store's identity** to `{ provider, profileId? }`, additively, no version bump.
    Add `[G]ateway` to `ApiKeysView` and free-text model entry to `ModelModal`.
 

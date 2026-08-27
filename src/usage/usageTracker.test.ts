@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { extractUsage } from "../llm/recordingClient.js";
 import {
   getRunCost,
+  getRunCostUnknownCount,
   getUsage,
   readRecords,
   recordExecution,
@@ -240,5 +241,127 @@ describe("item 221 — sentinel records carry the run's real provider, not a har
     // The pre-fix defect: every sentinel's runId landed in the openai bucket regardless
     // of the run's real provider. This is the assertion that catches its return.
     expect(usage.byProvider.openai?.runs ?? 0).toBe(0);
+  });
+});
+
+describe("unknown cost is not zero — the ledger semantics of est_cost_usd: null (item 387)", () => {
+  /**
+   * The distinction this pins cannot be reached through `recordExecution` with either built-in
+   * profile, because both carry a pricing table. It is reached the way the ledger will actually
+   * meet it: a row already on disk carrying `est_cost_usd: null`. Without this test the nullable
+   * field is an annotation with no behavioural contract — every reader used to coerce it with
+   * `|| 0`, which is exactly the "unpriceable run looks free" conflation the field exists to end.
+   */
+  function writeRows(rows: Array<Record<string, unknown>>): void {
+    fs.writeFileSync(
+      path.join(storageDir, "user-1.jsonl"),
+      rows.map((r) => JSON.stringify(r)).join("\n") + "\n",
+      "utf8"
+    );
+  }
+
+  const base = {
+    timestamp: new Date().toISOString(),
+    userId: "user-1",
+    runId: "run-1",
+    provider: "openai",
+    model: "gpt-4o-mini",
+    input_uncached: 100,
+    cache_write: 0,
+    cache_read: 0,
+    output: 20,
+  };
+
+  it("getUsage excludes an unknown-cost record from the money total and counts it instead", async () => {
+    writeRows([
+      { ...base, est_cost_usd: 0.25 },
+      { ...base, runId: "run-2", est_cost_usd: null, unpriceable: true },
+    ]);
+    const usage = await getUsage("user-1", "all", { storageDir });
+    // The known row's cost, and ONLY it. Summing the unknown as 0 would give the same number,
+    // so the count below is what makes the two cases distinguishable.
+    expect(usage.totalCostUsd).toBeCloseTo(0.25, 10);
+    expect(usage.unknownCostRecords).toBe(1);
+  });
+
+  it("a genuinely-free record and an unknown-cost record are NOT the same thing", async () => {
+    writeRows([{ ...base, est_cost_usd: 0 }]);
+    const free = await getUsage("user-1", "all", { storageDir });
+    writeRows([{ ...base, est_cost_usd: null, unpriceable: true }]);
+    const unknown = await getUsage("user-1", "all", { storageDir });
+
+    // Both report $0.00 — which is precisely why the total alone cannot tell them apart, and why
+    // the count exists.
+    expect(free.totalCostUsd).toBe(0);
+    expect(unknown.totalCostUsd).toBe(0);
+    expect(free.unknownCostRecords).toBe(0);
+    expect(unknown.unknownCostRecords).toBe(1);
+  });
+
+  it("getUsage reports zero unknowns when every record is priced", async () => {
+    writeRows([{ ...base, est_cost_usd: 0.25 }, { ...base, est_cost_usd: 0.5 }]);
+    const usage = await getUsage("user-1", "all", { storageDir });
+    expect(usage.totalCostUsd).toBeCloseTo(0.75, 10);
+    expect(usage.unknownCostRecords).toBe(0);
+  });
+
+  it("getRunCost sums only the priced records, and the sibling reports what it left out", () => {
+    writeRows([
+      { ...base, est_cost_usd: 0.25 },
+      { ...base, est_cost_usd: null, unpriceable: true },
+      { ...base, est_cost_usd: 0.1 },
+    ]);
+    expect(getRunCost("user-1", "run-1", { storageDir })).toBeCloseTo(0.35, 10);
+    expect(getRunCostUnknownCount("user-1", "run-1", { storageDir })).toBe(1);
+  });
+
+  it("getRunCostUnknownCount is zero for a fully-priced run and for an unknown runId", () => {
+    writeRows([{ ...base, est_cost_usd: 0.25 }]);
+    expect(getRunCostUnknownCount("user-1", "run-1", { storageDir })).toBe(0);
+    expect(getRunCostUnknownCount("user-1", "no-such-run", { storageDir })).toBe(0);
+    expect(getRunCostUnknownCount("user-1", "", { storageDir })).toBe(0);
+  });
+
+  it("recordExecution writes null — not 0 — when the caller marks the record unpriceable", async () => {
+    const rec = await recordExecution(
+      {
+        userId: "user-1",
+        runId: "run-1",
+        provider: "openai",
+        model: "some-gateway-model",
+        input_uncached: 100,
+        cache_write: 0,
+        cache_read: 0,
+        output: 20,
+        unpriceable: true,
+      },
+      { storageDir }
+    );
+    expect(rec.est_cost_usd).toBeNull();
+    // And it survives the JSONL round-trip as null rather than being read back as 0.
+    const [readBack] = readRecords("user-1", { storageDir });
+    expect(readBack?.est_cost_usd).toBeNull();
+  });
+
+  it("an ordinary record still records a real number — the null path is opt-in, not the default", async () => {
+    // A million input tokens, deliberately: `round4` quantises to four decimals, so a 100-token
+    // gpt-4o-mini call costs $0.000027 and rounds to a literal 0 — a third kind of zero that is
+    // neither "free" nor "unknown". Using a cost that survives rounding keeps this test about the
+    // opt-in null path rather than about rounding.
+    const rec = await recordExecution(
+      {
+        userId: "user-1",
+        runId: "run-1",
+        provider: "openai",
+        model: "gpt-4o-mini",
+        input_uncached: 1_000_000,
+        cache_write: 0,
+        cache_read: 0,
+        output: 200_000,
+      },
+      { storageDir }
+    );
+    expect(typeof rec.est_cost_usd).toBe("number");
+    expect(rec.est_cost_usd).toBeGreaterThan(0);
   });
 });

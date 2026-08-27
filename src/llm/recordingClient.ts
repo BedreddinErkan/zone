@@ -8,6 +8,7 @@ import type { LLMClient, LLMProvider, LLMRequestOptions } from "./types.js";
 import { getRequestContext } from "./openaiContext.js";
 import { recordExecution } from "../usage/usageTracker.js";
 import type { ProviderName } from "../usage/pricing.js";
+import { profileForProvider, type ProviderProfile } from "./providerProfile.js";
 
 interface UsageBreakdown {
   input_uncached: number;
@@ -87,16 +88,16 @@ export function extractUsage(rawUsage: unknown): UsageBreakdown | null {
   };
 }
 
-function toProviderName(provider: LLMProvider): ProviderName {
-  if (provider === "anthropic") return "anthropic";
-  return "openai";
-}
-
 // Centralized post-call hook. Reads usage from the response (works for both
 // OpenAI Chat Completions usage shape and the Anthropic adapter's translated
 // shape that adds cache_creation_input_tokens / cache_read_input_tokens).
+//
+// Takes the run's resolved ProviderProfile rather than a provider string: the pricing table now
+// comes from `profile.pricing`, which is what replaced the old `toProviderName` if-return. That
+// helper existed only because `LLMProvider` and `ProviderName` were separate declarations of the
+// same two-value union, and it is deleted rather than rewired.
 async function recordFromResponse(
-  provider: LLMProvider,
+  profile: ProviderProfile,
   fallbackModel: string,
   rawUsage: unknown,
   responseModel: string | undefined
@@ -110,15 +111,20 @@ async function recordFromResponse(
     const subagentId = ctx?.subagentId?.trim() || undefined;
     const subagentType = ctx?.subagentType;
     const parentRunId = ctx?.parentRunId?.trim() || undefined;
+    // The unpriceable signal rides INSIDE the record. It is deliberately not a second positional
+    // argument to recordExecution: two pinned tests assert that call with
+    // `toHaveBeenCalledWith(expect.objectContaining(...))`, which compares the whole args array,
+    // so an arity change breaks them while an extra object key does not.
     await recordExecution({
       userId,
       runId,
       subagentId,
       subagentType,
       parentRunId,
-      provider: toProviderName(provider),
+      provider: (profile.pricing?.table ?? profile.adapterProvider) as ProviderName,
       model: responseModel || fallbackModel,
       ...usage,
+      ...(profile.pricing ? {} : { unpriceable: true as const }),
     });
   } catch (err) {
     // Best-effort: a recording failure must never fail the actual LLM call.
@@ -129,10 +135,17 @@ async function recordFromResponse(
 export class RecordingLLMClient implements LLMClient {
   readonly provider: LLMProvider;
   private readonly inner: LLMClient;
+  private readonly profile: ProviderProfile;
 
-  constructor(inner: LLMClient) {
+  /**
+   * `profile` is optional and defaults to the built-in matching `inner.provider`, so every
+   * existing one-argument construction keeps working unchanged (providerProfile.ts's R9 — this is
+   * the one rewired site whose default is derived rather than a literal).
+   */
+  constructor(inner: LLMClient, profile?: ProviderProfile) {
     this.inner = inner;
     this.provider = inner.provider;
+    this.profile = profile ?? profileForProvider(inner.provider);
   }
 
   async createChatCompletion(
@@ -141,7 +154,7 @@ export class RecordingLLMClient implements LLMClient {
   ): Promise<ChatCompletion> {
     const response = await this.inner.createChatCompletion(params, options);
     await recordFromResponse(
-      this.provider,
+      this.profile,
       String(params.model || ""),
       (response as { usage?: unknown }).usage,
       response.model
@@ -155,8 +168,13 @@ export class RecordingLLMClient implements LLMClient {
   ): Promise<AsyncIterable<ChatCompletionChunk>> {
     // For OpenAI, opt into final-chunk usage. The Anthropic adapter emits a
     // synthetic final chunk with `usage` already populated (see convertStream).
+    // Gated on the PROTOCOL, not the vendor. The investigation's harness section established that
+    // this gate is protocol-shaped ("recordingClient.ts gates include_usage on
+    // provider === 'openai'; that gate is protocol-shaped, not vendor-shaped"), and reading the
+    // profile's protocol is what makes it correct for an openai-chat endpoint that is not OpenAI.
+    // Behaviour is identical for both built-ins, whose protocol and vendor agree.
     const augmented: ChatCompletionCreateParamsStreaming =
-      this.provider === "openai"
+      this.profile.protocol === "openai-chat"
         ? {
             ...params,
             stream_options: {
@@ -166,7 +184,7 @@ export class RecordingLLMClient implements LLMClient {
           }
         : params;
     const baseStream = await this.inner.createChatCompletionStream(augmented, options);
-    const provider = this.provider;
+    const profile = this.profile;
     const fallbackModel = String(params.model || "");
 
     async function* wrapped(): AsyncGenerator<ChatCompletionChunk, void, unknown> {
@@ -184,7 +202,7 @@ export class RecordingLLMClient implements LLMClient {
         }
       } finally {
         if (lastUsage) {
-          await recordFromResponse(provider, fallbackModel, lastUsage, lastModel);
+          await recordFromResponse(profile, fallbackModel, lastUsage, lastModel);
         }
       }
     }

@@ -27395,27 +27395,172 @@ in roughly a dozen TUI settings-persistence sites — stays out of scope for the
 out of scope for the count this entry pins tests against; it is now tracked as its own open
 unknown, row 9 of `docs/gateway-support-investigation.md`'s own table, rather than only named here.
 
+## 387. A ProviderProfile record now separates wire protocol from endpoint identity, and the twelve defaulting sites share one resolver
+
+**Bucket: Neither.** Completed work is recorded with no fix proposed, on item 386's own precedent.
+This is Option B step 3 of `docs/gateway-support-investigation.md`'s recommendation; steps 1 and 2
+landed in `aa0711f0` and step 3's prerequisite — a written baseline — landed in `368e01e7` as item
+386. That document's own step list is annotated with this status rather than left reading as
+undone.
+
+**What the record is.** `src/llm/providerProfile.ts` declares
+`{ id, protocol, baseUrl?, keyRef, adapterProvider, capabilities?, pricing? }` with built-in
+`anthropic` and `openai` profiles. `LLMProvider` keeps its type and changes meaning: it is the
+protocol selector, which is what `openaiAdapter.ts`'s third constructor parameter already treated
+it as. Nothing on disk changed and no key-store schema moved.
+
+**Why the resolver takes a fallback argument.** The twelve sites do not agree on a default — six
+resolve to `anthropic` and six to `openai` — so a resolver carrying one built-in default would have
+changed behaviour at six of them and broken item 386's pins. `resolveProfile` takes the fallback as
+a required argument and each site passes its own. The disagreement is preserved exactly and becomes
+visible at one grep instead of twelve scattered literals, which makes unifying it later a single
+deliberate decision rather than twelve silent ones. Sites 10 and 11 — the two whose `openai`
+fallback genuinely disagrees with the request path for the same empty context — are left disagreeing
+on purpose, with a comment at each saying so.
+
+**Twelve sites, three treatments.** Eight route through the resolver. Two are deleted outright:
+`recordingClient`'s `toProviderName` and `taskClassifier`'s pricing ternary existed only because
+`LLMProvider` and `ProviderName` were separate declarations of the same union, and the profile's
+own pricing reference replaces both. Two are deliberately untouched — `openaiAdapter`'s constructor
+default and `getModelName`'s parameter default are already the protocol selector and are inert in
+production, so rewiring them would be churn against two pinned tests. Forcing all twelve into one
+function shape would have been dishonest about what four of them are.
+
+**The one behaviour change.** A profile with no pricing table records cost as unknown rather than
+`$0`, via a `PricedUsd` union and a nullable `est_cost_usd`. Both built-in profiles price, so every
+recorded number is byte-identical today and the new branch is reachable only from a test that
+constructs a pricing-less profile. Four readers used to coerce with `|| 0`; each now excludes an
+unknown from its money total and surfaces a count beside it, because a total that silently absorbs
+an unknown is the same conflation the field exists to end. `getUsage` gained `unknownCostRecords`,
+`getRunCost` gained a sibling counter that both run-summary sites report, and the metrics dashboard
+counts per run.
+
+**What was NOT done, stated plainly.** The per-run meter is untouched: `TokenBudgetMeter`'s
+`provider as ProviderName` cast and `iterCostMeter`'s pricing call still work exactly as before, so
+three of the four `totalCost` call sites are routed and the fourth is not. Routing it would require
+`snapshot().costUsd` to become nullable, which is the containment boundary this pass was scoped to
+respect — the budget gate gets a warning instead. `AnthropicAdapter` still has no `baseUrl`, which
+the recommendation puts out of scope for every step. `capabilities` is declared and unpopulated.
+`config.ts`'s own two key ternaries are literally `keyRef.envVar` and `keyRef.keyStoreProvider`
+written by hand and are not rewired, with no test forcing them into sync. And because `LLMProvider`
+keeps its two values, `adapterProvider` can only be one of them, so a gateway profile still cannot
+turn the Responses branch off — that needs the widening Option A proposed.
+
+**Both warning helpers are wired but unreachable in production.** `resolveProfile` only ever returns
+a built-in, and both built-ins price, so neither the no-pricing warning nor the inert-budget-gate
+warning can fire today. They are unit-tested directly instead. This is stated because a reader who
+greps for the marker strings and finds no runtime occurrences should conclude the feature is
+dormant by construction, not broken.
+
+**Evidence quality is not uniform, and the difference matters.** The eleven implementation
+constraints recorded at the top of `providerProfile.ts` came from a nine-agent adversarial pass over
+the fifteen test files that pin provider resolution. That pass worked from static reading plus the
+existing suite, so most of what it produced is prediction. **Three constraints were confirmed by
+running a trial edit against the affected tests**, and the trials corrected the predictions twice:
+the import-leaf rule is real but narrower than stated — a second export from `factory.js` breaks the
+four files that mock it only when the export is actually accessed at runtime, since an unused
+binding is elided — and the config comparison rule broke five tests rather than the three predicted,
+so the estimate had undercounted. **The other eight are static predictions**, two of them
+unrunnable by construction because they concern paths a two-valued union makes unreachable. A rule
+carrying "confirmed" and a rule carrying "predicted" are not the same evidence, and the module
+records which is which per rule rather than presenting eleven findings as uniformly verified.
+
+**What the pins could not check.** Every one of the roughly 150 tests across those fifteen files
+validates mechanical fidelity — same strings, same numbers, same call arities — and none exercised
+the new semantic, which is why this pass added `providerProfile.test.ts` and a ledger-semantics
+suite rather than treating a green run as sufficient. Item 388 records a cost site the existing
+enumeration missed; item 389 records the observer-rule violation that makes full cost nullability a
+breaking change; item 390 records a test whose name asserts something it never establishes.
+
+## 388. Closed — `totalCost` has a fourth call site, and item 299's enumeration names three
+
+**Bucket: Closed** by the commit carrying this line. Item 299 tabulates three cost surfaces and
+three laundering points — `recordingClient`'s if-return coercion, `TokenBudgetMeter`'s explicit
+cast, and `taskClassifier`'s inline ternary. A fourth `totalCost` call exists and is in none of
+them: `executionPlan.ts`, in the block that reports plan-generation cost through `onCostUsd`.
+
+**Why it escaped the enumeration.** The other three each perform a visible coercion, which is what
+item 299 keyed on. This one performs none — it passed `client.provider`, an `LLMProvider`, straight
+into a `ProviderName` parameter. It type-checked only because the two unions are structurally
+identical, so there was nothing for a search for casts, ternaries or if-returns to find. That also
+makes it the one site of the four that would have failed the build rather than mis-priced silently
+had either union changed, which is a small mercy and not a defense.
+
+Its value reaches `dispatch.ts`'s plan-generation accumulator, and an exact-equality test pins it
+against the ledger row written by a different `totalCost` call, so the two had to move together.
+Both now price through the profile. Item 299 keeps its own bucket and its own remedy; this entry
+corrects the count its table implies, and nothing else about it.
+
+## 389. `costUsd === 0` is used as a semantic proxy for "the run never started"
+
+**Bucket: Actionable now.** The remedy is specifiable at one named site, and this entry does not
+apply it.
+
+`agentLoop.ts` suppresses the `[zone-graceful-degrade]` marker when
+`costUsd === 0 && terminationReason === "daily_usd_cap_exceeded"`. The comment states the intent
+exactly: a pre-check rejection happens before any spend, and emitting a degradation marker for a
+run that never began would misreport it. The mechanism is the problem, not the intent — zero cost is
+being read as "no work happened", which is an inference from a number that has at least three other
+ways of being zero. A genuinely free call is one. A model absent from the pricing table is another,
+which item 299 already covers. A profile that cannot price at all is a third, introduced by item
+387. Under any of them a real, expensive run that later hits the daily cap is suppressed from its
+own marker.
+
+Two pinned tests key on this proxy, which is what makes it load-bearing rather than incidental, and
+what makes end-to-end cost nullability a breaking change rather than a widening: item 387's
+containment decision exists partly because of this site.
+
+**The fix, specified.** The suppression wants to ask whether the run performed any work, so it
+should read something that answers that — `iterCount === 0`, or the absence of a terminal LLM call
+— rather than inferring it from a dollar figure. Both tests would need their own update in the same
+commit, since they assert the proxy rather than the intent.
+
+## 390. Closed — a test named for the precedence it never establishes
+
+**Bucket: Closed** by the commit carrying this line, which supplies the missing coverage without
+editing the misleading case.
+
+`taskClassifier.test.ts` carries a case named "explicit provider param wins over request context".
+It passes an explicit provider and asserts the resulting model. It never establishes a request
+context — the file contains no `withRequestContext`, no `zoneRequestContext`, and no
+`getRequestContext` anywhere — and its own comment says "Even if ctx.provider were openai", which
+is a hypothetical rather than a fixture. So the assertion holds identically whether the context rung
+of the precedence exists, is inverted, or was deleted, and the test's name asserts a property its
+body cannot observe.
+
+This is the observer-rule shape this document already has a standing rule about, and its cost is
+specific: anyone grepping for context-precedence coverage finds this name and stops looking. The
+same gap existed at `agentLoop.recordRunSummary.test.ts`, where nothing wrapped a call in an outer
+context either, so a resolver invoked with its context argument dropped entirely would have passed
+every case in both files.
+
+Closed by adding real sibling cases at both sites — each establishing an actual request context and
+asserting both the context-wins and explicit-outranks-context directions — rather than by rewriting
+the vacuous case. The misleading name stays, deliberately: editing it would remove the evidence of
+what a vacuous test looks like while the sibling beside it now carries the real assertion. A future
+pass may retire it; this one records why it survives.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 386 to find out which ones still need something. No index of
+reader the trouble of reading all 390 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (171): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42,
+**Closed** (173): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42,
 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113,
 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167,
 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228,
 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260,
 262, 264, 265, 266, 267, 268, 269, 270, 271, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285,
 286, 288, 289, 290, 301, 302, 304, 308, 309, 310, 327, 336, 337, 343, 344, 345, 348, 351,
-320, 352, 353, 364, 370, 371, 372, 377, 378, 379, 384, 385
+320, 352, 353, 364, 370, 371, 372, 377, 378, 379, 384, 385, 388, 390
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (18): 287, 291, 292, 293, 296, 299, 313, 328, 329, 334, 347, 358, 359, 365, 368, 373, 375, 383
+first (19): 287, 291, 292, 293, 296, 299, 313, 328, 329, 334, 347, 358, 359, 365, 368, 373, 375, 383, 389
 
 Six, down from seven, and the movement is the ledger's own signal about whether anything is specified
 and waiting, in both directions. The diagnosis pass into `find_references` left it at 7 (287 plus six
@@ -27451,14 +27596,14 @@ eleven to twelve.
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (17): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250, 263, 318, 376
 
-**Neither — a structural fact recorded, with no fix proposed** (180): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
+**Neither — a structural fact recorded, with no fix proposed** (181): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
 74, 76, 77, 78, 79, 80, 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109,
 112, 114, 115, 118, 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152,
 154, 155, 158, 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199,
 200, 201, 202, 205, 206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230,
 232, 243, 244, 247, 248, 249, 254, 256, 261, 272, 294, 295, 297, 298, 300, 303, 305, 306, 307, 311, 312,
 314, 315, 316, 317, 319, 321, 322, 323, 324, 325, 326, 330, 331, 332, 333, 335,
-338, 339, 340, 341, 342, 346, 349, 350, 354, 355, 356, 357, 360, 361, 362, 363, 366, 367, 369, 374, 380, 381, 382, 386
+338, 339, 340, 341, 342, 346, 349, 350, 354, 355, 356, 357, 360, 361, 362, 363, 366, 367, 369, 374, 380, 381, 382, 386, 387
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.

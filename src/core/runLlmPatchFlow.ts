@@ -118,7 +118,7 @@ import {
   type PipelineConfig,
 } from "../llm/archetypeDispatcher.js";
 import { type CapabilityFilter } from "../tools/capabilities.js";
-import { getRunCost } from "../usage/usageTracker.js";
+import { getRunCost, getRunCostUnknownCount } from "../usage/usageTracker.js";
 import {
   generateFinalRunReport,
   type FinalRunReport,
@@ -516,6 +516,8 @@ function assembleRunSummary(input: {
   verificationCommands?: VerificationCommand[] | null;
   decisionMode?: "safe_to_apply" | "preview_only" | "blocked" | "chat" | "rolled_back" | null;
   totalUsd?: number | null;
+  /** Records excluded from totalUsd because their profile could not price them. */
+  unknownCostRecords?: number | null;
   iterCost?: Pick<
     IterCostUpdatePayload,
     "iter_count" | "total_input_uncached" | "total_cache_read" | "total_cache_write"
@@ -558,6 +560,7 @@ function assembleRunSummary(input: {
     },
     cost: {
       totalUsd,
+      ...(input.unknownCostRecords ? { unknownCostRecords: input.unknownCostRecords } : {}),
       iterCount,
       cacheHitPct,
       avgIterUsd: iterCount > 0 ? totalUsd / iterCount : 0,
@@ -6428,6 +6431,7 @@ const initializeTodosFromPlan = (): void => {
         verificationCommands: agentVerificationCommands,
         decisionMode: agentDecisionMode,
         totalUsd: getRunCost(input.userId ?? "local-dev", runId),
+        unknownCostRecords: getRunCostUnknownCount(input.userId ?? "local-dev", runId),
         iterCost: latestIterCostUpdate,
       });
       emitStructuredProgress({
@@ -11243,6 +11247,7 @@ let decisionMode: "preview_only" | "safe_to_apply" | "blocked" =
     verificationCommands: runSummaryVerificationCommands,
     decisionMode,
     totalUsd: getRunCost(input.userId ?? "local-dev", input.runId ?? ""),
+    unknownCostRecords: getRunCostUnknownCount(input.userId ?? "local-dev", input.runId ?? ""),
     iterCost: latestIterCostUpdate,
   });
   emitStructuredProgress({

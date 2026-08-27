@@ -214,6 +214,33 @@ describe("loadCliConfig — unrecognized provider value warns (item 385)", () =>
   });
 });
 
+describe("loadCliConfig — the model/provider conflict branch, reached WITHOUT tripping unrecognized (item 387)", () => {
+  // The only pre-existing test that reaches this branch passes "openrouter", which trips the
+  // unrecognized warning on the way in — so a rewire in which the conflict warning fires only on
+  // the unrecognized path would still show two warnings and stay green. This case supplies a
+  // RECOGNIZED provider that genuinely disagrees with the model, which is the branch's real job.
+  it("a recognized provider conflicting with a known model warns exactly once and the model wins", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const cfg = loadCliConfig({ model: "gpt-4o", provider: "anthropic" }, {});
+    expect(cfg.provider).toBe("openai");
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[zone] provider "anthropic" conflicts with model "gpt-4o" (openai); using openai to match the selected model.'
+    );
+    warnSpy.mockRestore();
+  });
+
+  it("a recognized provider AGREEING with a known model warns not at all", () => {
+    // Guards the other direction: comparing resolved profiles by object identity rather than by
+    // provider makes this condition always-true and fires the warning on agreeing pairs.
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const cfg = loadCliConfig({ model: "gpt-4o", provider: "openai" }, {});
+    expect(cfg.provider).toBe("openai");
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+});
+
 describe("validateCliConfig", () => {
   it("throws when anthropic provider and no anthropicApiKey", () => {
     expect(() =>

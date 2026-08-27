@@ -4,9 +4,9 @@ import { AUX_CALL_MAX_OUTPUT_TOKENS } from "./models.js";
 import { createLLMClient, PlanRefusalError } from "./factory.js";
 import { getRequestContext } from "./openaiContext.js";
 import { extractUsage } from "./recordingClient.js";
+import { priceForProfile, profileForProvider } from "./providerProfile.js";
 import type { LLMProvider } from "./types.js";
 import { log } from "../utils/logger.js";
-import { totalCost } from "../usage/pricing.js";
 import { round4 } from "../usage/usageTracker.js";
 
 export type ExecutionPlan = {
@@ -553,15 +553,24 @@ ${input.forceSteps
     const usage = extractUsage(response.usage);
     if (usage) {
       const pricingModel = response.model || model;
-      const costUsd = round4(
-        totalCost(client.provider, pricingModel, {
+      // The fourth totalCost call site. Item 299 enumerates three cost-laundering points and
+      // misses this one, which passed `client.provider` (an LLMProvider) straight into a
+      // ProviderName parameter with no coercion at all — it type-checked only because the two
+      // unions are structurally identical today, so it would have started mis-pricing silently
+      // the moment either changed. Now priced through the profile like the others. See ledger 388.
+      const priced = priceForProfile(
+        profileForProvider(client.provider),
+        pricingModel,
+        {
           input_uncached: usage.input_uncached,
           cache_write: usage.cache_write,
           cache_read: usage.cache_read,
           output: usage.output,
-        })
+        }
       );
-      input.onCostUsd(costUsd);
+      // `onCostUsd` takes a number and feeds dispatch.ts's plan-generation accumulator; an
+      // unpriceable profile contributes nothing rather than a fabricated zero-that-looks-free.
+      if (priced.known) input.onCostUsd(round4(priced.usd));
     }
   }
 

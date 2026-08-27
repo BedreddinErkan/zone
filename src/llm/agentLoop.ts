@@ -3,6 +3,11 @@
   getModelName,
 } from "./openaiClient.js";
 import { createLLMClient } from "./factory.js";
+import {
+  providerOf,
+  resolveProfile,
+  warnBudgetGateInertOnce,
+} from "./providerProfile.js";
 import { getRequestContext, withRequestContext } from "./openaiContext.js";
 import { readProjectMemoryBlock } from "../memory/projectMemory.js";
 import { log, debugLog } from "../utils/logger.js";
@@ -2213,6 +2218,29 @@ function envelopeKeyForInput(input: AgentLoopInput): string {
   return runId || (input.sessionId ?? "");
 }
 
+/**
+ * The run's provider, resolved through the one resolver in `providerProfile.ts`.
+ *
+ * `fallback: "anthropic"` is this site's own historical default, passed explicitly. Both telemetry
+ * call sites (`recordRunSummary` and the `zone_llm_retry_started` handler) go through here rather
+ * than restating the precedence chain, which is what they did before — the comment at the
+ * recordRunSummary site already noted it was duplicating `factory.ts`'s precedence by hand.
+ *
+ * Deliberately NOT hoisted to a single per-run constant: the two sites read `getRequestContext()`
+ * from different stores — the summary site runs after `runAgentLoopScoped` has returned, the retry
+ * site runs inside its scope — so each must resolve at its own point to preserve today's answers.
+ * Returns the provider STRING, because every consumer of these fields is string-typed.
+ */
+function runProviderFor(input: AgentLoopInput): LLMProvider {
+  return providerOf(
+    resolveProfile({
+      explicit: input.provider,
+      context: getRequestContext()?.provider,
+      fallback: "anthropic",
+    })
+  );
+}
+
 export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResult> {
   const runStartTs = Date.now();
   const scopedContext: Parameters<typeof withRequestContext>[0] = {};
@@ -2247,7 +2275,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         // Same precedence factory.ts's own resolveProvider uses, so this sentinel always
         // agrees with whatever provider the run's own top-level client actually resolved to
         // (item 221 — a hardcoded "openai" literal sat here previously).
-        provider: input.provider ?? getRequestContext()?.provider ?? "anthropic",
+        provider: runProviderFor(input),
         // Time spent parked on a human is not latency. This figure persists to
         // ~/.zone/usage/*.jsonl under model "__run_summary__" and is read by
         // metricsAggregator, so a run parked for an hour would record an hour of
@@ -2852,6 +2880,22 @@ async function runAgentLoopScoped(input: AgentLoopInput, stats: LoopRunStats): P
         promotedAtIter: null,
       };
     }
+  }
+
+  // `--max-budget-usd` on a run whose profile cannot price is an inert gate: `snapshot().costUsd`
+  // never leaves zero, so the per-iteration check below can never fire and the run proceeds to its
+  // iteration ceiling under a flag whose only purpose is bounding it. Warned here, once, before the
+  // loop opens — not inside the per-iteration check, which would repeat it every turn. Separate
+  // from the profile-has-no-pricing warning because the consequence is different and worse.
+  if (!isSubagentLoop && typeof input.runUsdCap === "number" && input.runUsdCap > 0) {
+    warnBudgetGateInertOnce(
+      resolveProfile({
+        explicit: input.provider,
+        context: getRequestContext()?.provider,
+        fallback: "anthropic",
+      }),
+      input.runUsdCap
+    );
   }
 
   const toolCallLog: Array<{
@@ -3561,7 +3605,7 @@ Example:
       recordRunRetry({
         userId,
         runId: input.runId.trim(),
-        provider: input.provider ?? getRequestContext()?.provider ?? "anthropic",
+        provider: runProviderFor(input),
       }).catch(() => {});
     }
   };

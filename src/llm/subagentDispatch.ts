@@ -1,6 +1,7 @@
 import { log } from "../utils/logger.js";
 import { getRequestContext } from "./openaiContext.js";
 import { getModelForRole } from "./modelRouting.js";
+import { providerOf, resolveProfile } from "./providerProfile.js";
 import type { ToolResult } from "../tools/toolExecutor.js";
 import type {
   IterCostAccumulator,
@@ -121,7 +122,14 @@ export function logSubagentDispatched(
   const dispatchReason = extractDispatchReason(parsedArgs.description);
   const dispatchSubagentType =
     typeof parsedArgs.subagent_type === "string" ? parsedArgs.subagent_type : null;
-  const dispatchProvider = getRequestContext()?.provider ?? "openai";
+  // `fallback: "openai"` is THIS site's own historical default and is preserved deliberately. It
+  // disagrees with the request path's `"anthropic"` for the same empty context — one of the two
+  // genuine disagreements the investigation's §2.5 measured. Correcting it is a behaviour change
+  // that the characterization baseline (item 386) pins, so it is left alone and made visible here
+  // rather than quietly unified.
+  const dispatchProvider = providerOf(
+    resolveProfile({ context: getRequestContext()?.provider, fallback: "openai" })
+  );
   const dispatchWorkerModel =
     dispatchSubagentType === "worker"
       ? getModelForRole("worker", dispatchProvider)

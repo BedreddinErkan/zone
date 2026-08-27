@@ -3,6 +3,7 @@ import { withRequestContext } from "./openaiContext.js";
 
 const openaiCtorMock = vi.fn();
 const anthropicCtorMock = vi.fn();
+const recordingCtorMock = vi.fn();
 
 vi.mock("./openaiAdapter.js", () => ({
   OpenAIAdapter: class {
@@ -20,7 +21,10 @@ vi.mock("./anthropicAdapter.js", () => ({
 
 vi.mock("./recordingClient.js", () => ({
   RecordingLLMClient: class {
-    constructor(inner: unknown) { return inner; }
+    constructor(inner: unknown, profile?: unknown) {
+      recordingCtorMock(inner, profile);
+      return inner;
+    }
   },
 }));
 
@@ -30,6 +34,7 @@ describe("resolveProvider — 3-level precedence", () => {
     vi.resetModules();
     openaiCtorMock.mockClear();
     anthropicCtorMock.mockClear();
+    recordingCtorMock.mockClear();
     process.env.OPENAI_API_KEY = "sk-openai-test";
     process.env.ANTHROPIC_API_KEY = "sk-ant-test";
   });
@@ -108,4 +113,48 @@ describe("API key charset validation", () => {
     expect(() => createLLMClient({ provider: "anthropic" })).not.toThrow();
   });
 
+});
+
+/**
+ * Two tripwires this refactor newly makes load-bearing (item 387).
+ *
+ * Neither was covered before: `toHaveBeenCalledWith` appeared zero times in this file, so nothing
+ * pinned what actually reaches the adapter, and the RecordingLLMClient mock discarded its argument
+ * entirely, so deleting the wrap in factory.ts kept every test green while all usage and cost
+ * recording died. Under the profile refactor the wrapper is also where the pricing table arrives,
+ * which makes both gaps sharper than they were.
+ */
+describe("what actually reaches the adapter and the recorder (item 387)", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    openaiCtorMock.mockClear();
+    anthropicCtorMock.mockClear();
+    recordingCtorMock.mockClear();
+    process.env.OPENAI_API_KEY = "sk-openai-test";
+    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+  });
+
+  it("the openai profile constructs the adapter with (key, baseUrl, protocol selector)", async () => {
+    const { createLLMClient } = await import("./factory.js");
+    createLLMClient({ provider: "openai" });
+    // The third argument is the protocol selector — passing the wrong one here silently flips the
+    // Responses branch off for gpt-5 models, which no other test would notice.
+    expect(openaiCtorMock).toHaveBeenCalledWith("sk-openai-test", undefined, "openai");
+  });
+
+  it("the anthropic profile constructs its adapter with the key alone", async () => {
+    const { createLLMClient } = await import("./factory.js");
+    createLLMClient({ provider: "anthropic" });
+    expect(anthropicCtorMock).toHaveBeenCalledWith("sk-ant-test");
+  });
+
+  it("every client is wrapped in RecordingLLMClient, and the wrapper receives the run's profile", async () => {
+    const { createLLMClient } = await import("./factory.js");
+    createLLMClient({ provider: "openai" });
+    expect(recordingCtorMock).toHaveBeenCalledOnce();
+    const [, profile] = recordingCtorMock.mock.calls[0] as [unknown, { id?: string; pricing?: unknown }];
+    expect(profile?.id).toBe("openai");
+    // The pricing table now arrives through this wrapper — an unwrapped client records nothing.
+    expect(profile?.pricing).toEqual({ table: "openai" });
+  });
 });
