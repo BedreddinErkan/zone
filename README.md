@@ -99,12 +99,6 @@ Stop guessing what your coding agent costs. Every task shows its real cost, and 
 
 Real Zone runs: a small edit costs as little as **$0.02**; a full Astro site scaffold costs **$0.09**; a typical cached feature or refactor runs **$0.20–0.50**; large multi-file refactors top out around **$0.90**. At ~5 sessions/day and ~$0.30/session, that's roughly **$45/mo** in API spend.
 
-| Plan | Monthly |
-|------|---------|
-| Claude Pro + Zone | ~$65 |
-| Claude Max 5× | $100 |
-| Claude Max 20× | $200 |
-
 Anthropic rates (Jun 2026): **Sonnet 4.6** $3 / $15 per MTok · **Opus 4.8** $5 / $25 · cache-hit input **$0.30** (−90%). Prompt caching is on by default, so multi-iteration runs get *cheaper* per turn, not more expensive.
 
 > Consumer Claude plans don't include API access, and Claude Code under a plan is rate-limited. Zone is BYOK on the provider API — `/metrics` shows real history from your own runs.
