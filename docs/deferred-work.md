@@ -27540,24 +27540,84 @@ the vacuous case. The misleading name stays, deliberately: editing it would remo
 what a vacuous test looks like while the sibling beside it now carries the real assertion. A future
 pass may retire it; this one records why it survives.
 
+## 391. Closed — markerAttribution's drift check was stale by the exact mechanism its own header already warned about, and a comment alone did not prevent it recurring
+
+**Bucket: Closed** by the commit carrying this line. CI failed on the commit that introduced item
+387 while the local suite was green at that same commit — `scripts/markerAttribution.test.ts`
+expected 415 marker names and found 417.
+
+**The mechanism.** `readTrackedFiles()` (`scripts/markerAttribution.ts`) scans `git ls-files` — the
+index, not the working directory. The ProviderProfile pass ran its full verification suite before
+`git add`-ing the two new files it created, so the two markers those files define,
+`[zone-profile-no-pricing]` and `[zone-budget-gate-inert]`, were invisible to the scan: the tracked
+tree genuinely still had 415 marker names at that moment, and the test passed for a reason that had
+nothing to do with what the commit about to be staged actually contained. CI, checking out the
+pushed commit fresh, correctly saw 417 and failed. This is not an environment difference; the same
+failure reproduces locally the instant the tree is put back in the state CI saw it in. It is also
+not novel: `scripts/markerAttribution.ts`'s own header comment already records this exact class from
+a prior pass, at 406→414 — "a test that passed before the commit and failed immediately after it,
+for a reason that had nothing to do with the tree it claims to measure." A comment recording the
+first occurrence did not prevent the second.
+
+**The count, confirmed rather than assumed.** `git diff` on the added lines between the two commits
+turns up five marker-shaped strings. Three were already in the tree before this pass —
+`[zone-graceful-degrade]`, `[zone-pricing]`, and `[zone-task-classifier-failure]` — and this pass
+only added new mentions of them in comments and ledger prose, which does not change a distinct-name
+count. The other two, `[zone-profile-no-pricing]` and `[zone-budget-gate-inert]`, are genuinely new;
+each was confirmed via the tool's own per-marker query to have exactly one emitter
+(`src/llm/providerProfile.ts`), landing in `one`: 352→354. Hazards moved 24→26, not unchanged — the
+two figures both moving by two is coincidence, not a rule, and the hazard delta was checked
+separately by diffing the full hazard list rather than inferred from the marker-count delta. Both
+new hazard rows are `src/llm/providerProfile.ts`'s own doc-comment prose, citing `[zone-pricing]`
+and `[zone-task-classifier-failure]` as illustrative examples of an unrelated point — a source file
+mentioning a marker it does not itself emit is exactly what `hazards()` is built to flag, and it
+flagged real prose correctly.
+
+**The fix is structural, not another comment.** `scripts/markerAttribution.ts` gains
+`readWorktreeFiles()` — every currently-tracked path plus every untracked-but-not-gitignored path,
+all read from disk — and `driftGuardOk()`, which compares the tracked-only summary against the
+full-worktree summary and reports exactly where they disagree. A new test in
+`markerAttribution.test.ts`, placed to run before the drift-check assertion, fails loudly whenever
+the two disagree, naming both summaries and pointing at `git status --porcelain`. Proven both
+directions before landing: passes on a clean tree, and — checked against a genuine untracked file
+carrying a new marker, not a hypothetical — fails with the correct diagnosis, then passes again once
+the file was removed. On a clean tree or a fully-staged one the two scans agree by construction and
+the guard is silent; a routine ledger edit that only adds new mentions of already-counted markers
+(as most passes through this document do) does not move either summary and does not trip it, which
+is why the check is a structural comparison and not a bare "does an uncommitted file contain
+`[zone-`" test — that shape would have fired on nearly every pass through this document.
+
+**The same pattern, a different corpus.** `docs/deferred-work.md`'s own four guards —
+`deferredWorkSnapshot.test.ts`, `deferredWorkAnaphorSweep.test.ts`, `deferredWorkPositionalSweep.test.ts`,
+`deferredWorkSpatialReferenceLint.test.ts` — lock an exact count against this file's own text, read
+live off disk each run (items 36, 126, and the 257/302/303 lineage). `markerAttribution.test.ts`'s
+drift check is the same shape applied to a different corpus: the git-tracked source tree via
+`git ls-files`, rather than one file's text via `fs.readFileSync`. No prior entry named it as a
+member of that class. A future pass that adds, renames, or removes a `[zone-*]`-shaped string —
+including a new mention of an existing one inside a source-file comment — should include this test
+in its own verification sequence alongside those four, in the same step, for the same reason: an
+absolute that only a deliberate pass updates correctly is exactly the kind of number this document's
+own discipline exists to keep honest, and now has a second, differently-shaped instrument checking
+it rather than a single comment asking a future author to remember.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 390 to find out which ones still need something. No index of
+reader the trouble of reading all 391 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (173): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42,
+**Closed** (174): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42,
 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113,
 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167,
 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228,
 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260,
 262, 264, 265, 266, 267, 268, 269, 270, 271, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285,
 286, 288, 289, 290, 301, 302, 304, 308, 309, 310, 327, 336, 337, 343, 344, 345, 348, 351,
-320, 352, 353, 364, 370, 371, 372, 377, 378, 379, 384, 385, 388, 390
+320, 352, 353, 364, 370, 371, 372, 377, 378, 379, 384, 385, 388, 390, 391
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (19): 287, 291, 292, 293, 296, 299, 313, 328, 329, 334, 347, 358, 359, 365, 368, 373, 375, 383, 389

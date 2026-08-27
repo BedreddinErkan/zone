@@ -11,6 +11,8 @@ import {
   scanTree,
   hazards,
   readTrackedFiles,
+  summarize,
+  driftGuardOk,
   type FileInput,
 } from "./markerAttribution.js";
 
@@ -317,6 +319,67 @@ describe("self-exclusion — the tool does not inventory its own fixtures", () =
 });
 
 /**
+ * The structural fix for a recurring incident, not a repeat of the comment that already failed to
+ * prevent it once. `readTrackedFiles()` scans `git ls-files` — the INDEX, not the working tree —
+ * so a verification run that happens before `git add` sees a stale, pre-change picture and can
+ * report the drift-check below as passing for a reason unrelated to what the tree actually
+ * contains. This is documented in `markerAttribution.ts`'s own header (406->414) and it happened
+ * again anyway (415->417, docs/deferred-work.md item 391) — proof that a comment alone is not
+ * sufficient prevention, since updating the hardcoded numbers again would leave the exact same gap
+ * open for a third occurrence.
+ *
+ * This test closes it structurally: it compares the tracked-only scan against a full-worktree scan
+ * (tracked + untracked-but-not-gitignored, both read from disk) and fails LOUDLY, with a message
+ * naming the actual mechanism, whenever they disagree — which is exactly the condition under which
+ * the drift-check's hardcoded numbers cannot be trusted. On a clean tree, or a fully-staged one,
+ * the two scans agree and this passes silently. It intentionally runs BEFORE the drift check below,
+ * so a developer sees "your tree has an unstaged change that affects this scan" rather than a bare
+ * "expected 417 to be 415" that gives no hint the real problem is `git add`, not the constant.
+ */
+describe("working-tree hazard — the tracked scan must agree with what staging would produce (item 391)", () => {
+  it("driftGuardOk() passes on the actual working tree right now", () => {
+    const result = driftGuardOk();
+    if (!result.ok) {
+      throw new Error(
+        "markerAttribution's drift-check reads git's INDEX (git ls-files), not the working tree. " +
+          "The tracked-only scan and the full-worktree scan (tracked + untracked-but-not-gitignored) " +
+          "disagree, which means an untracked or unstaged-modified file would change this file's " +
+          "numbers once staged — the drift-check assertion below is unreliable until you `git add` " +
+          "(or revert) whatever changed. Run `git status --porcelain` to find it.\n" +
+          `  tracked:  size=${result.tracked.size} dist=${JSON.stringify(result.tracked.dist)} hazards=${result.tracked.hazardCount}\n` +
+          `  worktree: size=${result.worktree.size} dist=${JSON.stringify(result.worktree.dist)} hazards=${result.worktree.hazardCount}\n` +
+          "See docs/deferred-work.md item 391."
+      );
+    }
+    expect(result.ok).toBe(true);
+  });
+
+  it("fixture proof: an untracked file adding a new marker makes the guard disagree", () => {
+    // Proves the guard actually discriminates rather than passing unconditionally — built from
+    // scanTree/summarize directly (not driftGuardOk, which shells out to git against the real
+    // tree and cannot be pointed at a fixture) so this needs no real filesystem write.
+    const trackedOnly: FileInput[] = [
+      { path: "src/llm/existing.ts", text: `log("[zone-existing]", JSON.stringify({}));` },
+    ];
+    const plusUntracked: FileInput[] = [
+      ...trackedOnly,
+      { path: "src/llm/brandNew.ts", text: `log("[zone-brand-new]", JSON.stringify({}));` },
+    ];
+    const trackedSummary = summarize(scanTree(trackedOnly));
+    const worktreeSummary = summarize(scanTree(plusUntracked));
+    expect(trackedSummary).not.toEqual(worktreeSummary);
+    expect(worktreeSummary.size).toBe(trackedSummary.size + 1);
+  });
+
+  it("fixture proof: the guard agrees when nothing distinguishes tracked from worktree", () => {
+    const files: FileInput[] = [
+      { path: "src/llm/existing.ts", text: `log("[zone-existing]", JSON.stringify({}));` },
+    ];
+    expect(summarize(scanTree(files))).toEqual(summarize(scanTree(files)));
+  });
+});
+
+/**
  * Drift check against the live tree, asserting today's real figures rather than a cached copy —
  * matching tool-mention-defect-sweep.mjs's own convention. A future change to the tree that
  * shifts these numbers should make this test fail and prompt a review, not silently drift.
@@ -371,8 +434,31 @@ describe("drift check — today's figures against the real tree", () => {
     // `[zone-agent-tool-call]` is deliberately untouched at one emitter — the new record is a
     // separate channel with a separate name, so no count keyed on the debug marker sums two
     // populations with different gating.
+    //
+    // 415->417: the ProviderProfile pass (docs/deferred-work.md item 387) added two warn-once
+    // markers, `[zone-profile-no-pricing]` and `[zone-budget-gate-inert]`, both emitted from
+    // src/llm/providerProfile.ts alone — both land in `one`, so `one` moves 352->354. `zero` and
+    // `several` are unchanged.
+    //
+    // Hazards moved 24->26, NOT unchanged — the size of the two changes happening to match is
+    // coincidence, not a reason to assume the hazard count tracks it. Both new rows are
+    // src/llm/providerProfile.ts, from its own doc-comment prose citing two PRE-EXISTING markers
+    // as illustrative examples: `[zone-pricing]` (real emitter usage/pricing.ts) and
+    // `[zone-task-classifier-failure]` (real emitter src/llm/taskClassifier.ts). Legitimate prose,
+    // correctly flagged — providerProfile.ts is a source file that mentions but does not emit
+    // either. Confirmed no third hazard: the other pre-existing marker gaining a new mention in
+    // this pass, `[zone-graceful-degrade]`, gained it only in docs/deferred-work.md, a "doc" file
+    // hazards() does not scan.
+    //
+    // This exact count was ALSO the second occurrence of the incident this file's own header
+    // already documented once (406->414): the verification suite ran before `git add`, so
+    // readTrackedFiles() could not see the two new files yet and this test passed locally at 415
+    // for a reason unrelated to the tree it claims to measure, then failed in CI against the
+    // pushed commit. The "working-tree hazard" describe block above this one is the structural fix
+    // for that recurrence — this comment records the numbers, that block is what actually prevents
+    // a third one. See docs/deferred-work.md item 391.
     const result = scanTree(readTrackedFiles());
-    expect(result.size).toBe(415);
+    expect(result.size).toBe(417);
 
     const dist = { zero: 0, one: 0, several: 0 };
     for (const attr of result.values()) {
@@ -381,8 +467,8 @@ describe("drift check — today's figures against the real tree", () => {
       else if (c === 1) dist.one++;
       else dist.several++;
     }
-    expect(dist).toEqual({ zero: 43, one: 352, several: 20 });
-    expect(hazards(result)).toHaveLength(24);
+    expect(dist).toEqual({ zero: 43, one: 354, several: 20 });
+    expect(hazards(result)).toHaveLength(26);
   });
 
   /**

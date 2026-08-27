@@ -244,6 +244,77 @@ export function readTrackedFiles(): FileInput[] {
   return files;
 }
 
+/**
+ * Every file `readTrackedFiles()` would see AFTER `git add -A` — every currently tracked path,
+ * PLUS every untracked-but-not-gitignored path, all read from disk. `--exclude-standard` matters:
+ * without it this would pull in `dist/` (gitignored, full of compiled marker literals) on any
+ * machine that has run a build.
+ *
+ * This exists to answer one question: does the tracked-only scan `readTrackedFiles()` performs
+ * currently agree with what the tree would scan as once staged? A "yes" from `driftGuardOk` below
+ * is what makes the drift-check assertion trustworthy; this function alone does not check anything.
+ */
+export function readWorktreeFiles(): FileInput[] {
+  const trackedRaw = execFileSync("git", ["ls-files", "-z"], { cwd: REPO_ROOT, encoding: "utf8" });
+  const untrackedRaw = execFileSync(
+    "git",
+    ["ls-files", "--others", "--exclude-standard", "-z"],
+    { cwd: REPO_ROOT, encoding: "utf8" }
+  );
+  const paths = [...trackedRaw.split("\0"), ...untrackedRaw.split("\0")].filter(Boolean);
+  const files: FileInput[] = [];
+  for (const p of paths) {
+    if (SELF_EXCLUDED_PATHS.includes(p)) continue;
+    let text: string;
+    try {
+      text = fs.readFileSync(path.join(REPO_ROOT, p), "utf8");
+    } catch {
+      continue;
+    }
+    if (text.includes("[zone-")) files.push({ path: p, text });
+  }
+  return files;
+}
+
+export interface DriftSummary {
+  size: number;
+  dist: { zero: number; one: number; several: number };
+  hazardCount: number;
+}
+
+export function summarize(result: Map<string, MarkerAttribution>): DriftSummary {
+  const dist = { zero: 0, one: 0, several: 0 };
+  for (const attr of result.values()) {
+    const c = attr.emittedIn.length;
+    if (c === 0) dist.zero++;
+    else if (c === 1) dist.one++;
+    else dist.several++;
+  }
+  return { size: result.size, dist, hazardCount: hazards(result).length };
+}
+
+/**
+ * The structural fix for the recurring "passed locally, failed in CI" incident (406->414, then
+ * 415->417 — docs/deferred-work.md item 391). A code comment recording the first occurrence did
+ * not prevent the second, so this checks it instead: compares the tracked-only summary (what the
+ * drift-check below asserts against) with the full-worktree summary (what the SAME assertion would
+ * see after `git add -A`). They agree on a clean tree and on a fully-staged one; they disagree
+ * exactly when an untracked or unstaged-modified file would change the count, the distribution, or
+ * the hazard list once staged — which is precisely the condition under which the drift-check's
+ * hardcoded numbers cannot be trusted, whichever way they currently point.
+ */
+export function driftGuardOk(): { ok: true } | { ok: false; tracked: DriftSummary; worktree: DriftSummary } {
+  const tracked = summarize(scanTree(readTrackedFiles()));
+  const worktree = summarize(scanTree(readWorktreeFiles()));
+  const ok =
+    tracked.size === worktree.size &&
+    tracked.hazardCount === worktree.hazardCount &&
+    tracked.dist.zero === worktree.dist.zero &&
+    tracked.dist.one === worktree.dist.one &&
+    tracked.dist.several === worktree.dist.several;
+  return ok ? { ok: true } : { ok: false, tracked, worktree };
+}
+
 export function main(markerArg?: string): void {
   const files = readTrackedFiles();
   const result = scanTree(files);
