@@ -385,7 +385,7 @@ describe("working-tree hazard — the tracked scan must agree with what staging 
  * shifts these numbers should make this test fail and prompt a review, not silently drift.
  */
 describe("drift check — today's figures against the real tree", () => {
-  it("417 marker names; emitter-count distribution zero=43 one=354 several=20; 26 hazards", () => {
+  it("418 marker names; emitter-count distribution zero=43 one=355 several=20; 26 hazards", () => {
     // Re-derived via this file's own scanTree/hazards, not hand-added to the prior 410/349 —
     // the repository-tree write guard (ledger item 236) landed one new marker,
     // `[zone-repo-guard]`, so the total moved 410->411. It lands in `several`, not `one`:
@@ -457,8 +457,11 @@ describe("drift check — today's figures against the real tree", () => {
     // pushed commit. The "working-tree hazard" describe block above this one is the structural fix
     // for that recurrence — this comment records the numbers, that block is what actually prevents
     // a third one. See docs/deferred-work.md item 391.
+    // 417 -> 418, one=354 -> 355: [zone-profile-partial-pricing] (providerProfile.ts), added by
+    // ledger item 399 so a gateway priced with SKIPPED cache buckets says its reported cost is a
+    // floor rather than a total. One marker, one emitter, no new hazard row.
     const result = scanTree(readTrackedFiles());
-    expect(result.size).toBe(417);
+    expect(result.size).toBe(418);
 
     const dist = { zero: 0, one: 0, several: 0 };
     for (const attr of result.values()) {
@@ -467,7 +470,7 @@ describe("drift check — today's figures against the real tree", () => {
       else if (c === 1) dist.one++;
       else dist.several++;
     }
-    expect(dist).toEqual({ zero: 43, one: 354, several: 20 });
+    expect(dist).toEqual({ zero: 43, one: 355, several: 20 });
     expect(hazards(result)).toHaveLength(26);
   });
 

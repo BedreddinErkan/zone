@@ -11,7 +11,7 @@ import {
   warnBudgetGateInertOnce,
   _resetProviderProfileWarningsForTest,
   type ProviderProfile,
-} from "./providerProfile.js";
+  warnProfilePartialPricingOnce,} from "./providerProfile.js";
 import { totalCost } from "../usage/pricing.js";
 
 /**
@@ -317,5 +317,56 @@ describe("priceForProfile — inline rates are consulted before the named table 
     const priced = priceForProfile(p, "hub/unlisted", { ...ZERO_CACHE });
     expect(priced.known).toBe(false);
     expect(priced).not.toHaveProperty("usd");
+  });
+});
+
+describe("warnProfilePartialPricingOnce — a skipped zero is not a declared zero (item 399)", () => {
+  const PARTIAL = {
+    id: "lab-partial",
+    protocol: "openai-chat" as const,
+    adapterProvider: "openai" as const,
+    keyRef: { envVar: "ZONE_GATEWAY_KEY_LAB", keyExample: "x" },
+    pricing: {
+      rates: { m: { input: 1, output: 2, cache_read: 0, cache_write: 0 } },
+      cacheUnpricedModels: ["m"],
+    },
+  };
+
+  beforeEach(() => { _resetProviderProfileWarningsForTest(); });
+
+  it("names the models and says the zero is an omission, not a statement about the endpoint", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    warnProfilePartialPricingOnce(PARTIAL);
+    const line = String(warn.mock.calls[0]?.[0] ?? "");
+    expect(line).toContain("[zone-profile-partial-pricing]");
+    expect(line).toContain("lab-partial");
+    expect(line).toContain("m");
+    expect(line).toMatch(/SKIPPED/);
+    expect(line).toMatch(/floor, not a total/);
+    warn.mockRestore();
+  });
+
+  it("fires once per profile", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    warnProfilePartialPricingOnce(PARTIAL);
+    warnProfilePartialPricingOnce(PARTIAL);
+    expect(warn.mock.calls.filter(c => String(c[0]).includes("partial-pricing"))).toHaveLength(1);
+    warn.mockRestore();
+  });
+
+  it("stays silent when every bucket was declared — including declared zeros", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { cacheUnpricedModels: _drop, ...rates } = PARTIAL.pricing;
+    warnProfilePartialPricingOnce({ ...PARTIAL, pricing: rates });
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("stays silent for both built-ins", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    warnProfilePartialPricingOnce(ANTHROPIC_PROFILE);
+    warnProfilePartialPricingOnce(OPENAI_PROFILE);
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
   });
 });

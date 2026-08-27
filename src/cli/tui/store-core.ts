@@ -258,13 +258,32 @@ export type StoreState = {
   keysSelectedIndex: number;
   /** `input-profile-id` and `input-base-url` are the gateway flow's two extra steps; the vendor
    *  flow still goes `select-provider` -> `input` in one hop. */
-  keysEditMode: "view" | "select-provider" | "input-profile-id" | "input-base-url" | "input" | "confirm-delete";
+  keysEditMode:
+    | "view"
+    | "select-provider"
+    | "input-profile-id"
+    | "input-base-url"
+    | "input"
+    | "confirm-delete"
+    // The optional pricing sub-flow. Reached after a gateway key saves, or via P on a priced-able
+    // row — never inserted into the id -> url -> key chain, which stays exactly three steps.
+    | "price-model-id"
+    | "price-input"
+    | "price-output"
+    | "price-cache-read"
+    | "price-cache-write";
   keysEditInput: string;
   keysEditProvider: ApiKeyProvider | null;
   /** Gateway draft, carried across the three input steps. Empty for a vendor key, which is what
    *  `setDiskKey` keys on to decide whether to write the gateway fields at all. */
   keysDraftProfileId: string;
   keysDraftBaseUrl: string;
+  /** The row the pricing sub-flow is editing, and the prices collected so far. `keysPriceDraft`
+   *  omits a cache bucket the user skipped, which is what makes skipped distinguishable from a
+   *  typed zero all the way to disk. */
+  keysPriceProvider: string;
+  keysPriceModelId: string;
+  keysPriceDraft: { input?: number; output?: number; cache_read?: number; cache_write?: number };
   sessionsList: SessionMeta[];
   sessionsSelectedIndex: number;
   transcriptGeneration: number;
@@ -365,6 +384,9 @@ export function buildInitialState(initialValues?: {
     keysEditProvider: null,
     keysDraftProfileId: "",
     keysDraftBaseUrl: "",
+    keysPriceProvider: "",
+    keysPriceModelId: "",
+    keysPriceDraft: {},
     sessionsList: [],
     sessionsSelectedIndex: 0,
     transcriptGeneration: 0,
@@ -431,6 +453,11 @@ export type StoreAction =
   | { type: "KEYS_GATEWAY_START" }
   | { type: "KEYS_GATEWAY_ID_SUBMIT" }
   | { type: "KEYS_GATEWAY_URL_SUBMIT" }
+  | { type: "KEYS_PRICE_START"; provider: string }
+  | { type: "KEYS_PRICE_MODEL_SUBMIT" }
+  | { type: "KEYS_PRICE_NUMBER_SUBMIT"; field: "input" | "output" | "cache_read" | "cache_write"; value: number }
+  | { type: "KEYS_PRICE_SKIP"; field: "cache_read" | "cache_write" }
+  | { type: "KEYS_PRICE_CANCEL" }
   | { type: "KEYS_START_DELETE" }
   | { type: "KEYS_DELETE_CANCELED" }
   | { type: "SESSIONS_OPEN"; list: SessionMeta[] }
@@ -906,7 +933,7 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
     }
 
     case "KEYS_OPEN":
-      return { ...state, modalView: "keys", keysList: action.list, keysSelectedIndex: 0, keysEditMode: "view", keysEditInput: "", keysEditProvider: null, keysDraftProfileId: "", keysDraftBaseUrl: "" };
+      return { ...state, modalView: "keys", keysList: action.list, keysSelectedIndex: 0, keysEditMode: "view", keysEditInput: "", keysEditProvider: null, keysDraftProfileId: "", keysDraftBaseUrl: "", keysPriceProvider: "", keysPriceModelId: "", keysPriceDraft: {} };
 
     case "KEYS_CLOSE":
       return { ...state, modalView: "none" };
@@ -921,7 +948,7 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
     }
 
     case "KEYS_START_ADD":
-      return { ...state, keysEditMode: "select-provider", keysEditInput: "", keysEditProvider: null, keysDraftProfileId: "", keysDraftBaseUrl: "" };
+      return { ...state, keysEditMode: "select-provider", keysEditInput: "", keysEditProvider: null, keysDraftProfileId: "", keysDraftBaseUrl: "", keysPriceProvider: "", keysPriceModelId: "", keysPriceDraft: {} };
 
     case "KEYS_START_EDIT":
       return { ...state, keysEditMode: "input", keysEditProvider: action.provider, keysEditInput: "" };
@@ -936,12 +963,12 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
       return { ...state, keysEditInput: state.keysEditInput.slice(0, -1) };
 
     case "KEYS_INPUT_CANCEL":
-      return { ...state, keysEditMode: "view", keysEditInput: "", keysEditProvider: null, keysDraftProfileId: "", keysDraftBaseUrl: "" };
+      return { ...state, keysEditMode: "view", keysEditInput: "", keysEditProvider: null, keysDraftProfileId: "", keysDraftBaseUrl: "", keysPriceProvider: "", keysPriceModelId: "", keysPriceDraft: {} };
 
     // The gateway flow's three steps all reuse KEYS_INPUT_CHAR/BACKSPACE for the buffer; these
     // three actions only move the buffer into a draft field and advance the mode.
     case "KEYS_GATEWAY_START":
-      return { ...state, keysEditMode: "input-profile-id", keysEditInput: "", keysEditProvider: null, keysDraftProfileId: "", keysDraftBaseUrl: "" };
+      return { ...state, keysEditMode: "input-profile-id", keysEditInput: "", keysEditProvider: null, keysDraftProfileId: "", keysDraftBaseUrl: "", keysPriceProvider: "", keysPriceModelId: "", keysPriceDraft: {} };
 
     case "KEYS_GATEWAY_ID_SUBMIT": {
       const id = state.keysEditInput.trim();
@@ -956,6 +983,36 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
       if (!url) return state;
       return { ...state, keysDraftBaseUrl: url, keysEditMode: "input", keysEditProvider: state.keysDraftProfileId, keysEditInput: "" };
     }
+
+    // ── The optional pricing sub-flow ──────────────────────────────────────────────────────────
+    case "KEYS_PRICE_START":
+      return { ...state, keysEditMode: "price-model-id", keysEditInput: "", keysPriceProvider: action.provider, keysPriceModelId: "", keysPriceDraft: {} };
+
+    case "KEYS_PRICE_MODEL_SUBMIT": {
+      const id = state.keysEditInput.trim();
+      if (!id) return state;
+      return { ...state, keysPriceModelId: id, keysEditMode: "price-input", keysEditInput: "" };
+    }
+
+    case "KEYS_PRICE_NUMBER_SUBMIT": {
+      const next = { ...state.keysPriceDraft, [action.field]: action.value };
+      const mode =
+        action.field === "input" ? "price-output" as const
+        : action.field === "output" ? "price-cache-read" as const
+        : action.field === "cache_read" ? "price-cache-write" as const
+        : "view" as const;
+      return { ...state, keysPriceDraft: next, keysEditMode: mode, keysEditInput: "" };
+    }
+
+    // Skipping LEAVES THE FIELD ABSENT rather than writing a zero — the absence is the record that
+    // the user never declared it, which a stored 0 could not distinguish from a declared 0.
+    case "KEYS_PRICE_SKIP": {
+      const mode = action.field === "cache_read" ? "price-cache-write" as const : "view" as const;
+      return { ...state, keysEditMode: mode, keysEditInput: "" };
+    }
+
+    case "KEYS_PRICE_CANCEL":
+      return { ...state, keysEditMode: "view", keysEditInput: "", keysPriceProvider: "", keysPriceModelId: "", keysPriceDraft: {} };
 
     case "KEYS_START_DELETE": {
       const entry = state.keysList[state.keysSelectedIndex];

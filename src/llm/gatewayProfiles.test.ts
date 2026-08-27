@@ -94,6 +94,46 @@ describe("gatewayProfiles — the record it produces", () => {
   });
 });
 
+describe("gatewayProfiles — declared pricing becomes the profile's inline table", () => {
+  const priced = (pricing: Record<string, { input: number; output: number; cache_read?: number; cache_write?: number }>) =>
+    gatewayProfilesFrom(store({ ...LAB, pricing }))[0]!;
+
+  it("builds ModelRates from the declared rates, so costFromRates can use them unchanged", () => {
+    const p = priced({ "openai/gpt-4o-mini": { input: 0.15, output: 0.6, cache_read: 0.075, cache_write: 0.1 } });
+    expect(p.pricing?.rates?.["openai/gpt-4o-mini"]).toEqual({
+      input: 0.15, output: 0.6, cache_read: 0.075, cache_write: 0.1,
+    });
+    // No named table: a gateway's models are not in any vendor table, and claiming one would
+    // price them against the wrong rates.
+    expect(p.pricing?.table).toBeUndefined();
+  });
+
+  it("prices actually resolve through priceForProfile", () => {
+    const p = priced({ m: { input: 1, output: 2, cache_read: 0, cache_write: 0 } });
+    const out = priceForProfile(p, "m", {
+      input_uncached: 1_000_000, cache_write: 0, cache_read: 0, output: 1_000_000,
+    });
+    expect(out.known).toBe(true);
+    expect(out.known && out.usd).toBeCloseTo(3, 10);
+  });
+
+  it("a skipped cache bucket becomes 0 AND is recorded in cacheUnpricedModels", () => {
+    const p = priced({ m: { input: 1, output: 2 } });
+    expect(p.pricing?.rates?.["m"]).toEqual({ input: 1, output: 2, cache_read: 0, cache_write: 0 });
+    // The zero alone cannot say whether it was chosen or skipped; this is what says so.
+    expect(p.pricing?.cacheUnpricedModels).toEqual(["m"]);
+  });
+
+  it("a fully declared row records NO skipped models, even when the declared rate is zero", () => {
+    const p = priced({ m: { input: 1, output: 2, cache_read: 0, cache_write: 0 } });
+    expect(p.pricing?.cacheUnpricedModels).toBeUndefined();
+  });
+
+  it("an unpriced row still has no pricing at all — declining to price is unchanged", () => {
+    expect(gatewayProfilesFrom(store(LAB))[0]!.pricing).toBeUndefined();
+  });
+});
+
 describe("readGatewayProfilesSync — reads the real store, fails closed", () => {
   function writeStore(contents: string): string {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "zone-gwprofiles-"));

@@ -2,7 +2,8 @@ import fs from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { DiskApiKey, DiskKeysFile } from "../api/diskKeys.js";
-import type { ProviderProfile, WireProtocol } from "./providerProfile.js";
+import type { PricingRef, ProviderProfile, WireProtocol } from "./providerProfile.js";
+import type { ModelRates } from "../usage/pricing.js";
 
 /**
  * Build `ProviderProfile`s from the BYOK key store — the step that makes a gateway profile
@@ -30,6 +31,41 @@ export function isGatewayRow(row: DiskApiKey): boolean {
 }
 
 /**
+ * Turn a row's declared prices into the profile's inline `pricing.rates` table.
+ *
+ * Returns `undefined` when the row declares nothing, so an unpriced gateway keeps `pricing`
+ * absent and every existing unpriceable behaviour with it.
+ *
+ * A skipped cache bucket becomes `0` here, because `ModelRates` requires all four and
+ * `costFromRates` multiplies each one. The fact that it was SKIPPED rather than declared-zero
+ * survives separately in `cacheUnpricedModels` — the arithmetic needs a number, the user needs to
+ * know which number they actually chose.
+ */
+function pricingFromRow(row: DiskApiKey): PricingRef | undefined {
+  const declared = row.pricing;
+  if (!declared) return undefined;
+  const modelIds = Object.keys(declared);
+  if (modelIds.length === 0) return undefined;
+
+  const rates: Record<string, ModelRates> = {};
+  const cacheUnpricedModels: string[] = [];
+  for (const id of modelIds) {
+    const e = declared[id]!;
+    if (e.cache_read === undefined || e.cache_write === undefined) cacheUnpricedModels.push(id);
+    rates[id] = {
+      input: e.input,
+      output: e.output,
+      cache_read: e.cache_read ?? 0,
+      cache_write: e.cache_write ?? 0,
+    };
+  }
+  return {
+    rates,
+    ...(cacheUnpricedModels.length > 0 ? { cacheUnpricedModels } : {}),
+  };
+}
+
+/**
  * The env var a gateway profile's key is looked up under when neither an explicit nor a
  * context-supplied key is available. `factory.ts`'s `resolveApiKeyForProfile` reads
  * `profile.keyRef.envVar` as its last rung, so a gateway needs a name there even though the normal
@@ -44,11 +80,13 @@ export function gatewayEnvVar(id: string): string {
 /**
  * One profile per gateway row. Pure — the caller supplies the store.
  *
- * `pricing` is deliberately left ABSENT rather than defaulted to a vendor table. Step 3 established
- * the rule and `priceForProfile` enforces it: a profile that cannot price records cost as UNKNOWN,
- * never as `0`. Guessing OpenAI's rates for an arbitrary proxy would produce a confident wrong
- * number, which is worse than an honest missing one, and `warnProfileCannotPriceOnce` says so once
- * per profile at the point of use.
+ * `pricing` is present ONLY when the user declared prices for this row, and is otherwise left
+ * ABSENT rather than defaulted to a vendor table. Step 3 established the rule and `priceForProfile`
+ * enforces it: a profile that cannot price records cost as UNKNOWN, never as `0`. Guessing OpenAI's
+ * rates for an arbitrary proxy would produce a confident wrong number, which is worse than an honest
+ * missing one, and `warnProfileCannotPriceOnce` says so once per profile at the point of use. That
+ * unpriced behaviour is unchanged by the pricing support below — declining to price still means
+ * cost unknown, gate inert, warning fired.
  *
  * `capabilities` is likewise left absent: this profile knows its endpoint but not its models'
  * context windows, so every capability lookup falls through to the global table and then to the
@@ -63,10 +101,14 @@ export function gatewayProfilesFrom(store: DiskKeysFile): ProviderProfile[] {
     // these two ids, so accepting such a row here would produce a profile that never resolves.
     if (id === "anthropic" || id === "openai") continue;
     const protocol: WireProtocol = row.protocol ?? "openai-chat";
+    const pricing = pricingFromRow(row);
     out.push({
       id,
       protocol,
       baseUrl: row.baseUrl,
+      // Spread rather than assigned, so an unpriced row has no `pricing` key at all — the shape
+      // `priceForProfile` and `warnProfileCannotPriceOnce` both key on.
+      ...(pricing ? { pricing } : {}),
       // The PROTOCOL SELECTOR, not the identity — the split this record exists to make. An
       // openai-chat proxy runs the OpenAI adapter and conversion modules regardless of which
       // vendor's models sit behind it.

@@ -6,6 +6,7 @@ import { RecordingLLMClient } from "./recordingClient.js";
 import {
   resolveProfile,
   warnProfileCannotPriceOnce,
+  warnProfilePartialPricingOnce,
   type ProviderProfile,
 } from "./providerProfile.js";
 
@@ -61,6 +62,9 @@ export function createLLMClient(options: LLMClientResolveOptions = {}): LLMClien
       },
     });
   warnProfileCannotPriceOnce(profile);
+  // The sibling case: a profile that CAN price, but only some buckets. Silent for both built-ins
+  // and for any gateway whose cache rates were entered rather than skipped.
+  warnProfilePartialPricingOnce(profile);
 
   const apiKey = resolveApiKeyForProfile(profile, options.apiKey, ctx?.userApiKey);
   const inner: LLMClient =

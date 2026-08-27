@@ -81,6 +81,37 @@ describe("diskKeys", () => {
     expect(store.keys[0]!.baseUrl).toBe("http://b/v1");
   });
 
+  // --- Declared pricing (step: the USD cap on a gateway) ---
+
+  it("a priced gateway row round-trips its rates", async () => {
+    await setDiskKey("lab", "sk-lab-key0000000000", {
+      baseUrl: "http://localhost:4000/v1",
+      pricing: { "openai/gpt-4o-mini": { input: 0.15, output: 0.6, cache_read: 0.075, cache_write: 0 } },
+    });
+    const [row] = (await loadDiskKeys()).keys;
+    expect(row!.pricing!["openai/gpt-4o-mini"]).toEqual({
+      input: 0.15, output: 0.6, cache_read: 0.075, cache_write: 0,
+    });
+  });
+
+  it("a SKIPPED cache bucket is absent on disk; a TYPED zero is present as 0", async () => {
+    // The whole point of the distinction: both price at $0, but only one of them is a statement
+    // about the endpoint. Absence is the record that the user never declared it.
+    await setDiskKey("lab", "sk-lab-key0000000000", {
+      baseUrl: "http://x/v1",
+      pricing: { "m": { input: 1, output: 2, cache_write: 0 } },
+    });
+    const entry = (await loadDiskKeys()).keys[0]!.pricing!["m"]!;
+    expect("cache_write" in entry).toBe(true);
+    expect(entry.cache_write).toBe(0);
+    expect("cache_read" in entry).toBe(false);
+  });
+
+  it("an empty pricing map is not written at all", async () => {
+    await setDiskKey("lab", "sk-lab-key0000000000", { baseUrl: "http://x/v1", pricing: {} });
+    expect((await loadDiskKeys()).keys[0]!.pricing).toBeUndefined();
+  });
+
   it("removeDiskKey removes the named provider", async () => {
     await setDiskKey("anthropic", "sk-ant-test123456789");
     await setDiskKey("openai", "sk-openai-test123456");

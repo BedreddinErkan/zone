@@ -1005,8 +1005,28 @@ An earlier reading of `/spend/logs` appeared to show the streaming calls missing
 the last three array elements from an unsorted response; sorted by `startTime`, the streaming calls
 were present with correct spend.
 
-### Consequence
+### Consequence — SUPERSEDED; the first sentence was true only of the shape this harness ran
 
-On a gateway, no usage reaches Zone and the streaming cost header is zero, so `totalCost` stays `0`
-and `--max-budget-usd` never fires. `recordingClient.ts:158–167` gates `include_usage` on
-`provider === "openai"`; that gate is protocol-shaped, not vendor-shaped.
+Originally recorded as: *"On a gateway, no usage reaches Zone and the streaming cost header is zero,
+so `totalCost` stays `0` and `--max-budget-usd` never fires. `recordingClient.ts:158–167` gates
+`include_usage` on `provider === "openai"`; that gate is protocol-shaped, not vendor-shaped."*
+
+**"No usage reaches Zone" no longer holds, and did not hold for the design that shipped.** The
+prescription in that last clause was applied: the gate now reads `profile.protocol === "openai-chat"`.
+And the harness measured Option A's shape — it cast `adapterProvider` to `"openai-compatible"`, which
+is not `"openai"`, so the gate closed. Option B shipped instead, where an openai-chat gateway's
+`adapterProvider` **is** `"openai"`; the gate was open even before it was made protocol-shaped.
+Item 396's live run proves usage arrives, by emitting `[zone-pricing] unknown model
+openai/openai/gpt-4o-mini, cost=0` — a line only reachable by `totalCost` being called on real usage.
+
+**The rest of the sentence was right, for a different reason.** `totalCost` did stay `0` and
+`--max-budget-usd` never fired — not because no usage arrived, but because no rate existed for a
+gateway's model id in any global table. Ledger item 399 closes that: a gateway profile can now carry
+user-declared per-model rates, and both USD gates price through the profile rather than through a
+provider string. Measured against this same proxy: cost records non-zero, and
+`--max-budget-usd 0.0001` fires with `spentUsd: 0.0003504`. **An UNPRICED gateway is unchanged** —
+cost unknown, gate inert, `[zone-budget-gate-inert]` fired — because a declared rate is the user's
+claim and nothing infers one.
+
+Reading cost from the gateway instead was measured and deliberately not built; ledger item 400
+records the header and `/spend/logs` figures and why one proxy measured once is not an architecture.

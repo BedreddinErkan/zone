@@ -1,4 +1,5 @@
 import { totalCost, type ProviderName } from "./pricing.js";
+import { priceForProfile, type ProviderProfile } from "../llm/providerProfile.js";
 import type { UsageRecord } from "./usageTracker.js";
 
 export interface IterUsageBreakdown {
@@ -86,6 +87,17 @@ export function buildIterCostUpdate(input: {
   iter: number;
   totalIter: number;
   provider: ProviderName;
+  /**
+   * The run's resolved provider profile, when it has one. Present => price through
+   * `priceForProfile`, which consults the profile's own inline rates BEFORE any global table and is
+   * the only way a gateway's declared prices reach this meter — and therefore the only way
+   * `--max-budget-usd` can compare against a number that moves on a gateway run.
+   *
+   * Absent => the exact `totalCost` call this meter has always made. providerProfile.ts's R4 names
+   * this site by name as one that should receive an already-resolved profile rather than a cast
+   * provider string; this is that.
+   */
+  profile?: ProviderProfile;
   model: string;
   current: IterUsageBreakdown;
   previous?: IterCostAccumulator;
@@ -105,7 +117,14 @@ export function buildIterCostUpdate(input: {
     output: cleanNumber(input.current.output),
     output_reasoning: cleanNumber(input.current.output_reasoning),
   };
-  const iterCost = totalCost(input.provider, input.model, current);
+  // An unpriceable profile yields `known: false`, and 0 is exactly what `totalCost` returns for the
+  // same situation today — so declining to declare prices leaves the gate inert, unchanged.
+  const priced = input.profile
+    ? priceForProfile(input.profile, input.model, current)
+    : undefined;
+  const iterCost = priced
+    ? (priced.known ? priced.usd : 0)
+    : totalCost(input.provider, input.model, current);
   const accumulator: IterCostAccumulator = {
     input_uncached: previous.input_uncached + current.input_uncached,
     cache_write: previous.cache_write + current.cache_write,

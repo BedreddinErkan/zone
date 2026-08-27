@@ -8,7 +8,7 @@ import type { LLMClient, LLMProvider, LLMRequestOptions } from "./types.js";
 import { getRequestContext } from "./openaiContext.js";
 import { recordExecution } from "../usage/usageTracker.js";
 import type { ProviderName } from "../usage/pricing.js";
-import { profileForProvider, type ProviderProfile } from "./providerProfile.js";
+import { priceForProfile, profileForProvider, type ProviderProfile } from "./providerProfile.js";
 
 interface UsageBreakdown {
   input_uncached: number;
@@ -111,6 +111,22 @@ async function recordFromResponse(
     const subagentId = ctx?.subagentId?.trim() || undefined;
     const subagentType = ctx?.subagentType;
     const parentRunId = ctx?.parentRunId?.trim() || undefined;
+    // Priced HERE, through the profile, rather than left to `recordExecution`'s global-table
+    // lookup: a gateway's rates live on the profile's own inline table, keyed by a model id no
+    // vendor table knows, so the lookup there would miss and bill $0.
+    //
+    // `unpriceable` now follows whether pricing actually ANSWERED, not merely whether a pricing
+    // block exists. That distinction is load-bearing: a profile carrying `rates` that do not cover
+    // THIS model used to fall through to the adapter's vendor table, miss, and record a confident
+    // `0` with no unpriceable flag — strictly worse than the honest `null` it replaced, because
+    // the daily cap sums a 0 as real spend and skips a null.
+    const model = responseModel || fallbackModel;
+    const priced = priceForProfile(profile, model, {
+      input_uncached: usage.input_uncached,
+      cache_write: usage.cache_write,
+      cache_read: usage.cache_read,
+      output: usage.output,
+    });
     // The unpriceable signal rides INSIDE the record. It is deliberately not a second positional
     // argument to recordExecution: two pinned tests assert that call with
     // `toHaveBeenCalledWith(expect.objectContaining(...))`, which compares the whole args array,
@@ -121,10 +137,13 @@ async function recordFromResponse(
       subagentId,
       subagentType,
       parentRunId,
+      // Stays a STRING (R8). It is the billing-table attribution for `byProvider`, not the identity.
       provider: (profile.pricing?.table ?? profile.adapterProvider) as ProviderName,
-      model: responseModel || fallbackModel,
+      model,
       ...usage,
-      ...(profile.pricing ? {} : { unpriceable: true as const }),
+      ...(priced.known
+        ? { est_cost_usd: priced.usd }
+        : { unpriceable: true as const }),
     });
   } catch (err) {
     // Best-effort: a recording failure must never fail the actual LLM call.

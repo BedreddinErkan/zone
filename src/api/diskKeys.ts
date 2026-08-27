@@ -32,6 +32,12 @@ export interface DiskApiKey {
   protocol?: DiskKeyProtocol;
   /** Free-text display name for the keys list. Never used for resolution. */
   label?: string;
+  /**
+   * Per-model declared prices, keyed by exact model id. Present only on a gateway row the user has
+   * priced; `gatewayProfilesFrom` turns it into the profile's inline `pricing.rates` table, which
+   * is what makes `--max-budget-usd` and the daily cap enforceable on a gateway at all.
+   */
+  pricing?: Record<string, DiskKeyPricing>;
 }
 
 export interface DiskKeysFile {
@@ -39,11 +45,33 @@ export interface DiskKeysFile {
   keys: DiskApiKey[];
 }
 
+/**
+ * One model's declared prices, in USD per MILLION tokens — the same units as
+ * `PRICING_USD_PER_MTOK`, so the arithmetic is shared rather than re-implemented.
+ *
+ * These are the USER'S DECLARATION, never Zone's estimate: nothing infers, guesses, or defaults a
+ * rate for a gateway, because a confident wrong number is worse than an honest missing one.
+ *
+ * `cache_read`/`cache_write` being ABSENT is itself the record of a choice — it means the user
+ * skipped that bucket at setup, and it will price at $0. That is deliberately distinguishable from
+ * a user who TYPED `0`, which stores `0` explicitly. Same arithmetic, two different situations:
+ * "I priced cached tokens at nothing because my gateway does not bill them" versus "I never said."
+ * Without the distinction a user seeing an unexpectedly low cost has no way to tell which happened.
+ */
+export interface DiskKeyPricing {
+  input: number;
+  output: number;
+  cache_read?: number;
+  cache_write?: number;
+}
+
 /** The gateway-only fields `setDiskKey` accepts alongside the key itself. */
 export interface DiskKeyExtras {
   baseUrl?: string;
   protocol?: DiskKeyProtocol;
   label?: string;
+  /** Keyed by EXACT model id, matching how `PricingRef.rates` is looked up. */
+  pricing?: Record<string, DiskKeyPricing>;
 }
 
 let _keysFilePathOverride: string | null = null;
@@ -127,6 +155,11 @@ export async function setDiskKey(
     ...(extras?.baseUrl ? { baseUrl: extras.baseUrl } : {}),
     ...(extras?.protocol ? { protocol: extras.protocol } : {}),
     ...(extras?.label ? { label: extras.label } : {}),
+    // An empty pricing map is dropped rather than written, so a row the user never priced keeps the
+    // exact key set it had before this field existed.
+    ...(extras?.pricing && Object.keys(extras.pricing).length > 0
+      ? { pricing: extras.pricing }
+      : {}),
   };
   if (idx >= 0) store.keys[idx] = entry;
   else store.keys.push(entry);

@@ -167,6 +167,13 @@ export type PricingRef = {
   table?: ProviderName;
   /** Inline per-model rates, keyed by exact model id. Consulted first. */
   rates?: Readonly<Record<string, ModelRates>>;
+  /**
+   * Model ids in `rates` whose cache buckets the user SKIPPED rather than declared. They price at
+   * `0`, and this records that the zero is a skipped declaration — not a statement that the endpoint
+   * does not bill cached tokens. The two are the same number and different facts, and without this
+   * an unexpectedly low cost is unexplainable from the record alone.
+   */
+  cacheUnpricedModels?: readonly string[];
 };
 
 export type ProviderProfile = {
@@ -317,6 +324,7 @@ export function priceForProfile(
 
 const _warnedNoPricing = new Set<string>();
 const _warnedInertBudget = new Set<string>();
+const _warnedPartialPricing = new Set<string>();
 
 /**
  * Fired once per profile when a profile that cannot price is selected. Without it, an unpriceable
@@ -349,7 +357,30 @@ export function warnBudgetGateInertOnce(profile: ProviderProfile, capUsd: number
   );
 }
 
+/**
+ * Fired once per profile when a profile prices some buckets but not the cached-token ones.
+ *
+ * The situation this exists to make legible: the user skipped the cache prompts at setup, so those
+ * buckets price at `0`, so a long run — which is mostly cache reads after its first iteration —
+ * reports a cost well below what the endpoint actually billed. That is a defensible state to be in,
+ * but only if it is visible; the alternative is a user comparing Zone's figure to their provider
+ * invoice with no way to account for the gap.
+ */
+export function warnProfilePartialPricingOnce(profile: ProviderProfile): void {
+  const skipped = profile.pricing?.cacheUnpricedModels;
+  if (!skipped || skipped.length === 0) return;
+  if (_warnedPartialPricing.has(profile.id)) return;
+  _warnedPartialPricing.add(profile.id);
+  console.warn(
+    `[zone-profile-partial-pricing] provider profile "${profile.id}" declares input and output ` +
+      `rates for ${skipped.length} model(s) (${skipped.join(", ")}) but its cache-read and ` +
+      `cache-write buckets price at $0 because they were SKIPPED at setup — not because the ` +
+      `endpoint is known not to bill cached tokens. Reported cost is a floor, not a total.`
+  );
+}
+
 export function _resetProviderProfileWarningsForTest(): void {
   _warnedNoPricing.clear();
   _warnedInertBudget.clear();
+  _warnedPartialPricing.clear();
 }

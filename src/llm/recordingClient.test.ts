@@ -211,3 +211,78 @@ describe("extractUsage — partition violation is announced, not silently clampe
     expect(warn).not.toHaveBeenCalled();
   });
 });
+
+describe("pricing a gateway profile through the ledger (items 396/399)", () => {
+  beforeEach(() => { vi.mocked(recordExecution).mockClear(); });
+
+  /** A gateway as `gatewayProfilesFrom` builds one: inline rates, and NO named table. */
+  const PRICED_GATEWAY = {
+    id: "lab",
+    protocol: "openai-chat" as const,
+    adapterProvider: "openai" as const,
+    baseUrl: "http://localhost:4000/v1",
+    keyRef: { envVar: "ZONE_GATEWAY_KEY_LAB", keyExample: "x" },
+    pricing: {
+      rates: {
+        "openai/gpt-4o-mini": { input: 0.15, output: 0.6, cache_read: 0, cache_write: 0 },
+      },
+    },
+  };
+
+  async function runStream(profile: unknown, model: string, usage: unknown) {
+    const inner = makeFakeInner("openai", vi.fn().mockResolvedValue({
+      [Symbol.asyncIterator]: async function* () { yield { choices: [], model, usage }; },
+    }));
+    const client = new RecordingLLMClient(inner, profile as never);
+    const stream = await client.createChatCompletionStream(
+      { model, messages: [], stream: true } as never
+    );
+    for await (const _ of stream as AsyncIterable<unknown>) { /* drain */ }
+    return vi.mocked(recordExecution).mock.calls[0]?.[0];
+  }
+
+  it("prices a gateway model from the profile's OWN inline rates, which no global table knows", async () => {
+    const rec = await runStream(PRICED_GATEWAY, "openai/gpt-4o-mini", {
+      prompt_tokens: 1_000_000, completion_tokens: 1_000_000,
+    });
+    // 1M input at $0.15 + 1M output at $0.60. totalCost() could never produce this: the model id
+    // is absent from PRICING_USD_PER_MTOK entirely, so the global lookup returns 0.
+    expect(rec?.est_cost_usd).toBeCloseTo(0.75, 10);
+    expect(rec?.unpriceable).toBeUndefined();
+    expect(totalCost("openai", "openai/gpt-4o-mini", {
+      input_uncached: 1_000_000, cache_write: 0, cache_read: 0, output: 1_000_000,
+    })).toBe(0);
+  });
+
+  it("THE REGRESSION THIS PASS EXISTS TO AVOID: rates that do not cover THIS model stay unknown, not 0", async () => {
+    // Before the fix, `unpriceable` keyed on `profile.pricing` merely being PRESENT. A profile with
+    // rates for some other model would therefore drop the flag, fall through to the adapter's
+    // vendor table, miss, and record a confident `0` — which the daily cap sums as real spend,
+    // where a null is correctly skipped. Strictly worse than recording nothing.
+    const rec = await runStream(PRICED_GATEWAY, "some-other-model", {
+      prompt_tokens: 1_000_000, completion_tokens: 1_000_000,
+    });
+    expect(rec?.unpriceable).toBe(true);
+    expect(rec?.est_cost_usd).toBeUndefined();
+  });
+
+  it("an unpriced gateway is unchanged — still unknown, never zero", async () => {
+    const { pricing: _dropped, ...unpriced } = PRICED_GATEWAY;
+    const rec = await runStream(unpriced, "openai/gpt-4o-mini", {
+      prompt_tokens: 1000, completion_tokens: 1000,
+    });
+    expect(rec?.unpriceable).toBe(true);
+    expect(rec?.est_cost_usd).toBeUndefined();
+  });
+
+  it("a built-in profile still prices through its named table, byte-identical", async () => {
+    const rec = await runStream(undefined, "gpt-4o", {
+      prompt_tokens: 1_000_000, completion_tokens: 1_000_000,
+    });
+    const expected = totalCost("openai", "gpt-4o", {
+      input_uncached: 1_000_000, cache_write: 0, cache_read: 0, output: 1_000_000,
+    });
+    expect(rec?.est_cost_usd).toBeCloseTo(expected, 10);
+    expect(rec?.unpriceable).toBeUndefined();
+  });
+});

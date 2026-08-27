@@ -8,6 +8,7 @@ import {
 import { type SubagentTokenUsage, emptySubagentTokenUsage } from "../subagents.js";
 import { extractUsage } from "../recordingClient.js";
 import type { ProviderName } from "../../usage/pricing.js";
+import type { ProviderProfile } from "../providerProfile.js";
 
 // Mirrors agentLoop.ts module-level constants — do not change independently.
 const TOKEN_BUDGET_HARD = 0.95;
@@ -65,6 +66,9 @@ export class TokenBudgetMeter {
     iter: number;
     totalIter: number;
     provider: string;
+    /** The run's provider profile, when it has one — see buildIterCostUpdate. Optional, so every
+     *  existing string-only call site prices exactly as it did before. */
+    profile?: ProviderProfile;
     model: string;
     onStructuredEvent?: (e: unknown) => void;
     tier?: string;
@@ -97,6 +101,7 @@ export class TokenBudgetMeter {
           iter,
           totalIter,
           provider: provider as ProviderName,
+          profile: opts.profile,
           model,
           current: usage,
           previous: this._iterCostAccumulator,

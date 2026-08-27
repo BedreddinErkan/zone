@@ -27948,11 +27948,99 @@ cosmetic message (item 396's second finding, `${provider}/${model}` rendering
 `openai/openai/gpt-4o-mini` for a gateway id that already contains a slash) remains untouched — this
 pass does not touch `usage/pricing.ts`.
 
+## 399. A gateway can now declare its own prices, and both USD gates had to move together for that to mean anything
+
+**Bucket: Neither.** The work and its reasoning are recorded here, applied in the pass that files
+them, on items 392, 396 and 398's precedent.
+
+**The evidence the design rests on, quoted rather than summarised.** Item 396's live run against the
+LiteLLM lab proxy emitted:
+
+```
+[zone-pricing] unknown model openai/openai/gpt-4o-mini, cost=0
+```
+
+That line is `totalCost` being CALLED. Usage does reach Zone, the meter does try to price it, and it
+fails only for want of a rate entry — which is what made "let the user supply the rate" the whole
+fix rather than a guess at one. Two things follow. First, the investigation document's own
+"Consequence" paragraph — "no usage reaches Zone" — was stale, and this pass rewrites that
+paragraph in `docs/gateway-support-investigation.md`: it was
+measured with `adapterProvider` cast to `"openai-compatible"`, Option A's shape, while Option B
+shipped, where an openai-chat gateway's `adapterProvider` IS `"openai"` and the `include_usage` gate
+had since been made protocol-shaped. Second, the doubled prefix in that same line is display-only,
+not a lookup key built by concatenation: `resolveRates` indexes two levels,
+`PRICING_USD_PER_MTOK[provider]?.[model]`, and the only `${provider}/${model}` in the tree is the two
+`console.warn` strings. Checked by grep before assuming; already filed as cosmetic in item 396, so
+recorded here rather than filed a second time.
+
+**Neither gate read the inline rates, and one of them would have regressed.** `PricingRef.rates` had
+existed since step 4 with no writer, and adding a writer alone would not have worked: the per-run
+gate prices in `iterCostMeter` from a `provider as ProviderName` cast with no profile in scope, and
+the daily gate prices in `recordExecution` from a provider NAME. Worse, `recordFromResponse` derived
+`unpriceable` from `profile.pricing` being merely PRESENT — so a profile carrying rates that did not
+cover the model in hand would have dropped the flag, fallen through to the adapter's vendor table,
+missed, and written a confident `est_cost_usd: 0`. The daily cap sums a zero as real spend and
+correctly skips a null, so that is strictly worse than the honest unknown it replaced. Both paths
+moved in one change, and `unpriceable` now derives from whether pricing actually ANSWERED — which
+also closes the "pricing block that answers for nothing" hole item 392 named and left open.
+
+**A skipped rate and a declared zero are the same number and different facts.** `ModelRates` needs
+four rates; a user is asked for input and output, and the two cache buckets are asked for
+separately with the screen stating that Enter leaves them at $0. A skipped bucket is stored by its
+ABSENCE on disk, a typed zero as an explicit `0` — so the record itself distinguishes "my gateway
+does not bill cached tokens" from "I never said", which a stored zero alone could not. That
+distinction is surfaced three ways: the `/keys` row says which models have skipped buckets, the save
+toast names what was priced, and `[zone-profile-partial-pricing]` fires once per profile at the
+point of use to say the reported cost is a floor rather than a total. Nothing infers, guesses or
+defaults a rate; declining to price still means cost unknown, gate inert, warning fired, unchanged.
+
+**Verified against the running lab proxy, twice, because no unit test existed that could have
+caught the wrong-zero regression this entry describes.** With the profile priced, a run recorded
+`"costUsd":0.0004239` where item 396's and item 398's gateway runs had both recorded zero, and `[zone-profile-no-pricing]`, `[zone-pricing]` and
+`[zone-budget-gate-inert]` were all absent for the first time. With `--max-budget-usd 0.0001` the
+gate fired: `[zone-run-usd-cap] {"capUsd":0.0001,"spentUsd":0.0003504,"iter":1,"tier":"simple"}`, the
+run stopped, and `success` was false. The ledger rows on disk carry real `est_cost_usd` figures with
+no `unpriceable` flag.
+
+**What this did NOT do.** Item 299's remedy — refusing an unrecognised provider string loudly at the
+three laundering points — is untouched, as is the `[zone-pricing]` double-slash message. Long-context
+`aboveThreshold` tiers cannot be declared for a gateway; only flat rates can. And nothing validates
+a declared rate against what the endpoint actually charges, which is inherent: the rate is the user's
+claim about their own contract, and Zone has no independent source for it.
+
+## 400. What one LiteLLM proxy reports about cost, measured once, and why it is not an architecture
+
+**Bucket: Neither.** A measurement recorded so a future pass has it; explicitly NOT built, and the
+entry exists partly to say why not.
+
+Reading cost from the gateway itself is the obvious alternative to asking the user for rates, and it
+was measured rather than dismissed. Against a local LiteLLM 1.98.0 proxy in front of an OpenAI
+upstream: the `x-litellm-response-cost` response header is correct on NON-STREAMING requests
+(reproduced twice) and `0.0` on streaming ones. The `/spend/logs` endpoint records both correctly,
+but writes asynchronously. A first reading that appeared to show streaming calls missing from
+`/spend/logs` was an artefact of slicing the last three elements of an unsorted response; sorted by
+`startTime` they were present with correct spend.
+
+**Why that does not become the design.** Zone's agent loop is entirely streaming, so the one
+mechanism that is correct on the hot path is the one that reports zero. `/spend/logs` is correct but
+is a LiteLLM-specific endpoint, and its asynchronous write means a per-iteration gate would be
+reading a figure that may not exist yet — a cap that reads late is not a cap. Both observations are
+about ONE gateway and ONE upstream, measured once. A pricing design resting on them would be resting
+on a vendor-specific header shape that no other proxy is obliged to send, which is the same
+category error as pricing a gateway's models from a vendor's catalog. The user's own declared rate
+has none of those properties: it is available synchronously, needs no endpoint support, and is
+already in the units the arithmetic uses.
+
+**What would change this.** A second and third gateway measured on the same two mechanisms, showing
+the header is reliable on streaming requests across implementations — at which point reading cost
+from the wire becomes a candidate, most plausibly as a reconciliation pass against declared rates
+rather than as a replacement for them.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 398 to find out which ones still need something. No index of
+reader the trouble of reading all 400 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -28004,14 +28092,14 @@ eleven to twelve.
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (17): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250, 263, 318, 376
 
-**Neither — a structural fact recorded, with no fix proposed** (186): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
+**Neither — a structural fact recorded, with no fix proposed** (188): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
 74, 76, 77, 78, 79, 80, 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109,
 112, 114, 115, 118, 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152,
 154, 155, 158, 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199,
 200, 201, 202, 205, 206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230,
 232, 243, 244, 247, 248, 249, 254, 256, 261, 272, 294, 295, 297, 298, 300, 303, 305, 306, 307, 311, 312,
 314, 315, 316, 317, 319, 321, 322, 323, 324, 325, 326, 330, 331, 332, 333, 335,
-338, 339, 340, 341, 342, 346, 349, 350, 354, 355, 356, 357, 360, 361, 362, 363, 366, 367, 369, 374, 380, 381, 382, 386, 387, 392, 393, 396, 397, 398
+338, 339, 340, 341, 342, 346, 349, 350, 354, 355, 356, 357, 360, 361, 362, 363, 366, 367, 369, 374, 380, 381, 382, 386, 387, 392, 393, 396, 397, 398, 399, 400
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.

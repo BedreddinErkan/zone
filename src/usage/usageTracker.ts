@@ -91,22 +91,35 @@ export function round4(n: number): number {
 }
 
 export async function recordExecution(
-  rec: Omit<UsageRecord, "timestamp" | "est_cost_usd">,
+  rec: Omit<UsageRecord, "timestamp" | "est_cost_usd"> & {
+    /**
+     * A token cost the CALLER already computed, when it holds something this function cannot see —
+     * today that means a provider profile's own inline rate table, which is keyed by profile and
+     * model rather than by the two-vendor `provider` string below. Absent => this function prices
+     * against the global table exactly as it always has.
+     *
+     * The web-search fee is deliberately NOT the caller's to add: it is provider-flat and is
+     * applied here either way, so the two paths cannot disagree about it.
+     */
+    est_cost_usd?: number;
+  },
   options?: { storageDir?: string }
 ): Promise<UsageRecord> {
   // An unpriceable profile records cost as unknown rather than as 0. Note the web-search fee is
   // dropped along with it deliberately: it is a real known charge, but reporting a partial figure
   // as if it were the whole cost is the same conflation this field exists to end.
-  const est_cost_usd: number | null = rec.unpriceable
-    ? null
-    : round4(
-        totalCost(rec.provider, rec.model, {
+  const tokenCost =
+    rec.est_cost_usd !== undefined
+      ? rec.est_cost_usd
+      : totalCost(rec.provider, rec.model, {
           input_uncached: rec.input_uncached,
           cache_write: rec.cache_write,
           cache_read: rec.cache_read,
           output: rec.output,
-        }) + webSearchFee(rec.webSearchRequests ?? 0)
-      );
+        });
+  const est_cost_usd: number | null = rec.unpriceable
+    ? null
+    : round4(tokenCost + webSearchFee(rec.webSearchRequests ?? 0));
   const full: UsageRecord = {
     ...rec,
     timestamp: new Date().toISOString(),

@@ -180,3 +180,123 @@ describe("ApiKeysView — the list", () => {
     expect(vendorLine).not.toMatch(/→/);
   });
 });
+
+describe("ApiKeysView — the optional pricing sub-flow (item 399)", () => {
+  const GATEWAY_ROW = {
+    provider: "lab", key: "sk-lab", addedAt: "2026-08-02T00:00:00.000Z",
+    baseUrl: "http://localhost:4000/v1",
+  };
+
+  function openWith(rows: unknown[]): void {
+    currentState = reducer(buildInitialState(), { type: "KEYS_OPEN", list: rows as never });
+  }
+
+  /** Drive keys WITHOUT resetting state, so a pre-seeded list survives. */
+  async function pressFrom(keys: Array<{ input?: string; key?: Record<string, boolean> }>): Promise<string> {
+    let frame = "";
+    const { stdin, lastFrame, rerender } = render(React.createElement(ApiKeysView));
+    for (const k of keys) {
+      if (k.key?.escape) stdin.write("\x1B");
+      else if (k.key?.return) stdin.write("\r");
+      else if (k.key?.backspace) stdin.write("\x7F");
+      else if (k.input) stdin.write(k.input);
+      await flush(k.key?.escape ? 60 : 1);
+      rerender(React.createElement(ApiKeysView));
+      frame = lastFrame() ?? "";
+    }
+    return frame;
+  }
+
+  it("P on a gateway row opens pricing; P on a vendor row does nothing", async () => {
+    openWith([GATEWAY_ROW]);
+    await pressFrom([{ input: "p" }]);
+    expect(currentState.keysEditMode).toBe("price-model-id");
+    expect(currentState.keysPriceProvider).toBe("lab");
+
+    openWith([{ provider: "openai", key: "sk-v", addedAt: "2026-08-01T00:00:00.000Z" }]);
+    await pressFrom([{ input: "p" }]);
+    expect(currentState.keysEditMode).toBe("view");
+  });
+
+  it("walks model id -> input -> output -> cache, and saves the declared rates", async () => {
+    openWith([GATEWAY_ROW]);
+    await pressFrom([
+      { input: "p" },
+      ...type("openai/gpt-4o-mini"), ENTER,
+      ...type("0.15"), ENTER,
+      ...type("0.6"), ENTER,
+      ...type("0.075"), ENTER,
+      ...type("0.3"), ENTER,
+    ]);
+    expect(setDiskKeyMock).toHaveBeenCalledWith("lab", "sk-lab", {
+      baseUrl: "http://localhost:4000/v1",
+      pricing: { "openai/gpt-4o-mini": { input: 0.15, output: 0.6, cache_read: 0.075, cache_write: 0.3 } },
+    });
+  });
+
+  it("skipping the cache prompts OMITS those keys rather than writing zeros", async () => {
+    openWith([GATEWAY_ROW]);
+    await pressFrom([
+      { input: "p" },
+      ...type("m"), ENTER,
+      ...type("1"), ENTER,
+      ...type("2"), ENTER,
+      ENTER, ENTER,
+    ]);
+    const extras = setDiskKeyMock.mock.calls[0]![2] as { pricing: Record<string, object> };
+    // Absence is the record that the user never declared them — a written 0 could not say that.
+    expect(extras.pricing["m"]).toEqual({ input: 1, output: 2 });
+  });
+
+  it("merges with the row's existing prices instead of replacing them", async () => {
+    openWith([{ ...GATEWAY_ROW, pricing: { "already-priced": { input: 9, output: 9 } } }]);
+    await pressFrom([
+      { input: "p" },
+      ...type("second-model"), ENTER,
+      ...type("1"), ENTER,
+      ...type("2"), ENTER,
+      ENTER, ENTER,
+    ]);
+    const extras = setDiskKeyMock.mock.calls[0]![2] as { pricing: Record<string, object> };
+    expect(Object.keys(extras.pricing).sort()).toEqual(["already-priced", "second-model"]);
+  });
+
+  it("rejects a non-numeric rate rather than storing NaN", async () => {
+    openWith([GATEWAY_ROW]);
+    await pressFrom([
+      { input: "p" },
+      ...type("m"), ENTER,
+      ...type("abc"), ENTER,
+    ]);
+    // Number("abc") is NaN; storing it would poison every cost this profile ever reports.
+    expect(currentState.keysEditMode).toBe("price-input");
+    expect(setDiskKeyMock).not.toHaveBeenCalled();
+  });
+
+  it("Esc mid-pricing writes nothing and clears the draft", async () => {
+    openWith([GATEWAY_ROW]);
+    await pressFrom([
+      { input: "p" },
+      ...type("m"), ENTER,
+      ...type("1"), ENTER,
+      { key: { escape: true } },
+    ]);
+    expect(setDiskKeyMock).not.toHaveBeenCalled();
+    expect(currentState.keysEditMode).toBe("view");
+    expect(currentState.keysPriceModelId).toBe("");
+    expect(currentState.keysPriceDraft).toEqual({});
+  });
+
+  it("the list says whether a gateway is unpriced, and whether a zero was skipped", async () => {
+    openWith([
+      GATEWAY_ROW,
+      { ...GATEWAY_ROW, provider: "lab2", pricing: { m: { input: 1, output: 2 } } },
+      { ...GATEWAY_ROW, provider: "lab3", pricing: { m: { input: 1, output: 2, cache_read: 0, cache_write: 0 } } },
+    ]);
+    const { lastFrame } = render(React.createElement(ApiKeysView));
+    const frame = lastFrame() ?? "";
+    expect(frame).toMatch(/unpriced/);
+    expect(frame).toMatch(/cache buckets SKIPPED/);
+    expect(frame).toMatch(/all buckets declared/);
+  });
+});
