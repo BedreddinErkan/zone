@@ -85,6 +85,9 @@ function envStr(key: string): string | undefined {
 
 function resolveProvider(value: string | undefined): LLMProvider {
   if (value === "openai") return "openai";
+  if (value !== undefined && value !== "anthropic") {
+    console.warn(`[zone] provider "${value}" is not recognized; falling back to anthropic.`);
+  }
   return "anthropic";
 }
 

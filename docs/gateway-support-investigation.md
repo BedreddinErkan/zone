@@ -319,7 +319,7 @@ confirmed by `command grep`). Provider is therefore settable only via `ZONE_PROV
 `<repo>/.zone/model.json`, or `~/.zone/config.json`'s `defaultProvider`.
 
 This is the exact shape of ledger item 258: `program.opts<CliOptions>()` asserts a hand-written
-interface rather than checking it. Note also that `config.ts:107`'s own warning text tells the user
+interface rather than checking it. Note also that `openaiClient.ts:107`'s own warning text tells the user
 to *"Check --model / --provider / .zone/model.json consistency"* — naming a flag that does not exist.
 
 ---

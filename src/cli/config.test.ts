@@ -161,12 +161,39 @@ describe("loadCliConfig — config file precedence", () => {
     expect(cfg.provider).toBe("openai");
   });
 
-  it("unknown provider string → falls back to anthropic", () => {
+  it("unknown provider string → falls back to anthropic, with a warning naming the bad value", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const cfg = loadCliConfig({}, { defaultProvider: "grok" as never });
     expect(cfg.provider).toBe("anthropic");
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[zone] provider "grok" is not recognized; falling back to anthropic.'
+    );
+    warnSpy.mockRestore();
   });
 
+  it("explicit anthropic provider is a valid choice, not a fallback — no warning", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const cfg = loadCliConfig({}, { defaultProvider: "anthropic" });
+    expect(cfg.provider).toBe("anthropic");
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+});
 
+describe("loadCliConfig — unrecognized provider value warns (item 385)", () => {
+  it("an unrecognized provider that also conflicts with a known model's provider warns twice — once for the bad value, once for the conflict", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const cfg = loadCliConfig({ model: "gpt-4o", provider: "openrouter" }, {});
+    expect(cfg.provider).toBe("openai");
+    expect(warnSpy).toHaveBeenCalledTimes(2);
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[zone] provider "openrouter" is not recognized; falling back to anthropic.'
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[zone] provider "openrouter" conflicts with model "gpt-4o" (openai); using openai to match the selected model.'
+    );
+    warnSpy.mockRestore();
+  });
 });
 
 describe("validateCliConfig", () => {

@@ -70,6 +70,33 @@ describe("the real commander boundary reaches CliFlags correctly (item 258)", ()
   });
 });
 
+describe("--provider reaches CliFlags through the real parser (item 384)", () => {
+  const PROVIDER_DECL = extractDeclaredOptionStrings().find((d) => d.startsWith("--provider"))!;
+
+  function parseFlags(argv: string[]) {
+    const program = buildRealCommand();
+    program.parse(argv, { from: "user" });
+    const options = program.opts();
+    return buildCliFlags(options, false, ["node", "zone", ...argv]);
+  }
+
+  it("the declaration exists in index.ts and is the one under test", () => {
+    expect(PROVIDER_DECL).toBe("--provider <name>");
+  });
+
+  it("--provider openai sets CliFlags.provider — through the real parser, not a hand-built object", () => {
+    expect(parseFlags(["--provider", "openai"]).provider).toBe("openai");
+  });
+
+  it("--provider anthropic sets CliFlags.provider", () => {
+    expect(parseFlags(["--provider", "anthropic"]).provider).toBe("anthropic");
+  });
+
+  it("unset leaves CliFlags.provider undefined — no accidental default", () => {
+    expect(parseFlags([]).provider).toBeUndefined();
+  });
+});
+
 /**
  * `--max-turns` (ledger item 259). `buildRealCommand` registers every declaration without its
  * parser, so a value would arrive as a raw string there; these cases pair index.ts's OWN declaration

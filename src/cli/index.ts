@@ -79,6 +79,7 @@ type CliOptions = {
   // CLI.0 agent-loop path options
   model?: string;
   effort?: string;
+  provider?: string;
   forceTier?: string;
   yes?: boolean;
   /** commander's own naming for a `--no-x` flag: `revision`/`color`, never `noRevision`/`noColor`
@@ -118,6 +119,7 @@ export function buildCliFlags(options: CliOptions, isHeadless: boolean, argv: st
   return {
     model: options.model,
     effort: options.effort as string | undefined,
+    provider: options.provider,
     repo: options.repo,
     forceTier: options.forceTier,
     yes: options.yes,
@@ -1249,6 +1251,7 @@ export async function run(): Promise<void> {
     .option("--repo <path>", "Target repository path", process.cwd())
     .option("-m, --model <id>", "Model override (e.g. claude-sonnet-4-6)")
     .option("--effort <level>", "Reasoning effort: low|medium|high|xhigh|max (clamped per model)")
+    .option("--provider <name>", "Provider override")
     .option("--force-tier <tier>", "Force classification tier: simple | medium | complex")
     .option("--yes", "Auto-approve all run_command calls and scope revisions")
     .option("--no-revision", "Reject all scope revisions automatically")

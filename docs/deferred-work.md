@@ -27242,24 +27242,98 @@ and fails only when the component starts reading something the mock never had, w
 a *different* file. The first shape is caught by reading; the second is caught only by a field being
 added, and by then every assertion in the file has quietly stopped meaning anything.
 
+## 384. Closed — `--provider` was named in a warning message but did not exist as a CLI flag
+
+**Bucket: Closed** by the commit carrying this line. `index.ts`'s own commander chain declared no
+`--provider` option at all — not a wrong property name and not a declared-and-unread flag, but a
+flag with no declaration whatsoever, even though everything downstream of it already existed and
+was already correct: `CliFlags.provider` was declared in `config.ts`, and `loadCliConfig` already
+read it — `flags.provider ?? envStr("ZONE_PROVIDER") ?? diskModel?.provider ?? file.defaultProvider`
+— into `explicitProvider`. A warning printed by `getModelName()`, in `openaiClient.ts`, told a user
+to "Check --model / --provider / .zone/model.json consistency" for a flag that could never be
+typed, because commander never produced a `provider` key for `buildCliFlags` to read.
+`docs/gateway-support-investigation.md` §2.6 cited this same warning as `config.ts:107`; the line
+number was right, the file was not — `getModelName()` and its warning live in `openaiClient.ts`,
+and that citation is fixed in the same commit.
+
+Item 258 named two shapes for this defect class: a flag read under a property name the parser
+never produces, and — item 259 — a flag parsed and never read. This is a third shape, upstream of
+both: nothing to misname or leave unread, because nothing was ever declared. Provider was reachable
+only through `ZONE_PROVIDER`, a repository's own `.zone/model.json`, or `~/.zone/config.json`'s
+`defaultProvider` — never from the command line, on a CLI whose own commander chain declares
+thirty-plus other options for exactly this purpose.
+
+The fix adds the three wiring points item 258's own remedy established for this file: a
+`--provider <name>` declaration in the commander chain, a `provider?: string` field on
+`CliOptions`, and a `provider: options.provider` line in `buildCliFlags`. All three sit next to
+`effort`, matching the position `CliFlags` itself already gives `provider` — between `model` and
+`repo` — rather than merely appended, so a reader comparing the three shapes field by field, the
+exact comparison item 258's own guard automates, finds them in the same order in each.
+`cliOptionsCoverage.test.ts` needs no edit: it AST-scans every `options.X` read in `index.ts`
+against commander's own produced keys and starts covering `provider` the moment both the
+declaration and the read exist. `index.optionsBoundary.test.ts` gains a dedicated case, built the
+way its `--max-turns`/`--max-budget-usd` cases already are: a real `commander.Command` constructed
+from `index.ts`'s own declaration strings, a real argv, and the real exported `buildCliFlags` —
+never a hand-built options object standing in for the parser. The help text stays a bare
+"Provider override" rather than enumerating the two current values, since the valid set is already
+enforced — and now, by item 385, named on rejection — at runtime by `resolveProvider`.
+
+## 385. Closed — an unrecognized `--provider` value was silently coerced to anthropic
+
+**Bucket: Closed** by the commit carrying this line. Filed alongside item 384, which is what lets
+this value arrive from `--provider` directly rather than only from `ZONE_PROVIDER` or a config
+file. `resolveProvider`, in `config.ts`, read `"openai"` as `"openai"` and every other string —
+valid provider name or typo alike — as `"anthropic"`, with nothing said about the difference:
+`loadCliConfig({ provider: "openrouter" })` returned `provider: "anthropic"` exactly as
+`loadCliConfig({})` would, and nothing distinguished a value that was honored from one that was
+discarded.
+
+The same function already had a working precedent for saying so. The branch guarding a known
+model's own provider prints `` `[zone] provider "${explicitProvider}" conflicts with model
+"${explicitModel}" (${provider}); using ${provider} to match the selected model.` `` whenever an
+explicit provider disagrees with a catalog model's own provider — a bare `console.warn`, a
+`[zone]` prefix, the bad value and the resolution named in one sentence. `resolveProvider` itself
+had no equivalent for the case where the value is not a recognized provider at all.
+
+The fix adds one, on the same terms: any value that is neither `"openai"` nor `"anthropic"` now
+prints `` `[zone] provider "${value}" is not recognized; falling back to anthropic.` `` before
+returning the fallback it always returned. `undefined` is excluded from the check, since that is
+the ordinary shape of a run that never set a provider and warning on it would fire on every
+default invocation; `"anthropic"` is excluded too, since a user who wrote it explicitly made a
+valid choice, not an error the function is correcting. The return value is unchanged in every
+case; only the visibility of the coercion changed.
+
+`resolveProvider` has two call sites in the same function, and an unrecognized value reaching the
+one that guards a known model's provider now fires both warnings for one input:
+`loadCliConfig({ model: "gpt-4o", provider: "openrouter" })` prints the new sentence and the
+existing conflict sentence together, naming `anthropic` and then `openai` for what the function
+ultimately resolves to `openai`. Kept rather than merged: the first sentence is accurate about
+what `resolveProvider` alone returns for that string in isolation, the second about what the run
+actually uses, and building a path for one warning to suppress the other is exactly the
+provider-resolution machinery this fix was scoped to leave alone — a `ProviderProfile` refactor is
+a separate, later pass, and needs its own written baseline first. `config.test.ts`'s existing
+"unknown provider string" case now asserts the warning's own text, not only the fallback value it
+already checked, closing the gap a value-only assertion would have passed on either side of this
+fix.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 383 to find out which ones still need something. No index of
+reader the trouble of reading all 385 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (169): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42,
+**Closed** (171): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42,
 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113,
 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167,
 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228,
 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260,
 262, 264, 265, 266, 267, 268, 269, 270, 271, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285,
 286, 288, 289, 290, 301, 302, 304, 308, 309, 310, 327, 336, 337, 343, 344, 345, 348, 351,
-320, 352, 353, 364, 370, 371, 372, 377, 378, 379
+320, 352, 353, 364, 370, 371, 372, 377, 378, 379, 384, 385
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (18): 287, 291, 292, 293, 296, 299, 313, 328, 329, 334, 347, 358, 359, 365, 368, 373, 375, 383
