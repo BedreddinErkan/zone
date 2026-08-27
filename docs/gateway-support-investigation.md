@@ -865,8 +865,8 @@ should not become the supported path. Two specific guards belong in the spike:
 > **Progress.** Steps 1 and 2 are **DONE** (`aa0711f0`). Step 3's stated prerequisite — pinning
 > current behaviour first — is **DONE** (`368e01e7`, ledger item 386), and step 3 itself is
 > **DONE** (ledger item 387; the commit that added `src/llm/providerProfile.ts` —
-> `git log --diff-filter=A -- src/llm/providerProfile.ts`). Steps 4 and 5 and the Option C spike
-> remain open.
+> `git log --diff-filter=A -- src/llm/providerProfile.ts`). Step 4 is **DONE** (ledger item 392).
+> Step 5 and the Option C spike remain open, and step 5 has gained the vision fix (item 394).
 > Each step's text below is left as written; the status markers are appended, not substituted.
 
 1. **[DONE — `aa0711f0`] Add `--provider` to commander** (`cli/index.ts`). It is referenced by an existing warning
@@ -886,13 +886,29 @@ should not become the supported path. Two specific guards belong in the spike:
    defaults are deliberately left alone because they already are the protocol selector. The
    step-4 pricing warning was pulled forward in reduced form: a profile with no pricing table now
    records cost as unknown rather than `$0`. See ledger item 387 for what was NOT done.
-4. **Give profiles optional capability and pricing overrides**, consulted before the global tables.
+4. **[DONE — see item 392] Give profiles optional capability and pricing overrides**, consulted before the global tables.
    Make a missing pricing entry on a *gateway* profile a startup warning rather than a silent `$0`
    — the daily and per-run gates depend on it. *(The startup-warning half of this landed early with
    step 3; the capability and pricing OVERRIDE tables remain open — `ProviderProfile.capabilities`
    is declared and unpopulated.)*
+   *As built:* `ModelCapabilities` (`llm/types.ts`) declares six per-model fields and
+   `ProfileCapabilities` (`llm/providerProfile.ts`) carries them per profile, matched EXACTLY on the
+   model id. Resolution is override → global table → conservative default at every site. Reaching
+   the adapter-side capabilities required a per-call `capabilities` field on `LLMRequestOptions`
+   rather than a constructor argument, because both adapter constructors have their argument lists
+   pinned by assertions. Four of the six are verified against an outgoing request body; `contextWindow`
+   never appears in one and is verified at its accessor; `supportsVision` is declared and
+   deliberately NOT consumed — see step 5. Pricing gained inline per-model rates consulted before the
+   named table. Both warn-once helpers are now reachable, driven through `createLLMClient` and
+   `runAgentLoop`.
 5. **Widen the key store's identity** to `{ provider, profileId? }`, additively, no version bump.
    Add `[G]ateway` to `ApiKeysView` and free-text model entry to `ModelModal`.
+   **Also in this step's scope, moved here from step 4:** correct `supportsVision`'s optimistic
+   `true` default for unknown models, AND thread profile capabilities into the composer's image gate
+   in the same change. These two halves must land together — flipping the default alone blocks
+   images for exactly the unlisted-model users a gateway profile serves, with no override path,
+   because the composer has no profile in scope. Ledger item 394 records the measurement and the
+   coupling.
 
 **Explicitly out of scope for all of the above**: a `baseURL` on `AnthropicAdapter`. Anthropic-protocol
 gateways (Bedrock, Vertex) are a separate problem with separate auth (SigV4, GCP tokens), and folding

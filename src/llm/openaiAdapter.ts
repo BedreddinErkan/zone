@@ -48,7 +48,7 @@ export class OpenAIAdapter implements LLMClient {
     options: LLMRequestOptions = {}
   ): Promise<ChatCompletion> {
     if (this.provider === "openai" && normalizeModelId(params.model).startsWith("gpt-5")) {
-      const body = responsesConvertParams(params, { effort: options.effort });
+      const body = responsesConvertParams(params, { effort: options.effort, capabilities: options.capabilities });
       const resp = await withExponentialBackoff(
         () =>
           this.sdk.responses.create(body, {
@@ -59,12 +59,12 @@ export class OpenAIAdapter implements LLMClient {
       );
       return responsesConvertResponse(resp);
     }
-    const resolvedEffort = resolveEffortForModel(params.model, options.effort);
+    const resolvedEffort = resolveEffortForModel(params.model, options.effort, options.capabilities);
     // OpenAI reasoning_effort only supports "low"|"medium"|"high"; xhigh/max are narrowed to "high".
     const reasoningEffort =
       resolvedEffort === "xhigh" || resolvedEffort === "max" ? "high" : resolvedEffort;
     const withEffort: ChatCompletionCreateParamsNonStreaming =
-      reasoningEffort && supportsEffort(params.model)
+      reasoningEffort && supportsEffort(params.model, options.capabilities)
         ? { ...params, reasoning_effort: reasoningEffort }
         : params;
     // gpt-5.x reasoning models reject `max_tokens`; translate to `max_completion_tokens`

@@ -106,7 +106,7 @@ export class AnthropicAdapter implements LLMClient {
       }
       const wasJsonMode =
         params.response_format?.type === "json_object";
-      const { params: anthropicParams, warnings } = convertParams(params, { effort: options.effort, webSearch: options.webSearch });
+      const { params: anthropicParams, warnings } = convertParams(params, { effort: options.effort, webSearch: options.webSearch, capabilities: options.capabilities });
       if (warnings.length > 0) {
         for (const w of warnings) console.warn(`[zone-anthropic] ${w}`);
       }
@@ -128,7 +128,7 @@ export class AnthropicAdapter implements LLMClient {
     params: ChatCompletionCreateParamsNonStreaming,
     options: LLMRequestOptions
   ): Promise<ChatCompletionWithReasoning> {
-    const { params: anthropicParams, warnings } = convertParams(params, { effort: options.effort, webSearch: options.webSearch });
+    const { params: anthropicParams, warnings } = convertParams(params, { effort: options.effort, webSearch: options.webSearch, capabilities: options.capabilities });
     if (warnings.length > 0) {
       for (const w of warnings) console.warn(`[zone-anthropic] ${w}`);
     }
@@ -307,7 +307,7 @@ export class AnthropicAdapter implements LLMClient {
     // effort must be threaded here exactly as the other two entry points do — without
     // it convertParams sees no effort level, so thinking config is silently absent on
     // this path alone.
-    const { params: anthropicParams, warnings } = convertParams(params, { effort: options.effort, webSearch: options.webSearch });
+    const { params: anthropicParams, warnings } = convertParams(params, { effort: options.effort, webSearch: options.webSearch, capabilities: options.capabilities });
     if (warnings.length > 0) {
       for (const w of warnings) console.warn(`[zone-anthropic] ${w}`);
     }

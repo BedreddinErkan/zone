@@ -1,4 +1,4 @@
-import type { LLMProvider } from "./types.js";
+import type { LLMProvider, ModelCapabilities } from "./types.js";
 import { formatCostNote } from "../usage/pricing.js";
 
 export type ZoneModelTier = "high" | "standard";
@@ -167,7 +167,11 @@ export function _resetContextWindowFallbackWarningsForTest(): void {
  *  "claude-sonnet-4-6-20260219"); falls back to DEFAULT_CONTEXT_WINDOW — conservative,
  *  never silently disables compaction. The fallback is announced: on a 1M-context model
  *  it would compact at 150k, and nothing else in a transcript reveals that. */
-export function getContextWindow(modelId: string): number {
+export function getContextWindow(modelId: string, caps?: ModelCapabilities): number {
+  // Profile override → global table → conservative default. Checked first so a gateway model id
+  // the table cannot match still gets its real window instead of the 200k assumption, and so the
+  // fallback warning below does not fire for a model the profile has actually declared.
+  if (caps?.contextWindow !== undefined) return caps.contextWindow;
   if (modelId in MODEL_CONTEXT_WINDOWS) return MODEL_CONTEXT_WINDOWS[modelId];
   let best = "";
   for (const key of Object.keys(MODEL_CONTEXT_WINDOWS)) {
@@ -351,7 +355,11 @@ export function warnIfUnverifiedModelParams(modelId: string): void {
 /** The model's declared output ceiling, or undefined when the model is unlisted.
  *  Exact match first, then longest-prefix (dated snapshot IDs). Callers that must
  *  clamp use this; callers that just need a budget use getMaxOutputTokens. */
-export function lookupMaxOutputTokens(modelId: string): number | undefined {
+export function lookupMaxOutputTokens(
+  modelId: string,
+  caps?: ModelCapabilities
+): number | undefined {
+  if (caps?.maxOutputTokens !== undefined) return caps.maxOutputTokens;
   if (modelId in MODEL_MAX_OUTPUT_TOKENS) return MODEL_MAX_OUTPUT_TOKENS[modelId];
   let best = "";
   for (const key of Object.keys(MODEL_MAX_OUTPUT_TOKENS)) {
@@ -363,9 +371,12 @@ export function lookupMaxOutputTokens(modelId: string): number | undefined {
 /** Output-token budget for one call to `modelId`: its catalog ceiling, or the
  *  conservative default when unlisted. max_tokens is a ceiling, not a reservation —
  *  only tokens actually produced are billed. */
-export function getMaxOutputTokens(modelId: string): number {
+export function getMaxOutputTokens(modelId: string, caps?: ModelCapabilities): number {
+  // The warn stays FIRST and unconditional: it reports a known-but-unprobed catalog model, which is
+  // a fact about the catalog and not about which ceiling this call ends up using. Moving the
+  // override above it would silence that report for a profile-declared model.
   warnIfUnverifiedModelParams(modelId);
-  return lookupMaxOutputTokens(modelId) ?? DEFAULT_MAX_OUTPUT_TOKENS;
+  return lookupMaxOutputTokens(modelId, caps) ?? DEFAULT_MAX_OUTPUT_TOKENS;
 }
 
 /**
@@ -384,7 +395,8 @@ export const MODEL_CACHE_MIN_CHARS: Record<string, number> = {
 export const DEFAULT_CACHE_MIN_CHARS = 8_200;
 
 /** Exact match, then longest-prefix, so dated snapshot IDs resolve to their alias. */
-export function getCacheMinChars(modelId: string): number {
+export function getCacheMinChars(modelId: string, caps?: ModelCapabilities): number {
+  if (caps?.cacheMinChars !== undefined) return caps.cacheMinChars;
   if (modelId in MODEL_CACHE_MIN_CHARS) return MODEL_CACHE_MIN_CHARS[modelId];
   let best = "";
   for (const key of Object.keys(MODEL_CACHE_MIN_CHARS)) {

@@ -44,17 +44,22 @@ export function createLLMClient(options: LLMClientResolveOptions = {}): LLMClien
   // receives (providerProfile.ts's R4). `fallback: "anthropic"` is this site's own historical
   // default, passed explicitly rather than hidden inside the resolver — see resolveProfile's own
   // comment for why the twelve sites each supply their own.
-  const profile = resolveProfile({
-    explicit: options.provider,
-    context: ctx?.provider,
-    fallback: "anthropic",
-    // Preserves the throw this function has always had for an unrecognized provider, rather than
-    // letting it silently become a warn-and-fall-back (R5). Unreachable while LLMProvider is
-    // two-valued; kept because dropping it would be a behaviour change on the day it is widened.
-    onUnrecognized: (value) => {
-      throw new Error(`Unsupported provider: ${value}`);
-    },
-  });
+  // An explicitly supplied profile is used verbatim — it is the only way a profile that is not one
+  // of the two built-ins reaches this function, since resolveProfile can only ever return a
+  // built-in. That is what makes the no-pricing warning below reachable rather than dormant.
+  const profile =
+    options.profile ??
+    resolveProfile({
+      explicit: options.provider,
+      context: ctx?.provider,
+      fallback: "anthropic",
+      // Preserves the throw this function has always had for an unrecognized provider, rather than
+      // letting it silently become a warn-and-fall-back (R5). Unreachable while LLMProvider is
+      // two-valued; kept because dropping it would be a behaviour change on the day it is widened.
+      onUnrecognized: (value) => {
+        throw new Error(`Unsupported provider: ${value}`);
+      },
+    });
   warnProfileCannotPriceOnce(profile);
 
   const apiKey = resolveApiKeyForProfile(profile, options.apiKey, ctx?.userApiKey);

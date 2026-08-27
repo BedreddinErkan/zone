@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   ANTHROPIC_PROFILE,
+  capabilitiesFor,
   OPENAI_PROFILE,
   profileForProvider,
   providerOf,
@@ -207,5 +208,114 @@ describe("warn-once helpers", () => {
     warnBudgetGateInertOnce(UNPRICEABLE, 1);
     expect(warn).toHaveBeenCalledTimes(4);
     warn.mockRestore();
+  });
+});
+
+describe("capabilitiesFor — per-model over default, undefined when nothing is declared (item 392)", () => {
+  const BARE: ProviderProfile = {
+    id: "bare-gateway",
+    protocol: "openai-chat",
+    adapterProvider: "openai",
+    keyRef: { envVar: "X", keyExample: "sk-…" },
+  };
+
+  it("a profile declaring no capabilities returns undefined, not an empty object", () => {
+    // undefined is the signal every consumer keys on to fall through to the global tables. An
+    // empty object would be a declaration that overrides nothing, which is a different thing and
+    // would still short-circuit a `caps?.x !== undefined` check the same way — but only by luck.
+    expect(capabilitiesFor(BARE, "any-model")).toBeUndefined();
+    expect(capabilitiesFor(undefined, "any-model")).toBeUndefined();
+  });
+
+  it("a default applies to any model the profile serves", () => {
+    const p = { ...BARE, capabilities: { default: { contextWindow: 32_000 } } };
+    expect(capabilitiesFor(p, "anything-at-all")?.contextWindow).toBe(32_000);
+  });
+
+  it("a per-model entry wins over the default, field by field", () => {
+    const p = {
+      ...BARE,
+      capabilities: {
+        default: { contextWindow: 32_000, maxOutputTokens: 4_096 },
+        models: { "special/model": { maxOutputTokens: 64_000 } },
+      },
+    };
+    const caps = capabilitiesFor(p, "special/model");
+    // The per-model entry overrode only maxOutputTokens; contextWindow still comes from default.
+    expect(caps?.maxOutputTokens).toBe(64_000);
+    expect(caps?.contextWindow).toBe(32_000);
+    // A model with no entry is unaffected by the override.
+    expect(capabilitiesFor(p, "other/model")?.maxOutputTokens).toBe(4_096);
+  });
+
+  it("matching is EXACT on the id as given — no normalization, no prefix walk", () => {
+    const p = { ...BARE, capabilities: { models: { "hub/m": { contextWindow: 1 } } } };
+    expect(capabilitiesFor(p, "hub/m")?.contextWindow).toBe(1);
+    // Deliberately not matched: a third resolution strategy that guessed would disagree with both
+    // existing ones, which already disagree with each other.
+    expect(capabilitiesFor(p, "hub/m-20260219")).toBeUndefined();
+    expect(capabilitiesFor(p, "prefix/hub/m")).toBeUndefined();
+  });
+
+  it("neither built-in declares capabilities, which is what keeps their resolution unchanged", () => {
+    expect(ANTHROPIC_PROFILE.capabilities).toBeUndefined();
+    expect(OPENAI_PROFILE.capabilities).toBeUndefined();
+  });
+});
+
+describe("priceForProfile — inline rates are consulted before the named table (item 392)", () => {
+  const RATES = { input: 1, output: 2, cache_read: 0, cache_write: 0 };
+
+  it("inline rates price a model no global table knows", () => {
+    const p: ProviderProfile = {
+      id: "rate-gateway",
+      protocol: "openai-chat",
+      adapterProvider: "openai",
+      keyRef: { envVar: "X", keyExample: "sk-…" },
+      pricing: { rates: { "hub/some-model": RATES } },
+    };
+    const priced = priceForProfile(p, "hub/some-model", { ...ZERO_CACHE });
+    expect(priced.known).toBe(true);
+    // 100 input @ $1/MTok + 30 output @ $2/MTok
+    expect(priced.known === true && priced.usd).toBeCloseTo(100 / 1e6 + (30 * 2) / 1e6, 12);
+  });
+
+  it("inline rates win over the named table for the same model id", () => {
+    const p: ProviderProfile = {
+      ...OPENAI_PROFILE,
+      id: "override-gateway",
+      pricing: { table: "openai", rates: { "gpt-4o-mini": RATES } },
+    };
+    const viaInline = priceForProfile(p, "gpt-4o-mini", { ...ZERO_CACHE });
+    const viaTable = priceForProfile(OPENAI_PROFILE, "gpt-4o-mini", { ...ZERO_CACHE });
+    expect(viaInline.known === true && viaInline.usd).toBeCloseTo(100 / 1e6 + 60 / 1e6, 12);
+    // Different figures prove the inline table was consulted rather than skipped.
+    expect(viaInline.known === true && viaInline.usd)
+      .not.toBeCloseTo(viaTable.known === true ? viaTable.usd : -1, 12);
+  });
+
+  it("a model absent from the inline rates falls through to the named table", () => {
+    const p: ProviderProfile = {
+      ...OPENAI_PROFILE,
+      id: "partial-gateway",
+      pricing: { table: "openai", rates: { "hub/other": RATES } },
+    };
+    const priced = priceForProfile(p, "gpt-4o-mini", { ...ZERO_CACHE });
+    const viaTable = priceForProfile(OPENAI_PROFILE, "gpt-4o-mini", { ...ZERO_CACHE });
+    expect(priced.known === true && priced.usd)
+      .toBeCloseTo(viaTable.known === true ? viaTable.usd : -1, 12);
+  });
+
+  it("a pricing block that answers for nothing is still UNKNOWN, not zero", () => {
+    const p: ProviderProfile = {
+      id: "empty-pricing",
+      protocol: "openai-chat",
+      adapterProvider: "openai",
+      keyRef: { envVar: "X", keyExample: "sk-…" },
+      pricing: { rates: { "hub/other": RATES } },
+    };
+    const priced = priceForProfile(p, "hub/unlisted", { ...ZERO_CACHE });
+    expect(priced.known).toBe(false);
+    expect(priced).not.toHaveProperty("usd");
   });
 });

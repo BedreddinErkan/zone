@@ -158,3 +158,75 @@ describe("what actually reaches the adapter and the recorder (item 387)", () => 
     expect(profile?.pricing).toEqual({ table: "openai" });
   });
 });
+
+/**
+ * Reachability of the no-pricing warning, driven through the real client-construction path.
+ *
+ * Step 3 wired this warning but it could not fire: `resolveProfile` only ever returns a built-in,
+ * and both built-ins price, so the guard at the top of the helper always returned early. The
+ * profile injection seam added in step 4 is what makes it reachable, and this test drives it
+ * through `createLLMClient` rather than by calling the helper directly — a warning that only ever
+ * fires when a test calls it by hand is not wired to anything.
+ */
+describe("a profile with no pricing table warns through createLLMClient (item 392)", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    openaiCtorMock.mockClear();
+    anthropicCtorMock.mockClear();
+    recordingCtorMock.mockClear();
+    process.env.OPENAI_API_KEY = "sk-openai-test";
+    process.env.TEST_GATEWAY_KEY = "sk-gateway-test";
+  });
+
+  afterEach(() => {
+    delete process.env.TEST_GATEWAY_KEY;
+  });
+
+  const UNPRICEABLE = {
+    id: "test-gateway",
+    protocol: "openai-chat" as const,
+    adapterProvider: "openai" as const,
+    keyRef: { envVar: "TEST_GATEWAY_KEY", keyExample: "sk-…" },
+  };
+
+  it("fires the no-pricing warning, naming the profile, when the client is built", async () => {
+    const { createLLMClient } = await import("./factory.js");
+    const { _resetProviderProfileWarningsForTest } = await import("./providerProfile.js");
+    _resetProviderProfileWarningsForTest();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    createLLMClient({ profile: UNPRICEABLE });
+
+    const line = warn.mock.calls.map((c) => String(c[0])).find((m) => m.includes("[zone-profile-no-pricing]"));
+    expect(line).toBeDefined();
+    expect(line).toContain("test-gateway");
+    warn.mockRestore();
+  });
+
+  it("uses the injected profile verbatim — its keyRef env var, not the built-in's", async () => {
+    const { createLLMClient } = await import("./factory.js");
+    const { _resetProviderProfileWarningsForTest } = await import("./providerProfile.js");
+    _resetProviderProfileWarningsForTest();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    createLLMClient({ profile: UNPRICEABLE });
+
+    // Proof the profile actually drove construction rather than being ignored: the key came from
+    // TEST_GATEWAY_KEY, which no built-in profile names.
+    expect(openaiCtorMock).toHaveBeenCalledWith("sk-gateway-test", undefined, "openai");
+    warn.mockRestore();
+  });
+
+  it("a built-in profile still says nothing — the warning is about the profile, not the seam", async () => {
+    const { createLLMClient } = await import("./factory.js");
+    const { _resetProviderProfileWarningsForTest, OPENAI_PROFILE } = await import("./providerProfile.js");
+    _resetProviderProfileWarningsForTest();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    createLLMClient({ profile: OPENAI_PROFILE });
+
+    expect(warn.mock.calls.map((c) => String(c[0])).find((m) => m.includes("[zone-profile-no-pricing]")))
+      .toBeUndefined();
+    warn.mockRestore();
+  });
+});

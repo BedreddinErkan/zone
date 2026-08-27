@@ -104,3 +104,38 @@ describe("normalizeModelId — snapshot suffix stripping", () => {
     expect(usesAdaptiveThinking("claude-sonnet-4-6-20260219")).toBe(false);
   });
 });
+
+describe("effort drift guard — the two independent sets must agree (item 395)", () => {
+  /**
+   * `supportsEffort` reads EFFORT_SUPPORTED_MODELS; `effortLevelsFor` reads MODEL_EFFORT_LEVELS.
+   * They are separate tables, and every consumer gates on both in sequence
+   * (`resolvedEffort && supportsEffort(model)`). Nothing enforced their agreement, so a model added
+   * to one and not the other would resolve an effort and then have it silently discarded one line
+   * later — a drop with no warning anywhere. This guard is the enforcement; the entry that records
+   * the hazard is ledger item 395.
+   */
+  it("every catalog model that supports effort has a non-empty ladder, and vice versa", () => {
+    const disagreements: string[] = [];
+    for (const provider of Object.keys(MODEL_CATALOG) as (keyof typeof MODEL_CATALOG)[]) {
+      for (const m of MODEL_CATALOG[provider]) {
+        const supported = supportsEffort(m.id);
+        const hasLadder = effortLevelsFor(m.id).length > 0;
+        if (supported !== hasLadder) {
+          disagreements.push(
+            `${m.id}: supportsEffort=${supported} but effortLevelsFor=${hasLadder ? "non-empty" : "empty"}`
+          );
+        }
+      }
+    }
+    expect(disagreements, disagreements.join("\n")).toEqual([]);
+  });
+
+  it("a profile override moves BOTH together, so the override cannot manufacture the same drop", () => {
+    const caps = { effortLevels: ["low", "high"] as const };
+    expect(supportsEffort("hub/unlisted-model", caps)).toBe(true);
+    expect(effortLevelsFor("hub/unlisted-model", caps)).toEqual(["low", "high"]);
+    // And an explicitly empty ladder disables both, rather than one saying yes and the other no.
+    expect(supportsEffort("hub/unlisted-model", { effortLevels: [] })).toBe(false);
+    expect(effortLevelsFor("hub/unlisted-model", { effortLevels: [] })).toEqual([]);
+  });
+});

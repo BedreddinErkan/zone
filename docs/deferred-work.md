@@ -27600,11 +27600,148 @@ absolute that only a deliberate pass updates correctly is exactly the kind of nu
 own discipline exists to keep honest, and now has a second, differently-shaped instrument checking
 it rather than a single comment asking a future author to remember.
 
+## 392. A provider profile can now declare what its models are, and the layer is consulted before the global tables
+
+**Bucket: Neither.** Completed work recorded with no fix proposed, on items 386 and 387's own
+precedent. This is Option B step 4; step 3 declared `capabilities` and `pricing` on the record and
+left them unpopulated, and this fills them in.
+
+**What the layer is.** `ModelCapabilities` in `llm/types.ts` declares six per-model fields —
+context window, output ceiling, cache minimum, effort ladder, adaptive thinking, vision — and
+`ProfileCapabilities` in `llm/providerProfile.ts` carries them per profile as a per-model map plus
+an optional default that a per-model entry overrides field by field. `capabilitiesFor` returns
+`undefined` when a profile declares nothing, and that `undefined` is the signal every consumer keys
+on to fall through to the global table exactly as before. Resolution is override, then global
+table, then conservative default, at every site; never a merge and never reversed. Both built-in
+profiles declare no capabilities at all, which is what makes their behaviour byte-identical rather
+than merely intended to be.
+
+**Matching is exact on the model id as given, and that is a third strategy.** The two existing ones
+disagree: `models.ts` does raw-exact-then-longest-prefix, `modelRegistry.ts` does
+normalize-then-exact, and for an id carrying a non-date suffix the first resolves a context window
+while the second finds no effort ladder. A profile author writes the id their endpoint actually
+uses, so predictable beats clever; a fourth strategy that guessed would add a way for two
+capabilities of the same model to disagree.
+
+**The adapter seam is per-call, and the reason is a pin.** Five of the nine capabilities are
+consumed inside `convertParams`, behind an adapter with no profile in scope. The obvious route — a
+constructor argument — is closed: `factory.test.ts` asserts both adapter constructors' whole
+argument arrays, so either would break a pinned test. Instead `LLMRequestOptions` gained an optional
+`capabilities` field, the same shape as the `effort` and `webSearch` options already threaded that
+way, and both adapters pass it into the converter's existing optional bag. No constructor changed.
+
+**Which capabilities are verified against a request body, and which are not.** A capability that is
+threaded but never changes an outgoing request is indistinguishable from an unconsumed field, so
+the distinction is recorded rather than averaged away. Output ceiling, cache minimum, effort ladder
+and adaptive thinking are each asserted on the body that goes on the wire, in both directions —
+without the override, then with it — against a model id no global table can match. Those tests were
+mutation-checked: dropping the override argument at three lookups fails exactly three of them, so
+they discriminate rather than passing for unrelated reasons. Context window is threaded and
+verified, but at its accessor rather than in a body, because it never appears in a request at all;
+it gates compaction. Vision is declared and deliberately not consumed — item 394.
+
+**Two hazards the layer would otherwise have created.** `supportsEffort` and `effortLevelsFor` read
+independent tables and every consumer gates on both in sequence, so overriding only the ladder would
+let an effort resolve and then be discarded one line later — a new silent drop manufactured by the
+fix. Both take the override, and a profile declaring a non-empty ladder is by definition declaring
+support. Separately, the clamp-down resolver has a branch that returns nothing when no allowed level
+sits at or below the request; it was unreachable only because every global row contains the lowest
+level, and a profile declaring a truncated ladder reaches it. It now reports through the existing
+clamp marker with a null resolution rather than dropping in silence. No new marker name was added by
+this pass.
+
+**Pricing gained inline rates,** consulted before the named table, so a gateway can price ids no
+global table knows. The arithmetic is shared with `totalCost` through a helper extracted for the
+purpose — the tables did not move — so an inline-priced call and a table-priced one cannot drift
+apart on the long-context threshold. A pricing block that answers for nothing is still unknown
+rather than zero.
+
+**Both warn-once helpers are now reachable.** Item 387 recorded them as wired but dormant, because
+`resolveProfile` can only return a built-in and both built-ins price. An optional profile field on
+the client options and on the agent-loop input is the seam; the tests drive both warnings through
+`createLLMClient` and `runAgentLoop` rather than by calling the helpers by hand, and one of them
+asserts the injected profile's own key environment variable was the one read, which is what proves
+the profile drove construction rather than being accepted and ignored.
+
+**What was NOT done.** No configuration file or environment variable can define a profile yet, so
+the seam is programmatic: this pass makes a gateway profile expressible and consumable, not yet
+user-configurable, which is step 5's territory along with the key store. `baseUrl` remains unset on
+both built-ins, deliberately, because a pinned assertion records it as absent. The escalation ladder
+and role routing take no override, since the role router's argument count is itself pinned. And
+`formatCostNote` runs at module-initialisation time, so a per-profile pricing override cannot change
+the catalog cost notes the model picker displays.
+
+## 393. Two unrelated things in this codebase are called capabilities, and a grep lands on either
+
+**Bucket: Neither.** A structural fact recorded; renaming either one is churn against a name that is
+correct in its own module, so no fix is proposed.
+
+`Capability` in `tools/capabilities.ts` is what a TOOL may do — file reads, file writes, shell
+execution, network fetches — and drives which tools an agent loop is permitted to call.
+`ModelCapabilities` in `llm/types.ts`, carried by `ProfileCapabilities` in `llm/providerProfile.ts`,
+is what a MODEL supports — context window, output ceiling, effort ladder. The two are unrelated,
+never appear in the same expression, and are one search away from each other.
+
+The hazard is specific rather than aesthetic. A reader who greps the word and lands on the tool
+vocabulary will conclude that a provider profile grants tool permissions, which it does not; a
+reader who lands on the model vocabulary while chasing a permissions question will conclude the
+opposite. Both readings are self-consistent and wrong, which is the shape that survives review.
+Mitigated with a pointer in each module's header naming the other and stating which is which, so a
+reader who arrives at the wrong one is told so in the first paragraph. That is the whole remedy —
+the names themselves stay.
+
+## 394. Vision defaults to true for unknown models, and fixing only that half makes things worse
+
+**Bucket: Actionable now.** The fix is specified here, and it is deliberately not applied in the
+pass that found it — the reason being that its two halves are coupled, not a lack of specification.
+
+**Measured, not read.** `supportsVision` has exactly ONE production reader, the composer's
+image-send gate. The optional catalog field it consults is declared on ZERO of the catalog's
+entries, and the function returns true both when a matched entry omits the field and when no entry
+matches at all. Both instruments agree: a `git grep -a` and a `command grep -rn` for the field being
+assigned each return a single hit, and that hit is a test's module mock rather than a catalog entry.
+So the function is a constant today — it returns true for every possible input — and its one guard
+is dead. No test pins the default in either direction, so changing it is free of test churn.
+
+**Why free-to-change is not the same as safe-to-change, which is the part worth carrying.** Flipping
+the default to false alone would block image sends for exactly the unlisted-model and gateway users
+a provider profile exists to serve, and would give them no way to say otherwise, because the
+composer reads a display string and has no profile in scope. A future reader who sees "unknown model
+defaults to true, that is a defect" and corrects only that line makes the product worse, not better,
+and the test suite will not tell them. The two halves must land in one change: correct the default
+AND thread profile capabilities into the composer's gate so a profile can declare vision support.
+`ModelCapabilities` already carries the field for that purpose; nothing reads it yet, and that is
+recorded in item 392 as a deliberate gap rather than an oversight.
+
+The work belongs with the pass that touches the key store and the model picker, since that pass is
+already in the composer's neighbourhood, and it is named in step 5's scope in the investigation
+document so it is picked up there rather than sitting loose here.
+
+## 395. Two independent tables decide whether a model supports effort, and nothing made them agree
+
+**Bucket: Actionable now.** A drift guard is specified and, for this one, already built.
+
+Whether an effort level reaches the wire depends on two separate lookups against two separate
+tables: one answers which levels a model accepts, the other answers whether the model supports
+effort at all. Every consumer gates on both in sequence. They hold the same identifiers today —
+checked by hand while mapping this surface — but nothing enforced it, and the failure mode if they
+ever diverge is the quietest kind: an effort resolves successfully against the first table, then is
+discarded by the second with no warning emitted anywhere, in three separate call sites.
+
+This is the same shape as the effort drop item 392 had to close for profile overrides, one level
+up: the override path now moves both together by construction, so a declared ladder cannot
+manufacture the divergence. The global tables had no such protection. A guard now walks the catalog
+and asserts the two answers agree for every model, which is the enforcement the tables were missing;
+it is written in the same form as the drift guards already sitting beside it. What remains open is
+the structural question the guard does not answer — whether two tables should decide one property at
+all, or whether the second should be derived from the first — and that is a consolidation this entry
+does not propose.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 391 to find out which ones still need something. No index of
+reader the trouble of reading all 395 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -27620,7 +27757,7 @@ first.
 320, 352, 353, 364, 370, 371, 372, 377, 378, 379, 384, 385, 388, 390, 391
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (19): 287, 291, 292, 293, 296, 299, 313, 328, 329, 334, 347, 358, 359, 365, 368, 373, 375, 383, 389
+first (21): 287, 291, 292, 293, 296, 299, 313, 328, 329, 334, 347, 358, 359, 365, 368, 373, 375, 383, 389, 394, 395
 
 Six, down from seven, and the movement is the ledger's own signal about whether anything is specified
 and waiting, in both directions. The diagnosis pass into `find_references` left it at 7 (287 plus six
@@ -27656,14 +27793,14 @@ eleven to twelve.
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (17): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250, 263, 318, 376
 
-**Neither — a structural fact recorded, with no fix proposed** (181): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
+**Neither — a structural fact recorded, with no fix proposed** (183): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
 74, 76, 77, 78, 79, 80, 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109,
 112, 114, 115, 118, 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152,
 154, 155, 158, 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199,
 200, 201, 202, 205, 206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230,
 232, 243, 244, 247, 248, 249, 254, 256, 261, 272, 294, 295, 297, 298, 300, 303, 305, 306, 307, 311, 312,
 314, 315, 316, 317, 319, 321, 322, 323, 324, 325, 326, 330, 331, 332, 333, 335,
-338, 339, 340, 341, 342, 346, 349, 350, 354, 355, 356, 357, 360, 361, 362, 363, 366, 367, 369, 374, 380, 381, 382, 386, 387
+338, 339, 340, 341, 342, 346, 349, 350, 354, 355, 356, 357, 360, 361, 362, 363, 366, 367, 369, 374, 380, 381, 382, 386, 387, 392, 393
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.

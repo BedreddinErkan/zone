@@ -3,6 +3,12 @@
  *
  * 7 capabilities describe what a tool can do. CapabilityFilter is the
  * declarative form of allowedTools passed to AgentLoopInput.
+ *
+ * NAMING HAZARD, and this pointer is here because a grep for "capabilities" lands on one of these
+ * two modules at random. THIS file is about what a TOOL may do — fs.read, fs.write, shell.exec.
+ * `ModelCapabilities` in `src/llm/types.ts` is about what a MODEL supports — context window, output
+ * ceiling, effort ladder — and is carried by `ProfileCapabilities` in `src/llm/providerProfile.ts`.
+ * Same English word, unrelated concepts; the two never appear in the same expression. Ledger 393.
  */
 
 export type Capability =

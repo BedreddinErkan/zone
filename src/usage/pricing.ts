@@ -135,17 +135,18 @@ function rateFor(rates: ModelRates, type: TokenType): number {
   }
 }
 
-export function totalCost(
-  provider: ProviderName,
-  model: string,
+/**
+ * The whole-request arithmetic, given rates that have already been resolved.
+ *
+ * Extracted from `totalCost` (which now calls it) so a caller holding rates from somewhere other
+ * than `PRICING_USD_PER_MTOK` — a provider profile's own inline table — gets identical maths
+ * including the long-context threshold, rather than a second implementation that drifts. The
+ * tables themselves have not moved; only this arithmetic became addressable.
+ */
+export function costFromRates(
+  rates: ModelRates,
   breakdown: Record<TokenType, number>
 ): number {
-  const rates = resolveRates(provider, model);
-  if (!rates) {
-    console.warn(`[zone-pricing] unknown model ${provider}/${model}, cost=0`);
-    return 0;
-  }
-
   // A long-context surcharge keys on the request's INPUT size, which is every input
   // bucket summed — input_uncached + cache_read + cache_write reconstructs
   // prompt_tokens, since recordingClient derives input_uncached as
@@ -170,6 +171,19 @@ export function totalCost(
     (sum, t) => sum + ((breakdown[t] ?? 0) / 1_000_000) * rateFor(effective, t),
     0
   );
+}
+
+export function totalCost(
+  provider: ProviderName,
+  model: string,
+  breakdown: Record<TokenType, number>
+): number {
+  const rates = resolveRates(provider, model);
+  if (!rates) {
+    console.warn(`[zone-pricing] unknown model ${provider}/${model}, cost=0`);
+    return 0;
+  }
+  return costFromRates(rates, breakdown);
 }
 
 /**

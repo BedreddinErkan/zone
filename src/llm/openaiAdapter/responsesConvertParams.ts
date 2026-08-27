@@ -10,10 +10,11 @@ import type {
 } from "openai/resources/responses/responses.js";
 import { resolveEffortForModel, supportsEffort } from "../modelRegistry.js";
 import type { EffortLevel } from "../modelRegistry.js";
+import type { ModelCapabilities } from "../types.js";
 
 export function responsesConvertParams(
   params: ChatCompletionCreateParamsNonStreaming,
-  options: { effort?: EffortLevel }
+  options: { effort?: EffortLevel; capabilities?: ModelCapabilities }
 ): ResponseCreateParamsNonStreaming {
   // Extract the first system message as top-level instructions.
   // Subsequent system messages (e.g., compaction's [compacted_history]) become developer input items
@@ -75,10 +76,10 @@ export function responsesConvertParams(
   // load-bearing, not decorative: without it, `summary: "auto"` widens to plain `string` on
   // this standalone const and fails structural assignability against the SDK's own
   // `'auto' | 'concise' | 'detailed' | null` field the first time it's assigned into `result`.
-  const resolvedEffort = resolveEffortForModel(params.model, options.effort);
+  const resolvedEffort = resolveEffortForModel(params.model, options.effort, options.capabilities);
   const narrowedEffort =
     resolvedEffort === "xhigh" || resolvedEffort === "max" ? "high" : resolvedEffort;
-  const reasoning: ResponseCreateParamsNonStreaming["reasoning"] = supportsEffort(params.model)
+  const reasoning: ResponseCreateParamsNonStreaming["reasoning"] = supportsEffort(params.model, options.capabilities)
     ? { summary: "auto", ...(narrowedEffort ? { effort: narrowedEffort } : {}) }
     : undefined;
 

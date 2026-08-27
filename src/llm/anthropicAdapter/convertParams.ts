@@ -9,6 +9,7 @@ import { applyMessageCacheBreakpoint2 } from "./cacheControlHelpers.js";
 import { readProviderState, selectThinkingReplayIndices } from "./thinkingBlocks.js";
 import { supportsEffort, usesAdaptiveThinking, resolveEffortForModel } from "../modelRegistry.js";
 import { getMaxOutputTokens, lookupMaxOutputTokens, getCacheMinChars } from "../models.js";
+import type { ModelCapabilities } from "../types.js";
 import type { EffortLevel } from "../modelRegistry.js";
 
 // Existing low/medium/high values UNCHANGED. xhigh defensive (Sonnet won't receive it after resolver).
@@ -28,6 +29,12 @@ const DEFAULT_ADAPTIVE_EFFORT: EffortLevel = "high";
 export interface ConvertParamsExtras {
   effort?: EffortLevel;
   webSearch?: boolean;
+  /**
+   * Per-call capability overrides for `input.model`, resolved from the run's provider profile and
+   * threaded here through `LLMRequestOptions`. Absent on every pre-step-4 caller, so the global
+   * per-model tables answer exactly as they did.
+   */
+  capabilities?: ModelCapabilities;
 }
 
 const JSON_MODE_INSTRUCTION = [
@@ -55,9 +62,10 @@ const JSON_MODE_INSTRUCTION = [
 function isCacheEligible(
   systemText: string,
   tools: Anthropic.Tool[] | undefined,
-  model: string
+  model: string,
+  caps?: ModelCapabilities
 ): boolean {
-  const minChars = getCacheMinChars(model);
+  const minChars = getCacheMinChars(model, caps);
   // System alone clears the minimum: eligible even without tools.
   if (systemText.length >= minChars) return true;
   if (!tools || tools.length === 0) return false;
@@ -117,7 +125,7 @@ export function convertParams(
       ? input.max_tokens
       : typeof input.max_completion_tokens === "number" && input.max_completion_tokens > 0
         ? input.max_completion_tokens
-        : getMaxOutputTokens(input.model);
+        : getMaxOutputTokens(input.model, extras?.capabilities);
 
   const temperature =
     typeof input.temperature === "number"
@@ -150,7 +158,7 @@ export function convertParams(
   //     enlarging the system prompt costs full input rate once, a 1.25x write once, and 0.1x
   //     reads thereafter — not full rate on every iteration.
   //   • no tools (synthesis calls): system block gets cache_control directly.
-  const cacheEligible = isCacheEligible(finalSystem || "", tools, input.model);
+  const cacheEligible = isCacheEligible(finalSystem || "", tools, input.model, extras?.capabilities);
   let systemForRequest: Anthropic.MessageCreateParams["system"] = finalSystem || undefined;
   let toolsForRequest: Anthropic.Messages.ToolUnion[] | undefined = tools;
 
@@ -203,11 +211,11 @@ export function convertParams(
   // budget_tokens / temperature / top_p / stop_sequences are all removed on this family (API 400 otherwise).
   // Non-adaptive path (Sonnet/Haiku/OpenAI): unchanged — temperature/top_p/stop_sequences/budget_tokens
   // flow exactly as before.
-  const adaptive = usesAdaptiveThinking(input.model);
-  const resolvedEffort = resolveEffortForModel(input.model, extras?.effort);
+  const adaptive = usesAdaptiveThinking(input.model, extras?.capabilities);
+  const resolvedEffort = resolveEffortForModel(input.model, extras?.effort, extras?.capabilities);
 
   const thinkingBudget =
-    !adaptive && resolvedEffort && supportsEffort(input.model)
+    !adaptive && resolvedEffort && supportsEffort(input.model, extras?.capabilities)
       ? EFFORT_BUDGET_MAP[resolvedEffort]
       : undefined;
 
@@ -220,7 +228,7 @@ export function convertParams(
       : 0;
   // Clamp to the model's declared ceiling: over-asking is a hard 400. Unlisted models
   // pass through unclamped — we don't know their ceiling and must not invent one.
-  const modelCeiling = lookupMaxOutputTokens(input.model);
+  const modelCeiling = lookupMaxOutputTokens(input.model, extras?.capabilities);
   const budgetedMaxTokens = Math.max(max_tokens, thinkingFloor);
   const effectiveMaxTokens =
     modelCeiling !== undefined ? Math.min(budgetedMaxTokens, modelCeiling) : budgetedMaxTokens;

@@ -195,3 +195,90 @@ describe("subagent loops do not gate on the parent's runUsdCap (item 259)", () =
     expect(capMarkers()).toHaveLength(0);
   });
 });
+
+/**
+ * Reachability of the inert-budget-gate warning, driven through a real run.
+ *
+ * `--max-budget-usd` on a run whose profile cannot price is an inert ceiling: the accumulated cost
+ * never leaves zero, so the per-iteration comparison above can never fire and the run proceeds to
+ * its iteration limit under a flag whose only purpose is bounding it. Step 3 wired this warning and
+ * it could not fire, because every reachable profile priced. Driven here through `runAgentLoop`
+ * with an injected profile rather than by calling the helper directly (item 392).
+ */
+describe("--max-budget-usd on an unpriceable profile warns that the gate is inert (item 392)", () => {
+  const UNPRICEABLE = {
+    id: "test-gateway",
+    protocol: "openai-chat" as const,
+    adapterProvider: "openai" as const,
+    keyRef: { envVar: "TEST_GATEWAY_KEY", keyExample: "sk-…" },
+  };
+
+  /** A terminal response: the warning fires before the loop opens, so one clean iteration is enough. */
+  function llmDone() {
+    return {
+      choices: [{ message: { content: "done", tool_calls: null }, finish_reason: "stop" }],
+      usage: COSTLY,
+    };
+  }
+
+  it("warns once, naming the cap and the profile", async () => {
+    mocks.createChatCompletion.mockResolvedValue(llmDone());
+    const { _resetProviderProfileWarningsForTest } = await import("./providerProfile.js");
+    _resetProviderProfileWarningsForTest();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await runAgentLoop({
+      task: "do something",
+      repoPath,
+      userId: "user-1",
+      runId: "test-run-inert-gate",
+      runUsdCap: 2.5,
+      profile: UNPRICEABLE,
+    });
+
+    const line = warn.mock.calls.map((c) => String(c[0])).find((m) => m.includes("[zone-budget-gate-inert]"));
+    expect(line).toBeDefined();
+    expect(line).toContain("$2.50");
+    expect(line).toContain("test-gateway");
+    warn.mockRestore();
+  });
+
+  it("says nothing when the same run uses a profile that can price", async () => {
+    mocks.createChatCompletion.mockResolvedValue(llmDone());
+    const { _resetProviderProfileWarningsForTest, OPENAI_PROFILE } = await import("./providerProfile.js");
+    _resetProviderProfileWarningsForTest();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await runAgentLoop({
+      task: "do something",
+      repoPath,
+      userId: "user-1",
+      runId: "test-run-priceable-gate",
+      runUsdCap: 2.5,
+      profile: OPENAI_PROFILE,
+    });
+
+    expect(warn.mock.calls.map((c) => String(c[0])).find((m) => m.includes("[zone-budget-gate-inert]")))
+      .toBeUndefined();
+    warn.mockRestore();
+  });
+
+  it("says nothing without a cap, even on an unpriceable profile — the warning is about the gate", async () => {
+    mocks.createChatCompletion.mockResolvedValue(llmDone());
+    const { _resetProviderProfileWarningsForTest } = await import("./providerProfile.js");
+    _resetProviderProfileWarningsForTest();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await runAgentLoop({
+      task: "do something",
+      repoPath,
+      userId: "user-1",
+      runId: "test-run-no-cap",
+      profile: UNPRICEABLE,
+    });
+
+    expect(warn.mock.calls.map((c) => String(c[0])).find((m) => m.includes("[zone-budget-gate-inert]")))
+      .toBeUndefined();
+    warn.mockRestore();
+  });
+});

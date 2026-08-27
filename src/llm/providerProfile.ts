@@ -1,5 +1,11 @@
-import type { LLMProvider } from "./types.js";
-import { totalCost, type ProviderName, type TokenType } from "../usage/pricing.js";
+import type { LLMProvider, ModelCapabilities } from "./types.js";
+import {
+  costFromRates,
+  totalCost,
+  type ModelRates,
+  type ProviderName,
+  type TokenType,
+} from "../usage/pricing.js";
 
 /**
  * ProviderProfile — the seam between "which wire protocol" and "which endpoint identity".
@@ -92,11 +98,47 @@ import { totalCost, type ProviderName, type TokenType } from "../usage/pricing.j
  */
 
 /**
- * Reserved for step 4 of the recommendation (per-profile capability overrides consulted before the
- * global tables). Declared so the record's shape is complete and so a profile literal can carry the
- * field; deliberately unpopulated — nothing reads it yet.
+ * Per-profile capability overrides, consulted BEFORE the global per-model tables. Step 4 of the
+ * recommendation; step 3 declared this as an empty placeholder and this is its real shape.
+ *
+ * NAMING HAZARD: `ModelCapabilities` (what a MODEL supports) is not `src/tools/capabilities.ts`'s
+ * `Capability` (what a TOOL may do — `fs.write`, `shell.exec`). See that type's own note and ledger
+ * item 393.
+ *
+ * Matching is EXACT on the model id as the caller passes it — no normalization, no prefix walk.
+ * That is a deliberate third strategy, chosen because the two existing ones disagree: `models.ts`
+ * does raw-exact-then-longest-prefix while `modelRegistry.ts` does normalize-then-exact, and they
+ * already return different answers for the same id (a `-beta` suffix resolves a context window but
+ * no effort levels). A profile author writes the id their endpoint actually uses, so predictable
+ * beats clever here; `default` covers everything else this profile serves.
  */
-export type ProfileCapabilities = Record<string, never>;
+export type ProfileCapabilities = {
+  /** Keyed by the exact model id. Wins over `default`. */
+  models?: Readonly<Record<string, ModelCapabilities>>;
+  /** Applied to any model this profile serves with no entry in `models`. */
+  default?: ModelCapabilities;
+};
+
+/**
+ * The capability overrides this profile declares for `model`, or `undefined` when it declares none.
+ *
+ * `undefined` is the signal every consumer keys on: it means "this profile says nothing", and the
+ * consumer falls through to the global table exactly as before. A profile that declares SOME fields
+ * gets a merged object — per-model entries win field-by-field over `default`, so a profile can set
+ * a shared context window once and override the output ceiling for one model.
+ */
+export function capabilitiesFor(
+  profile: ProviderProfile | undefined,
+  model: string
+): ModelCapabilities | undefined {
+  const caps = profile?.capabilities;
+  if (!caps) return undefined;
+  const perModel = caps.models?.[model];
+  if (!perModel && !caps.default) return undefined;
+  if (!perModel) return caps.default;
+  if (!caps.default) return perModel;
+  return { ...caps.default, ...perModel };
+}
 
 /** Which wire protocol an endpoint speaks. Decides the adapter class and conversion modules. */
 export type WireProtocol = "anthropic-messages" | "openai-chat";
@@ -112,8 +154,20 @@ export type KeyRef = {
   keyExample: string;
 };
 
-/** Which pricing table prices this endpoint. ABSENT means the profile cannot price at all. */
-export type PricingRef = { table: ProviderName };
+/**
+ * How this endpoint's calls are priced. ABSENT means the profile cannot price at all — cost for it
+ * is UNKNOWN, never `0`.
+ *
+ * `rates` is consulted before `table`, so a gateway can declare rates for model ids no global table
+ * knows without needing an entry added to `PRICING_USD_PER_MTOK`. Both are optional: a profile with
+ * neither is the unpriceable case.
+ */
+export type PricingRef = {
+  /** Names a table in `usage/pricing.ts`. Consulted only when `rates` has no entry for the model. */
+  table?: ProviderName;
+  /** Inline per-model rates, keyed by exact model id. Consulted first. */
+  rates?: Readonly<Record<string, ModelRates>>;
+};
 
 export type ProviderProfile = {
   id: string;
@@ -230,8 +284,16 @@ export function priceForProfile(
   model: string,
   breakdown: Record<TokenType, number>
 ): PricedUsd {
-  if (!profile.pricing) return { known: false, reason: "no_pricing_for_profile" };
-  return { known: true, usd: totalCost(profile.pricing.table, model, breakdown) };
+  const pricing = profile.pricing;
+  if (!pricing) return { known: false, reason: "no_pricing_for_profile" };
+  // Inline rates first — a gateway declares rates for ids no global table knows. Uses the same
+  // arithmetic totalCost does (long-context threshold included), via the helper both share, so an
+  // inline-priced call and a table-priced one cannot drift apart.
+  const inline = pricing.rates?.[model];
+  if (inline) return { known: true, usd: costFromRates(inline, breakdown) };
+  if (pricing.table) return { known: true, usd: totalCost(pricing.table, model, breakdown) };
+  // Declared a pricing block but nothing in it answers for this model: still unknown, not zero.
+  return { known: false, reason: "no_pricing_for_profile" };
 }
 
 // ─── Warn-once helpers ───────────────────────────────────────────────────────────────────────

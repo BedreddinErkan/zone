@@ -4,9 +4,11 @@
 } from "./openaiClient.js";
 import { createLLMClient } from "./factory.js";
 import {
+  capabilitiesFor,
   providerOf,
   resolveProfile,
   warnBudgetGateInertOnce,
+  type ProviderProfile,
 } from "./providerProfile.js";
 import { getRequestContext, withRequestContext } from "./openaiContext.js";
 import { readProjectMemoryBlock } from "../memory/projectMemory.js";
@@ -277,6 +279,14 @@ export interface AgentLoopInput {
   /** LLM provider to use for this run. When set, passed to createLLMClient so the
    *  agent loop uses the correct provider instead of relying solely on context. */
   provider?: LLMProvider;
+  /**
+   * An already-resolved provider profile for this run, used verbatim instead of resolving one from
+   * `provider`. Supplies the per-model capability overrides threaded into the context-window and
+   * output-ceiling lookups and into each LLM call's request options, and is the only way a profile
+   * without a pricing table reaches this loop — which is what makes the inert-budget-gate warning
+   * reachable rather than dormant.
+   */
+  profile?: ProviderProfile;
   /** Tur P2-scope: when present, write tools reject paths outside the
    *  union of plan.steps[*].filesLikely. Forwarded into executeTool. */
   executionPlan?: import("./executionPlan.js").ExecutionPlan | null;
@@ -2889,11 +2899,12 @@ async function runAgentLoopScoped(input: AgentLoopInput, stats: LoopRunStats): P
   // from the profile-has-no-pricing warning because the consequence is different and worse.
   if (!isSubagentLoop && typeof input.runUsdCap === "number" && input.runUsdCap > 0) {
     warnBudgetGateInertOnce(
-      resolveProfile({
-        explicit: input.provider,
-        context: getRequestContext()?.provider,
-        fallback: "anthropic",
-      }),
+      input.profile ??
+        resolveProfile({
+          explicit: input.provider,
+          context: getRequestContext()?.provider,
+          fallback: "anthropic",
+        }),
       input.runUsdCap
     );
   }
@@ -3499,7 +3510,13 @@ Example:
         { role: "user", content: userMessageContent },
       ];
 
-  const client = createLLMClient({ apiKey: input.userApiKey, provider: input.provider });
+  // `profile` wins over `provider` inside createLLMClient — passing both keeps the existing
+  // provider-only path byte-identical while letting a run that was given a profile use it verbatim.
+  const client = createLLMClient({
+    apiKey: input.userApiKey,
+    provider: input.provider,
+    profile: input.profile,
+  });
   const requestCtx = getRequestContext();
   const budget = new TokenBudgetMeter({
     baseTokens: cleanTokenNumber(input.tokenBudgetBaseTokens),
@@ -3639,7 +3656,7 @@ Example:
                   : "Mention which steps remain incomplete."),
             },
           ],
-          max_tokens: getMaxOutputTokens(wrapupModel),
+          max_tokens: getMaxOutputTokens(wrapupModel, capabilitiesFor(input.profile, wrapupModel)),
         },
         { signal: input.abortSignal, effort: requestCtx?.effort }
       );
@@ -4418,10 +4435,10 @@ Example:
           messages: wireMessages,
           tools: toolsForLLM,
           tool_choice: "auto",
-          max_tokens: getMaxOutputTokens(modelName),
+          max_tokens: getMaxOutputTokens(modelName, capabilitiesFor(input.profile, modelName)),
           ...(promptCacheKey ? { prompt_cache_key: promptCacheKey } : {}),
         },
-        { signal: input.abortSignal, onToolArgumentsDelta, onTextDelta, onRetryEvent, effort: requestCtx?.effort, webSearch: input.webSearchEnabled }
+        { signal: input.abortSignal, onToolArgumentsDelta, onTextDelta, onRetryEvent, effort: requestCtx?.effort, webSearch: input.webSearchEnabled, capabilities: capabilitiesFor(input.profile, modelName) }
       );
     } catch (llmErr: unknown) {
       if (llmErr instanceof UpstreamUnavailableError) {
@@ -5418,7 +5435,7 @@ Example:
       try {
         // Compact.0: trigger on context-window fullness, not cumulative billing
         const currentContextTokens = Math.round(JSON.stringify(responseInput).length / 4);
-        const contextWindowLimit = getContextWindow(modelName);
+        const contextWindowLimit = getContextWindow(modelName, capabilitiesFor(input.profile, modelName));
         compactionResult = await compactor.checkAndMaybeCompact({
           responseInput,
           toolCallLog,
@@ -5645,9 +5662,9 @@ Example:
               // No tools — pure text continuation; prevents the model from emitting
               // a tool call instead of finishing the prose answer.
               tool_choice: "none",
-              max_tokens: getMaxOutputTokens(modelName),
+              max_tokens: getMaxOutputTokens(modelName, capabilitiesFor(input.profile, modelName)),
             },
-            { signal: input.abortSignal, onToolArgumentsDelta, onTextDelta, onRetryEvent, effort: requestCtx?.effort, webSearch: input.webSearchEnabled }
+            { signal: input.abortSignal, onToolArgumentsDelta, onTextDelta, onRetryEvent, effort: requestCtx?.effort, webSearch: input.webSearchEnabled, capabilities: capabilitiesFor(input.profile, modelName) }
           );
           // Record continuation cost/tokens so budget.snapshot() in finalizeRun is accurate.
           budget.recordLLMCall({
@@ -5782,7 +5799,7 @@ Example:
               "Do not call tools. Do not mention patches or verification.",
           },
         ],
-        max_tokens: getMaxOutputTokens(chatAssessmentModel),
+        max_tokens: getMaxOutputTokens(chatAssessmentModel, capabilitiesFor(input.profile, chatAssessmentModel)),
       }, { signal: input.abortSignal, effort: requestCtx?.effort });
       // Record assessment cost/tokens — mirrors the continuation call site's own
       // comment (item 254/255: this call was previously unfed). The loop's own `iter`
@@ -5906,7 +5923,7 @@ Example:
                 fwHint),
         },
       ],
-      max_tokens: getMaxOutputTokens(finalAssessmentModel),
+      max_tokens: getMaxOutputTokens(finalAssessmentModel, capabilitiesFor(input.profile, finalAssessmentModel)),
     }, { signal: input.abortSignal, effort: requestCtx?.effort });
     // Record assessment cost/tokens — mirrors the continuation call site's own
     // comment (item 254/255: this call was previously unfed). Post-loop, so the

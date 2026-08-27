@@ -1,6 +1,6 @@
 import { MODEL_CATALOG, type ZoneModelTier } from "./models.js";
 import { normalizeModelId } from "./modelIdNormalize.js";
-import type { LLMProvider } from "./types.js";
+import type { LLMProvider, ModelCapabilities } from "./types.js";
 
 export type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max";
 
@@ -65,7 +65,8 @@ const ADAPTIVE_THINKING_MODELS = new Set([
   "claude-sonnet-5",
 ]);
 
-export function usesAdaptiveThinking(id: string): boolean {
+export function usesAdaptiveThinking(id: string, caps?: ModelCapabilities): boolean {
+  if (caps?.adaptiveThinking !== undefined) return caps.adaptiveThinking;
   return ADAPTIVE_THINKING_MODELS.has(normalizeModelId(id));
 }
 
@@ -104,15 +105,22 @@ const MODEL_EFFORT_LEVELS: Record<string, EffortLevel[]> = {
   "gpt-5.4-nano": ["low", "medium", "high"],
 };
 
-export function effortLevelsFor(model: string): EffortLevel[] {
+/**
+ * `caps.effortLevels` overrides the global table. An explicitly empty array is honoured as "this
+ * model takes no effort" — a different statement from omitting the field, which defers to the
+ * table. That distinction is why the check is on `!== undefined` rather than on truthiness.
+ */
+export function effortLevelsFor(model: string, caps?: ModelCapabilities): EffortLevel[] {
+  if (caps?.effortLevels !== undefined) return [...caps.effortLevels];
   return MODEL_EFFORT_LEVELS[normalizeModelId(model)] ?? [];
 }
 
 export function resolveEffortForModel(
   model: string,
-  requested: EffortLevel | undefined
+  requested: EffortLevel | undefined,
+  caps?: ModelCapabilities
 ): EffortLevel | undefined {
-  const allowed = effortLevelsFor(model);
+  const allowed = effortLevelsFor(model, caps);
   if (!requested || allowed.length === 0) return undefined;  // Haiku / no-effort ⇒ drop
   if (allowed.includes(requested)) return requested;          // exact match ⇒ pass
   // clamp DOWN to the highest allowed level ≤ requested
@@ -122,10 +130,15 @@ export function resolveEffortForModel(
     const i = EFFORT_ORDER.indexOf(lvl);
     if (i <= want && (best === undefined || i > EFFORT_ORDER.indexOf(best))) best = lvl;
   }
-  // If no allowed level ≤ requested (unreachable with current map — all entries include "low"),
-  // return undefined rather than clamping UP (cost-unsafe).
   if (best !== undefined && best !== requested) {
     console.warn("[zone-effort-clamped]", { model, requested, resolved: best });
+  } else if (best === undefined) {
+    // No allowed level at or below the request, so the effort is dropped rather than clamped UP
+    // (clamping up is cost-unsafe). This branch was unreachable while every table row contained
+    // "low"; a profile declaring a truncated ladder such as ["high","max"] reaches it, and a drop
+    // that says nothing is exactly the silent degradation this layer exists to remove. Reported
+    // through the existing marker with a null resolution rather than a new marker name.
+    console.warn("[zone-effort-clamped]", { model, requested, resolved: null });
   }
   return best;  // undefined ⇒ no effort (strict clamp-down semantics)
 }
@@ -155,7 +168,17 @@ export function getProviderForModel(id: string): "anthropic" | "openai" {
   return entry?.provider ?? "anthropic";
 }
 
-export function supportsEffort(id: string): boolean {
+/**
+ * MUST take the same override as `effortLevelsFor`, and this is not defensive symmetry.
+ *
+ * These two read INDEPENDENT sets — `EFFORT_SUPPORTED_MODELS` and `MODEL_EFFORT_LEVELS` — and every
+ * consumer gates on both in sequence (`resolvedEffort && supportsEffort(model)`). Overriding only
+ * the levels would let an effort resolve and then be silently discarded one line later: a brand-new
+ * silent drop manufactured by the override layer itself. A profile that declares a non-empty ladder
+ * is by definition declaring that the model supports effort.
+ */
+export function supportsEffort(id: string, caps?: ModelCapabilities): boolean {
+  if (caps?.effortLevels !== undefined) return caps.effortLevels.length > 0;
   return EFFORT_SUPPORTED_MODELS.has(normalizeModelId(id));
 }
 
