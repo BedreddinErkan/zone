@@ -110,6 +110,18 @@ describe("getModelName — model override resolution", () => {
     warnSpy.mockRestore();
   });
 
+  it("provider argument omitted entirely — the default parameter itself, not just the branch it selects — resolves the openai standard default (gateway-support-investigation.md §2.4 site 9; characterization, not endorsement)", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // Every getModelName call elsewhere in this file passes provider explicitly, including one
+    // passing "openai" itself (the previous test) — none would catch a change to
+    // openaiClient.ts:80's own default parameter value. This omits the argument, exercising the
+    // default-parameter mechanism itself, under the same ambient-env assumption the previous
+    // test already relies on (no stub in this file clears ZONE_LLM_MODEL/OPENAI_MODEL).
+    expect(getModelName("standard")).toBe("gpt-4o-mini");
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
   it("high default (no override) resolves to gpt-4o without warning", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     expect(getModelName("high", "openai")).toBe("gpt-4o");

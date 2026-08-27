@@ -4,6 +4,7 @@ import {
   clearClassificationCache,
   CLASSIFIER_CONFIDENCE_THRESHOLD,
 } from "./taskClassifier.js";
+import { totalCost } from "../usage/pricing.js";
 
 const mocks = vi.hoisted(() => ({
   createChatCompletion: vi.fn(),
@@ -629,6 +630,74 @@ describe("Phase BYOM.1.1 — classifier provider routing", () => {
       classifierModel: "claude-haiku-4-5",
       provider: "anthropic",
     });
+  });
+});
+
+describe("computeResponseCost — provider-conditional pricing (gateway-support-investigation.md §2.4 site 12; characterization, not endorsement)", () => {
+  it('provider="anthropic" prices against the anthropic table, not openai\'s', async () => {
+    mocks.createChatCompletion.mockResolvedValue(
+      buildResponse(
+        JSON.stringify({
+          tier: "simple",
+          estimatedFiles: 1,
+          estimatedIterations: 5,
+          needsSubagent: false,
+          confidence: 0.9,
+        }),
+        "claude-haiku-4-5"
+      )
+    );
+
+    const result = await classifyTask("site 12 anthropic pricing pin", {
+      provider: "anthropic",
+      skipCache: true,
+    });
+
+    // buildResponse's default usage is {prompt_tokens:100, completion_tokens:30, zero cache} →
+    // extractUsage gives {input_uncached:100, cache_write:0, cache_read:0, output:30}. The
+    // expected figure is derived from the real totalCost(), not a hand-typed literal, so this
+    // is a routing pin rather than the same arithmetic written twice: if computeResponseCost's
+    // ternary routed to the wrong table, this comparison — computed with the KNOWN provider
+    // string, independent of what the ternary actually picked — would disagree with it.
+    const expected = totalCost("anthropic", "claude-haiku-4-5", {
+      input_uncached: 100,
+      cache_write: 0,
+      cache_read: 0,
+      output: 30,
+    });
+    expect(result.classifierCostUsd).toBeCloseTo(expected, 10);
+  });
+
+  it('provider="openai" prices against the openai table — a different figure than the anthropic branch for identical usage', async () => {
+    mocks.createChatCompletion.mockResolvedValue(
+      buildResponse(
+        JSON.stringify({
+          tier: "medium",
+          estimatedFiles: 3,
+          estimatedIterations: 10,
+          needsSubagent: false,
+          confidence: 0.8,
+        }),
+        "gpt-4o-mini"
+      )
+    );
+
+    const result = await classifyTask("site 12 openai pricing pin", {
+      provider: "openai",
+      skipCache: true,
+    });
+
+    const expected = totalCost("openai", "gpt-4o-mini", {
+      input_uncached: 100,
+      cache_write: 0,
+      cache_read: 0,
+      output: 30,
+    });
+    expect(result.classifierCostUsd).toBeCloseTo(expected, 10);
+    // A mis-routed ternary would price "claude-haiku-4-5"/"gpt-4o-mini" as an unknown model in
+    // the OTHER table ($0, with a [zone-pricing] warning), not a plausible wrong number — so
+    // this pin is sensitive to the routing itself, not only to the two tables' rates.
+    expect(result.classifierCostUsd).toBeGreaterThan(0);
   });
 });
 

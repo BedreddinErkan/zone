@@ -27316,11 +27316,90 @@ a separate, later pass, and needs its own written baseline first. `config.test.t
 already checked, closing the gap a value-only assertion would have passed on either side of this
 fix.
 
+## 386. A characterization-test baseline now exists for the twelve provider-defaulting sites that gateway-support-investigation.md §2.4 counted
+
+**Bucket: Neither.** A structural fact is recorded, with no fix proposed — deliberately, on the
+same terms items 297 and 298 already used for this exact subject, and the terms item 385's own
+closing paragraph named for what comes next: "a `ProviderProfile` refactor is a separate, later
+pass, and needs its own written baseline first." This entry is that baseline, not that refactor.
+
+**What this pass did, and did not do.** Test-only; no production file changed, and every new or
+touched test passes against HEAD exactly as it stood before this pass started — none of the
+twelve sites' resolved values changed. `docs/gateway-support-investigation.md` §2.4 inventoried
+twelve distinct sites that each produce a provider value through a default arm — six defaulting
+to `"anthropic"`, six to `"openai"` — and §2.5 measured that the defaults disagree with each
+other. This pass writes down each site's current, observable output through its own public entry
+point, so a later unification pass has a fixed reference for what it changes rather than a silent
+pick at each site.
+
+**Four sites already had adequate coverage, unchanged by this pass.** `llm/factory.ts`'s
+`resolveProvider` (`factory.test.ts`, `describe("resolveProvider — 3-level precedence")`) pins its
+fallback arm through `createLLMClient`. `modelRegistry.ts`'s `getProviderForModel`
+(`modelRegistry.test.ts`) pins `getProviderForModel("unknown-model")` returning `"anthropic"`.
+`taskClassifier.ts:555`'s `options.provider ?? ctx?.provider ?? "anthropic"`
+(`taskClassifier.test.ts`, `describe("Phase BYOM.1.1 — classifier provider routing")`) pins the
+omitted-provider case through `classifyTask` directly. `toolExecutor.ts:1117`'s
+`_requestCtx?.provider ?? "openai"` (`toolExecutor.workerModel.test.ts`, "falls back to openai
+provider when context has no provider set") pins its fallback through `executeTool` directly.
+
+**Eight sites gained a new test.** `cli/config.ts`'s `resolveProvider` (item 385's own subject) had
+every warning path pinned already; this pass adds the one sibling item 385 did not need — a
+totally empty `loadCliConfig({}, {})` call, asserted to resolve `"anthropic"` and emit no warning
+at all, distinguishing "nothing was ever set" from "something was set and rejected."
+`agentLoop.ts:2250`'s `input.provider ?? getRequestContext()?.provider ?? "anthropic"`, feeding
+`recordRunSummary`, had both explicit branches pinned by item 221's own tests
+(`agentLoop.recordRunSummary.test.ts`) but not the fallback arm itself; this pass adds the
+omitted-provider case. `agentLoop.ts:3564`, the identically-shaped fallback feeding
+`recordRunRetry` from inside the `zone_llm_retry_started` handler, had no coverage at all; this
+pass reaches it through `runAgentLoop` by having the same fake `createChatCompletion` mock item
+221's own tests already substitute for the LLM client invoke the `onRetryEvent` callback
+`runAgentLoop` threads into every call — the real, unmocked closure inside `agentLoop.ts` then
+runs for real and calls the real (mocked-at-the-module-boundary) `recordRunRetry`. No real SDK
+error class and no fake-timer handling of `withExponentialBackoff`'s own retry delays are needed,
+because the event is synthesized at the client seam rather than earned by a real retry loop. No
+test in this pass establishes that `zone_llm_retry_started` actually fires from
+`withExponentialBackoff` under a real retryable SDK error, though — this pin covers the fallback
+arm the handler computes, not the event's own reachability from a genuine retry.
+`recordingClient.ts`'s `toProviderName` had its `"openai"` arm pinned and not its `"anthropic"`
+arm; this pass adds the sibling. `openaiAdapter.ts:23`'s `provider: LLMProvider = "openai"`
+constructor default had every existing test either omit the argument for an unrelated reason or
+supply a non-default third argument to test routing; this pass adds a direct one-argument
+construction asserting `.provider`. `openaiClient.ts:80`'s `provider: LLMProvider = "openai"`
+default parameter had every call in `openaiClient.test.ts` supply the argument explicitly,
+including one supplying `"openai"` itself; this pass adds a call omitting it, so a future change
+to the default's value, not just its branch, is caught. `subagentDispatch.ts:124`'s
+`getRequestContext()?.provider ?? "openai"` had no test file at all; this pass adds
+`subagentDispatch.test.ts`, calling the exported `logSubagentDispatched` directly (it is
+dispatched from `toolEventHandler/handleToolResult.ts`, not from `toolExecutor.ts`, so
+`executeTool` cannot reach it) and asserting the `getModelForRole` call it drives.
+`taskClassifier.ts:433`'s `computeResponseCost` ternary had `classifierCostUsd` pinned only as
+`> 0`, which cannot distinguish which pricing table produced it; this pass computes the expected
+dollar figure for both branches directly from `totalCost` (`usage/pricing.ts`), not a hand-typed
+literal, through `classifyTask` directly, using one anthropic-only and one openai-only model id so
+a mis-routed ternary prices at `$0` (an unpriced-model warning) rather than a plausible wrong
+number.
+
+**The two `§2.5` findings.** The unrecognized-provider warning is item 385 itself; this pass adds
+no new test for the warning, only the quiet-default sibling named two paragraphs up, which pins a
+different property of the same function. The cross-provider pair — `{provider:"openai"}` with no
+model set anywhere resolves to `{model:"claude-sonnet-4-6", provider:"openai"}`, because the
+model-pins-provider branch in `config.ts` requires an explicit, catalog-known model and a
+defaulted one is neither — was exercised by an existing test that checked only `cfg.provider`;
+this pass adds the sibling assertion on `cfg.model`, pinning the pair as such.
+
+**What this does not decide.** Six sites still default to `"anthropic"` and six to `"openai"`, on
+four different shapes (if-return, `??` chain, default parameter, ternary) with no shared resolver
+— unchanged, and not this entry's job to change, per items 297 and 298. A twelfth cluster the
+investigation's own AST-walk definition does not reach — nested-object-literal provider selection
+in roughly a dozen TUI settings-persistence sites — stays out of scope for the same reason it was
+out of scope for the count this entry pins tests against; it is now tracked as its own open
+unknown, row 9 of `docs/gateway-support-investigation.md`'s own table, rather than only named here.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 385 to find out which ones still need something. No index of
+reader the trouble of reading all 386 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -27372,14 +27451,14 @@ eleven to twelve.
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (17): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250, 263, 318, 376
 
-**Neither — a structural fact recorded, with no fix proposed** (179): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
+**Neither — a structural fact recorded, with no fix proposed** (180): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
 74, 76, 77, 78, 79, 80, 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109,
 112, 114, 115, 118, 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152,
 154, 155, 158, 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199,
 200, 201, 202, 205, 206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230,
 232, 243, 244, 247, 248, 249, 254, 256, 261, 272, 294, 295, 297, 298, 300, 303, 305, 306, 307, 311, 312,
 314, 315, 316, 317, 319, 321, 322, 323, 324, 325, 326, 330, 331, 332, 333, 335,
-338, 339, 340, 341, 342, 346, 349, 350, 354, 355, 356, 357, 360, 361, 362, 363, 366, 367, 369, 374, 380, 381, 382
+338, 339, 340, 341, 342, 346, 349, 350, 354, 355, 356, 357, 360, 361, 362, 363, 366, 367, 369, 374, 380, 381, 382, 386
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.

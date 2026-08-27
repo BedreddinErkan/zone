@@ -27,6 +27,7 @@ const toolExecutorMock = vi.hoisted(() => ({
 const mocks = vi.hoisted(() => ({
   createChatCompletion: vi.fn(),
   recordRunSummary: vi.fn(),
+  recordRunRetry: vi.fn(),
   getUsage: vi.fn(),
   readDailyUsdCapOverride: vi.fn<() => number | undefined>(),
 }));
@@ -45,6 +46,7 @@ vi.mock("../usage/usageTracker.js", () => ({
   recordExecution: vi.fn(),
   readRecords: vi.fn(() => []),
   recordRunSummary: mocks.recordRunSummary,
+  recordRunRetry: mocks.recordRunRetry,
   getRunCost: vi.fn(() => 0),
   recordRunSummarySync: vi.fn(),
 }));
@@ -88,6 +90,8 @@ beforeEach(() => {
   });
   mocks.createChatCompletion.mockResolvedValue(makeDoneResponse());
   mocks.recordRunSummary.mockResolvedValue(undefined); // default: success
+  mocks.recordRunRetry.mockReset();
+  mocks.recordRunRetry.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -146,5 +150,77 @@ describe("item 221 — the recordRunSummary call site passes the run's real prov
 
     const call = mocks.recordRunSummary.mock.calls[0]?.[0] as { provider?: string } | undefined;
     expect(call?.provider).toBe("anthropic");
+  });
+
+  it("omitting provider (and no request context) falls back to the anthropic literal — the ?? \"anthropic\" default arm itself, not just pass-through", async () => {
+    await runAgentLoop({
+      task: "do something",
+      repoPath,
+      userId: "user-1",
+      runId: "test-run-provider-omitted",
+    });
+
+    const call = mocks.recordRunSummary.mock.calls[0]?.[0] as { provider?: string } | undefined;
+    expect(call?.provider).toBe("anthropic");
+  });
+});
+
+describe("agentLoop.ts:3564 — the retry-event provider fallback (gateway-support-investigation.md §2.4 site 5; characterization, not endorsement)", () => {
+  // zone_llm_retry_started only ever fires from inside withExponentialBackoff, beneath a REAL
+  // adapter's REAL SDK call throwing a retryable error class. Reaching that here would mean
+  // abandoning this file's own established convention of replacing createLLMClient with a bare
+  // fake client. Instead, the fake client's own createChatCompletion invokes the onRetryEvent
+  // callback runAgentLoop hands it through options — the exact seam a real client would also
+  // receive it through — so the real, unmocked onRetryEvent closure inside agentLoop.ts runs for
+  // real and calls the real recordRunRetry. No real SDK error class and no fake-timer handling of
+  // withExponentialBackoff's own backoff delays are needed: the event is synthesized at the
+  // client seam, not earned by driving a real retry loop. This pins the handler's own fallback
+  // arm only — no test in this repo establishes that zone_llm_retry_started actually fires from
+  // withExponentialBackoff under a real retryable SDK error; that reachability question is
+  // untested.
+
+  it("omitting provider (and no request context) falls back to the anthropic literal", async () => {
+    mocks.createChatCompletion.mockImplementation(
+      async (
+        _params: unknown,
+        options?: { onRetryEvent?: (event: string, payload: Record<string, unknown>) => void }
+      ) => {
+        options?.onRetryEvent?.("zone_llm_retry_started", {});
+        return makeDoneResponse();
+      }
+    );
+
+    await runAgentLoop({
+      task: "do something",
+      repoPath,
+      userId: "user-1",
+      runId: "test-run-retry-fallback",
+    });
+
+    const call = mocks.recordRunRetry.mock.calls[0]?.[0] as { provider?: string } | undefined;
+    expect(call?.provider).toBe("anthropic");
+  });
+
+  it("an explicit openai run threads provider:\"openai\" into recordRunRetry too", async () => {
+    mocks.createChatCompletion.mockImplementation(
+      async (
+        _params: unknown,
+        options?: { onRetryEvent?: (event: string, payload: Record<string, unknown>) => void }
+      ) => {
+        options?.onRetryEvent?.("zone_llm_retry_started", {});
+        return makeDoneResponse();
+      }
+    );
+
+    await runAgentLoop({
+      task: "do something",
+      repoPath,
+      userId: "user-1",
+      runId: "test-run-retry-openai",
+      provider: "openai",
+    });
+
+    const call = mocks.recordRunRetry.mock.calls[0]?.[0] as { provider?: string } | undefined;
+    expect(call?.provider).toBe("openai");
   });
 });

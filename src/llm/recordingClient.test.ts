@@ -45,6 +45,17 @@ describe("toProviderName — provider billing", () => {
       expect.objectContaining({ provider: "openai" })
     );
   });
+
+  it("anthropic provider → recordExecution called with provider='anthropic'", async () => {
+    const client = new RecordingLLMClient(makeFakeInner("anthropic"));
+    const stream = await client.createChatCompletionStream(
+      { model: "claude-sonnet-4-6", messages: [], stream: true }
+    );
+    for await (const _ of stream) {}
+    expect(vi.mocked(recordExecution)).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: "anthropic" })
+    );
+  });
 });
 
 describe("stream_options.include_usage — set for openai, not anthropic", () => {

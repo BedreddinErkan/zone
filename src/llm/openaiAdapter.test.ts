@@ -237,3 +237,10 @@ describe("OpenAI prompt cache stability helpers", () => {
     expect(buildOpenAIPromptCacheKey("run-abc", undefined)).toBe("zone-run-run-abc");
   });
 });
+
+describe("OpenAIAdapter — provider constructor default (gateway-support-investigation.md §2.4 site 8; characterization, not endorsement)", () => {
+  it("constructing with apiKey only (no baseUrl, no provider) defaults .provider to \"openai\"", () => {
+    const adapter = new OpenAIAdapter("sk-test");
+    expect(adapter.provider).toBe("openai");
+  });
+});

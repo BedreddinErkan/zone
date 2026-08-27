@@ -37,6 +37,14 @@ describe("loadCliConfig — defaults", () => {
     const cfg = loadCliConfig({}, {});
     expect(cfg.forceTier).toBeUndefined();
   });
+
+  it("no provider input at all (flags, env, disk, config file all unset) — resolves to anthropic silently, no warning", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const cfg = loadCliConfig({}, {});
+    expect(cfg.provider).toBe("anthropic");
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
 });
 
 describe("loadCliConfig — flag precedence", () => {
@@ -158,6 +166,16 @@ describe("loadCliConfig — config file precedence", () => {
 
   it("openai provider set from config file", () => {
     const cfg = loadCliConfig({}, { defaultProvider: "openai" });
+    expect(cfg.provider).toBe("openai");
+  });
+
+  it('§2.5\'s cross-provider pair: {provider:"openai"} with a defaulted model yields model=claude-sonnet-4-6, provider=openai — characterization, not endorsement', () => {
+    // Same input as "openai provider set from config file" above; this adds the model
+    // assertion that pins the mismatched pair. The model-pins-provider branch only
+    // activates for an EXPLICIT, catalog-known model — a defaulted model is not
+    // explicit, so provider resolves independently here.
+    const cfg = loadCliConfig({}, { defaultProvider: "openai" });
+    expect(cfg.model).toBe("claude-sonnet-4-6");
     expect(cfg.provider).toBe("openai");
   });
 
