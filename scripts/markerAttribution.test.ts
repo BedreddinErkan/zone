@@ -385,7 +385,7 @@ describe("working-tree hazard — the tracked scan must agree with what staging 
  * shifts these numbers should make this test fail and prompt a review, not silently drift.
  */
 describe("drift check — today's figures against the real tree", () => {
-  it("422 marker names; emitter-count distribution zero=43 one=359 several=20; 28 hazards", () => {
+  it("423 marker names; emitter-count distribution zero=43 one=360 several=20; 28 hazards", () => {
     // Re-derived via this file's own scanTree/hazards, not hand-added to the prior 410/349 —
     // the repository-tree write guard (ledger item 236) landed one new marker,
     // `[zone-repo-guard]`, so the total moved 410->411. It lands in `several`, not `one`:
@@ -496,8 +496,16 @@ describe("drift check — today's figures against the real tree", () => {
     // legitimate row rather than a bug, and it is the same shape [zone-llm-retry-attempt] produced
     // one pass earlier. Re-derived from the scan, and the added row identified by grepping source
     // mentions against emitters, rather than assumed from the count moving by one.
+    //
+    // 422 -> 423, one=359 -> 360, hazards UNCHANGED at 28: [zone-anthropic-credit-error]
+    // (src/llm/anthropicAdapter.ts), added by ledger item 413 so the shape a real out-of-balance
+    // Anthropic account actually sends is recorded the first time a funded key hits it — that whole
+    // arc (411/412/413) turned on not knowing whether credit exhaustion arrives as 402, a
+    // status-less mid-stream frame, or a gateway-normalized 400, and no live call could settle it.
+    // One marker, one emitter, and no new hazard row: unlike [zone-mcp-tools-filtered] above, its
+    // only other mentions are its own test and the ledger, neither of which hazards() scans.
     const result = scanTree(readTrackedFiles());
-    expect(result.size).toBe(422);
+    expect(result.size).toBe(423);
 
     const dist = { zero: 0, one: 0, several: 0 };
     for (const attr of result.values()) {
@@ -506,7 +514,7 @@ describe("drift check — today's figures against the real tree", () => {
       else if (c === 1) dist.one++;
       else dist.several++;
     }
-    expect(dist).toEqual({ zero: 43, one: 359, several: 20 });
+    expect(dist).toEqual({ zero: 43, one: 360, several: 20 });
     expect(hazards(result)).toHaveLength(28);
   });
 

@@ -28681,10 +28681,11 @@ cases specifically. Item 411's own fix and this entry do not touch Anthropic's `
 branch at all — a plain Anthropic 429 still classifies as retryable `"429"` today, unconditionally,
 exactly as before.
 
-## 413. `mapAnthropicBadRequest` recognizes a gateway-shaped credit error at status 400, not the real Anthropic status (402), and is unreachable from the main agent-loop call anyway
+## 413. Closed — `mapAnthropicBadRequest` recognized a gateway-shaped credit error at status 400, not the real Anthropic status (402)
 
-**Bucket: Actionable now** for the status half — the fix is named and small. The streaming-path
-half is a larger, separate lift, named here but not scoped.
+**Bucket: Actionable now → Closed.** Fixed this commit. **This entry originally claimed a second
+defect that does not exist; that half is retracted below, and the retraction is the more useful
+half of this closure.**
 
 Found while checking item 411's Anthropic question. `mapAnthropicBadRequest`
 (`src/llm/anthropicAdapter.ts`) guards on `err instanceof BadRequestError && err.status === 400`
@@ -28698,43 +28699,135 @@ confirms the gateway normalizes the real 402 into a generic 400 `invalid_request
 function's friendly "top up your balance" message fires for the gateway-mediated presentation and
 not for genuine direct-Anthropic credit exhaustion, which is the more fundamental case.
 
-**A second, independent gap in the same function, found by tracing its one call site.**
-`mapAnthropicBadRequest` is invoked from exactly one place: the `catch` block at the end of
-`AnthropicAdapter.createChatCompletion`'s **non-streaming** branch (`options.onToolArgumentsDelta ||
-options.onTextDelta` both falsy). Reading every `createChatCompletion` call site in
-`agentLoop.ts` (five total): the main per-iteration loop call and one continuation/coaching call
-both set **both** callbacks, forcing the **streaming** branch (`_streamWithToolCallbacks`), which
-has no catch block and no equivalent mapping at all. Only three auxiliary calls — the final wrapup,
-the chat-mode assessment, and the final assessment — omit both callbacks and reach the mapped path.
-So even a status-402-aware fix would still miss the highest-volume call site; the message would
-only ever fire from the three lower-volume, one-shot calls.
+**RETRACTED — the "second, independent gap" this entry originally claimed does not exist.** The
+original text asserted that `mapAnthropicBadRequest` is invoked only from *"the `catch` block at the
+end of `AnthropicAdapter.createChatCompletion`'s **non-streaming** branch"*, and therefore that the
+streaming branch — which the agent loop's per-iteration call always takes — *"has no catch block and
+no equivalent mapping at all."* Both halves are wrong. `createChatCompletion`'s `try` opens at the
+**top of the method, above** the streaming branch, and its single `catch` encloses both; the
+`return await this._streamWithToolCallbacks(...)` inside it even carries a comment stating the
+reason for the `await`: *"without it a streaming-path rejection bypasses this try/catch."*
 
-**Not scoped here**, per item 411's own boundary — item 411 fixed OpenAI's conflation and confirmed
-Anthropic's retry classification is already correct; this entry is what it found beyond that,
-recorded rather than folded in.
+**Refuted by a test that was already green when the claim was written**, not merely by re-reading:
+`anthropicAdapter.streamRetry.test.ts` scenario 5 drives `createChatCompletion` with streaming
+options, injects a 400 into the stream, and asserts a `ProviderRequestError` with
+`kind: "request_shape"` comes out. The streaming path reaching this mapping was existing, asserted
+behaviour the whole time. **The failure mode worth recording is the one that produced the claim:**
+the trace stopped at the `catch`'s line number and inferred its scope from whichever branch
+happened to precede it, rather than reading up to the matching `try`. The observable symptom the entry reported —
+the credit message never firing for a direct Anthropic account out of balance — was entirely
+explained by this entry's own status defect, and fixing that alone fixes it on every path.
+
+**The fix.** `mapAnthropicBadRequest` gains one branch ahead of its 400 branch, keyed on the error
+`type` rather than the status:
+
+```ts
+if (err instanceof APIError && err.type === "billing_error") {
+  throw new ProviderRequestError(err.status ?? 402, "credit", ANTHROPIC_CREDIT_MESSAGE, err);
+}
+```
+
+**`type`, not `status`, and the choice is load-bearing** — established by constructing both shapes
+through the SDK's own constructors rather than reasoning about them:
+
+```
+402 (direct, pre-generation)  -> APIError, status 402,       type "billing_error"
+mid-stream SSE event:error    -> APIError, status undefined, type "billing_error"
+400 (LiteLLM gateway)         -> BadRequestError, status 400, type "invalid_request_error"
+```
+
+The middle row is what `core/streaming.ts` builds for an SSE error frame —
+`new APIError(undefined, body, undefined, headers, type)` — with no status, because there is no HTTP
+status to attach to a frame arriving inside a 200 response. A `status === 402` check would have
+missed it silently. Anthropic **types** this field (`readonly type: ErrorType | null`, with
+`'billing_error'` a union member in `resources/shared.ts`), so unlike the OpenAI sibling check in
+`withExponentialBackoff.ts` — which rests on documentation, since OpenAI's `code`/`type` are bare
+strings — this one rests on the SDK's own type contract. The 400 branch is unchanged, so the
+gateway presentation keeps exactly its previous behaviour, and both branches now share one
+`ANTHROPIC_CREDIT_MESSAGE` constant so the two presentations of one condition cannot drift apart.
+
+**Where a streaming 402 actually throws, since the fix depends on it.** `messages.stream()` returns
+its runner **synchronously** and issues the request fire-and-forget (`_run(executor)` →
+`executor().then(…, #handleError)`), so nothing throws at stream creation. The 402 rejects
+`_createMessage` → `#handleError`, which re-emits it **unwrapped** because `APIError extends
+AnthropicError` → the async iterator's `on('error', err => reader.reject(err))` → the `for await`
+loop throws the original error at its first iteration, inside the `withExponentialBackoff` callback.
+`classifyError` finds 402 non-retryable, so it propagates unwrapped through
+`_streamWithToolCallbacks`'s fallback guard (which rethrows anything that is not an
+`UpstreamUnavailableError`) and into the method-level catch. One catch suffices, and it already
+existed — which is why this fix adds no `.catch()` wrappers, unlike its OpenAI sibling, where none
+existed at all.
+
+**`classifyError` is untouched.** Anthropic's 402 was already correctly non-retryable; this pass
+changes only how it is *reported*.
+
+**Name now narrower than behaviour, recorded rather than silently left.** The function still reads
+`mapAnthropicBadRequest` while handling a 402 and a status-less mid-stream error. Kept to avoid
+churn in its one call site and two test files' imports; noted here and in its own doc comment.
+
+**Not live-confirmed.** Both provider balances were exhausted, so the error *shapes* above are
+constructed and measured, while the claim that a real out-of-balance Anthropic account sends
+`type: "billing_error"` rests on Anthropic's live docs plus its typed enum. The new
+`[zone-anthropic-credit-error]` marker (`{status, type}`) exists to convert that into an
+observation the first time a funded account hits it — the arc across items 411/412/413 turned
+repeatedly on not knowing which shape a provider really sends.
+
+## 414. `createChatCompletionStream` maps no provider error, and the seam that fixes its sibling cannot reach it
+
+**Bucket: Neither.** A real structural gap with no fix specified — the shape that closed item 413
+does not transfer here, and what would work instead is a different, larger decision about where a
+lazy iterable's errors get handled.
+
+`AnthropicAdapter.createChatCompletionStream` is a separate public method from
+`createChatCompletion`, and unlike its sibling it has **no `try`/`catch` and no call to
+`mapAnthropicBadRequest`**. So the credit-exhaustion message item 413 just made reachable
+everywhere else is still absent here, as is the retention and request-shape classification. Its
+OpenAI counterpart has the same gap: `openaiAdapter.ts`'s own `createChatCompletionStream` carries
+one `.catch(mapOpenAIQuotaExhausted)` added by item 411's fix, but see below for why that is weaker
+than it looks.
+
+**Live, not vestigial.** Two production call sites, both in `src/llm/planFullPatch.ts`, and that
+module is imported by `src/core/runLlmPatchFlow.ts` at three separate call sites — so this is a
+reachable path, not dead code.
+
+**Why item 413's seam does not transfer, which is the whole reason this is filed rather than
+fixed.** That fix worked because a streaming 402 surfaces *inside* the `withExponentialBackoff`
+callback, within an enclosing `try`. This method has no such enclosure: it calls
+`this.sdk.messages.stream(...)`, which **returns synchronously**, and returns
+`convertStream(stream)` — a lazy async iterable. The HTTP request has barely started when the
+method returns. Errors therefore surface in the **caller's** `for await`, outside the adapter
+entirely, after this function's stack frame is gone. Wrapping the method in `try`/`catch` or
+`.catch()` would catch essentially nothing. **This also means item 411's `.catch()` on the OpenAI
+equivalent is largely inert for the same reason** — recorded here rather than left implied, since
+that wrapper reads as covering the path and does not.
+
+**What closing it would take, without proposing one:** either wrapping the returned iterable so
+each `next()` rejection passes through the mapper, or handling provider errors at the
+`planFullPatch` consumer where the `for await` actually runs. Those are different designs with
+different blast radii, and choosing between them is not a decision this entry makes.
 
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 413 to find out which ones still need something. No index of
+reader the trouble of reading all 414 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (181): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42,
+**Closed** (182): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42,
 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113,
 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167,
 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228,
 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260,
 262, 264, 265, 266, 267, 268, 269, 270, 271, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285,
 286, 288, 289, 290, 301, 302, 304, 308, 309, 310, 327, 336, 337, 343, 344, 345, 348, 351,
-320, 352, 353, 364, 370, 371, 372, 377, 378, 379, 384, 385, 388, 390, 391, 394, 406, 328, 330, 408, 410, 411
+320, 352, 353, 364, 370, 371, 372, 377, 378, 379, 384, 385, 388, 390, 391, 394, 406, 328, 330, 408, 410, 411, 413
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (24): 287, 291, 292, 293, 296, 299, 313, 329, 334, 347, 358, 359, 365, 368, 373, 375, 383, 389, 395,
-401, 403, 404, 409, 413
+first (23): 287, 291, 292, 293, 296, 299, 313, 329, 334, 347, 358, 359, 365, 368, 373, 375, 383, 389, 395,
+401, 403, 404, 409
 
 Six, down from seven, and the movement is the ledger's own signal about whether anything is specified
 and waiting, in both directions. The diagnosis pass into `find_references` left it at 7 (287 plus six
@@ -28788,14 +28881,14 @@ in count, membership moved: 287, 291, 292, 293, 296, 299, 313, 329, 334, 347, 35
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (19): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250, 263, 318, 376, 405, 412
 
-**Neither — a structural fact recorded, with no fix proposed** (189): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
+**Neither — a structural fact recorded, with no fix proposed** (190): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
 74, 76, 77, 78, 79, 80, 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109,
 112, 114, 115, 118, 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152,
 154, 155, 158, 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199,
 200, 201, 202, 205, 206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230,
 232, 243, 244, 247, 248, 249, 254, 256, 261, 272, 294, 295, 297, 298, 300, 303, 305, 306, 307, 311, 312,
 314, 315, 316, 317, 319, 321, 322, 323, 324, 325, 326, 331, 332, 333, 335,
-338, 339, 340, 341, 342, 346, 349, 350, 354, 355, 356, 357, 360, 361, 362, 363, 366, 367, 369, 374, 380, 381, 382, 386, 387, 392, 393, 396, 397, 398, 399, 400, 402, 407
+338, 339, 340, 341, 342, 346, 349, 350, 354, 355, 356, 357, 360, 361, 362, 363, 366, 367, 369, 374, 380, 381, 382, 386, 387, 392, 393, 396, 397, 398, 399, 400, 402, 407, 414
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.

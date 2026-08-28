@@ -1,6 +1,7 @@
-import Anthropic, { BadRequestError, APIConnectionTimeoutError } from "@anthropic-ai/sdk";
+import Anthropic, { APIError, BadRequestError, APIConnectionTimeoutError } from "@anthropic-ai/sdk";
 import { withExponentialBackoff, UpstreamUnavailableError } from "./withExponentialBackoff.js";
 import { ProviderRequestError } from "./factory.js";
+import { log } from "../utils/logger.js";
 import type {
   ChatCompletion,
   ChatCompletionChunk,
@@ -36,14 +37,52 @@ export function isTimeoutError(err: unknown): boolean {
 }
 
 /**
- * Maps a raw Anthropic SDK BadRequestError (HTTP 400) to a ProviderRequestError with a
- * user-facing message. Rethrows everything else unchanged.
+ * The one credit-exhaustion message, shared by both presentations below so the two cannot drift
+ * into telling a user different things about the same condition.
+ */
+const ANTHROPIC_CREDIT_MESSAGE =
+  "API credit exhausted — your Anthropic credit balance is too low. Top up at console.anthropic.com (Plans & Billing), then retry. You can also switch model/provider with /model.";
+
+/**
+ * Maps a recognized Anthropic SDK error to a ProviderRequestError with a user-facing message.
+ * Rethrows everything else unchanged.
+ *
+ * NAME IS NARROWER THAN THE BEHAVIOUR, deliberately: this handles a 402 and a status-less
+ * mid-stream error as well as the 400 it was named for. Kept as-is to avoid churn in its one call
+ * site and its tests' imports; recorded in docs/deferred-work.md item 413 rather than left silent.
  *
  * SDK body shape: {"type":"error","error":{"type":"invalid_request_error","message":"..."}}
  * err.error = the full body; err.error.error.message = the actual message.
  * err.type = SDK convenience property for the inner error.error.type.
+ *
+ * TWO PRESENTATIONS OF CREDIT EXHAUSTION, and the discriminator choice is load-bearing (item 413):
+ *
+ *   402 (direct Anthropic, pre-generation)  -> APIError, status 402,       type "billing_error"
+ *   mid-stream SSE `event: error`           -> APIError, status undefined, type "billing_error"
+ *   400 (LiteLLM gateway, normalized)       -> BadRequestError, status 400, type "invalid_request_error"
+ *
+ * The middle row is what `core/streaming.ts` builds — `new APIError(undefined, body, undefined,
+ * headers, type)` — with no status, because there is no HTTP status to attach to a frame arriving
+ * inside a 200 response. So keying the credit check on `status === 402` would silently miss it;
+ * keying on `type` covers both. Anthropic TYPES this field (`readonly type: ErrorType | null`,
+ * 'billing_error' a union member), so this rests on the SDK's type contract rather than on
+ * documentation — a stronger footing than the OpenAI sibling check in withExponentialBackoff.ts.
+ *
+ * The 400 branch is unchanged and still handles the gateway presentation via its message regex,
+ * so gateway users keep exactly today's behaviour.
  */
 export function mapAnthropicBadRequest(err: unknown): never {
+  if (err instanceof APIError && err.type === "billing_error") {
+    // `status ?? 402`: the mid-stream shape carries none, and reporting the real status of the
+    // condition is more useful downstream than reporting `undefined`.
+    const status = err.status ?? 402;
+    // The whole 411/413 arc turned on not knowing which shape a real out-of-balance account
+    // produces, and no live call was possible to settle it. This records the shape the first time
+    // a funded account actually hits one. `log`, not `debugLog` — a marker gated behind
+    // ZONE_VERBOSE_LOGS would not be there on the run that finally shows it (item 409).
+    log("[zone-anthropic-credit-error]", JSON.stringify({ status, type: err.type }));
+    throw new ProviderRequestError(status, "credit", ANTHROPIC_CREDIT_MESSAGE, err);
+  }
   if (err instanceof BadRequestError && err.status === 400) {
     const bodyMsg = (err.error as { error?: { message?: string } } | null)?.error?.message ?? "";
     const fullMsg = bodyMsg || err.message;
@@ -60,7 +99,7 @@ export function mapAnthropicBadRequest(err: unknown): never {
           ? "request_shape"
           : "other";
     const userMessage = isCredit
-      ? "API credit exhausted — your Anthropic credit balance is too low. Top up at console.anthropic.com (Plans & Billing), then retry. You can also switch model/provider with /model."
+      ? ANTHROPIC_CREDIT_MESSAGE
       : isRetention
         ? "This model requires 30-day minimum data retention and isn't available for accounts configured for zero data retention (ZDR) or shorter retention. Adjust your Anthropic account's data-retention policy or switch models with /model."
         : `Invalid API request (${fullMsg}). Check model and parameter configuration.`;
