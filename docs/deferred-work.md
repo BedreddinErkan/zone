@@ -28382,6 +28382,16 @@ created it, and is stated as newly created rather than pre-existing because befo
 read-only archetypes could not reach an MCP tool at all. Closing it means Zone-side code at the
 dispatch branch.
 
+**Narrowed, not closed, by item 410's per-server tool allowlist.** A `tools` field in a server's
+declaration means a tool the user did not name is never registered and therefore never offered — so
+the mutating surface is now whatever the user chose rather than whatever the server ships, and a
+server that adds a mutating tool in a later release does not gain it silently. That is a real
+reduction and it is the reason the allowlist was chosen over a denylist. **It does not close this
+entry.** Every tool that IS listed still bypasses `executeTool` at the dispatch branch and still
+fires no `onApprovalRequired`; a user who lists `browser_click` gets exactly the ungated mutation
+this entry's own consequence paragraph describes. The allowlist changes how much surface exists, not
+whether the gate runs on it.
+
 **Two boundaries on the word "every".** MCP is TUI-only: the headless CLI entry never calls
 `loadDiskMcp` and never constructs a manager, so nothing changes for `--print`; adding it needs a
 non-TTY trust story the current code explicitly declines to invent. And three auxiliary
@@ -28471,28 +28481,149 @@ orchestrator / finalRunReport." The two disagree about whether todo display is s
 read as the first comment surviving unedited past the point sidebar-seeding moved to the in-loop
 tool.
 
+## 410. Closed — a server declaration can name which of its tools to expose
+
+**Bucket: Closed** by the commit carrying this line. Built because two live measurements agreed on
+the cost and one of them named the exact minimal set.
+
+**The measurement that motivated it.** With 24 MCP tools loaded, `tool_descriptions` was 65.1% of
+total tokens (33,128 chars per iteration) in one run and 67.4% (21,907 chars) in another. Across
+those two runs the locator flow used three tools — `browser_navigate`, `browser_find`, and
+`browser_evaluate` or `browser_run_code_unsafe`. Twenty-one tool descriptions were paid for on every
+iteration and never called.
+
+**The field.** `McpServerConfig` gains `tools?: string[]`, an allowlist. Absent means expose
+everything the server reports, which is the unchanged default and is pinned by its own test.
+`version` stays 1 — the field is additive and old configs parse identically.
+
+**Allowlist, not denylist, and the reason is in this repo rather than in the abstract.** An
+allowlist fails closed: a tool a server adds in a later release is not offered until someone names
+it. A denylist fails open, and `capabilities.ts`'s `READ_ONLY_CAPABILITIES` comment records what
+that already cost once — the capability allow-set *"replaced a name denylist that had the opposite
+failure direction: it granted whatever it forgot, which is how `multi_edit` reached a read-only
+run."* The allowlist's own weakness — a server renames a tool and the entry matches nothing — is the
+mitigable one: a rename is detectable, because the named tool is simply absent from `listTools`, and
+`[zone-mcp-tools-filtered]` reports it. A denylist's failure is a tool nobody has heard of being
+granted, which is undetectable by construction. One weakness has a marker; the other cannot have one.
+
+**Where the filtering happens, and what it is not.** After `listTools`, before `registerTool`, inside
+`connectOne` — because there is nowhere else it can go. The MCP protocol has no client-side tool
+filter: checked against the installed SDK (1.29.0) rather than assumed, `tools/list` request params
+are `_meta` and `cursor` only, and `ClientCapabilities` carries `experimental`, `sampling`,
+`elicitation`, `roots`, `tasks`, `extensions` — none of which restricts a server's surface. So the
+subprocess still starts, still reports every tool it has, and still holds every capability it held.
+**This withholds tools from the model. It is not a sandbox** and does not constrain the server
+process. `connectOne` is also the first point at which the server's real tool names exist, which is
+what makes an unmatched entry detectable at all.
+
+**Malformed and unmatched are different failures, detectable at different times, and get different
+treatment.** A malformed `tools` (not an array, non-string elements) is a parse-time, per-server
+fault: `validateServer` returns null, that server is skipped, `[zone-mcp-load-warn]` fires. This
+follows the precedent `args` and `env` already set and which `diskMcp.test.ts` pins — one server's
+bad filter must not disable another, so `loadDiskMcp`'s whole-file `return null` posture is
+deliberately NOT used here; that posture stays reserved for file-level faults. An empty array is
+rejected the same way rather than honoured: read literally it means "expose nothing", which nobody
+writes on purpose, and honouring it would register a server that can offer the model nothing at all
+— the silent zero-tool state this field exists to prevent. An **unmatched** name is not knowable
+until after `listTools`, so it cannot be a parse-time check at any price; it is reported by the new
+marker at connect time instead.
+
+**`[zone-mcp-tools-filtered]`** carries `{serverName, available, offered, dropped, unmatched}` — one
+marker serving both purposes, the token win readable as `available` versus `offered` and the rename
+case readable as `unmatched`. Emitted through `log`, not `debugLog`: item 409 records exactly what
+`debugLog` gating costs, and a silently-unmatched allowlist entry is that same shape.
+`[zone-mcp-connected]` gains a `registered` field alongside its existing `tools` count, always
+present rather than only when a filter is set — a user with a three-tool allowlist reading
+`tools: 24` alone would reasonably conclude the filter had done nothing.
+
+**The trust modal now shows the declared tool list, and the reason is worth stating.** The modal
+renders *before* `connect`, so the server has not started and `listTools` has not run — it has never
+been able to show a server's tool list, filtered or full, and showed only a command line. The
+allowlist is declared in the file and so is knowable at that point. Showing it is what makes the
+approval cover what actually runs. The trust hash covers the field automatically: `mcpConfigHash` is
+SHA-256 over raw file bytes and `isMcpTrusted` requires an exact match, so adding or editing the
+field re-triggers the prompt — the existing "whitespace change produces different hash" test already
+pins that sensitivity.
+
+**Measured live after the change**, in the same lab and on the same page as the two motivating runs
+this entry opens with, with the filter naming exactly the three tools the flow uses: `[zone-mcp-tools-filtered]` reported
+`available 24, offered 3, dropped 21, unmatched []`; `[zone-mcp-connected]` reported
+`tools: 24, registered: 3`; `[zone-agent-loop-entry]`'s `toolsAvailable` contained the three
+`mcp__playwright__*` names; and `tool_descriptions` fell to **17,305 chars, 51.5% of total tokens**,
+from 21,907 / 67.4% on the same task and page.
+
+**What that live run did not establish, stated precisely.** It terminated at `upstream_unavailable`
+with `costUsd: 0` and never reached the browser, so it did not confirm the flow completing
+end-to-end with the filter applied. The cause was that no funded provider was available — both the
+OpenAI and the Anthropic keys in the store were out of balance, so switching providers would not
+have helped and this is not a defect in either the filter or the flow. **The expectation here is
+well-founded rather than open:** the two runs that motivated this entry each completed the full
+capture-propose-verify flow using exactly the tools the filter names, so what is outstanding is a
+confirmation with the filter in place, not a question about whether three tools suffice. The
+confirming run is the one measurement this entry defers.
+
+## 411. A 429 from an exhausted quota is retried as if it were rate limiting
+
+**Bucket: Actionable now.** The distinguishing field is already on the error object and already
+reaches `classifyError`; the fix is to read it before returning the retryable classification.
+
+**Observed, not reasoned about.** A live run against OpenAI on an out-of-balance account emitted
+`[zone-llm-retry-attempt] attempt=1/4 class=429 delayMs=5036`, then `attempt=2/4 class=429
+delayMs=13075`, and repeated the pattern for a second model and a second loop entry — six retry
+attempts across one run, with delays of 4–16 seconds each, before the run terminated at
+`upstream_unavailable` with `costUsd: 0`. No retry could ever have succeeded: the balance does not
+change during the backoff.
+
+**The mechanism.** `classifyError` (`src/llm/withExponentialBackoff.ts`) branches on the SDK's error
+*class*: `err instanceof OpenAIRateLimitError` returns `{retryable: true, retryClass: "429"}`, which
+selects `RETRY_CONFIG.rateLimit429` — four attempts, 5,000 ms initial delay, multiplier 3. The
+OpenAI SDK constructs that one class from HTTP status 429, and OpenAI returns 429 for two
+operationally opposite conditions: `rate_limit_exceeded`, which is transient and where backoff is
+exactly right, and `insufficient_quota`, which is a billing state that no amount of waiting clears.
+Both arrive as the same class, so both get the same treatment.
+
+**The signal exists and is not consulted.** `openai/core/error.d.ts` declares
+`readonly code: string | null | undefined` and `readonly type: string | undefined` on `APIError`,
+and OpenAI populates them — `insufficient_quota` versus `rate_limit_exceeded`. `classifyError`
+reads neither; its only inspections are a chain of `instanceof` checks and a `status >= 500`
+fallback. So the information needed to separate the two cases is on the object the function already
+holds.
+
+**Why this is worth an entry rather than a shrug.** The cost is not the wasted seconds. It is that
+the run's own diagnostic record says `class=429` — rate limiting — for a condition that is a billing
+exhaustion, so a reader reconstructing the failure from the sink is pointed at the wrong cause. The
+first pass reading this exact log did conclude "transient rate limiting, retry later," and was wrong
+until the account state was checked by hand. A run that burns its retry budget on a condition no
+retry can clear is a distinct defect from the mis-labelling, and both live here.
+
+**Not established, and named rather than assumed.** Whether Anthropic exhibits the same conflation
+was not checked. Its balance-exhausted response is reported elsewhere in this series as a 400
+`invalid_request_error` carrying "credit balance is too low", which would take the `non_retryable`
+path rather than this one — but that was not verified against `classifyError` in this pass, and the
+claim here is scoped to OpenAI.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 409 to find out which ones still need something. No index of
+reader the trouble of reading all 411 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (179): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42,
+**Closed** (180): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42,
 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113,
 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167,
 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228,
 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260,
 262, 264, 265, 266, 267, 268, 269, 270, 271, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285,
 286, 288, 289, 290, 301, 302, 304, 308, 309, 310, 327, 336, 337, 343, 344, 345, 348, 351,
-320, 352, 353, 364, 370, 371, 372, 377, 378, 379, 384, 385, 388, 390, 391, 394, 406, 328, 330, 408
+320, 352, 353, 364, 370, 371, 372, 377, 378, 379, 384, 385, 388, 390, 391, 394, 406, 328, 330, 408, 410
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (23): 287, 291, 292, 293, 296, 299, 313, 329, 334, 347, 358, 359, 365, 368, 373, 375, 383, 389, 395,
-401, 403, 404, 409
+first (24): 287, 291, 292, 293, 296, 299, 313, 329, 334, 347, 358, 359, 365, 368, 373, 375, 383, 389, 395,
+401, 403, 404, 409, 411
 
 Six, down from seven, and the movement is the ledger's own signal about whether anything is specified
 and waiting, in both directions. The diagnosis pass into `find_references` left it at 7 (287 plus six
@@ -28534,7 +28665,11 @@ visiting each one — landing the bucket at twenty-two: 287, 291, 292, 293, 296,
 separately closes item 330, which sat in Neither rather than this bucket. A later pass investigating
 a plan-generation Zod failure files 409 — a prompt template contradicting its own prose and its own
 schema, its fix named and small — reaching twenty-three: 287, 291, 292, 293, 296, 299, 313, 329, 334,
-347, 358, 359, 365, 368, 373, 375, 383, 389, 395, 401, 403, 404, 409.
+347, 358, 359, 365, 368, 373, 375, 383, 389, 395, 401, 403, 404, 409. The pass after it files 411
+while verifying the MCP tool filter against a live lab — a 429 from an exhausted quota retried as if
+it were rate limiting, its distinguishing field already on the error object — reaching twenty-four:
+287, 291, 292, 293, 296, 299, 313, 329, 334, 347, 358, 359, 365, 368, 373, 375, 383, 389, 395, 401,
+403, 404, 409, 411.
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (18): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250, 263, 318, 376, 405
 

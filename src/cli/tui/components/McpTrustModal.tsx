@@ -40,7 +40,18 @@ export function McpTrustModal({ config, onApprove, onDeny }: McpTrustModalProps)
       <Text>that will be spawned as subprocesses during agent tool use.</Text>
       <Text> </Text>
       {serverEntries.map(([name, cfg]) => (
-        <Text key={name}>  <Text color={role.accent}>{glyph.groupMarker}</Text> {serverCommandLine(name, cfg)}</Text>
+        <Box key={name} flexDirection="column">
+          <Text>  <Text color={role.accent}>{glyph.groupMarker}</Text> {serverCommandLine(name, cfg)}</Text>
+          {/* Until the `tools` allowlist existed this modal showed a command line
+              and nothing else — it renders BEFORE connect(), so the server's own
+              tool list has never been available here to show. The allowlist is
+              declared in the file, so it is knowable at this point, and showing
+              it is what makes the approval cover what actually runs. */}
+          <Text dimColor>
+            {"      tools: "}
+            {cfg.tools ? cfg.tools.join(", ") : "all tools this server provides"}
+          </Text>
+        </Box>
       ))}
       <Text> </Text>
       <Text dimColor>

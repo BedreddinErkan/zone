@@ -357,3 +357,102 @@ it("callTool with unknown name → success:false", async () => {
   expect(result.success).toBe(false);
   expect(result.output).toContain("mcp tool not found");
 });
+
+// ── Per-server tool allowlist ────────────────────────────────────────────────
+//
+// The server still starts and still returns its FULL tools/list — the MCP
+// protocol has no client-side tool filter (checked against SDK 1.29.0:
+// ListToolsRequest params are only `_meta`/`cursor`, and no ClientCapability
+// restricts a server's surface). Zone drops the unlisted ones locally, between
+// listTools and registerTool. These tests assert on what the model can reach —
+// registeredToolNames() — which is the thing the filter is for; they do NOT
+// claim the server process was constrained, because it was not.
+describe("tools allowlist", () => {
+  it("T-FILTER-ALLOW: only listed tools are registered", async () => {
+    const server = uniqueServer();
+    _mockClient.listTools.mockResolvedValue({
+      tools: [makeTool("browser_navigate"), makeTool("browser_find"), makeTool("browser_click")],
+    });
+
+    const manager = await McpClientManager.connect(
+      { [server]: { command: "echo", tools: ["browser_navigate", "browser_find"] } },
+      "/tmp"
+    );
+
+    const names = manager.registeredToolNames();
+    expect(names).toContain(`mcp__${server}__browser_navigate`);
+    expect(names).toContain(`mcp__${server}__browser_find`);
+    // The whole point: an unlisted MUTATING tool is never offered. This is the
+    // half that narrows ledger item 408's ungated-mutation surface.
+    expect(names).not.toContain(`mcp__${server}__browser_click`);
+    expect(names).toHaveLength(2);
+  });
+
+  it("T-FILTER-ABSENT: no allowlist registers everything — the unchanged-by-default case", async () => {
+    const server = uniqueServer();
+    _mockClient.listTools.mockResolvedValue({
+      tools: [makeTool("browser_navigate"), makeTool("browser_click")],
+    });
+
+    const manager = await McpClientManager.connect({ [server]: { command: "echo" } }, "/tmp");
+
+    expect(manager.registeredToolNames()).toHaveLength(2);
+    expect(manager.registeredToolNames()).toContain(`mcp__${server}__browser_click`);
+  });
+
+  it("T-FILTER-UNMATCHED: a name the server does not provide registers the rest and is reported", async () => {
+    const server = uniqueServer();
+    _mockClient.listTools.mockResolvedValue({
+      tools: [makeTool("browser_navigate"), makeTool("browser_click")],
+    });
+    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const manager = await McpClientManager.connect(
+      // browser_snapshot is the rename case: an allowlist entry the server no
+      // longer provides. The allowlist's one real weakness is that this breaks
+      // silently — so it must not be silent.
+      { [server]: { command: "echo", tools: ["browser_navigate", "browser_snapshot"] } },
+      "/tmp"
+    );
+
+    expect(manager.registeredToolNames()).toEqual([`mcp__${server}__browser_navigate`]);
+
+    const call = spy.mock.calls.find((c) => String(c[0]).includes("zone-mcp-tools-filtered"));
+    expect(call, "an unmatched allowlist entry must be reported, not swallowed").toBeDefined();
+    const payload = JSON.parse(String(call![1])) as Record<string, unknown>;
+    expect(payload["serverName"]).toBe(server);
+    expect(payload["available"]).toBe(2);
+    expect(payload["offered"]).toBe(1);
+    expect(payload["dropped"]).toBe(1);
+    expect(payload["unmatched"]).toEqual(["browser_snapshot"]);
+    spy.mockRestore();
+  });
+
+  it("T-FILTER-MARKER-UNCONDITIONAL: the marker is log(), not debugLog() — visible without ZONE_VERBOSE_LOGS", async () => {
+    // Ledger item 409 records what debugLog gating costs: a failure nobody can
+    // see without an env var. This suite runs with ZONE_VERBOSE_LOGS unset, so
+    // observing the marker here IS the assertion that it is not gated.
+    expect(process.env["ZONE_VERBOSE_LOGS"]).not.toBe("1");
+    const server = uniqueServer();
+    _mockClient.listTools.mockResolvedValue({ tools: [makeTool("a"), makeTool("b")] });
+    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await McpClientManager.connect({ [server]: { command: "echo", tools: ["a"] } }, "/tmp");
+
+    expect(spy.mock.calls.some((c) => String(c[0]).includes("zone-mcp-tools-filtered"))).toBe(true);
+    spy.mockRestore();
+  });
+
+  it("T-FILTER-NO-MARKER-WITHOUT-FILTER: an unfiltered server emits no filter marker", async () => {
+    const server = uniqueServer();
+    _mockClient.listTools.mockResolvedValue({ tools: [makeTool("a")] });
+    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await McpClientManager.connect({ [server]: { command: "echo" } }, "/tmp");
+
+    // Floor: a marker that fired unconditionally would make the assertions
+    // above pass for the wrong reason.
+    expect(spy.mock.calls.some((c) => String(c[0]).includes("zone-mcp-tools-filtered"))).toBe(false);
+    spy.mockRestore();
+  });
+});

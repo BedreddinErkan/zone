@@ -7,6 +7,27 @@ export interface McpServerConfig {
   command: string;
   args?: string[];
   env?: Record<string, string>;
+  /**
+   * Allowlist of this server's tool names to expose to the model. Absent means
+   * expose everything the server reports — the unchanged default.
+   *
+   * ALLOWLIST, not a denylist, and the choice is load-bearing. An allowlist
+   * fails closed: a tool a server adds in a later release is not offered until
+   * someone names it. A denylist fails open, which this codebase has already
+   * paid for once — see `READ_ONLY_CAPABILITIES` in tools/capabilities.ts, whose
+   * comment records the name denylist that "granted whatever it forgot, which is
+   * how `multi_edit` reached a read-only run." The allowlist's own weakness (a
+   * server renames a tool and the entry silently matches nothing) is reported
+   * rather than swallowed — see `[zone-mcp-tools-filtered]` in mcpClientManager.
+   *
+   * NOT A SANDBOX. The MCP protocol has no client-side tool filter (SDK 1.29.0:
+   * `tools/list` params are `_meta`/`cursor` only, and no ClientCapability
+   * restricts a server's surface), so the subprocess still starts, still reports
+   * every tool, and still holds every capability it had. This withholds tools
+   * from the MODEL. It cuts prompt cost and narrows what the model can invoke;
+   * it does not constrain the server process itself.
+   */
+  tools?: string[];
 }
 
 export interface McpConfig {
@@ -42,6 +63,24 @@ function validateServer(raw: unknown, name: string): McpServerConfig | null {
       return null;
     }
     server.env = obj.env as Record<string, string>;
+  }
+  if (obj.tools !== undefined) {
+    if (!Array.isArray(obj.tools) || !obj.tools.every((t) => typeof t === "string")) {
+      log("[zone-mcp-load-warn]", `server '${name}': 'tools' must be string[] — skipping`);
+      return null;
+    }
+    // Empty is rejected rather than honoured. Read literally it means "expose
+    // nothing", which no one writes on purpose — and honouring it would register
+    // a server that can offer the model nothing at all, silently. That silent
+    // zero-tool state is the exact failure this field exists to make visible, so
+    // it is refused at the parse layer where the file that caused it can be named.
+    // Deliberately NOT conflated with the field being absent, which means "expose
+    // everything" and is the unchanged default.
+    if (obj.tools.length === 0) {
+      log("[zone-mcp-load-warn]", `server '${name}': 'tools' is empty — omit the field to expose all tools — skipping`);
+      return null;
+    }
+    server.tools = obj.tools as string[];
   }
   return server;
 }

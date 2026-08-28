@@ -99,8 +99,41 @@ export class McpClientManager {
       return;
     }
 
+    // Per-server tool allowlist. Applied HERE — after listTools, before
+    // registerTool — because that is the only place it can be: the MCP protocol
+    // has no client-side tool filter (SDK 1.29.0 — `tools/list` request params
+    // are `_meta` and `cursor` only, and no ClientCapability restricts a
+    // server's surface), and this is the first point at which the server's
+    // actual tool names exist, which is what makes an unmatched entry
+    // detectable at all.
+    //
+    // What this does and does not do: the subprocess above is already running
+    // and has already reported everything it has. Dropping names here withholds
+    // them from the MODEL — it cuts the tool-description prompt cost (measured
+    // at 65.1% and 67.4% of total tokens with 24 tools loaded) and means an
+    // unlisted tool is never offered, which narrows the ungated-mutation
+    // surface ledger item 408 records. It does not constrain the server process.
+    let toolsToRegister = toolsResult.tools;
+    if (config.tools) {
+      const allow = new Set(config.tools);
+      const available = toolsResult.tools.map((t) => t.name);
+      toolsToRegister = toolsResult.tools.filter((t) => allow.has(t.name));
+      // The allowlist's one real weakness is a server renaming a tool, which
+      // makes an entry match nothing. `log`, not `debugLog`: item 409 records
+      // what debugLog gating costs — a failure nobody sees without an env var —
+      // and a silently-unmatched entry is exactly that shape.
+      const unmatched = config.tools.filter((n) => !available.includes(n));
+      log("[zone-mcp-tools-filtered]", JSON.stringify({
+        serverName,
+        available: available.length,
+        offered: toolsToRegister.length,
+        dropped: available.length - toolsToRegister.length,
+        unmatched,
+      }));
+    }
+
     // Register each discovered tool into the live registry
-    for (const tool of toolsResult.tools) {
+    for (const tool of toolsToRegister) {
       const namespacedName = `mcp__${serverName}__${tool.name}`;
       if (this.toolRoutes.has(namespacedName)) {
         log("[zone-mcp-collision-warn]", `tool '${namespacedName}' already registered — overwriting with server '${serverName}'`);
@@ -118,7 +151,17 @@ export class McpClientManager {
     }
 
     this.servers.set(serverName, { client, transport, serverName });
-    debugLog("[zone-mcp-connected]", { serverName, tools: toolsResult.tools.length });
+    // `tools` keeps its original meaning — how many the server reported — so no
+    // existing reading of this marker changes. `registered` is what the model can
+    // actually reach, and is always present rather than only when a filter is
+    // set: a field that appears only in the filtered case would make the two
+    // states differ by presence, and "24" alone is exactly what a user with a
+    // 3-tool allowlist would misread as the filter having done nothing.
+    debugLog("[zone-mcp-connected]", {
+      serverName,
+      tools: toolsResult.tools.length,
+      registered: toolsToRegister.length,
+    });
   }
 
   registeredToolNames(): string[] {

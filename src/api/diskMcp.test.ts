@@ -100,6 +100,84 @@ describe("diskMcp — loadDiskMcp", () => {
     expect(cfg).not.toBeNull();
     expect(Object.keys(cfg!.mcpServers)).toEqual(["good"]);
   });
+
+  // ── `tools` allowlist (per-server tool filtering) ──────────────────────────
+  //
+  // The field is an ALLOWLIST, not a denylist — see the ledger entry for why
+  // (it fails closed, and this codebase already paid for the denylist shape
+  // once when a name denylist "granted whatever it forgot"). These cases pin
+  // the parse layer only; whether a listed name actually matches a tool the
+  // server provides is not knowable until after listTools, and is pinned in
+  // mcpClientManager.test.ts instead.
+
+  it("parses a valid tools allowlist", async () => {
+    const json = JSON.stringify({
+      version: 1,
+      mcpServers: {
+        playwright: { command: "npx", args: ["-y", "@playwright/mcp"], tools: ["browser_navigate", "browser_find"] },
+      },
+    });
+    await writeFile(join(tmp, ".zone", "mcp.json"), json);
+    const cfg = await loadDiskMcp(tmp);
+    expect(cfg).not.toBeNull();
+    expect(cfg!.mcpServers.playwright!.tools).toEqual(["browser_navigate", "browser_find"]);
+  });
+
+  it("leaves tools undefined when the field is absent — the unchanged-by-default case", async () => {
+    await writeFile(join(tmp, ".zone", "mcp.json"), VALID_MCP_JSON);
+    const cfg = await loadDiskMcp(tmp);
+    expect(cfg).not.toBeNull();
+    // Absent, not an empty array: an empty array means "expose nothing" and is
+    // rejected below, so the two must never be conflated at the parse layer.
+    expect(cfg!.mcpServers.filesystem!.tools).toBeUndefined();
+    expect("tools" in cfg!.mcpServers.filesystem!).toBe(false);
+  });
+
+  it("skips entries whose tools is not an array, keeps others", async () => {
+    const json = JSON.stringify({
+      version: 1,
+      mcpServers: {
+        bad: { command: "npx", tools: "browser_navigate" },
+        good: { command: "node" },
+      },
+    });
+    await writeFile(join(tmp, ".zone", "mcp.json"), json);
+    const cfg = await loadDiskMcp(tmp);
+    expect(cfg).not.toBeNull();
+    // Per-server skip, not a whole-file null: one server's bad filter must not
+    // disable another server. Mirrors the args/env precedent above.
+    expect(Object.keys(cfg!.mcpServers)).toEqual(["good"]);
+  });
+
+  it("skips entries whose tools has non-string elements, keeps others", async () => {
+    const json = JSON.stringify({
+      version: 1,
+      mcpServers: {
+        bad: { command: "npx", tools: ["browser_navigate", 42] },
+        good: { command: "node" },
+      },
+    });
+    await writeFile(join(tmp, ".zone", "mcp.json"), json);
+    const cfg = await loadDiskMcp(tmp);
+    expect(cfg).not.toBeNull();
+    expect(Object.keys(cfg!.mcpServers)).toEqual(["good"]);
+  });
+
+  it("skips entries with an empty tools array — 'expose nothing' is a mistake, not an intent", async () => {
+    const json = JSON.stringify({
+      version: 1,
+      mcpServers: {
+        bad: { command: "npx", tools: [] },
+        good: { command: "node" },
+      },
+    });
+    await writeFile(join(tmp, ".zone", "mcp.json"), json);
+    const cfg = await loadDiskMcp(tmp);
+    expect(cfg).not.toBeNull();
+    // Registering a server that can offer nothing is exactly the silent
+    // zero-tool state this whole field exists to make visible.
+    expect(Object.keys(cfg!.mcpServers)).toEqual(["good"]);
+  });
 });
 
 // T-MCPCFG-HASH
