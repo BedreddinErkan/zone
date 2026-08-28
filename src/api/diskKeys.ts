@@ -123,8 +123,11 @@ async function saveDiskKeys(store: DiskKeysFile): Promise<void> {
 }
 
 /**
- * `extras` is optional and defaults to absent, so every existing two-argument call — and the tests
- * that pin them — writes exactly the same three-field row it always did. Only a gateway supplies it.
+ * `extras` is optional and defaults to absent — but absent means "no change to this field," not
+ * "clear it." A key-only update (`/keys` → `E`) must not demote an existing gateway row to a plain
+ * vendor row by dropping `baseUrl`/`protocol`/`label`/`pricing` it already had; every explicitly
+ * supplied field still overrides, exactly as before, and the original two-argument call on a row
+ * that never had these fields still writes exactly the same three-field row it always did.
  */
 export async function setDiskKey(
   provider: ApiKeyProvider,
@@ -145,21 +148,25 @@ export async function setDiskKey(
   }
   const store = await loadDiskKeys();
   const idx = store.keys.findIndex(k => k.provider === provider);
+  const existing = idx >= 0 ? store.keys[idx] : undefined;
   // Spread the optional fields conditionally rather than assigning `undefined`: a row written with
   // `baseUrl: undefined` serialises to no key at all through JSON.stringify, but an explicit
-  // `undefined` would still make `"baseUrl" in entry` true for any in-memory reader.
+  // `undefined` would still make `"baseUrl" in entry` true for any in-memory reader. Each field
+  // falls back to the row being replaced when `extras` doesn't specify it, so an update that only
+  // means to change the key can't silently erase a gateway's identity.
   const entry: DiskApiKey = {
     provider,
     key,
     addedAt: new Date().toISOString(),
-    ...(extras?.baseUrl ? { baseUrl: extras.baseUrl } : {}),
-    ...(extras?.protocol ? { protocol: extras.protocol } : {}),
-    ...(extras?.label ? { label: extras.label } : {}),
+    ...((extras?.baseUrl ?? existing?.baseUrl) ? { baseUrl: extras?.baseUrl ?? existing!.baseUrl } : {}),
+    ...((extras?.protocol ?? existing?.protocol) ? { protocol: extras?.protocol ?? existing!.protocol } : {}),
+    ...((extras?.label ?? existing?.label) ? { label: extras?.label ?? existing!.label } : {}),
     // An empty pricing map is dropped rather than written, so a row the user never priced keeps the
     // exact key set it had before this field existed.
-    ...(extras?.pricing && Object.keys(extras.pricing).length > 0
-      ? { pricing: extras.pricing }
-      : {}),
+    ...(() => {
+      const pricing = extras?.pricing ?? existing?.pricing;
+      return pricing && Object.keys(pricing).length > 0 ? { pricing } : {};
+    })(),
   };
   if (idx >= 0) store.keys[idx] = entry;
   else store.keys.push(entry);

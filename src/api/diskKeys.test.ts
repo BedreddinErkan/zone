@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { loadDiskKeys, setDiskKey, removeDiskKey, maskKey, _setKeysFilePathForTest } from "./diskKeys.js";
+import { readGatewayProfilesSync, _setGatewayKeysPathForTest } from "../llm/gatewayProfiles.js";
 
 describe("diskKeys", () => {
   let tmp: string;
@@ -110,6 +111,59 @@ describe("diskKeys", () => {
   it("an empty pricing map is not written at all", async () => {
     await setDiskKey("lab", "sk-lab-key0000000000", { baseUrl: "http://x/v1", pricing: {} });
     expect((await loadDiskKeys()).keys[0]!.pricing).toBeUndefined();
+  });
+
+  // --- A key-only update must not demote a gateway (the /keys -> E defect) ---
+
+  it("a key-only update (no extras) preserves an existing gateway row's baseUrl, protocol, label and pricing", async () => {
+    await setDiskKey("lab", "sk-lab-old0000000000", {
+      baseUrl: "http://localhost:4000/v1",
+      protocol: "openai-chat",
+      label: "Lab gateway",
+      pricing: { m: { input: 1, output: 2 } },
+    });
+    // The exact shape of /keys -> E: a new key, no extras at all.
+    await setDiskKey("lab", "sk-lab-new0000000000");
+    const [row] = (await loadDiskKeys()).keys;
+    expect(row!.key).toBe("sk-lab-new0000000000");
+    expect(row!.baseUrl).toBe("http://localhost:4000/v1");
+    expect(row!.protocol).toBe("openai-chat");
+    expect(row!.label).toBe("Lab gateway");
+    expect(row!.pricing).toEqual({ m: { input: 1, output: 2 } });
+  });
+
+  it("a key-only update on a plain vendor row still writes exactly three fields — the merge fabricates nothing", async () => {
+    await setDiskKey("anthropic", "sk-ant-old00000000000");
+    await setDiskKey("anthropic", "sk-ant-new00000000000");
+    const [row] = (await loadDiskKeys()).keys;
+    expect(Object.keys(row!).sort()).toEqual(["addedAt", "key", "provider"]);
+  });
+
+  it("a row produced by the REAL /keys flow (add, then price, then edit) still resolves through readGatewayProfilesSync — not a hand-authored row with every field set", async () => {
+    // Traced from ApiKeysView.tsx's actual call sites, not hand-authored for convenience: the ADD
+    // step passes ONLY {baseUrl} (no protocol, no label — no UI path sets either today), and the
+    // PRICE step (savePricing) re-supplies baseUrl/protocol/label from the row's CURRENT state,
+    // which for a freshly-added row means protocol/label stay absent. A row built by hand with all
+    // four optional fields present at once (as an earlier throwaway repro did) is not what the real
+    // flow ever produces, and the merge fix keys on exactly which fields are present.
+    const keysPath = join(tmp, "keys.json");
+    _setGatewayKeysPathForTest(keysPath);
+    try {
+      await setDiskKey("lab", "sk-lab-key1", { baseUrl: "http://localhost:4000/v1" }); // the ADD step
+      await setDiskKey("lab", "sk-lab-key1", {
+        baseUrl: "http://localhost:4000/v1",
+        pricing: { "openai/gpt-4o-mini": { input: 0.15, output: 0.6 } },
+      }); // the PRICE step (savePricing's own extras shape, sans protocol/label — both absent on `row`)
+      await setDiskKey("lab", "sk-lab-key2"); // the EDIT step — no extras, the exact bug scenario
+
+      const profiles = readGatewayProfilesSync();
+      const profile = profiles.find((p) => p.id === "lab");
+      expect(profile).toBeDefined();
+      expect(profile!.baseUrl).toBe("http://localhost:4000/v1");
+      expect(profile!.pricing?.rates?.["openai/gpt-4o-mini"]).toBeDefined();
+    } finally {
+      _setGatewayKeysPathForTest(null);
+    }
   });
 
   it("removeDiskKey removes the named provider", async () => {

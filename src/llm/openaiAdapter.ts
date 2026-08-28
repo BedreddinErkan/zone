@@ -15,6 +15,8 @@ import {
   deriveRequestTimeoutMs,
   zoneDispatcher,
 } from "./requestTimeouts.js";
+import { getRequestContext } from "./openaiContext.js";
+import { log } from "../utils/logger.js";
 
 export class OpenAIAdapter implements LLMClient {
   readonly provider: LLMProvider;
@@ -77,13 +79,28 @@ export class OpenAIAdapter implements LLMClient {
           : max_tokens != null ? { max_tokens } : {}),
     };
     return withExponentialBackoff(
-      () =>
-        this.sdk.chat.completions.create(resolvedParams, {
+      () => {
+        // The last statement Zone owns before control passes to the SDK, on every attempt
+        // including retries (matches the sibling [zone-llm-retry-attempt] marker's per-attempt
+        // firing from this exact closure). Unconditional — not gated behind ZONE_VERBOSE_LOGS —
+        // so it's already in ~/.zone/markers.jsonl the next time a gateway call goes quiet, without
+        // needing verbose mode on in advance. No streaming path exists here to report progress
+        // through instead (see openaiAdapter.ts's own createChatCompletion: neither
+        // onToolArgumentsDelta nor onTextDelta is read on this path), so this is the only signal
+        // that the request was ever issued at all.
+        log("[zone-openai-request-issued]", JSON.stringify({
+          runId: getRequestContext()?.runId ?? null,
+          model: resolvedParams.model,
+          hasTools: Array.isArray(resolvedParams.tools) && resolvedParams.tools.length > 0,
+          provider: this.provider,
+        }));
+        return this.sdk.chat.completions.create(resolvedParams, {
           signal: options.signal,
           timeout: deriveRequestTimeoutMs(
             resolvedParams.max_completion_tokens ?? resolvedParams.max_tokens ?? undefined
           ),
-        }),
+        });
+      },
       { provider: this.provider, model: params.model, emit: options.onRetryEvent }
     );
   }

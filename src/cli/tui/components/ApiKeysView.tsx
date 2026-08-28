@@ -36,9 +36,11 @@ export function ApiKeysView(): React.ReactElement {
   /**
    * Write the pricing draft onto its row, merging with whatever that row already had.
    *
-   * Merged rather than replaced so pricing a second model does not silently drop the first, and so
-   * the row's baseUrl/protocol/label survive — `setDiskKey` replaces the whole row, and there is no
-   * separate updater to reach for: a new runtime export from diskKeys.ts would break six test files
+   * Merged rather than replaced so pricing a second model does not silently drop the first.
+   * `setDiskKey` itself now preserves a row's baseUrl/protocol/label when they're omitted from
+   * `extras`, so re-spreading them here from `row` is redundant-but-harmless rather than load-bearing
+   * — kept explicit anyway rather than relying on that fallback implicitly. There is still no
+   * separate updater to reach for: a new runtime export from diskKeys.ts would break seven test files
    * that mock the module with object-literal factories.
    */
   const savePricing = (finalDraft: typeof priceDraft): void => {
@@ -71,11 +73,10 @@ export function ApiKeysView(): React.ReactElement {
       });
   };
 
-  const refresh = (): void => {
-    void loadDiskKeys().then(store => {
+  const refresh = (): Promise<void> =>
+    loadDiskKeys().then(store => {
       dispatch({ type: "KEYS_OPEN", list: store.keys });
     });
-  };
 
   useInput((input, key) => {
     if (mode === "view") {
@@ -146,16 +147,24 @@ export function ApiKeysView(): React.ReactElement {
           // A vendor key still writes the same three fields it always did.
           const savedGatewayId = draftUrl ? editProvider : null;
           void setDiskKey(editProvider, editInput.trim(), draftUrl ? { baseUrl: draftUrl } : undefined)
+            // `refresh()` is itself async (its own `loadDiskKeys().then(dispatch(KEYS_OPEN))`), so it
+            // must be AWAITED here, not fired bare — `refresh` dispatches KEYS_OPEN, which
+            // unconditionally resets keysEditMode to "view", and firing it bare let that arrive
+            // AFTER the KEYS_PRICE_START dispatch below, silently undoing it on every new gateway.
+            .then(() => refresh())
             .then(() => {
-              refresh();
               dispatch({ type: "TOAST_PUSH", entry: { id: randomUUID(), message: "Key saved — active on next run.", level: "info" } });
               // A gateway is unpriced until told otherwise, which leaves --max-budget-usd inert.
               // Offer to price it now rather than leaving that to be discovered from a warning.
-              // `refresh` dispatches KEYS_OPEN (which resets to "view"), so this must follow it.
               if (savedGatewayId) {
                 dispatch({ type: "KEYS_PRICE_START", provider: savedGatewayId });
               }
             })
+            // Chaining refresh() into this catch is a deliberate tradeoff: a loadDiskKeys() failure
+            // during the post-save refresh (distinct from the key having already saved) now surfaces
+            // as this same "failed to save" toast, which is misleading about what actually failed —
+            // but the alternative, today's behavior, is a silent unhandled rejection. A surfaced,
+            // slightly mislabeled error beats a silent one.
             .catch((err: unknown) => {
               dispatch({ type: "TOAST_PUSH", entry: { id: randomUUID(), message: err instanceof Error ? err.message : "Failed to save key.", level: "error" } });
             });

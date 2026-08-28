@@ -460,8 +460,16 @@ describe("drift check — today's figures against the real tree", () => {
     // 417 -> 418, one=354 -> 355: [zone-profile-partial-pricing] (providerProfile.ts), added by
     // ledger item 399 so a gateway priced with SKIPPED cache buckets says its reported cost is a
     // floor rather than a total. One marker, one emitter, no new hazard row.
+    //
+    // 418 -> 419, one=355 -> 356: the gateway-live-defects investigation (docs/deferred-work.md
+    // item 405) added [zone-openai-request-issued], emitted once from src/llm/openaiAdapter.ts. One
+    // marker, one emitter — but hazards moves 26->27, not unchanged: the new emission site's own
+    // comment names [zone-llm-retry-attempt] as the precedent for firing on every retry attempt
+    // (that marker is emitted from withExponentialBackoff.ts, not here), which is exactly the
+    // sibling-marker-citation-in-prose shape item 387/391 already established as a legitimate
+    // hazard row, not a bug — re-derived from the scan rather than assumed unchanged.
     const result = scanTree(readTrackedFiles());
-    expect(result.size).toBe(418);
+    expect(result.size).toBe(419);
 
     const dist = { zero: 0, one: 0, several: 0 };
     for (const attr of result.values()) {
@@ -470,8 +478,8 @@ describe("drift check — today's figures against the real tree", () => {
       else if (c === 1) dist.one++;
       else dist.several++;
     }
-    expect(dist).toEqual({ zero: 43, one: 355, several: 20 });
-    expect(hazards(result)).toHaveLength(26);
+    expect(dist).toEqual({ zero: 43, one: 356, several: 20 });
+    expect(hazards(result)).toHaveLength(27);
   });
 
   /**

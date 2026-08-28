@@ -73,6 +73,62 @@ describe("OpenAIAdapter — normalizeTokenParam (sync path)", () => {
   });
 });
 
+// Diagnosability marker for the gateway-live-defects investigation: on this path (an
+// OpenAI-compatible gateway using the plain, non-gpt-5 route), there is no streaming and no
+// progress callback — this marker is the only signal, before this pass, that a request was ever
+// issued at all.
+describe("OpenAIAdapter — [zone-openai-request-issued] diagnosability marker", () => {
+  it("fires before the SDK call, carrying model/hasTools/provider", async () => {
+    const logSpy = vi.fn();
+    vi.doMock("../utils/logger.js", () => ({ log: logSpy, debugLog: vi.fn() }));
+    vi.resetModules();
+    const { OpenAIAdapter: FreshAdapter } = await import("./openaiAdapter.js");
+
+    sdkCreateMock.mockResolvedValueOnce(FAKE_COMPLETION);
+    await new FreshAdapter("sk-test").createChatCompletion({
+      model: "gpt-4o",
+      messages: [{ role: "user", content: "hi" }],
+      tools: [{ type: "function", function: { name: "read_file", parameters: {} } }] as ChatCompletionTool[],
+    });
+
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    const [marker, payload] = logSpy.mock.calls[0] as [string, string];
+    expect(marker).toBe("[zone-openai-request-issued]");
+    expect(JSON.parse(payload)).toEqual({
+      runId: null,
+      model: "gpt-4o",
+      hasTools: true,
+      provider: "openai",
+    });
+    // Fired strictly before the SDK call — otherwise a hang inside the SDK call would leave no
+    // trace that the request was ever attempted, which is the exact gap this marker exists to close.
+    const logOrder = logSpy.mock.invocationCallOrder[0]!;
+    const sdkOrder = sdkCreateMock.mock.invocationCallOrder[0]!;
+    expect(logOrder).toBeLessThan(sdkOrder);
+
+    vi.doUnmock("../utils/logger.js");
+    vi.resetModules();
+  });
+
+  it("hasTools is false when no tools are offered", async () => {
+    const logSpy = vi.fn();
+    vi.doMock("../utils/logger.js", () => ({ log: logSpy, debugLog: vi.fn() }));
+    vi.resetModules();
+    const { OpenAIAdapter: FreshAdapter } = await import("./openaiAdapter.js");
+
+    sdkCreateMock.mockResolvedValueOnce(FAKE_COMPLETION);
+    await new FreshAdapter("sk-test").createChatCompletion({
+      model: "gpt-4o", messages: [{ role: "user", content: "hi" }],
+    });
+
+    const [, payload] = logSpy.mock.calls[0] as [string, string];
+    expect(JSON.parse(payload).hasTools).toBe(false);
+
+    vi.doUnmock("../utils/logger.js");
+    vi.resetModules();
+  });
+});
+
 describe("OpenAIAdapter — normalizeTokenParam (stream path)", () => {
   beforeEach(() => { sdkCreateMock.mockReset(); });
 

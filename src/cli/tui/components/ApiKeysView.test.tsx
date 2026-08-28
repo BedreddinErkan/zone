@@ -110,6 +110,20 @@ describe("ApiKeysView — the gateway flow", () => {
     });
   });
 
+  it("the post-save pricing prompt survives the refresh, instead of being reset back to view", async () => {
+    // Regression guard: refresh() used to fire bare (not awaited), so its own KEYS_OPEN dispatch
+    // landed AFTER KEYS_PRICE_START and silently reset keysEditMode back to "view" on every new
+    // gateway. This fails under that bug (reads "view") and passes once refresh() is chained.
+    await press([
+      { input: "n" }, { input: "g" },
+      ...type("lab"), ENTER,
+      ...type("http://localhost:4000/v1"), ENTER,
+      ...type("sk-lab-key"), ENTER,
+    ]);
+    expect(currentState.keysEditMode).toBe("price-model-id");
+    expect(currentState.keysPriceProvider).toBe("lab");
+  });
+
   it("advances one step at a time — the id step does not accept a URL as its own value", async () => {
     await press([{ input: "n" }, { input: "g" }, ...type("lab")]);
     expect(currentState.keysEditMode).toBe("input-profile-id");

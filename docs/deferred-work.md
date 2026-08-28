@@ -28036,11 +28036,155 @@ the header is reliable on streaming requests across implementations — at which
 from the wire becomes a candidate, most plausibly as a reconciliation pass against declared rates
 rather than as a replacement for them.
 
+## 401. `provider === "openai"` is checked in two places as if it meant "this is really OpenAI," and it only ever means "this speaks the OpenAI wire protocol"
+
+**Bucket: Actionable now.** Both fixes are specified below; neither is built in this pass.
+
+A gateway's `adapterProvider` is `"openai"` for every profile speaking the `openai-chat` protocol
+(`gatewayProfilesFrom`, `llm/gatewayProfiles.ts`) — a routing decision, not a claim about who operates
+the endpoint. Two call sites read that field the other way, both found while investigating the same
+live gateway.
+
+**Site one: the agent loop's own LLM call.** `client.provider === "openai"` gates whether
+`prompt_cache_key` — an OpenAI-platform-specific field — is added to the request body
+(`agentLoop.ts`). Any `openai-chat` gateway satisfies that check, so a strict proxy can 400 on a
+field it never asked for and has no way to decline. The resolved profile is already in scope at the
+same call site (used two lines below for `capabilitiesFor`), so the fix is a one-line swap: gate on
+the profile's own id being `"openai"` — the real vendor identity — instead of the adapter's routing
+field. Item 405 rules this out as the cause of that investigation's 115-second silence specifically
+(an immediate 400 would have surfaced quickly, not silently), so it remains a live risk for the next
+strict gateway rather than a confirmed incident.
+
+**Site two: `OpenAIAdapter`, found while adding item 405's diagnostic marker to the same file.**
+`this.provider === "openai" && normalizeModelId(model).startsWith("gpt-5")` — in both
+`createChatCompletion` and `createChatCompletionStream` — decides whether a call is routed to
+`/responses` instead of `/chat/completions`. Any `openai-chat` gateway that names or aliases a model
+`gpt-5*` gets silently misrouted to an endpoint shape the gateway most likely doesn't implement. Same
+fix shape: read the profile's real identity rather than the adapter's routing field —
+`OpenAIAdapter` would need that identity threaded into its constructor or call options, since today
+it only carries the two-valued `LLMProvider` field this bug is rooted in.
+
+**Why one entry, not two.** Both are the identical category error — a protocol-routing value read as
+a vendor-identity claim — inside the same file family, found in the same pass. Filing them separately
+would have hidden that they share one cause and, most likely, one shape of fix.
+
+Neither is built here: this gateway's model doesn't trigger either path.
+
+## 402. No proxy support anywhere in the request path
+
+**Bucket: Neither.** A real gap, recorded without a fix, because the fix requires a design decision
+this entry doesn't make.
+
+Confirmed absent with both instruments this document's own evidence convention asks for: `command
+grep` and `git grep`, both `-inE "https?_proxy|proxyagent|no_proxy|setGlobalDispatcher"` across the
+tracked tree, zero hits from either. `zoneDispatcher` (`requestTimeouts.ts`) is a bare `undici.Agent`
+constructed once at module load and passed explicitly as `fetchOptions.dispatcher` on every OpenAI
+SDK call — which overrides any global or environment-derived proxy dispatcher undici would otherwise
+pick up. A corporate endpoint reachable only through an HTTP(S) proxy is unreachable regardless of
+`HTTPS_PROXY`/`NO_PROXY` being set.
+
+**Why this is Neither, not Actionable now.** More than one legitimate shape of fix exists — read
+`HTTPS_PROXY`/`NO_PROXY` from the environment and wrap `zoneDispatcher` in an `EnvHttpProxyAgent`
+(undici ships one), or add an explicit per-profile proxy field alongside `baseUrl` for a gateway that
+needs a proxy the ambient environment doesn't declare, or both. Picking one is a design decision, not
+a mechanical fix, and this entry doesn't make it.
+
+**What would close it.** A concrete report of a gateway unreachable specifically because of this — none
+exists yet — would settle which shape (env-derived vs. explicit-per-profile) actually matters in
+practice, rather than guessing at both.
+
+## 403. The task classifier's `Promise.race` never cancels the request it loses to
+
+**Bucket: Actionable now.** The fix is a small, well-understood shape: thread an `AbortController`.
+
+`taskClassifier.ts` races `client.createChatCompletion(...)` against a 5-second timeout
+(`DEFAULT_TIMEOUT_MS`) via `Promise.race`, and passes no `signal` to the completion call.
+`Promise.race` settles the race; it does not cancel the loser. On a classifier call slower than 5
+seconds, the timeout branch wins, the classifier degrades gracefully and reports a fallback
+classification — but the original request keeps running underneath, holding a connection (and, on a
+corporate gateway serving one connection at a time, potentially a place in a queue) for up to its own
+request timeout.
+
+**The fix.** Build an `AbortController` alongside the existing `setTimeout`, pass `controller.signal`
+into the `createChatCompletion` call's options, and call `controller.abort()` in the same place the
+timeout promise currently rejects. `agentLoop.ts`'s own calls already thread `input.abortSignal`
+through identically — this is the same shape applied one call site earlier.
+
+**Ruled out as this investigation's cause.** Item 405 records that the classifier's own call in the
+incident motivating this pass settled cleanly, with a definitive error, in 245ms — well under its
+5-second budget — so there was no abandoned request left running to collide with anything. This
+hazard is real and worth fixing on its own merits (a slow classifier leaks a connection per run on
+every affected gateway), but it did not cause that specific 115-second silence.
+
+## 404. `generateFinalRunReport` can attempt a second live LLM call against a provider that just failed as unavailable
+
+**Bucket: Actionable now**, with a judgment call flagged rather than resolved.
+
+When the agent loop's own LLM call is classified retryable (5xx/429/network) and
+`withExponentialBackoff` exhausts its 60-second retry budget, `agentLoop.ts` returns
+`terminationReason: "upstream_unavailable"` rather than throwing. `generateFinalRunReport.ts`'s
+`STATIC_REPORT_REASONS` — the set of terminations that skip straight to a deterministic, no-LLM
+summary — does not include it, so the run falls through to `generateAiFinalRunReport`, an ordinary
+live LLM call, gated only behind `ZONE_AI_FINAL_REPORT=true` (confirmed off by default). Against the
+same possibly-still-broken provider, that second call can pay for its own ~60-second
+retry-exhaustion cycle before its own try/catch falls back to the deterministic summary anyway.
+Confirmed directly against source, not inferred: the early-return check, the reasons set, and the
+try/catch around the AI-report call all read exactly as described.
+
+**The judgment call.** The mechanical fix — add `"upstream_unavailable"` to `STATIC_REPORT_REASONS`
+— trades away a possibly-useful qualitative AI summary on every upstream-unavailable run, not only
+the ones where the provider is still down for the second call too. Whether that trade is worth making
+unconditionally, or only after some evidence that the second call routinely fails when the first one
+just did, is exactly the kind of question this document records rather than settles by itself.
+
+**How this was found.** Not one of the three hazards the motivating investigation named going in —
+surfaced while tracing where the agent loop's own LLM error goes, in service of item 405. Two stacked
+~60-second cycles land close to the 115 seconds item 405 records, which is a real, code-confirmed
+*mechanism* for a delay of about that shape — not a confirmed explanation of that specific incident,
+since the flag it depends on is off by default and nothing establishes it was set on the affected run.
+
+## 405. The 115 seconds of silence itself: what was observed, what was ruled out, and what closes it next time
+
+**Bucket: Blocked on data.** Closing this requires an observation that doesn't exist yet.
+
+With `ZONE_VERBOSE_LOGS=1`, a run against a corporate OpenAI-compatible gateway reached "Starting
+agent tool loop," emitted `[zone-token-breakdown]` — confirming the request had been assembled and
+was about to be issued — and then produced no further output of any kind for 115+ seconds, until the
+user manually aborted. In the same session, a separate call on the same key and endpoint — the task
+classifier — completed in 245ms with a clean, non-retryable 401 Authentication Error, reported via
+its own graceful-degradation path.
+
+**Ruled out, and how.**
+- **The error being silently discarded somewhere in Zone's own code:** ruled out by tracing every hop
+  from `agentLoop.ts`'s own throw, through `runLlmPatchFlow.ts` and `dispatch.ts`, to the TUI's
+  generic error-handling branch — no point exists where a thrown error from this call is swallowed. A
+  clean, fast failure on this call would have produced visible output (a narration line, a stopped
+  spinner) within roughly one HTTP round trip. It did not.
+- **The classifier's own request still being in flight and colliding with the agent loop's call**
+  (the mechanism item 403 names — an uncancelled `Promise.race` loser): ruled out, because the
+  classifier's call did not time out and get abandoned. It settled cleanly, with a definitive error,
+  in 245ms — well before 115 seconds, and well under its own 5-second budget. Nothing was left running
+  from that call to collide with.
+
+**What remains open.** Whether the agent loop's own call was still genuinely in flight — a slow or
+stalled network call, bounded only by the generous per-request timeout floors already measured for
+this model (on the order of 15 minutes at a 16K-token output budget) — or had already failed via some
+path not yet identified. Item 404 names one candidate mechanism for a delayed failure (a
+misclassified-retryable error stacking two ~60-second retry-exhaustion cycles), but that mechanism is
+itself unconfirmed against this incident and depends on a flag that defaults off.
+
+**What closes it next time.** This pass adds `[zone-openai-request-issued]`
+(`src/llm/openaiAdapter.ts`), logged unconditionally immediately before the underlying SDK call, on
+every attempt including retries. The next time this happens, `~/.zone/markers.jsonl` will show
+whether the request was issued at all, how many attempts fired, and — by its timestamp gap to
+whatever comes next — whether the delay was spent waiting on the network or somewhere else. That
+observation doesn't exist yet for this incident; it will for the next one.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 400 to find out which ones still need something. No index of
+reader the trouble of reading all 405 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -28056,7 +28200,8 @@ first.
 320, 352, 353, 364, 370, 371, 372, 377, 378, 379, 384, 385, 388, 390, 391, 394
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (20): 287, 291, 292, 293, 296, 299, 313, 328, 329, 334, 347, 358, 359, 365, 368, 373, 375, 383, 389, 395
+first (23): 287, 291, 292, 293, 296, 299, 313, 328, 329, 334, 347, 358, 359, 365, 368, 373, 375, 383, 389, 395,
+401, 403, 404
 
 Six, down from seven, and the movement is the ledger's own signal about whether anything is specified
 and waiting, in both directions. The diagnosis pass into `find_references` left it at 7 (287 plus six
@@ -28088,18 +28233,21 @@ single condition. All three arrived with the fix named in the entry, which is wh
 requires; none was inherited backlog. The pass after that closed 334 as 343 — its named remedy
 turned out incomplete, and applying it alone would have introduced a crash — while filing 347, a
 retry event that never reaches the bus under its own type, whose remedy is likewise named. Net
-eleven to twelve.
+eleven to twelve. This pass adds three more, all found investigating one live gateway defect: 401
+and 404 while tracing where its LLM error goes, 403 while ruling out a candidate cause for the
+silence 405 records. Twenty to twenty-three: 287, 291, 292, 293, 296, 299, 313, 328, 329, 334, 347,
+358, 359, 365, 368, 373, 375, 383, 389, 395, 401, 403, 404.
 
-**Blocked on data** — closing requires an observation that doesn't exist yet (17): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250, 263, 318, 376
+**Blocked on data** — closing requires an observation that doesn't exist yet (18): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250, 263, 318, 376, 405
 
-**Neither — a structural fact recorded, with no fix proposed** (188): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
+**Neither — a structural fact recorded, with no fix proposed** (189): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
 74, 76, 77, 78, 79, 80, 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109,
 112, 114, 115, 118, 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152,
 154, 155, 158, 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199,
 200, 201, 202, 205, 206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230,
 232, 243, 244, 247, 248, 249, 254, 256, 261, 272, 294, 295, 297, 298, 300, 303, 305, 306, 307, 311, 312,
 314, 315, 316, 317, 319, 321, 322, 323, 324, 325, 326, 330, 331, 332, 333, 335,
-338, 339, 340, 341, 342, 346, 349, 350, 354, 355, 356, 357, 360, 361, 362, 363, 366, 367, 369, 374, 380, 381, 382, 386, 387, 392, 393, 396, 397, 398, 399, 400
+338, 339, 340, 341, 342, 346, 349, 350, 354, 355, 356, 357, 360, 361, 362, 363, 366, 367, 369, 374, 380, 381, 382, 386, 387, 392, 393, 396, 397, 398, 399, 400, 402
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
