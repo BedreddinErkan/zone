@@ -124,6 +124,47 @@ export function emitRequestedToolsGranted(data: RequestedToolsGrantedData): void
 }
 
 // ---------------------------------------------------------------------------
+// emitMcpToolsGranted — [zone-mcp-tools-granted]
+// Emitted once at loop entry when an approved MCP server's tools are escaped
+// past an allow-shaped filter.
+//
+// This marker is the discoverability half of the fix it belongs to. Before it,
+// the withholding was completely silent: a user who declared a server, approved
+// it at the trust gate and watched it connect had NO signal explaining why its
+// tools never reached the model — worse than silent, actually, since
+// buildToolAbsenceBlock reads the UNFILTERED registry and so named the withheld
+// tool back to the model, which could then report a capability it had never
+// been offered.
+//
+// filterSource names which arm of agentLoop's precedence chain supplied the
+// filter being escaped, so a zero-grant run is distinguishable from a
+// no-filter run: `granted: []` with a filterSource means the manager had no
+// tools registered, whereas the marker's absence means there was no allow-shaped
+// filter to escape in the first place and MCP already resolved. Those are
+// different states and only one of them is worth investigating.
+//
+// toolArrayLengthBefore/After carry the same cache consequence as the sibling
+// grant marker above and for the same reason: 24 MCP tool definitions entering
+// the cached tools block is a real prefix cost, and joining this runId against
+// the usage log's cache_read/cache_write is what measures it. This marker
+// supplies the join key, not the cache figures.
+// ---------------------------------------------------------------------------
+
+export interface McpToolsGrantedData {
+  runId: string | null | undefined;
+  /** Which precedence arm produced the filter being escaped. */
+  filterSource: string;
+  granted: string[];
+  toolArrayLengthBefore: number;
+  toolArrayLengthAfter: number;
+  toolDescriptionCharsAdded: number;
+}
+
+export function emitMcpToolsGranted(data: McpToolsGrantedData): void {
+  log("[zone-mcp-tools-granted]", JSON.stringify(data));
+}
+
+// ---------------------------------------------------------------------------
 // emitCacheUsage — [zone-cache-usage]
 // Emitted per-iteration when there is Anthropic cache activity.
 // ---------------------------------------------------------------------------

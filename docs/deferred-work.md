@@ -28306,24 +28306,112 @@ call today — `runPlanInvestigation` also supplies its own `capabilityFilter`, 
 precedence over any tier-derived filter regardless. The fact recorded is the shape of the guard, not
 that call site's present reachability.
 
+## 408. Closed — an approved MCP server's tools were reachable only where no filter happened to apply
+
+**Bucket: Closed** by the commit carrying this line. The defect was reported live, the mechanism was
+established by reading, and the gating was then measured across five runs before anything changed.
+
+**The measured matrix.** A user wrote `.zone/mcp.json`, approved it at the SHA-256 trust modal, and
+saw `[zone-mcp-connected] { tools: 24 }`. What `toolsAvailable` then contained, by archetype and
+tier:
+
+```
+question      / simple  →  2 tools, no MCP        simple_add / simple  →  5 tools, no MCP
+question      / complex →  2 tools, no MCP        simple_add / complex → 43 tools, all 24 present
+investigation / complex →  5 tools, no MCP
+```
+
+**The single working row was the absence of a filter, not a permission.** `resolveToolList` grants
+every registered tool when its internal `hasAllowFilter` is false. Every allow-shaped filter excluded
+MCP, by two independent routes: `mcp.call` appears in no allow-set that is ever used — the only set
+containing it is `ALL_CAPABILITIES`, whose sole occurrence in the tree is its own declaration — and
+the tier subsets are literal name lists fixed at authoring time, so an `mcp__<server>__<tool>` name
+composed at connect time from the user's own config cannot be in them. `question`/`complex` is the
+row that isolates this: tier is already complex and MCP is still absent, so tier alone was never the
+gate. The consequence is what made it a defect rather than a quirk — there was no rule to document
+and no way for a user to discover the one combination that worked.
+
+**Worse than silent.** `buildToolAbsenceBlock` computes its absent list from `resolveToolList(undefined)`,
+the UNFILTERED registry, so Zone named the withheld MCP tool back to the model in the same run in
+which it refused to offer it. The model could then report a capability it had never been given.
+
+**The rule now implemented.** Declaring a server and approving it at the trust gate IS the
+permission; a task-shape filter narrows Zone's own toolset and must not silently override it.
+Enforced at one point in `runAgentLoop`, in the block whose own comment already names it as the
+single place a filter mutation propagates to every downstream consumer — `toolsForLLM`,
+`effectiveAllowedSet`, `toolAbsenceBlock`, `offeredToolNames`, `baseSystemContent` — with
+`applyRequestedToolsGrant` as the established precedent for widening the filter at that point. The
+MCP names are escaped through `allowToolNames`.
+
+**Why not teach `resolveToolList` to grant `mcp.call`, which is the obvious shape.** Because
+`runLlmPatchFlow.readOnlyTools.test.ts` states, and pins with mutations, the property the read-only
+cage rests on: under a capability allow-set a new tool is denied by default rather than granted by
+default. Granting a capability class past that gate would break the invariant for every future
+caller. Escaping by name from the caller preserves it exactly — the primitive keeps denying by
+default, and the caller names what it grants, which is what `allowToolNames` is documented as. Deny
+still wins throughout: `excludeToolNames` and capability `exclude` are both checked before the allow
+branch, which is what leaves room for a per-tool filter in `.zone/mcp.json` later.
+
+**The `hadAllowFilter` guard is load-bearing, verified by mutation rather than assumed.**
+Introducing `allowToolNames` where neither `allow` nor `allowToolNames` existed flips
+`hasAllowFilter` false to true, and with no capability allow-set only the named tools resolve —
+collapsing the offered set instead of widening it. Removing the guard and re-running collapsed a
+complex-tier run from 20 tools to exactly one, the MCP tool. That is the same failure
+`applyRequestedToolsGrant`'s own doc comment records reproducing (an 18-tool exclude-only filter
+collapsing to 1), hit a second time by a second caller, which is why it is recorded again here.
+
+**The gate is executability, not task shape.** The grant is conditioned on `input.mcpManager` being
+present — not on tier, archetype, or `isSubagentLoop`. The manager is the only thing that can route
+an `mcp__` call: the dispatch branch tests `name.startsWith("mcp__") && input.mcpManager`, and
+`executeTool` has no `mcp__` branch at all. So the loop offers exactly what it can execute and never
+a tool it would fail on.
+
+**Subagents stay excluded, deliberately, and it is a separate axis.** The sole subagent spawn site in
+the tree omits `mcpManager`, so a subagent's is always undefined and the grant never fires for one.
+`mcpClientManager.test.ts`'s `T-SUBAGENT-EXCLUDE` was the only thing pinning that, and it does not
+actually exercise a subagent — it asserts the `resolveToolList` primitive's own rule and merely
+stands in for subagents because all three subagent filters happen to be allow-shaped. It is
+unchanged by this pass and still passes; a new test pins the invariant at the level its name claims.
+
+**A consequence this pass knowingly creates rather than inherits.** Every mutating MCP tool —
+`browser_click` and its siblings — is now reachable in strictly more situations than before,
+including in read-only archetypes, and **no approval gate fires for any of them.** MCP calls bypass
+`executeTool` entirely at the dispatch branch, so `onApprovalRequired` is never consulted; the
+`run_command` approval path does not cover them. This was named as out of scope for the change that
+created it, and is stated as newly created rather than pre-existing because before this commit the
+read-only archetypes could not reach an MCP tool at all. Closing it means Zone-side code at the
+dispatch branch.
+
+**Two boundaries on the word "every".** MCP is TUI-only: the headless CLI entry never calls
+`loadDiskMcp` and never constructs a manager, so nothing changes for `--print`; adding it needs a
+non-TTY trust story the current code explicitly declines to invent. And three auxiliary
+`runAgentLoop` callers build fresh input objects without a manager — the two verification-repair
+loops and the two investigation loops — so they are unaffected; the orchestrator step loop spreads
+the base input and does inherit it.
+
+**Cost.** 24 tool definitions measured at 33,128 characters enter the cached tools block, which was
+65.1% of total tokens across the 8-iteration run that measured it. Stable within a run, so cache
+breakpoint #1 still holds across iterations; the marker `[zone-mcp-tools-granted]` carries the runId
+to join against the usage log's own cache fields for anyone measuring the prefix cost directly.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 407 to find out which ones still need something. No index of
+reader the trouble of reading all 408 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (178): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42,
+**Closed** (179): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42,
 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113,
 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167,
 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228,
 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260,
 262, 264, 265, 266, 267, 268, 269, 270, 271, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285,
 286, 288, 289, 290, 301, 302, 304, 308, 309, 310, 327, 336, 337, 343, 344, 345, 348, 351,
-320, 352, 353, 364, 370, 371, 372, 377, 378, 379, 384, 385, 388, 390, 391, 394, 406, 328, 330
+320, 352, 353, 364, 370, 371, 372, 377, 378, 379, 384, 385, 388, 390, 391, 394, 406, 328, 330, 408
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (22): 287, 291, 292, 293, 296, 299, 313, 329, 334, 347, 358, 359, 365, 368, 373, 375, 383, 389, 395,

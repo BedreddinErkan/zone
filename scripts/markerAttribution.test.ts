@@ -385,7 +385,7 @@ describe("working-tree hazard — the tracked scan must agree with what staging 
  * shifts these numbers should make this test fail and prompt a review, not silently drift.
  */
 describe("drift check — today's figures against the real tree", () => {
-  it("418 marker names; emitter-count distribution zero=43 one=355 several=20; 26 hazards", () => {
+  it("421 marker names; emitter-count distribution zero=43 one=358 several=20; 27 hazards", () => {
     // Re-derived via this file's own scanTree/hazards, not hand-added to the prior 410/349 —
     // the repository-tree write guard (ledger item 236) landed one new marker,
     // `[zone-repo-guard]`, so the total moved 410->411. It lands in `several`, not `one`:
@@ -474,8 +474,20 @@ describe("drift check — today's figures against the real tree", () => {
     // only through an unrecognized-provider warning that names the fallback. One marker, one
     // emitter. Hazards stay 27 — its only other mention is docs/deferred-work.md, a "doc" file
     // hazards() does not scan; re-derived from the scan rather than assumed unchanged.
+    //
+    // 420 -> 421, one=357 -> 358: [zone-mcp-tools-granted] (src/llm/loopTelemetry.ts, emitted from
+    // src/llm/agentLoop.ts), added by ledger item 408 so the escape that makes an approved MCP
+    // server's tools survive an allow-shaped filter is reported rather than silent — the silence
+    // was half the original defect. One marker, one emitter. Hazards stay 27: its other mentions
+    // are the ledger (a "doc" file hazards() does not scan) and its own test, whose assertion on
+    // the payload is an emission-shaped reference rather than a prose citation of a sibling marker.
+    //
+    // This block's own `it` title had been stale since the 418/355/26 figures — three moves behind
+    // the assertions below it, which the comments had each recorded correctly. Corrected to match
+    // in the same pass rather than left, since a title that names different numbers than the test
+    // asserts is exactly the drift this describe block exists to catch.
     const result = scanTree(readTrackedFiles());
-    expect(result.size).toBe(420);
+    expect(result.size).toBe(421);
 
     const dist = { zero: 0, one: 0, several: 0 };
     for (const attr of result.values()) {
@@ -484,7 +496,7 @@ describe("drift check — today's figures against the real tree", () => {
       else if (c === 1) dist.one++;
       else dist.several++;
     }
-    expect(dist).toEqual({ zero: 43, one: 357, several: 20 });
+    expect(dist).toEqual({ zero: 43, one: 358, several: 20 });
     expect(hazards(result)).toHaveLength(27);
   });
 

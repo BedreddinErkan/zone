@@ -45,6 +45,7 @@ import {
   emitReadOnlySuppressionMismatch,
   emitPromptBranch,
   emitRequestedToolsGranted,
+  emitMcpToolsGranted,
   type PromptBranch,
 } from "./loopTelemetry.js";
 import { applyRequestedToolsGrant } from "./archetypeDispatcher.js";
@@ -2623,6 +2624,91 @@ async function runAgentLoopScoped(input: AgentLoopInput, stats: LoopRunStats): P
         toolArrayLengthBefore: preGrantToolCount,
         toolArrayLengthAfter: postGrantAsSent.length,
         toolDescriptionCharsAdded,
+      });
+    }
+  }
+
+  // An approved MCP server's tools must reach the model in EVERY pipeline, not
+  // only in the one combination where no filter happened to apply.
+  //
+  // Measured before this existed (five live runs, Q10 of
+  // docs/locator-discovery-investigation.md): question/simple and
+  // question/complex both offered 2 tools with no MCP, investigation/complex 5,
+  // simple_add/simple 5, and only simple_add/complex saw all 24. That last row
+  // was not a designed permission — it was the ABSENCE of a filter.
+  // resolveToolList grants everything when hasAllowFilter is false, and every
+  // allow-shaped filter excluded MCP: `mcp.call` is in no allow-set that is ever
+  // used, and the tier subsets are literal name lists fixed at authoring time,
+  // so an mcp__<server>__<tool> name composed at connect time cannot be in them.
+  // There was no rule to document and no way for a user to discover it.
+  //
+  // The rule: declaring a server and approving it at the SHA-256 trust gate IS
+  // the permission. connect() runs only under isMcpTrusted, the documented
+  // ZONE_TRUST_MCP=all bypass, or after the TTY modal, so "registered" implies
+  // "approved" — which is what makes granting by name safe here. An allow-filter
+  // exists to narrow ZONE's OWN toolset by task shape and must not silently
+  // override a permission the user already granted.
+  //
+  // WIDENED VIA allowToolNames, DELIBERATELY NOT BY TEACHING resolveToolList TO
+  // GRANT mcp.call. runLlmPatchFlow.readOnlyTools.test.ts states the property the
+  // read-only cage rests on: "under a capability allow-set a new tool is denied
+  // by default rather than granted by default." Granting a capability class past
+  // resolveToolList's own allow-gate would break that invariant for every future
+  // caller. Escaping by name from here preserves it exactly — the primitive keeps
+  // denying by default and the caller names what it grants, which is what
+  // allowToolNames is documented as ("an escape hatch for specific tools
+  // regardless of their capability set").
+  //
+  // GATED ON input.mcpManager — not on tier, archetype, or isSubagentLoop. The
+  // manager is the only thing that can ROUTE an mcp__ call (the dispatch branch
+  // in the iteration loop below checks name.startsWith("mcp__") && mcpManager;
+  // executeTool has no mcp__ branch at all), so this offers exactly what this
+  // loop can execute and never a tool it would fail on. Subagents get no manager
+  // — toolExecutor's sole spawn site omits it — so they stay excluded
+  // structurally rather than by a name check, and this gate stays correct if a
+  // later pass threads one in. That axis is executability, not task shape, and is
+  // deliberately left as it is.
+  //
+  // Names come off the threaded manager rather than by prefix-matching mcp__
+  // against the registry: the manager's own toolRoutes is precisely the set this
+  // loop can route, and re-deriving it from a global would be the re-derivation
+  // R4 (providerProfile.ts) warns against.
+  //
+  // Deny still wins: resolveToolList checks excludeToolNames and capability
+  // exclude BEFORE the allow branch, so this cannot override a denial — which is
+  // what leaves room for a future per-tool filter in .zone/mcp.json.
+  if (input.mcpManager) {
+    const mcpNames = input.mcpManager.registeredToolNames();
+    // hadAllowFilter, for the reason applyRequestedToolsGrant documents at
+    // archetypeDispatcher.ts's own grant helper: introducing allowToolNames where
+    // NEITHER allow nor allowToolNames existed flips resolveToolList's internal
+    // hasAllowFilter from false to true, and with no capability allow-set only the
+    // named tools would resolve — COLLAPSING the offered set instead of widening
+    // it (reproduced there: an 18-tool exclude-only filter collapsed to 1). With
+    // no allow-filter, MCP tools already resolve, so there is nothing to do.
+    const hadAllowFilter =
+      effectiveFilter?.allow !== undefined || (effectiveFilter?.allowToolNames?.size ?? 0) > 0;
+    if (hadAllowFilter && mcpNames.length > 0) {
+      const before = resolveToolList(effectiveFilter);
+      effectiveFilter = {
+        ...effectiveFilter,
+        allowToolNames: new Set([...(effectiveFilter?.allowToolNames ?? []), ...mcpNames]),
+      };
+      const after = resolveToolList(effectiveFilter);
+      // Reports what the run actually receives, not what was asked for: a name
+      // the filter's own excludeToolNames still denies is absent from `after` and
+      // so is absent here too, rather than being reported as granted.
+      const beforeNames = new Set(before.map((t) => t.name));
+      const grantedNames = after.filter((t) => !beforeNames.has(t.name)).map((t) => t.name);
+      emitMcpToolsGranted({
+        runId: input.runId ?? null,
+        filterSource,
+        granted: grantedNames,
+        toolArrayLengthBefore: before.length,
+        toolArrayLengthAfter: after.length,
+        toolDescriptionCharsAdded: after
+          .filter((t) => grantedNames.includes(t.name))
+          .reduce((sum, t) => sum + JSON.stringify(t.definition).length, 0),
       });
     }
   }
