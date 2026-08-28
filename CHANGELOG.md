@@ -4,6 +4,38 @@ All notable changes to Zone are documented in this file.
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [2.2.1] — 2026-08-28
+
+1 commit (`abf8d8f6`) since the 2.2.0 release (`560ea54b`). Every claim below names the commit or the
+`docs/deferred-work.md` item it comes from, so a reader can check it.
+
+### Added
+
+- **A new `[zone-openai-request-issued]` marker**, logged unconditionally immediately before each
+  request to an OpenAI-compatible endpoint, on every attempt including retries (`abf8d8f6`). An
+  unresponsive gateway can now be diagnosed from `~/.zone/markers.jsonl` after the fact, without
+  needing to have re-run in verbose mode.
+
+### Fixed
+
+- **Editing a gateway's API key through `/keys` no longer destroys the profile** (`abf8d8f6`). Before
+  this fix, re-entering a key for an existing gateway row dropped its base URL, protocol and declared
+  prices — silently demoting the row to a plain vendor key. The next run then either reported no API
+  key found, or, if a vendor key happened to be configured too, ran against the wrong endpoint on the
+  wrong account with no warning. **If you configured a gateway on 2.2.0 and have since edited its
+  key, delete that row from `/keys` and re-add it** — a demoted row can't be repaired in place, since
+  the price action is itself gated on the base URL the edit already removed.
+- **The pricing prompt after adding a gateway now actually appears** (`abf8d8f6`). It was being torn
+  down in the same tick it opened — a fire-and-forget refresh raced the prompt's own dispatch and
+  always won — so every gateway was created unpriced and `--max-budget-usd` could never bound it.
+
+**Known limitation.** One live symptom from 2.2.0 remains unexplained: an agent-loop request that
+produced no output for 115 seconds against a corporate gateway, while a separate call from the task
+classifier — same key, same endpoint — completed with a clean error in 245ms. Tracing found no
+swallowed error and no code path that discards a failure silently; the cause of the silence itself is
+not yet known (`docs/deferred-work.md` item 405, filed as blocked on data — no fix exists to specify
+until it recurs). The marker above is the instrument that will make the next occurrence diagnosable.
+
 ## [2.2.0] — 2026-08-28
 
 23 commits since 2.1.0 (`10a83f9c`). Every claim below names the commit or the
