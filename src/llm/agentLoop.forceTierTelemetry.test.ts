@@ -1,24 +1,21 @@
 /**
- * CHARACTERIZATION TEST — pins behaviour that is KNOWN TO BE WRONG.
+ * Item 328 CLOSED, item 330 CLOSED, item 329 still OPEN — read all three before changing anything
+ * here.
  *
- * Covers ledger items 328 and 329. Read those entries before changing anything here.
+ * `--force-tier` (and `ZONE_FORCE_TIER`, which resolves to the same field) now moves the SAME tier
+ * every downstream consumer reads. `runAgentLoop` rebinds `input.taskClassification` to a shallow
+ * copy with `.tier` overridden, once, before either the tool-subset filter or any telemetry site
+ * reads it — see the comment at the top of `runAgentLoop` in `agentLoop.ts`. That fixed:
  *
- * `--force-tier` genuinely takes effect: it reaches `resolveTierLimits(..., {forceTierOverride})`,
- * which returns early with the forced tier's limits, so the token cap and iteration ceiling really
- * do change. What it never does is reach the telemetry:
+ *   - item 328 — all six `recordLLMCall` sites read the corrected tier now, so a run invoked with
+ *     `--force-tier complex` on a task the classifier called "simple" logs "complex".
+ *   - item 330 — `tierToolFilter` reads the corrected tier too, so the tool subset actually widens
+ *     to the forced tier instead of staying at whatever the classifier originally said.
  *
- *   - item 328 — all six `recordLLMCall` sites in agentLoop.ts pass
- *     `tier: input.taskClassification?.tier`, the CLASSIFIER's tier. There is no "effective tier"
- *     string anywhere in the tree; the forced value exists only as a TierLimits object. So a run
- *     invoked with `--force-tier complex` on a task the classifier called "simple" logs "simple".
- *   - item 329 — `emitArchetype` hardcodes `userOverride: null`, which is the one field on that
- *     marker designed to record exactly this override.
- *
- * These assertions therefore encode the DEFECT, not the specification. That is deliberate: the
- * mis-record survived precisely because nothing anywhere asserted on it, and an untested defect is
- * one silent edit away from being joined by another. When either fix lands, the corresponding
- * assertion must be UPDATED to the corrected value — never deleted, or the mis-record becomes
- * unobserved again and this file's whole reason for existing is undone.
+ * item 329 is NOT fixed by this and is a genuinely separate defect: `emitArchetype` hardcodes
+ * `userOverride: null` as a literal, unrelated to any tier read, and remains open (deferred-work.md
+ * item 329, bucket unchanged). Its assertion below is still a CHARACTERIZATION of that one field —
+ * update it, never delete it, when item 329 itself is fixed.
  *
  * Driven through the mocked-SDK harness, so it costs nothing to run.
  */
@@ -103,8 +100,8 @@ beforeEach(() => {
   toolExecutorMock.withStagingTempFlush.mockImplementation((_: unknown, fn: () => unknown) => fn());
 });
 
-describe("item 328 (characterization) — cost telemetry records the classifier's tier, not the forced one", () => {
-  it("iter_cost_update reports tier 'simple' on a run forced to complex", async () => {
+describe("item 328 (fixed) — cost telemetry now records the forced tier", () => {
+  it("iter_cost_update reports tier 'complex' on a run forced to complex", async () => {
     const { events } = await runForcedComplex();
     const costEvent = events.find((e) => e["type"] === "iter_cost_update");
 
@@ -112,13 +109,31 @@ describe("item 328 (characterization) — cost telemetry records the classifier'
     // vacuously unreachable and the pin would silently stop pinning anything.
     expect(costEvent, "no iter_cost_update event emitted — the pin has nothing to observe").toBeDefined();
 
-    // THE DEFECT, PINNED. "complex" is what was asked for; "simple" is what is recorded.
-    expect(costEvent!["tier"]).toBe("simple");
-    expect(costEvent!["tier"]).not.toBe("complex");
+    // THE FIX, PINNED. "complex" is what was asked for, and now what is recorded.
+    expect(costEvent!["tier"]).toBe("complex");
+    expect(costEvent!["tier"]).not.toBe("simple");
   });
 });
 
-describe("item 329 (characterization) — emitArchetype hardcodes userOverride to null", () => {
+describe("item 330 (fixed) — the tool subset now moves with the forced tier", () => {
+  it("a run forced to complex is offered the full tool set, not the simple-tier subset", async () => {
+    await runForcedComplex();
+
+    expect(mocks.createChatCompletion).toHaveBeenCalled();
+    const [params] = mocks.createChatCompletion.mock.calls[0]!;
+    const toolNames = (
+      (params as { tools?: Array<{ function?: { name?: string } }> }).tools ?? []
+    ).map((t) => t.function?.name);
+
+    // THE FIX, PINNED. search_in_files is absent from the 5-tool simple-tier subset
+    // (apply_patch, multi_edit, read_file, run_command, write_file) and present at every
+    // wider tier — its presence here is a direct signal that tierToolFilter read the forced
+    // tier, not the classifier's original "simple".
+    expect(toolNames).toContain("search_in_files");
+  });
+});
+
+describe("item 329 (characterization, still open) — emitArchetype hardcodes userOverride to null", () => {
   it("the [zone-archetype] marker carries userOverride null even when a tier was forced", async () => {
     await runForcedComplex();
 
@@ -128,9 +143,12 @@ describe("item 329 (characterization) — emitArchetype hardcodes userOverride t
 
     const payload = JSON.parse(String(archetypeCall![1])) as Record<string, unknown>;
 
-    // THE DEFECT, PINNED. This field exists to record exactly the override that was supplied.
+    // THE DEFECT, STILL PINNED — item 329, not part of this fix. This field exists to record
+    // exactly the override that was supplied, and still doesn't.
     expect(payload["userOverride"]).toBeNull();
-    // The same marker's own tier field carries the classifier's value, for the same reason as 328.
-    expect(payload["tier"]).toBe("simple");
+    // The same marker's own tier field is now correct (item 328/330's fix) — it is a different
+    // field on the same call than userOverride, and reads input.taskClassification.tier like
+    // every other corrected site.
+    expect(payload["tier"]).toBe("complex");
   });
 });

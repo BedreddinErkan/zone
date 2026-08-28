@@ -2252,6 +2252,22 @@ function runProviderFor(input: AgentLoopInput): LLMProvider {
 }
 
 export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResult> {
+  // Item 328/330: --force-tier (and ZONE_FORCE_TIER, which resolves to the same field) must move
+  // the SAME tier every downstream consumer reads — tierToolFilter (tool subset), resolveTierLimits
+  // (iteration/subagent budget), and every tier-carrying telemetry payload — not resolveTierLimits
+  // alone. Every one of those reads input.taskClassification?.tier, so correcting it once here,
+  // before either function scope below reads it, corrects all of them with no other edit.
+  //
+  // Shallow-copied, never mutated in place: taskClassifier.ts's classificationCache returns this
+  // exact object BY REFERENCE on a cache hit, so writing into it would leak the forced tier into a
+  // later, unforced run that happens to submit the same task text.
+  //
+  // Absent taskClassification is left alone (the `&&` short-circuits) — tierFilterFromClassifier's
+  // own precondition already means no tier-derived filter applies when there is no classification
+  // to force a tier onto, and synthesizing one here would be a different feature, not this fix.
+  if (input.forceTier && input.taskClassification && input.taskClassification.tier !== input.forceTier) {
+    input = { ...input, taskClassification: { ...input.taskClassification, tier: input.forceTier } };
+  }
   const runStartTs = Date.now();
   const scopedContext: Parameters<typeof withRequestContext>[0] = {};
   if (typeof input.userId === "string" && input.userId.trim()) {

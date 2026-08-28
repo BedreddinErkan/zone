@@ -25927,11 +25927,10 @@ remain genuinely non-streamed (item 318, still blocked on data). OpenAI gets nei
 worker's own streamed text should surface in the parent's live preview is a separate design
 question this pass did not answer.
 
-## 328. Cost telemetry records the classifier's tier, not the tier a run was forced to
+## 328. Closed — cost telemetry records the classifier's tier, not the tier a run was forced to
 
-**Bucket: Actionable now.** The fix is specified: derive one effective-tier string
-(`input.forceTier ?? input.taskClassification?.tier`) and pass it at the six sites that currently
-read the classifier directly. Nothing new needs to be learned first.
+**Bucket: Actionable now → Closed.** Fixed this commit, by a different mechanism than the six-site
+edit this entry originally specified — see the closing note.
 
 **What is and is not broken.** `--force-tier` genuinely works. It is defined at
 `src/cli/index.ts:1252`, read under the name commander actually produces (`:122`, structurally
@@ -25974,6 +25973,17 @@ defect, not the specification. When this fix lands, change that assertion to the
 deleting it returns the field to the unobserved state that let the mis-record survive in the first
 place.
 
+**Fixed, by one interception point rather than six edits.** `runAgentLoop` now rebinds
+`input.taskClassification` to a shallow copy with `.tier` overridden by `input.forceTier`, once,
+before `runAgentLoopScoped` reads it — not at each `recordLLMCall` site this entry names. Every
+site this entry lists reads `input.taskClassification?.tier`, so correcting the value once, before
+any of them runs, corrects all of them without visiting each individually. The copy is shallow and
+never mutates the object in place, because `taskClassifier.ts`'s classification cache returns the
+identical object by reference on a cache hit; writing into it would leak a forced tier into a later,
+unforced run submitting the same task text. `agentLoop.forceTierTelemetry.test.ts`'s pinned
+assertion is updated to the corrected value, per this entry's own instruction, not deleted. The same
+interception point also closes item 330, since `tierToolFilter` reads the same corrected field.
+
 ## 329. `emitArchetype` hardcodes `userOverride` to null — the one field designed to record the override
 
 **Bucket: Actionable now.** The fix is to pass the value that already exists in scope
@@ -25995,11 +26005,9 @@ Contrast `src/llm/agentLoop.ts:2802`, which populates a `userOverride` field fro
 `readDailyUsdCapOverride()` — the same field name, wired, on a different marker. So the pattern is
 established elsewhere in the same file and simply was not applied here.
 
-## 330. `--force-tier` governs tier limits but not the tier-derived tool subset
+## 330. Closed — `--force-tier` governs tier limits but not the tier-derived tool subset
 
-**Bucket: Neither.** The remedy is a key choice nobody has made: whether a debugging override that
-exists to relax budgets should also change which tools the model is offered. Making it do so is a
-behavioural change to every forced run, not a correction.
+**Bucket: Neither → Closed.** The choice this entry names is made: see the closing note.
 
 `src/llm/agentLoop.ts:2416-2417` builds the tool filter from the classifier:
 `tierToolFilter(input.taskClassification.tier)` — so a run forced to complex is still handed the
@@ -26019,14 +26027,34 @@ while the premise underneath them was wrong. The simple tier's five-tool subset 
 `write_file` and `apply_patch`, so the write path was available regardless; the control held, but
 not for the reason recorded at the time.
 
-**Residual limit to carry forward.** `fetch_url` is complex-tier-only and absent from both smaller
-subsets, so a future run that needs a complex-tier-only tool will not get it from this flag. Such a
-run needs a task the classifier itself rates complex.
+**Residual limit to carry forward — now resolved by this entry's own closing fix, noted here rather
+than silently dropped.** This entry originally read: "`fetch_url` is complex-tier-only and absent
+from both smaller subsets, so a future run that needs a complex-tier-only tool will not get it from
+this flag." That no longer holds. `tierToolFilter` returns no allowlist for `complex` — the full
+toolset, `fetch_url` included — and a run forced to complex now reads `complex` at that call too,
+for the same reason the rest of this entry's fix does.
 
 **Third instance of one pattern.** A setting's name does not tell you which code path it triggers.
 The first was an `--otp` flag whose absence was read as an auth failure when the npm version had
 moved to a browser flow; the second was `ZONE_HOME`, a plausible variable that does not exist, where
-`HOME` is the real lever. This is the third: `--force-tier` names a tier and governs a budget.
+`HOME` is the real lever. This is the third: `--force-tier` names a tier and governs a budget — or
+did; the fix closing this entry is what makes that no longer true.
+
+**Decided: (a) — the forced tier now moves everywhere, including this filter.** A user typing
+`--force-tier complex` has one coherent mental model: treat this run as complex. A forced budget
+paired with a tool subset that still reflected the classifier's original guess was never a requested
+combination — it was two consumers of one field silently disagreeing. Item 328's fix (a single
+shallow copy of `input.taskClassification` with `.tier` overridden, made once in `runAgentLoop`
+before either consumer reads it) corrects `tierToolFilter(input.taskClassification.tier)` along with
+every telemetry site, because both read the same corrected field. The existing `--help` text
+("Force classification tier: simple | medium | complex") needed no rewrite under this choice — the
+code now matches what it already claimed. This does not touch item 329 (`emitArchetype`'s hardcoded
+`userOverride: null`), a different, hardcoded field unrelated to any tier read and still open.
+
+This says nothing about the archetype dispatcher's own, separate `capabilityFilter` — a read-only
+pipeline's `allow: READ_ONLY_CAPABILITIES` still wins the precedence chain over the tier-derived
+filter when one is set, independent of tier — that mechanism is untouched by this fix and outside
+this entry's scope.
 
 ## 331. `/metrics` computes a tier distribution from a field nothing ever populates
 
@@ -28250,27 +28278,55 @@ the same shape as the `/keys` key-edit defect closed earlier in this series: the
 composition around it was never run. The regression tests added here are ordering tests by
 construction — they seed the store *after* resolution, which no prior test did.
 
+## 407. `--force-tier`'s tier-everywhere fix is a no-op when no classification exists at all
+
+**Bucket: Neither.** A deliberate scope boundary from the fix that closed items 328 and 330, not a
+gap left in it — synthesizing a classification to hang a forced tier on would be a different,
+unasked-for feature, not a correction to the disagreement those two entries described.
+
+`runAgentLoop`'s interception point only overrides `input.taskClassification.tier` when a
+classification is already present: the guard reads
+`input.forceTier && input.taskClassification && input.taskClassification.tier !== input.forceTier`.
+When `input.taskClassification` is absent entirely — no classifier ran, not even a fallback — the
+`&&` short-circuits and nothing is overridden. This matches what `tierToolFilter`'s caller,
+`tierFilterFromClassifier`, already required before items 328 and 330 were fixed: its own
+precondition is the same `input.taskClassification?.tier` truthiness check, so a run with no
+classification at all never had a tier-derived filter applied, forced or not. The boundary this fix
+draws is the same one that already existed one layer up, carried forward rather than newly
+introduced.
+
+**Not hypothetical — a real call shape, though its reach to this flag specifically was not
+checked.** `src/llm/planInvestigation.ts`'s `runPlanInvestigation` calls `runAgentLoop` with no
+`taskClassification` field in its input object at all; `loopTelemetry.ts`'s own
+`TierConstraintsData.classificationSource` doc comment names this exact function as the reason that
+field distinguishes `"absent"` from a real classifier result. What is confirmed is the code shape:
+a production caller of `runAgentLoop` exists that supplies no classification. What is not checked
+here, and is not claimed either way, is whether `--force-tier` is threaded to reach that specific
+call today — `runPlanInvestigation` also supplies its own `capabilityFilter`, which would take
+precedence over any tier-derived filter regardless. The fact recorded is the shape of the guard, not
+that call site's present reachability.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 406 to find out which ones still need something. No index of
+reader the trouble of reading all 407 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (176): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42,
+**Closed** (178): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42,
 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113,
 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167,
 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228,
 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260,
 262, 264, 265, 266, 267, 268, 269, 270, 271, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285,
 286, 288, 289, 290, 301, 302, 304, 308, 309, 310, 327, 336, 337, 343, 344, 345, 348, 351,
-320, 352, 353, 364, 370, 371, 372, 377, 378, 379, 384, 385, 388, 390, 391, 394, 406
+320, 352, 353, 364, 370, 371, 372, 377, 378, 379, 384, 385, 388, 390, 391, 394, 406, 328, 330
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (23): 287, 291, 292, 293, 296, 299, 313, 328, 329, 334, 347, 358, 359, 365, 368, 373, 375, 383, 389, 395,
+first (22): 287, 291, 292, 293, 296, 299, 313, 329, 334, 347, 358, 359, 365, 368, 373, 375, 383, 389, 395,
 401, 403, 404
 
 Six, down from seven, and the movement is the ledger's own signal about whether anything is specified
@@ -28303,10 +28359,14 @@ single condition. All three arrived with the fix named in the entry, which is wh
 requires; none was inherited backlog. The pass after that closed 334 as 343 — its named remedy
 turned out incomplete, and applying it alone would have introduced a crash — while filing 347, a
 retry event that never reaches the bus under its own type, whose remedy is likewise named. Net
-eleven to twelve. This pass adds three more, all found investigating one live gateway defect: 401
+eleven to twelve. A later pass adds three more, all found investigating one live gateway defect: 401
 and 404 while tracing where its LLM error goes, 403 while ruling out a candidate cause for the
 silence 405 records. Twenty to twenty-three: 287, 291, 292, 293, 296, 299, 313, 328, 329, 334, 347,
-358, 359, 365, 368, 373, 375, 383, 389, 395, 401, 403, 404.
+358, 359, 365, 368, 373, 375, 383, 389, 395, 401, 403, 404. This pass closes 328 — the single
+interception point that fixes it corrects every `recordLLMCall` site this entry named, without
+visiting each one — landing the bucket at twenty-two: 287, 291, 292, 293, 296, 299, 313, 329, 334,
+347, 358, 359, 365, 368, 373, 375, 383, 389, 395, 401, 403, 404. The same interception point
+separately closes item 330, which sat in Neither rather than this bucket.
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (18): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250, 263, 318, 376, 405
 
@@ -28316,8 +28376,8 @@ silence 405 records. Twenty to twenty-three: 287, 291, 292, 293, 296, 299, 313, 
 154, 155, 158, 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199,
 200, 201, 202, 205, 206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230,
 232, 243, 244, 247, 248, 249, 254, 256, 261, 272, 294, 295, 297, 298, 300, 303, 305, 306, 307, 311, 312,
-314, 315, 316, 317, 319, 321, 322, 323, 324, 325, 326, 330, 331, 332, 333, 335,
-338, 339, 340, 341, 342, 346, 349, 350, 354, 355, 356, 357, 360, 361, 362, 363, 366, 367, 369, 374, 380, 381, 382, 386, 387, 392, 393, 396, 397, 398, 399, 400, 402
+314, 315, 316, 317, 319, 321, 322, 323, 324, 325, 326, 331, 332, 333, 335,
+338, 339, 340, 341, 342, 346, 349, 350, 354, 355, 356, 357, 360, 361, 362, 363, 366, 367, 369, 374, 380, 381, 382, 386, 387, 392, 393, 396, 397, 398, 399, 400, 402, 407
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
