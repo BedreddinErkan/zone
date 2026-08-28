@@ -4,6 +4,30 @@ All notable changes to Zone are documented in this file.
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [2.2.2] — 2026-08-28
+
+1 commit (`27e49753`) since the 2.2.1 release (`657bc87d`). Every claim below names the commit or the
+`docs/deferred-work.md` item it comes from, so a reader can check it.
+
+### Fixed
+
+- **A gateway added through `/keys` could fail for the rest of that session** (`27e49753`). If a
+  gateway was added — or only became visible — after Zone had already started, `/keys` would show it
+  correctly and write it to disk correctly, but every task still failed with a message like
+  "No API key found for `<gateway>`. Add one with `/keys`, or set `ANTHROPIC_API_KEY`" — naming the
+  gateway and then a vendor variable it doesn't use. The cause, in one sentence: a gateway added
+  after startup was never resolved for that session, and nothing re-resolved it afterwards.
+  Restarting Zone worked around it, because startup resolves a gateway correctly when its row
+  already exists at that moment; nothing short of a restart did. The error message no longer pairs a
+  gateway's name with a vendor environment variable — an unresolved gateway now gets its own message
+  pointing at `/keys`. A new `[zone-gateway-unresolved]` marker also records the moment this happens,
+  in `~/.zone/markers.jsonl` (item 406).
+
+This is a different failure from item 405, still open since 2.2.1: a request to a gateway that *had*
+already resolved (the task classifier reached it and got a real response) produced no output for 115
+seconds. This release fixes a gateway never resolving in the first place, which is not what item 405
+describes — it does not explain or close it.
+
 ## [2.2.1] — 2026-08-28
 
 1 commit (`abf8d8f6`) since the 2.2.0 release (`560ea54b`). Every claim below names the commit or the
