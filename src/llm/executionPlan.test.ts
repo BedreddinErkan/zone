@@ -1344,3 +1344,164 @@ describe("plan-generation prompts — brevity instructions removed, caps lifted 
     expect(lexicalSpec).toBe(investigationSpec);
   });
 });
+
+// ─── item 409: the shape template contradicted its own prose and its own schema ───────────────
+//
+// A live run returned `null` for steps[N].subagentType on four steps at once, all rejected with
+// "expected 'explore' | 'worker', received null" — discarding the WHOLE plan, and with it the only
+// filesLikely checkWriteScope had to narrow against (item 243: absent filesLikely fails OPEN).
+//
+// The prose and worked examples teach omission; the JSON-shape template listed both subagent keys
+// with no "(optional)" marker, unlike every sibling optional field in the same block. A model that
+// had decided the field did not apply had no valid way to say so.
+//
+// WHAT THESE TESTS CAN AND CANNOT PIN. The schema half is directly assertable and is pinned
+// exactly. The prompt half is a string, so its CONTENT is assertable — but no test here can show
+// that a model therefore stops emitting null; that is a claim about model behaviour and needs a
+// live call, which was impossible when this was written (both provider balances exhausted). The
+// template tests below are regression guards against the marker being removed again, not evidence
+// the behaviour changed.
+
+describe("item 409 — null subagent annotations are coerced, not fatal", () => {
+  it("subagentType:null is coerced to absent instead of discarding the plan", async () => {
+    mockPlanResponse({
+      objective: "Add a helper",
+      steps: [{ title: "T", description: "D", filesLikely: ["src/a.ts"], subagentType: null }],
+      riskHints: [],
+      scopeSummary: "S",
+    });
+
+    const plan = await generateExecutionPlan({ task: "t", repoSummary: "", relevantFiles: [] });
+
+    expect(plan.steps).toHaveLength(1);
+    expect(plan.steps[0]!.subagentType).toBeUndefined();
+  });
+
+  it("subagentEligible:null is coerced the same way — both keys the template listed unmarked", async () => {
+    mockPlanResponse({
+      objective: "Add a helper",
+      steps: [{ title: "T", description: "D", filesLikely: ["src/a.ts"], subagentEligible: null }],
+      riskHints: [],
+      scopeSummary: "S",
+    });
+
+    const plan = await generateExecutionPlan({ task: "t", repoSummary: "", relevantFiles: [] });
+
+    expect(plan.steps).toHaveLength(1);
+    expect(plan.steps[0]!.subagentEligible).toBeUndefined();
+  });
+
+  it("the measured shape — four steps, all null — parses, and the marker reports the count", async () => {
+    mockPlanResponse({
+      objective: "Four things",
+      steps: [1, 2, 3, 4].map((n) => ({
+        title: `T${n}`,
+        description: `D${n}`,
+        filesLikely: [`src/${n}.ts`],
+        subagentEligible: null,
+        subagentType: null,
+      })),
+      riskHints: [],
+      scopeSummary: "S",
+    });
+
+    const plan = await generateExecutionPlan({ task: "t", repoSummary: "", relevantFiles: [] });
+    expect(plan.steps).toHaveLength(4);
+
+    // The condition on accepting null: the coercion must be LOUDER than the rejection it replaces.
+    // The old failure was a debugLog gated on ZONE_VERBOSE_LOGS=1; this is an unconditional log(),
+    // and it is what would surface a future prompt regression.
+    const call = mocks.log.mock.calls.find((c) => String(c[0]).includes("zone-plan-null-annotation"));
+    expect(call, "coercing silently would trade away the visibility that found this defect").toBeDefined();
+    const payload = JSON.parse(String(call![1])) as Record<string, unknown>;
+    expect(payload["steps"]).toBe(4);
+    expect(payload["fields"]).toEqual(["subagentEligible", "subagentType"]);
+  });
+
+  it("no marker fires when nothing was coerced — the signal means something", async () => {
+    mockPlanResponse({
+      objective: "Add a helper",
+      steps: [{ title: "T", description: "D", filesLikely: ["src/a.ts"], subagentType: "worker" }],
+      riskHints: [],
+      scopeSummary: "S",
+    });
+
+    await generateExecutionPlan({ task: "t", repoSummary: "", relevantFiles: [] });
+
+    expect(
+      mocks.log.mock.calls.some((c) => String(c[0]).includes("zone-plan-null-annotation"))
+    ).toBe(false);
+  });
+
+  it("regression: a genuinely invalid subagentType still REJECTS — the guard is null-specific", async () => {
+    mockPlanResponse({
+      objective: "Add a helper",
+      steps: [{ title: "T", description: "D", filesLikely: ["src/a.ts"], subagentType: "banana" }],
+      riskHints: [],
+      scopeSummary: "S",
+    });
+
+    // Coercion must not become a blanket "absorb anything unexpected".
+    await expect(
+      generateExecutionPlan({ task: "t", repoSummary: "", relevantFiles: [] })
+    ).rejects.toThrow();
+  });
+
+  it("regression: valid values survive untouched, and steps:[] with no reason still rejects", async () => {
+    mockPlanResponse({
+      objective: "Rename",
+      steps: [{ title: "T", description: "D", filesLikely: ["a.ts", "b.ts", "c.ts"], subagentEligible: true, subagentType: "explore" }],
+      riskHints: [],
+      scopeSummary: "S",
+    });
+    const plan = await generateExecutionPlan({ task: "t", repoSummary: "", relevantFiles: [] });
+    expect(plan.steps[0]!.subagentType).toBe("explore");
+    expect(plan.steps[0]!.subagentEligible).toBe(true);
+
+    // superRefine must still fire through the added preprocess wrapper.
+    mockPlanResponse({ objective: "X", steps: [], riskHints: [], scopeSummary: "S" });
+    await expect(
+      generateExecutionPlan({ task: "t", repoSummary: "", relevantFiles: [] })
+    ).rejects.toThrow();
+  });
+});
+
+describe("item 409 — both shape templates mark the subagent keys optional", () => {
+  // Regression guards on the template text only. See this block's own note above on what that
+  // does and does not establish.
+  /** The JSON-shape block only — NOT the worked examples, which legitimately carry concrete
+   *  values (EXAMPLE A/B exist to show when the annotation SHOULD be set). Scoping matters: an
+   *  unscoped line search matches EXAMPLE A first and would have driven the marker into the
+   *  examples, where it would contradict their whole purpose. */
+  function shapeBlockOf(prompt: string): string {
+    const idx = prompt.indexOf("JSON shape:");
+    expect(idx, "the prompt must still carry a JSON shape block").toBeGreaterThan(-1);
+    return prompt.slice(idx);
+  }
+
+  it("the lexical template (generateExecutionPlan) marks both keys optional", async () => {
+    const shape = shapeBlockOf(await buildLexicalPrompt());
+    const shapeLine = shape.split("\n").find((l) => l.includes('"subagentType"'));
+    expect(shapeLine, "the shape template must still name subagentType").toBeDefined();
+    expect(shapeLine!).toContain("optional");
+    const eligibleLine = shape.split("\n").find((l) => l.includes('"subagentEligible"'));
+    expect(eligibleLine!).toContain("optional");
+  });
+
+  it("the investigation template (buildPrompt) marks both keys optional — the same defect, second prompt", () => {
+    // Found while fixing the first: planInvestigation carries the identical contradiction, and is
+    // the DEFAULT generator on the quick path (shouldInvestigate = !isPureAddition(task)), so
+    // fixing only the lexical one would have left it live on the more-travelled route.
+    const shape = shapeBlockOf(buildPrompt("add a helper", ["src/a.ts"], true));
+    const shapeLine = shape.split("\n").find((l) => l.includes('"subagentType"'));
+    expect(shapeLine, "the shape template must still name subagentType").toBeDefined();
+    expect(shapeLine!).toContain("optional");
+    const eligibleLine = shape.split("\n").find((l) => l.includes('"subagentEligible"'));
+    expect(eligibleLine!).toContain("optional");
+  });
+
+  it("both templates still teach omission in prose — the half that was already correct", async () => {
+    expect(await buildLexicalPrompt()).toContain("EXAMPLE C");
+    expect(buildPrompt("add a helper", ["src/a.ts"], true)).toContain("omit the annotation entirely");
+  });
+});

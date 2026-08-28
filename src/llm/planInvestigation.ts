@@ -105,8 +105,8 @@ JSON shape:
       "title": "string",
       "description": "<what this step does to which code + the key decision/edit, concrete, not a restatement of the title>",
       "filesLikely": ["string"],
-      "subagentEligible": true | false,
-      "subagentType": "worker" | "explore"
+      "subagentEligible": true | false (optional — omit the key entirely when the step is not subagent-eligible),
+      "subagentType": "worker" | "explore" (optional — omit the key entirely when subagentEligible is not set; never send null)
     }
   ],
   "requestedTools": ["string"] (optional — name tools you were not offered but need, by exact name),

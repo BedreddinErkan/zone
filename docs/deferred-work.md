@@ -28404,12 +28404,12 @@ the base input and does inherit it.
 breakpoint #1 still holds across iterations; the marker `[zone-mcp-tools-granted]` carries the runId
 to join against the usage log's own cache fields for anyone measuring the prefix cost directly.
 
-## 409. A plan-generation prompt template contradicts its own prose, its own schema, and fails silently when a model follows the template
+## 409. Closed — a plan-generation prompt template contradicted its own prose, its own schema, and failed silently when a model followed the template
 
-**Bucket: Actionable now.** The fix is small and independent of which `planDepth` is active: give
-the JSON-shape template the same `(optional)` treatment every sibling optional field in the same
-block already carries, so a model reading the template literally has a correct way to say "not
-applicable" instead of reaching for `null`.
+**Bucket: Actionable now → Closed.** All three halves fixed this commit — the template, the schema's
+response to a `null`, and the silence. Two things this entry did not know are recorded in the
+closure: the same defect existed in a **second** prompt, and the stale-comment diagnosis was right
+about which comment but wrong about why.
 
 **The defect, located precisely.** `src/llm/executionPlan.ts:136` declares the field
 `subagentType: z.enum(["explore", "worker"]).optional()` — accepting `undefined`, rejecting `null`,
@@ -28480,6 +28480,67 @@ seeded by the in-loop TodoWrite tool now; pre-planner only feeds scopeGuard / ev
 orchestrator / finalRunReport." The two disagree about whether todo display is still a consumer —
 read as the first comment surviving unedited past the point sidebar-seeding moved to the in-loop
 tool.
+
+---
+
+**The second prompt this entry did not know about.** `planInvestigation.ts`'s `buildPrompt` carries
+the identical contradiction — the same two keys in its own JSON-shape block with no `(optional)`
+marker, while its siblings there (`requestedTools`, `noChangeReason`, `cannotVerifyReason`,
+`answerOnlyReason`) all carry one, and its own prose ends *"adding one JSDoc comment to one file →
+omit the annotation entirely."* **It is also the more-travelled path**: `shouldInvestigate =
+!isPureAddition(task)` is the default on the quick path, so `runPlanInvestigation` is usually the
+generator that runs, and `generateExecutionPlan` — which this entry located, and through which the
+measured failure arrived via `runLlmPatchFlow`'s Tur P1.5 block — is the other. Both are fixed;
+fixing one would have left the defect live on the route that runs more often.
+
+**The stale comment: right about which one, wrong about why.** This entry read the header as having
+survived unedited past a move of sidebar-seeding into the in-loop tool. Checked rather than
+inherited: `initializeTodosFromPlan()` is called from exactly **one** site, inside the
+`_planOrchestrationEnabled` branch, and `isPlanOrchestrationEnabled` returns false unless
+`ZONE_PLAN_ORCHESTRATION` is `1`/`true`. So the pre-planner *does* still seed the sidebar — just
+only under an opt-in flag that is off by default. The header was stale for the default path, not
+universally false, and the corrected comment names the flag rather than repeating either version.
+
+**Decision: the schema now accepts `null` and coerces it to absent — and the marker is the
+condition on that.** The argument for keeping the rejection is real and was weighed, not waved past:
+rejection is what made this defect visible. But two things outweigh it. First, proportionality — a
+`null` on an annotation documented in its own type comment as *"Informational only — agent still
+decides at runtime whether to actually spawn"* was discarding the entire plan, and with it the only
+`filesLikely` `checkWriteScope` had to narrow against, which per item 243 makes the write guard fail
+**open** for the rest of the run. Second, and decisively: rejection's only trace was
+`[zone-plan] skipped`, emitted through `debugLog` and gated on `ZONE_VERBOSE_LOGS=1` — this defect
+surfaced only because someone happened to be running verbose *and* reading markers. The new
+unconditional `[zone-plan-null-annotation]` (`{steps, fields}`) is strictly more visible than that,
+so accepting `null` **buys** visibility rather than trading it away. **That marker is the answer to
+"what would then surface a future prompt defect."** The shape follows local precedent: this schema
+already prefers repair-plus-marker over rejection for `[zone-plan-salvaged]`.
+
+Scoped deliberately to the two keys the templates listed unmarked — not a blanket null→undefined
+sweep, since `steps` and `filesLikely` are required and a blanket rule would absorb failures that
+should stay loud. A genuinely invalid value (`"banana"`) still rejects, pinned by its own test.
+
+**Decision: the silence is fixed too, proportionately.** The Tur P1.5 catch now emits an
+unconditional `[zone-plan-generation-failed]` (`{runId, branch, error, lostScopeNarrowing,
+lostPlanAlignment}`) and a user-visible `narration` warning naming what was lost — the write-scope
+guard is not narrowed for the run, and the plan-alignment check is skipped. Not a hard failure: the
+run can still complete, it just does so unguarded, and the user is told rather than left to infer
+it. Worth doing independently of the `null` fix, since that catch covers every generation failure —
+API error, malformed JSON, any other schema violation — and the loss is identical regardless of
+cause. The existing `debugLog` line stays for the verbose detail.
+
+**What `/plan` gets, confirmed rather than assumed.** `dispatch.ts` — the user-facing plan flow —
+calls **both** generators: `runPlanInvestigation` and `generateExecutionPlan` (three call sites, one
+of them the feedback replan). Both prompts and the shared schema are what this pass fixed, so the
+`/plan` flow benefits from the same correction. **Its behaviour is otherwise unchanged**:
+`dispatch.ts` is not modified by this commit, and all 200 tests across its sixteen test files plus
+the two `planInvestigation` files pass unchanged.
+
+**What remains unproven, stated plainly.** No live LLM call was possible (both provider balances
+exhausted), so nothing here demonstrates that a model actually stops emitting `null` — only that
+the template no longer contradicts itself and that a `null` is no longer fatal when one arrives.
+The prompt-text tests are regression guards against the `(optional)` marker being removed again,
+not evidence of changed model behaviour; `[zone-plan-null-annotation]` is what would show whether
+the emissions actually stop.
 
 ## 410. Closed — a server declaration can name which of its tools to expose
 
@@ -28816,18 +28877,18 @@ priority ordering" cautions against ranking by importance, which this section do
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (182): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42,
+**Closed** (183): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42,
 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113,
 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167,
 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228,
 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260,
 262, 264, 265, 266, 267, 268, 269, 270, 271, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285,
 286, 288, 289, 290, 301, 302, 304, 308, 309, 310, 327, 336, 337, 343, 344, 345, 348, 351,
-320, 352, 353, 364, 370, 371, 372, 377, 378, 379, 384, 385, 388, 390, 391, 394, 406, 328, 330, 408, 410, 411, 413
+320, 352, 353, 364, 370, 371, 372, 377, 378, 379, 384, 385, 388, 390, 391, 394, 406, 328, 330, 408, 410, 411, 413, 409
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (23): 287, 291, 292, 293, 296, 299, 313, 329, 334, 347, 358, 359, 365, 368, 373, 375, 383, 389, 395,
-401, 403, 404, 409
+first (22): 287, 291, 292, 293, 296, 299, 313, 329, 334, 347, 358, 359, 365, 368, 373, 375, 383, 389, 395,
+401, 403, 404
 
 Six, down from seven, and the movement is the ledger's own signal about whether anything is specified
 and waiting, in both directions. The diagnosis pass into `find_references` left it at 7 (287 plus six
@@ -28877,7 +28938,10 @@ it were rate limiting, its distinguishing field already on the error object — 
 Anthropic credit-error mapping checking a gateway-normalized status rather than the real one — while
 412, found investigating the same question, goes to Blocked on data instead: twenty-four, unchanged
 in count, membership moved: 287, 291, 292, 293, 296, 299, 313, 329, 334, 347, 358, 359, 365, 368,
-373, 375, 383, 389, 395, 401, 403, 404, 409, 413.
+373, 375, 383, 389, 395, 401, 403, 404, 409, 413. The pass after that closes 413 and then 409 — the
+plan-prompt template whose fix turned out to belong in two prompts, not one — leaving twenty-two:
+287, 291, 292, 293, 296, 299, 313, 329, 334, 347, 358, 359, 365, 368, 373, 375, 383, 389, 395, 401,
+403, 404.
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (19): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250, 263, 318, 376, 405, 412
 

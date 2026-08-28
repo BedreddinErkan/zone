@@ -385,7 +385,7 @@ describe("working-tree hazard — the tracked scan must agree with what staging 
  * shifts these numbers should make this test fail and prompt a review, not silently drift.
  */
 describe("drift check — today's figures against the real tree", () => {
-  it("423 marker names; emitter-count distribution zero=43 one=360 several=20; 28 hazards", () => {
+  it("425 marker names; emitter-count distribution zero=43 one=362 several=20; 31 hazards", () => {
     // Re-derived via this file's own scanTree/hazards, not hand-added to the prior 410/349 —
     // the repository-tree write guard (ledger item 236) landed one new marker,
     // `[zone-repo-guard]`, so the total moved 410->411. It lands in `several`, not `one`:
@@ -504,8 +504,23 @@ describe("drift check — today's figures against the real tree", () => {
     // status-less mid-stream frame, or a gateway-normalized 400, and no live call could settle it.
     // One marker, one emitter, and no new hazard row: unlike [zone-mcp-tools-filtered] above, its
     // only other mentions are its own test and the ledger, neither of which hazards() scans.
+    //
+    // 423 -> 425, one=360 -> 362, hazards 28 -> 31: [zone-plan-null-annotation]
+    // (src/llm/executionPlan.ts) and [zone-plan-generation-failed] (src/core/runLlmPatchFlow.ts),
+    // both added by ledger item 409 — the first records a coerced null subagent annotation so a
+    // future prompt regression is louder than the rejection it replaced, the second makes a
+    // plan-generation failure visible at all (it was a debugLog gated on ZONE_VERBOSE_LOGS=1).
+    // Two markers, one emitter each.
+    //
+    // THREE hazard rows, not two, and each was identified by grepping source mentions against
+    // emitters rather than inferred from the count moving: executionPlan.ts cites
+    // [zone-plan-generation-failed] and [zone-plan] (both emitted by runLlmPatchFlow.ts), and
+    // runLlmPatchFlow.ts cites [zone-plan-salvaged] (emitted by executionPlan.ts). All three are
+    // deliberate cross-module pointers in comments — the sibling-marker-citation-in-prose shape
+    // items 387/391 already established as a legitimate row rather than a bug. The two modules now
+    // reference each other's markers in both directions, which is why one pass added three rows.
     const result = scanTree(readTrackedFiles());
-    expect(result.size).toBe(423);
+    expect(result.size).toBe(425);
 
     const dist = { zero: 0, one: 0, several: 0 };
     for (const attr of result.values()) {
@@ -514,8 +529,8 @@ describe("drift check — today's figures against the real tree", () => {
       else if (c === 1) dist.one++;
       else dist.several++;
     }
-    expect(dist).toEqual({ zero: 43, one: 360, several: 20 });
-    expect(hazards(result)).toHaveLength(28);
+    expect(dist).toEqual({ zero: 43, one: 362, several: 20 });
+    expect(hazards(result)).toHaveLength(31);
   });
 
   /**

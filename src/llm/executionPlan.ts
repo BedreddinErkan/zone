@@ -122,7 +122,65 @@ export function planTerminalShape(plan: ExecutionPlan): PlanTerminalShape {
   return "unknown";
 }
 
-const executionPlanSchema = z
+/**
+ * item 409 — a `null` subagent annotation means "not applicable", so treat it as absent rather
+ * than discarding the whole plan.
+ *
+ * `.optional()` widens to `undefined` only; `null` is a type error. A live run returned `null` for
+ * `steps[N].subagentType` on four steps at once and every one of them failed validation, taking the
+ * entire plan with it — and with it the only `filesLikely` `checkWriteScope` had to narrow against,
+ * which per item 243 makes the write guard fail OPEN for the rest of the run. Destroying the write
+ * guard over an annotation documented as "informational only" is wildly out of proportion to the
+ * disagreement that caused it.
+ *
+ * ACCEPTED, NOT SILENTLY. The argument for keeping the rejection is real — it is what made this
+ * defect visible at all. But its only trace was `[zone-plan] skipped`, emitted through `debugLog`,
+ * which is gated on `ZONE_VERBOSE_LOGS=1`; it surfaced only because someone happened to be running
+ * verbose AND reading markers. The unconditional `[zone-plan-null-annotation]` below is strictly
+ * more visible than that, and it — not the rejection — is what surfaces a future prompt regression.
+ * Same repair-plus-marker shape this schema already uses for `[zone-plan-salvaged]`.
+ *
+ * SCOPED ON PURPOSE to the two keys the prompts' shape templates listed without an `(optional)`
+ * marker. NOT a blanket null→undefined sweep: `steps` and `filesLikely` are required, and a blanket
+ * rule would start absorbing failures that should stay loud. A genuinely invalid value (`"banana"`)
+ * still rejects. If another field ever shows up this way, `[zone-plan-generation-failed]`
+ * (runLlmPatchFlow.ts) is the signal to widen deliberately.
+ */
+function coerceNullSubagentAnnotations(raw: unknown): unknown {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw;
+  const obj = raw as Record<string, unknown>;
+  if (!Array.isArray(obj.steps)) return raw;
+
+  const fieldsSeen = new Set<string>();
+  let stepsTouched = 0;
+  const steps = obj.steps.map((step) => {
+    if (!step || typeof step !== "object" || Array.isArray(step)) return step;
+    const s = step as Record<string, unknown>;
+    if (s.subagentEligible !== null && s.subagentType !== null) return step;
+    const cleaned = { ...s };
+    if (cleaned.subagentEligible === null) {
+      delete cleaned.subagentEligible;
+      fieldsSeen.add("subagentEligible");
+    }
+    if (cleaned.subagentType === null) {
+      delete cleaned.subagentType;
+      fieldsSeen.add("subagentType");
+    }
+    stepsTouched += 1;
+    return cleaned;
+  });
+
+  if (stepsTouched === 0) return raw;
+  log(
+    "[zone-plan-null-annotation]",
+    JSON.stringify({ steps: stepsTouched, fields: [...fieldsSeen].sort() })
+  );
+  return { ...obj, steps };
+}
+
+const executionPlanSchema = z.preprocess(
+  coerceNullSubagentAnnotations,
+  z
   .object({
     // Optional — see the type-level comment. Matches narrative/filesLikely's own pattern.
     objective: z.string().optional(),
@@ -212,7 +270,8 @@ const executionPlanSchema = z
       return { ...data, noChangeReason: undefined, cannotVerifyReason: undefined, answerOnlyReason: undefined };
     }
     return data;
-  });
+  })
+);
 
 function stripJsonFences(raw: string): string {
   return raw
@@ -512,8 +571,8 @@ JSON shape:
       "title": "string",
       "description": "<what this step does to which code + the key decision/edit, concrete, not a restatement of the title>",
       "filesLikely": ["string"],
-      "subagentEligible": true | false,
-      "subagentType": "worker" | "explore"
+      "subagentEligible": true | false (optional — omit the key entirely when the step is not subagent-eligible),
+      "subagentType": "worker" | "explore" (optional — omit the key entirely when subagentEligible is not set; never send null)
     }
   ],
   "riskHints": ["string"],

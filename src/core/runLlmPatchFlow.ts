@@ -5143,7 +5143,15 @@ const initializeTodosFromPlan = (): void => {
     // agent_loop doesn't go through plannerStep narrowing, so we use top-N
     // developerContextFiles ranked quickly by rankRelevantFiles for the plan.
     // This is COARSER than plan_full_patch's narrowed plan but provides
-    // enough step structure for todo display and the scope guard.
+    // enough step structure for scopeGuard / evaluatePlanAlignment / the
+    // orchestrator / finalRunReport.
+    //
+    // NOT todo display, by default — corrected here after the two comments in this
+    // block disagreed about it (item 409). initializeTodosFromPlan() is called from
+    // exactly one site, inside the _planOrchestrationEnabled branch, and
+    // isPlanOrchestrationEnabled returns false unless ZONE_PLAN_ORCHESTRATION=1. So
+    // the pre-planner seeds the sidebar ONLY under that opt-in flag; the default flow
+    // leaves it to the in-loop TodoWrite tool, exactly as the comment further down says.
     let agentLoopPlanFiles: string[] = [];
     try {
       const ranker = await rankRelevantFiles({
@@ -5183,9 +5191,38 @@ const initializeTodosFromPlan = (): void => {
         // Sidebar is seeded by the in-loop TodoWrite tool now; pre-planner only
         // feeds scopeGuard / evaluatePlanAlignment / orchestrator / finalRunReport.
       } catch (err) {
-        debugLog(
-          `[zone-plan] skipped (agent_loop): ${err instanceof Error ? err.message : String(err)}`
-        );
+        const detail = err instanceof Error ? err.message : String(err);
+        debugLog(`[zone-plan] skipped (agent_loop): ${detail}`);
+        // item 409: this failure used to be completely invisible. The line above is
+        // debugLog — `if (VERBOSE) console.log(...)`, gated on ZONE_VERBOSE_LOGS=1 — so
+        // without that env var a user saw nothing at all, not even in a log file, while
+        // the run silently lost two real things. Neither is the iteration budget (this
+        // file's own comment further down records that figure as nominal for a
+        // tier-classified loop): checkWriteScope has no filesLikely to narrow against
+        // and therefore fails OPEN for the whole run (item 243), and
+        // evaluatePlanAlignment is skipped entirely, so its user-facing out-of-plan and
+        // mass-scope warnings never get the chance to fire.
+        //
+        // `log`, not `debugLog`, for the same reason [zone-plan-salvaged] uses it: a
+        // marker the stdout sink never sees is not a record of anything.
+        log("[zone-plan-generation-failed]", JSON.stringify({
+          runId: typeof input.runId === "string" ? input.runId.trim() || null : null,
+          branch: "agent_loop",
+          error: detail,
+          lostScopeNarrowing: true,
+          lostPlanAlignment: true,
+        }));
+        // Proportionate, deliberately: a warning naming what was lost, not a hard
+        // failure. The run can still complete — it just does so unguarded, and the user
+        // is now told that rather than left to infer it.
+        emitStructuredProgress({
+          type: "narration",
+          title: "Plan generation failed — continuing without a plan.",
+          status: "warning",
+          detail:
+            "The write-scope guard will not be narrowed to specific files for this run, " +
+            "and the plan-alignment check is skipped. Reason: " + detail,
+        } as Omit<ZoneStructuredProgressEvent, "runId" | "ts">);
       }
     }
 
