@@ -1,5 +1,6 @@
 import OpenAI from "openai";
-import { withExponentialBackoff } from "./withExponentialBackoff.js";
+import { withExponentialBackoff, isOpenAIQuotaExhausted } from "./withExponentialBackoff.js";
+import { ProviderRequestError } from "./factory.js";
 import type {
   ChatCompletion,
   ChatCompletionChunk,
@@ -17,6 +18,31 @@ import {
 } from "./requestTimeouts.js";
 import { getRequestContext } from "./openaiContext.js";
 import { log } from "../utils/logger.js";
+
+/**
+ * item 411 — mirrors anthropicAdapter.ts's mapAnthropicBadRequest exactly: turn a recognized
+ * provider error into a ProviderRequestError with a clean userMessage, and rethrow everything
+ * else unchanged. `isOpenAIQuotaExhausted` is the single source of truth for the detection —
+ * shared with classifyError's retry decision — so the "is this quota exhaustion" question is
+ * answered in exactly one place, not duplicated between the retry layer and this one.
+ *
+ * One message covers all four documented causes (credit_balance_exhausted plus three spend/usage
+ * limit variants) rather than branching per `code`: `type: "insufficient_quota"` is the stable,
+ * documented umbrella for all of them, and code values are stated to expand over time.
+ */
+function mapOpenAIQuotaExhausted(err: unknown): never {
+  if (isOpenAIQuotaExhausted(err)) {
+    throw new ProviderRequestError(
+      429,
+      "credit",
+      "API credit exhausted — your OpenAI account is out of credit or has hit a spend or usage " +
+        "limit. Check your balance at platform.openai.com (Settings → Billing), then retry. " +
+        "You can also switch model/provider with /model.",
+      err
+    );
+  }
+  throw err;
+}
 
 export class OpenAIAdapter implements LLMClient {
   readonly provider: LLMProvider;
@@ -58,7 +84,7 @@ export class OpenAIAdapter implements LLMClient {
             timeout: deriveRequestTimeoutMs(body.max_output_tokens ?? undefined),
           }),
         { provider: this.provider, model: params.model, emit: options.onRetryEvent }
-      );
+      ).catch(mapOpenAIQuotaExhausted);
       return responsesConvertResponse(resp);
     }
     const resolvedEffort = resolveEffortForModel(params.model, options.effort, options.capabilities);
@@ -102,7 +128,7 @@ export class OpenAIAdapter implements LLMClient {
         });
       },
       { provider: this.provider, model: params.model, emit: options.onRetryEvent }
-    );
+    ).catch(mapOpenAIQuotaExhausted);
   }
 
   async createChatCompletionStream(
@@ -129,7 +155,7 @@ export class OpenAIAdapter implements LLMClient {
     return withExponentialBackoff(
       () => this.sdk.chat.completions.create(resolvedParams, { signal: options.signal }),
       { provider: this.provider, model: params.model, emit: options.onRetryEvent }
-    ) as Promise<AsyncIterable<ChatCompletionChunk>>;
+    ).catch(mapOpenAIQuotaExhausted) as Promise<AsyncIterable<ChatCompletionChunk>>;
   }
 
   async createEmbedding(

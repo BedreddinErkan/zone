@@ -14,7 +14,7 @@ import {
 
 export interface RetryClassification {
   retryable: boolean;
-  retryClass: "5xx" | "429" | "network" | "non_retryable";
+  retryClass: "5xx" | "429" | "network" | "non_retryable" | "quota_exceeded";
   retryAfterMs?: number;
 }
 
@@ -59,12 +59,53 @@ function extractRetryAfterMs(err: { headers?: { get?: (name: string) => string |
   return undefined;
 }
 
+// item 411: OpenAI returns HTTP 429 for two operationally opposite conditions — transient
+// rate_limit_exceeded, where backoff is exactly right, and billing/quota exhaustion, which no
+// amount of waiting clears. Confirmed against OpenAI's own current docs (fetched live,
+// developers.openai.com/api/docs/guides/error-codes), not assumed: `type: "insufficient_quota"`
+// is the documented umbrella for every billing-related 429, and `code` names the specific cause
+// underneath it (`credit_balance_exhausted`, `organization_spend_limit_exceeded`,
+// `project_spend_limit_exceeded`, `organization_usage_limit_exceeded`). Ordinary rate-limiting
+// shows no `code` in the docs' own table.
+//
+// `code`/`type` are UNTYPED strings on the SDK's own APIError (`code: string | null | undefined`,
+// `type: string | undefined` — node_modules/openai/src/core/error.ts) — the SDK gives no
+// compile-time guarantee of these specific values; this rests on documentation, not a type
+// contract, and could not be confirmed against a live call in the session this was written in
+// (both provider balances were exhausted). `type` is checked first as the stable, documented
+// umbrella — Anthropic's own docs separately warn that error `type`/`code` value sets may expand
+// over time, and the same caution applies here — with the known `code` values as a secondary net
+// for the shape where `type` might be absent.
+//
+// Deliberately asymmetric: an unmatched 429 (no type, or a type other than "insufficient_quota")
+// is left exactly as it behaves today — retried as "429". A missed match wastes retries (today's
+// status quo); a false match would abandon a genuinely transient rate limit with no retry at all,
+// which is worse. Scoped to OpenAI only — Anthropic's billing exhaustion is a different status
+// (402, `billing_error`) entirely, not a 429, so Anthropic's RateLimitError branch below is
+// untouched by this check.
+const OPENAI_QUOTA_CODES = new Set([
+  "insufficient_quota",
+  "credit_balance_exhausted",
+  "organization_spend_limit_exceeded",
+  "project_spend_limit_exceeded",
+  "organization_usage_limit_exceeded",
+]);
+
+export function isOpenAIQuotaExhausted(err: unknown): boolean {
+  if (!(err instanceof OpenAIRateLimitError)) return false;
+  if (err.type === "insufficient_quota") return true;
+  return typeof err.code === "string" && OPENAI_QUOTA_CODES.has(err.code);
+}
+
 export function classifyError(err: unknown): RetryClassification {
   if (err instanceof ProviderRequestError) {
     return { retryable: false, retryClass: "non_retryable" };
   }
   if (err instanceof AnthropicUserAbortError || err instanceof OpenAIUserAbortError) {
     return { retryable: false, retryClass: "non_retryable" };
+  }
+  if (isOpenAIQuotaExhausted(err)) {
+    return { retryable: false, retryClass: "quota_exceeded" };
   }
   if (err instanceof AnthropicRateLimitError || err instanceof OpenAIRateLimitError) {
     const retryAfterMs = extractRetryAfterMs(err as { headers?: { get?: (name: string) => string | null } });

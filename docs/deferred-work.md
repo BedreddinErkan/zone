@@ -28562,10 +28562,9 @@ capture-propose-verify flow using exactly the tools the filter names, so what is
 confirmation with the filter in place, not a question about whether three tools suffice. The
 confirming run is the one measurement this entry defers.
 
-## 411. A 429 from an exhausted quota is retried as if it were rate limiting
+## 411. Closed — a 429 from an exhausted quota is retried as if it were rate limiting
 
-**Bucket: Actionable now.** The distinguishing field is already on the error object and already
-reaches `classifyError`; the fix is to read it before returning the retryable classification.
+**Bucket: Actionable now → Closed.** Fixed this commit.
 
 **Observed, not reasoned about.** A live run against OpenAI on an out-of-balance account emitted
 `[zone-llm-retry-attempt] attempt=1/4 class=429 delayMs=5036`, then `attempt=2/4 class=429
@@ -28596,34 +28595,146 @@ first pass reading this exact log did conclude "transient rate limiting, retry l
 until the account state was checked by hand. A run that burns its retry budget on a condition no
 retry can clear is a distinct defect from the mis-labelling, and both live here.
 
-**Not established, and named rather than assumed.** Whether Anthropic exhibits the same conflation
-was not checked. Its balance-exhausted response is reported elsewhere in this series as a 400
-`invalid_request_error` carrying "credit balance is too low", which would take the `non_retryable`
-path rather than this one — but that was not verified against `classifyError` in this pass, and the
-claim here is scoped to OpenAI.
+**Established, replacing the earlier caveat: Anthropic's own billing exhaustion is a different
+status entirely, and already resolved correctly before this fix.** Checked against two independent,
+converging sources rather than left unverified — Anthropic's own SDK
+(`@anthropic-ai/sdk/src/resources/shared.ts`) declares a fully **typed** `ErrorType` enum, unlike
+OpenAI's untyped strings, including a `'billing_error'` member; and Anthropic's official docs
+(`platform.claude.com/docs/en/api/errors`, fetched live), quoted verbatim: *"402 - `billing_error`:
+There's an issue with your billing or payment information."* Traced against `classifyError` for a
+bare `APIError` at status 402: it matches none of `AnthropicRateLimitError` (429-typed),
+`AnthropicInternalServerError`, or `AnthropicConnectionError`, and the catch-all `status >= 500`
+check misses 402 too, so it already fell through to `{retryable: false, retryClass:
+"non_retryable"}` before any line here changed. **No `classifyError` change was needed for
+Anthropic.** The earlier report of a 400 `invalid_request_error` carrying "credit balance is too
+low" came through a LiteLLM gateway, not direct Anthropic — the gateway evidently normalizes the
+real 402 into a generic 400 shape, which is now a confirmed divergence rather than a suspected one.
+
+**What this surfaced beyond OpenAI, filed separately rather than fixed here:** Anthropic has its
+own version of this same conflation — a monthly spend-cap 429 shares `type: "rate_limit_error"`
+with ordinary rate limiting, per Anthropic's own docs, with no clean field to distinguish them (item
+412, filed alongside this closure). And the existing `mapAnthropicBadRequest` function, built
+against the gateway-observed 400 shape, does not recognize the real 402 at all, so its friendly
+credit-exhausted message never fires for direct Anthropic access (item 413, filed the same way).
+
+**The fix.** `classifyError` (`src/llm/withExponentialBackoff.ts`) gains
+`isOpenAIQuotaExhausted(err)`: `err instanceof OpenAIRateLimitError` and either `err.type ===
+"insufficient_quota"` or `err.code` is one of four documented values
+(`credit_balance_exhausted`, `organization_spend_limit_exceeded`, `project_spend_limit_exceeded`,
+`organization_usage_limit_exceeded`). A match returns `{retryable: false, retryClass:
+"quota_exceeded"}` — a new `retryClass` literal, additive to the existing union — instead of the
+`"429"` path, so `withExponentialBackoff` throws immediately with zero retries rather than burning
+the four-attempt budget item 411 measured. **`code`/`type` are untyped strings on the SDK's own
+`APIError`** (`code: string | null | undefined`, `type: string | undefined` —
+`node_modules/openai/src/core/error.ts`) — the four `code` values and the `insufficient_quota`
+`type` this fix matches against are documented, not SDK-typed, fetched live from OpenAI's current
+official docs across three independent passes, and
+**could not be confirmed against a live call in the session this was written in**: both the OpenAI
+and Anthropic keys in the store were out of balance. `type` is checked first as the stable,
+documented umbrella for all four causes — OpenAI's own docs state *"the broader `error.type` can
+still be `insufficient_quota`"* for any billing-related 429 — since a `code` enumeration is more
+likely to grow than the umbrella `type` is to change. **Deliberately asymmetric:** an unmatched 429
+is left exactly as it behaves today, retried as `"429"` — a missed match wastes retries (today's
+status quo), while a false match would abandon a genuinely transient rate limit with no retry at
+all, which is worse. Scoped to OpenAI only, per the Anthropic finding above.
+
+`openaiAdapter.ts` gains a `mapOpenAIQuotaExhausted` helper mirroring `mapAnthropicBadRequest`'s
+exact shape — the same `isOpenAIQuotaExhausted` predicate reused rather than duplicated, so the
+retry decision and the message-wrapping decision cannot drift apart — wrapping all three of its
+`withExponentialBackoff` call sites and throwing `ProviderRequestError(429, "credit", message,
+err)` on a match. **Confirmed by reading: `openaiAdapter.ts` had no catch block around any of its
+three `withExponentialBackoff` calls before this fix** — every OpenAI error propagated raw, with no
+OpenAI-side equivalent of `mapAnthropicBadRequest` existing at all. `ProviderRequestError` already
+renders with dedicated, prominent handling in both `dispatch.ts` (clean stderr/JSON with
+`error_kind` + `userMessage`, exit 1) and `cli/tui/index.tsx` (a titled "Provider error" red
+ErrorLine) — reused rather than inventing a new class. One asymmetry in OpenAI's favor: unlike
+Anthropic, `openaiAdapter.ts` has no separate streaming-callback code path, so wrapping these three
+call sites covers all of OpenAI's traffic with no reachability gap.
+
+## 412. Anthropic's own rate-limit 429 conflates a monthly spend cap with ordinary rate limiting, and no reliable field distinguishes them
+
+**Bucket: Blocked on data.** What is missing is a captured live spend-cap 429 response, not a
+design choice — closing this needs the observation, not a decision about how to act on it.
+
+Found while checking item 411's own Anthropic question, and separate from it: Anthropic's official
+docs (`platform.claude.com/docs/en/api/errors`, fetched live) state, quoted verbatim, that a `429 -
+rate_limit_error` fires when *"your organization has hit a rate limit, reached its usage tier's
+monthly spend cap, or reached a spend limit on the Claude Code workspace,"* and that *"a tier
+spend-cap 429 has no `retry-after` header and keeps failing until access resumes."* Both causes
+share the identical `type: "rate_limit_error"` — Anthropic's SDK types this field with a real enum
+(`ErrorType`, `@anthropic-ai/sdk/src/resources/shared.ts`), but the enum has one member for both
+cases, so the type-level discriminator item 411 used for OpenAI's `insufficient_quota` has no
+Anthropic equivalent here.
+
+**Why this is not fixed alongside item 411, even though the shape is the same.** OpenAI's fix keys
+on a positive, documented field value (`type === "insufficient_quota"`). The only distinguishing
+signal Anthropic's own docs name for the spend-cap case is an *absence* — no `retry-after` header —
+which is a weaker, unconfirmed-as-reliable basis: an ordinary transient rate limit is not
+documented as *always* carrying that header either, so building a check on its absence risks the
+exact failure item 411's own design deliberately avoided — a false positive that abandons a
+genuinely transient condition with no retry at all. Acting on it needs a captured real spend-cap
+429 to confirm the header is reliably absent there and reliably present on ordinary rate limits,
+which this pass did not have (no funded key in either provider).
+
+**Scope, stated precisely.** This is the *tier spend-cap* and *Claude Code workspace spend-limit*
+cases specifically. Item 411's own fix and this entry do not touch Anthropic's `classifyError`
+branch at all — a plain Anthropic 429 still classifies as retryable `"429"` today, unconditionally,
+exactly as before.
+
+## 413. `mapAnthropicBadRequest` recognizes a gateway-shaped credit error at status 400, not the real Anthropic status (402), and is unreachable from the main agent-loop call anyway
+
+**Bucket: Actionable now** for the status half — the fix is named and small. The streaming-path
+half is a larger, separate lift, named here but not scoped.
+
+Found while checking item 411's Anthropic question. `mapAnthropicBadRequest`
+(`src/llm/anthropicAdapter.ts`) guards on `err instanceof BadRequestError && err.status === 400`
+before attempting its credit/retention/request-shape classification. Anthropic's official docs
+(fetched live, quoted in item 411's closing note) place `billing_error` at **HTTP 402**, not 400 —
+`BadRequestError extends APIError<400, ...>` in the SDK, so a real 402 response constructs a plain
+base `APIError` instead, which fails this function's `instanceof` guard entirely and falls straight
+to its own `throw err;` escape hatch, unmapped. The 400 shape this function recognizes matches what
+was observed earlier in this series through a **LiteLLM gateway** — item 411's own investigation
+confirms the gateway normalizes the real 402 into a generic 400 `invalid_request_error` — so this
+function's friendly "top up your balance" message fires for the gateway-mediated presentation and
+not for genuine direct-Anthropic credit exhaustion, which is the more fundamental case.
+
+**A second, independent gap in the same function, found by tracing its one call site.**
+`mapAnthropicBadRequest` is invoked from exactly one place: the `catch` block at the end of
+`AnthropicAdapter.createChatCompletion`'s **non-streaming** branch (`options.onToolArgumentsDelta ||
+options.onTextDelta` both falsy). Reading every `createChatCompletion` call site in
+`agentLoop.ts` (five total): the main per-iteration loop call and one continuation/coaching call
+both set **both** callbacks, forcing the **streaming** branch (`_streamWithToolCallbacks`), which
+has no catch block and no equivalent mapping at all. Only three auxiliary calls — the final wrapup,
+the chat-mode assessment, and the final assessment — omit both callbacks and reach the mapped path.
+So even a status-402-aware fix would still miss the highest-volume call site; the message would
+only ever fire from the three lower-volume, one-shot calls.
+
+**Not scoped here**, per item 411's own boundary — item 411 fixed OpenAI's conflation and confirmed
+Anthropic's retry classification is already correct; this entry is what it found beyond that,
+recorded rather than folded in.
 
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 411 to find out which ones still need something. No index of
+reader the trouble of reading all 413 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (180): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42,
+**Closed** (181): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42,
 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113,
 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167,
 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228,
 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260,
 262, 264, 265, 266, 267, 268, 269, 270, 271, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285,
 286, 288, 289, 290, 301, 302, 304, 308, 309, 310, 327, 336, 337, 343, 344, 345, 348, 351,
-320, 352, 353, 364, 370, 371, 372, 377, 378, 379, 384, 385, 388, 390, 391, 394, 406, 328, 330, 408, 410
+320, 352, 353, 364, 370, 371, 372, 377, 378, 379, 384, 385, 388, 390, 391, 394, 406, 328, 330, 408, 410, 411
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (24): 287, 291, 292, 293, 296, 299, 313, 329, 334, 347, 358, 359, 365, 368, 373, 375, 383, 389, 395,
-401, 403, 404, 409, 411
+401, 403, 404, 409, 413
 
 Six, down from seven, and the movement is the ledger's own signal about whether anything is specified
 and waiting, in both directions. The diagnosis pass into `find_references` left it at 7 (287 plus six
@@ -28669,9 +28780,13 @@ schema, its fix named and small — reaching twenty-three: 287, 291, 292, 293, 2
 while verifying the MCP tool filter against a live lab — a 429 from an exhausted quota retried as if
 it were rate limiting, its distinguishing field already on the error object — reaching twenty-four:
 287, 291, 292, 293, 296, 299, 313, 329, 334, 347, 358, 359, 365, 368, 373, 375, 383, 389, 395, 401,
-403, 404, 409, 411.
+403, 404, 409, 411. The pass that fixes 411 closes it and files 413 in its place — the existing
+Anthropic credit-error mapping checking a gateway-normalized status rather than the real one — while
+412, found investigating the same question, goes to Blocked on data instead: twenty-four, unchanged
+in count, membership moved: 287, 291, 292, 293, 296, 299, 313, 329, 334, 347, 358, 359, 365, 368,
+373, 375, 383, 389, 395, 401, 403, 404, 409, 413.
 
-**Blocked on data** — closing requires an observation that doesn't exist yet (18): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250, 263, 318, 376, 405
+**Blocked on data** — closing requires an observation that doesn't exist yet (19): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250, 263, 318, 376, 405, 412
 
 **Neither — a structural fact recorded, with no fix proposed** (189): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
 74, 76, 77, 78, 79, 80, 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109,

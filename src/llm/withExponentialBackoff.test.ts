@@ -87,6 +87,70 @@ describe("classifyError", () => {
     expect(r.retryable).toBe(true);
     expect(r.retryClass).toBe("429");
   });
+
+  // ── item 411 — a 429 from an exhausted OpenAI quota is not the same as rate limiting ──────────
+  //
+  // OpenAI returns 429 for both `rate_limit_exceeded` (transient) and quota/billing exhaustion
+  // (permanent within the billing period). Confirmed against OpenAI's own current docs, fetched
+  // live: `type: "insufficient_quota"` is the documented umbrella for every billing-related 429,
+  // and `code` names the specific cause underneath it. Both fields are UNTYPED strings on the SDK's
+  // own APIError (`code: string | null | undefined`, `type: string | undefined` —
+  // node_modules/openai/src/core/error.ts) — the SDK gives no compile-time guarantee of the
+  // specific values, so these fixtures build the exact JSON body shape the SDK's own
+  // `APIError.generate` extracts `code`/`type` from, rather than asserting against a typed enum
+  // that does not exist.
+  it("OpenAI RateLimitError with type=insufficient_quota → non-retryable 'quota_exceeded'", () => {
+    const err = OpenAIAPIError.generate(
+      429,
+      { error: { type: "insufficient_quota", code: "insufficient_quota", message: "You exceeded your current quota" } },
+      "quota exceeded",
+      new Headers()
+    );
+    const r = classifyError(err);
+    expect(r.retryable).toBe(false);
+    expect(r.retryClass).toBe("quota_exceeded");
+  });
+
+  it("OpenAI RateLimitError with a documented spend-limit code (type still insufficient_quota) → non-retryable 'quota_exceeded'", () => {
+    const err = OpenAIAPIError.generate(
+      429,
+      { error: { type: "insufficient_quota", code: "organization_spend_limit_exceeded", message: "spend limit reached" } },
+      "spend limit reached",
+      new Headers()
+    );
+    const r = classifyError(err);
+    expect(r.retryable).toBe(false);
+    expect(r.retryClass).toBe("quota_exceeded");
+  });
+
+  it("OpenAI RateLimitError with NO type/code (ordinary rate limiting) → still retryable '429'", () => {
+    // Regression guard: the new check must not over-match. OpenAI's own docs show no `code` at
+    // all for "Rate limit reached for requests" — this fixture is that shape exactly.
+    const err = OpenAIAPIError.generate(
+      429,
+      { error: { message: "Rate limit reached for requests" } },
+      "rate limited",
+      new Headers()
+    );
+    const r = classifyError(err);
+    expect(r.retryable).toBe(true);
+    expect(r.retryClass).toBe("429");
+  });
+
+  it("Anthropic RateLimitError is unaffected by the OpenAI-only quota check", () => {
+    // Anthropic's billing exhaustion is a DIFFERENT status (402, billing_error) entirely — not a
+    // 429 at all (platform.claude.com/docs/en/api/errors, fetched live). This check is scoped to
+    // OpenAI deliberately; an Anthropic 429 must never be reclassified by it.
+    const err = AnthropicAPIError.generate(
+      429,
+      { error: { type: "rate_limit_error", message: "rate limited" } },
+      "rate limited",
+      new Headers()
+    );
+    const r = classifyError(err);
+    expect(r.retryable).toBe(true);
+    expect(r.retryClass).toBe("429");
+  });
 });
 
 // -- withExponentialBackoff --
@@ -128,6 +192,26 @@ describe("withExponentialBackoff", () => {
     let calls = 0;
     const fn = () => { calls++; return Promise.reject(authErr); };
     await expect(withExponentialBackoff(fn, {})).rejects.toBe(authErr);
+    expect(calls).toBe(1);
+  });
+
+  it("item 411: a quota-exhausted OpenAI 429 propagates immediately with ZERO retries, not the 4-attempt 429 budget", async () => {
+    vi.useFakeTimers();
+    const quotaErr = OpenAIAPIError.generate(
+      429,
+      { error: { type: "insufficient_quota", code: "insufficient_quota", message: "no credit" } },
+      "no credit",
+      new Headers()
+    );
+    let calls = 0;
+    const fn = () => { calls++; return Promise.reject(quotaErr); };
+    const p = withExponentialBackoff(fn, { provider: "openai", model: "gpt-5.5" });
+    const assertion = expect(p).rejects.toBe(quotaErr);
+    await vi.runAllTimersAsync();
+    await assertion;
+    // Before the fix this classified as retryable "429" and burned rateLimit429.maxAttempts (4)
+    // attempts at 5s/15s/45s delays each — exactly the six-attempt, 4-16s-each pattern item 411
+    // measured live. One call, no wait, is the fix.
     expect(calls).toBe(1);
   });
 
