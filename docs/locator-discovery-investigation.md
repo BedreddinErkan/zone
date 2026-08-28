@@ -32,6 +32,11 @@ Part 3 is the whole point. Without it the tool still guesses, only better inform
 > tools. It also surfaces the largest open obstacle found so far: locator discovery classifies as a
 > read-only archetype, and no read-only archetype can reach MCP tools at any tier. The Recommendation
 > section itself is not edited here — this only records the obstacle.
+>
+> **Amended a fourth time, same day.** **[Q11](#q11--the-full-capability-unprompted-on-a-live-external-page)**
+> records the first run where capture, propose, and verify all fired in one turn, unprompted, live
+> against an external page — after `7e9baeb7` closed unknown 14. The recommendation's shape is
+> unchanged; this is confirming evidence, not a new finding about it.
 
 ---
 
@@ -860,9 +865,9 @@ consumer, so it is not an alternative route. **[static reading only — the env-
 | # | Unknown | Cheapest instrument |
 |---|---|---|
 | 11 | Do MCP tools actually appear at complex tier in a real run, as the matrix predicts? The matrix is unit-level; no live run has hit that window. | One live run on a task phrased to classify `debug` or `complex_multi_file`, with the MCP config in place; read `toolsAvailable`. **Partial answer from 10.3: yes, live, but only jointly with a write-shaped archetype — `question`/`complex` was also run and still showed no MCP. Not fully closed: the five runs measured don't cover every archetype at complex tier.** |
-| 12 | Does the 24-tool `@playwright/mcp` surface fit the 4,000-char house budget once offered (Q4 says nothing caps MCP results, and the tool *definitions* also enter the prompt)? | Sum `JSON.stringify` over the 24 registered definitions after connect; compare against the 4,372/4,400 description budget in Q2. **First data point from 10.5: `tool_descriptions` measured 33,128 chars in one 8-iteration run — roughly 8x this budget. n=1 run, not yet a general rate; not closed.** |
+| 12 | Does the 24-tool `@playwright/mcp` surface fit the 4,000-char house budget once offered (Q4 says nothing caps MCP results, and the tool *definitions* also enter the prompt)? | Sum `JSON.stringify` over the 24 registered definitions after connect; compare against the 4,372/4,400 description budget in Q2. **First data point from 10.5: `tool_descriptions` measured 33,128 chars in one 8-iteration run — roughly 8x this budget. n=1 run, not yet a general rate; not closed.** **Second data point from 11.4: 67.4% / 21,907 chars in a separate run, same 24-tool load — agrees with 10.5 on shape, differs in absolute chars (consistent with different prompts/iteration counts, not a fixed figure). Also the first direct measurement of the minimal set: 3 tools used (`browser_navigate`, `browser_find`, `browser_run_code_unsafe`) out of 24 loaded.** |
 | 13 | Is `--force-tier`'s behaviour a deliberate limits-only design or an incomplete wiring? | Read the commit that introduced `forceTierOverride` in `tierLimits.ts` for a stated rationale, as `9805d055`'s body settled the Chromium question. |
-| 14 | **(Q10)** Locator discovery classifies as a read-only archetype, and 10.3 shows no read-only archetype reaches MCP tools at any tier — only a write-shaped archetype does, confirmed live across five runs. What closes the gap: forcing a non-read-only archetype for this task, a narrow `mcp.call` grant on the read-only pipeline, or something else not yet evaluated? | Not reachable by instrument — this is a design choice, the same way unknown 6 is: a judgement about which layer should bend, not a fact about the code. |
+| 14 | ~~**(Q10)** Locator discovery classifies as a read-only archetype, and 10.3 shows no read-only archetype reaches MCP tools at any tier — only a write-shaped archetype does, confirmed live across five runs. What closes the gap: forcing a non-read-only archetype for this task, a narrow `mcp.call` grant on the read-only pipeline, or something else not yet evaluated?~~ **CLOSED — commit `7e9baeb7` (item 408) escapes MCP tool names past the tier/capability filters in every pipeline, not only the one accidental combination.** | ~~Not reachable by instrument — this is a design choice, the same way unknown 6 is: a judgement about which layer should bend, not a fact about the code.~~ **Closed by the fix, not by measurement — see item 408, docs/deferred-work.md.** |
 
 ---
 
@@ -981,3 +986,69 @@ was invalid: the model reached for `browser_run_code_unsafe`, which executes Pla
 inside the browser session. That would have measured Playwright against itself, not browser
 primitives against Playwright, so it answers nothing about 10.6's question and is recorded here only
 so it is not silently retried the same way later.
+
+---
+
+## Q11 — The full capability, unprompted, on a live external page
+
+*Measured live in `~/zone-locator-lab` against the real `@playwright/mcp` server, on commit
+`7e9baeb7` — the commit that made MCP tools reachable in every pipeline (item 408). This is the
+first run to exercise capture, propose, and verify in one turn without being asked to step through
+them.*
+
+### 11.1 The measured run
+
+**Measured by the user.** `.zone/memory.md` carried a `<!-- ZONE_INIT_BEGIN -->` block with four
+locator conventions (prefer `getByRole` with an accessible name; scope rather than switch to CSS;
+`data-testid` only when no accessible name exists; never `nth-child`, absolute XPath, or class
+selectors) plus an instruction to verify against the live page and report the match count.
+
+Task: *"I need a locator for the 'Get started' button on https://playwright.dev/. Propose one
+following this project's conventions, verify it against the live page, and tell me the match
+count."*
+
+Result, verbatim:
+
+```
+page.getByRole('link', { name: 'Get started' })
+Verified on https://playwright.dev/: match count is 1.
+Note: although you called it a button, the live page exposes "Get started" as
+a link, so this follows the project convention to prefer getByRole with the
+accessible name.
+```
+
+### 11.2 What this establishes
+
+**The project-memory channel is live, not just read.** `[zone-memory] injected project memory (581
+chars)` confirms the `ZONE_INIT` block reached the prompt. Q5 concluded the propose step is
+prompt-level and the channel exists; this is the first measurement of it actually firing end to end
+— closing the gap between "the mechanism exists" and "the mechanism ran."
+
+**The three-part capability ran in one turn, unprompted.** The model chose `browser_navigate`, then
+`browser_find`, then `browser_run_code_unsafe` to count matches, without being told to step through
+capture/propose/verify separately.
+
+**The model corrected a false premise in the request.** The user said "button"; the live page
+exposes a link. That correction — reading the live page rather than trusting what the user assumed
+— is the capability's actual value, distinct from writing a locator for an element description
+alone.
+
+### 11.3 Limits — stated plainly
+
+n=1 throughout: one page, one element, one framework's conventions (Playwright-shaped, since the
+seeded `.zone/memory.md` conventions were written for it), one model. This does not test Q7's
+multi-framework constraint — a Selenium-conventions run is the obvious next measurement and was not
+done here. Verification went through `browser_run_code_unsafe` again, i.e. Playwright's own API —
+the same limitation 10.7 already recorded, not a new one. The archetype/tier this run classified
+into was not logged in what was measured, so this does not independently confirm which matrix cell
+of 10.3 was exercised — the closure of unknown 14 rests on the commit, not on this run's archetype.
+
+### 11.4 Cost — a second measurement of the same shape as 10.5
+
+**Measured by the user.** `tool_descriptions` was 67.4% of total tokens — 21,907 chars per
+iteration, 24 MCP tools loaded. The run used three: `browser_navigate`, `browser_find`,
+`browser_run_code_unsafe`. Two measurements of the same shape now exist — 65.1% / 33,128 chars
+(10.5) and 67.4% / 21,907 chars (here) — agreeing on shape (majority of tokens, same 24-tool load)
+while differing in absolute chars, consistent with different prompts and iteration counts rather
+than a fixed per-run figure. This run also measures the actual minimal set directly, rather than
+naming one from inspection: three tools used out of 24 loaded.

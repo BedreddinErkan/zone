@@ -28394,11 +28394,88 @@ the base input and does inherit it.
 breakpoint #1 still holds across iterations; the marker `[zone-mcp-tools-granted]` carries the runId
 to join against the usage log's own cache fields for anyone measuring the prefix cost directly.
 
+## 409. A plan-generation prompt template contradicts its own prose, its own schema, and fails silently when a model follows the template
+
+**Bucket: Actionable now.** The fix is small and independent of which `planDepth` is active: give
+the JSON-shape template the same `(optional)` treatment every sibling optional field in the same
+block already carries, so a model reading the template literally has a correct way to say "not
+applicable" instead of reaching for `null`.
+
+**The defect, located precisely.** `src/llm/executionPlan.ts:136` declares the field
+`subagentType: z.enum(["explore", "worker"]).optional()` — accepting `undefined`, rejecting `null`,
+confirmed directly rather than assumed:
+
+```
+node -e 'const {z}=require("zod"); const s=z.enum(["explore","worker"]).optional();
+console.log(s.safeParse(undefined).success, s.safeParse(null).success)'
+→ true false
+```
+
+The prompt's own prose (the "Subagent eligibility" rules and its three worked examples) correctly
+teaches omission — the trivial-step example shows no `subagentEligible`/`subagentType` keys at all.
+But the same prompt's JSON-shape template, shown lower in the same call, lists both keys
+unconditionally:
+
+```
+"subagentEligible": true | false,
+"subagentType": "worker" | "explore"
+```
+
+with no `(optional)` marker — unlike every other optional field in the identical block
+(`"scopeNotes": "string (optional)"`, `"noChangeReason": "string (optional — ...)"`). A model
+reading the template literally, having already decided "not applicable" for a trivial step, has no
+correct way to express that other than fabricating a value or writing `null`. Reproduced live: a
+run returned `null` for `subagentType` on four steps at once, all failing with "Expected 'explore' |
+'worker', received null." `response_format` for this call is `{type:"json_object"}`, not a
+provider-enforced JSON-schema mode, so nothing upstream forces the keys present — this is the
+prompt's template contradicting its own prose and its own schema, not a provider constraint.
+
+**The failure is silent, and that is the more consequential half.** The catch site is one line —
+`debugLog(\`[zone-plan] skipped (agent_loop): ${err.message}\`)` — no progress event, no narration,
+no toast. `debugLog` (`src/utils/logger.ts`) is `if (VERBOSE) console.log(...)`, and
+`VERBOSE = process.env.ZONE_VERBOSE_LOGS === "1"`. Without that env var a user sees nothing at all —
+not the console, not a log file.
+
+**What is actually lost is not the iteration budget.** A failed generation does collapse
+`iterBudgetPlanSteps` to the `?? 1` fallback, landing on `computeWorkerMaxIterations`'s own stated
+floor (`WORKER_ITER_FLOOR=6`) — but the same code's own adjacent comment states that for a
+tier-classified main loop this `maxIterations` value is "nominal, not effective," discarded by
+`agentLoop.ts`'s unconditional tier-budget overwrite unless the run is answer-only (which binds via
+a different field, `maxIterationsOverride`). The two consequences that are real, and are not logged
+anywhere else: `checkWriteScope` fails open — item 243's already-documented behavior, empty-or-absent
+`filesLikely` allows every write, and a failed generation leaves neither a plan-level nor a
+step-level set for this run to be constrained by; and `evaluatePlanAlignment`
+(`runLlmPatchFlow.ts`, gated on `executionPlan && applyPatches.length > 0`) is skipped entirely, so
+its `warning` field — pushed to `visibleWarnings` when it fires — never has the chance to fire. A run
+whose plan failed to generate gets no out-of-plan-files check and no mass-scope warning, silently.
+
+**The plausible-but-unstated part.** This generation is not the mechanism the interactive
+`PlanActionPrompt` modal reviews — it is a separate, second call to the same `generateExecutionPlan`
+function, embedded in `runLlmPatchFlow.ts`'s own agent_loop branch, that only fires when
+`input.preGeneratedPlan` is absent. Under the default `planDepth: "quick"`, the top-level flow
+threads an already-approved plan through and this second call just reuses it. Under
+`planDepth: "strict"` or legacy `"investigate"`, the top-level call to `runLlmPatchFlow` never
+supplies a plan at all — so this generation is not a fallback for an edge case there, it is the
+**only** plan generation that ever runs, on every call, with no interactive counterpart: that mode's
+own reviewed gate is the staged-diff modal, which reviews the resulting code diff, not a step plan.
+Its existence under that setting reads as a plausible, load-bearing choice — something has to seed
+the scope guard when the reviewed gate doesn't produce a step plan at all. Its silent-failure
+behavior does not read the same way: nothing states that losing the scope guard and the alignment
+warning on a schema-validation failure is an accepted cost.
+
+**A stale comment, recorded alongside rather than corrected here.** The block's own header comment
+says the plan "provides enough step structure for todo display and the scope guard." The comment
+immediately after the generation call itself says the opposite for one of those two: "Sidebar is
+seeded by the in-loop TodoWrite tool now; pre-planner only feeds scopeGuard / evaluatePlanAlignment /
+orchestrator / finalRunReport." The two disagree about whether todo display is still a consumer —
+read as the first comment surviving unedited past the point sidebar-seeding moved to the in-loop
+tool.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 408 to find out which ones still need something. No index of
+reader the trouble of reading all 409 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -28414,8 +28491,8 @@ first.
 320, 352, 353, 364, 370, 371, 372, 377, 378, 379, 384, 385, 388, 390, 391, 394, 406, 328, 330, 408
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
-first (22): 287, 291, 292, 293, 296, 299, 313, 329, 334, 347, 358, 359, 365, 368, 373, 375, 383, 389, 395,
-401, 403, 404
+first (23): 287, 291, 292, 293, 296, 299, 313, 329, 334, 347, 358, 359, 365, 368, 373, 375, 383, 389, 395,
+401, 403, 404, 409
 
 Six, down from seven, and the movement is the ledger's own signal about whether anything is specified
 and waiting, in both directions. The diagnosis pass into `find_references` left it at 7 (287 plus six
@@ -28454,7 +28531,10 @@ silence 405 records. Twenty to twenty-three: 287, 291, 292, 293, 296, 299, 313, 
 interception point that fixes it corrects every `recordLLMCall` site this entry named, without
 visiting each one — landing the bucket at twenty-two: 287, 291, 292, 293, 296, 299, 313, 329, 334,
 347, 358, 359, 365, 368, 373, 375, 383, 389, 395, 401, 403, 404. The same interception point
-separately closes item 330, which sat in Neither rather than this bucket.
+separately closes item 330, which sat in Neither rather than this bucket. A later pass investigating
+a plan-generation Zod failure files 409 — a prompt template contradicting its own prose and its own
+schema, its fix named and small — reaching twenty-three: 287, 291, 292, 293, 296, 299, 313, 329, 334,
+347, 358, 359, 365, 368, 373, 375, 383, 389, 395, 401, 403, 404, 409.
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (18): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250, 263, 318, 376, 405
 
