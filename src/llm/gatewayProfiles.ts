@@ -132,10 +132,18 @@ export function _setGatewayKeysPathForTest(p: string | null): void {
 /**
  * Read the key store synchronously and build the gateway profiles in it, or `[]` on any problem.
  *
- * Synchronous on purpose: its one caller is `cli/config.ts`'s `loadCliConfig`, which is sync and is
- * called before `applyDiskKeyFallbacks` has run. Making it async would either make `loadCliConfig`
- * async — it has many callers, several synchronous — or force the unrecognized-provider warning to
- * move out of it, and that warning is pinned byte-exact by `config.test.ts` (ledger item 385).
+ * Synchronous on purpose: its original caller is `cli/config.ts`'s `loadCliConfig`, which is sync
+ * and is called before `applyDiskKeyFallbacks` has run. Making it async would either make
+ * `loadCliConfig` async — it has many callers, several synchronous — or force the
+ * unrecognized-provider warning to move out of it, and that warning is pinned byte-exact by
+ * `config.test.ts` (ledger item 385). There are now four callers, not one: `config.ts`'s
+ * `resolveProviderProfile` and `applyProviderSelection`, plus the TUI's own two id-listing helpers.
+ *
+ * IT SEES ONLY `~/.zone/keys.json`, and that asymmetry is load-bearing to know about:
+ * `loadDiskKeys` additionally falls back to a legacy `<cwd>/.zone/keys.json` and MIGRATES it, so on
+ * the run where that migration happens this function has already returned `[]` for a store the
+ * async reader is about to find. `applyDiskKeyFallbacks` closes that window by completing a
+ * `pendingProfileId` from the store it reads — see ledger item 406.
  *
  * Two rules from CLAUDE.md's `~/.zone` test-isolation section apply here verbatim and are the reason
  * this reads the way it does: `homedir()` is resolved AT CALL TIME, because a module-level `const`

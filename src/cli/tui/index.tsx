@@ -10,8 +10,7 @@ import { App } from "./App.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
 import type { CliFlags } from "../config.js";
 import { readGatewayProfilesSync } from "../../llm/gatewayProfiles.js";
-import { providerOf } from "../../llm/providerProfile.js";
-import { loadCliConfig, validateCliConfig, applyDiskKeyFallbacks, type CliConfig } from "../config.js";
+import { loadCliConfig, validateCliConfig, applyDiskKeyFallbacks, applyProviderSelection, type CliConfig } from "../config.js";
 import { runOneShotInner, type TuiMode } from "../dispatch.js";
 import { ApiKeyError, ProviderRequestError, PlanRefusalError } from "../../llm/factory.js";
 import { resolveInitialTuiMode } from "./initialMode.js";
@@ -941,7 +940,11 @@ export async function runTui(
     diskModelSettings = await loadDiskModel(process.cwd());
     if (diskModelSettings) {
       config.model = diskModelSettings.model;
-      config.provider = diskModelSettings.provider as typeof config.provider;
+      // Resolved, never cast. A gateway id is not an LLMProvider, and casting one into
+      // `config.provider` put a value there that no adapter branch matches — the 2.2.1 report's
+      // proximate cause. `applyProviderSelection` also runs AFTER applyDiskKeyFallbacks above, so a
+      // store that only became readable via that call's legacy migration is visible to it here.
+      applyProviderSelection(config, diskModelSettings.provider);
       config.effort = diskModelSettings.effort;
       config.summaryFormat = diskModelSettings.summaryFormat;
       // TUI default: memory on. An explicit persisted false still wins.
@@ -1386,19 +1389,12 @@ export async function runTui(
         onModelApply={(model, provider, effort, summaryFormat, memoryEnabled, commitOnSuccess) => {
           config.model = model;
           // A gateway id is NOT an LLMProvider, so casting it into `config.provider` would put a
-          // value there that no adapter branch matches. Resolve it to a profile instead and let
-          // `providerOf` supply the protocol selector; `applyDiskKeyFallbacks` fills the key on the
-          // next run, which is the same "active on next run" contract /keys already states.
-          const gw = readGatewayProfilesSync().find((g) => g.id === provider);
-          if (gw) {
-            config.profile = gw;
-            config.provider = providerOf(gw);
-            config.profileApiKey = undefined;
-          } else {
-            config.profile = undefined;
-            config.profileApiKey = undefined;
-            config.provider = provider as typeof config.provider;
-          }
+          // value there that no adapter branch matches. `applyProviderSelection` resolves it to a
+          // profile and lets `providerOf` supply the protocol selector; `applyDiskKeyFallbacks`
+          // fills the key on the next run, the same "active on next run" contract /keys states.
+          // Shared with the startup path above, which is what makes the two agree — they did not,
+          // and that disagreement is the 2.2.1 report.
+          applyProviderSelection(config, provider);
           config.effort = effort;
           config.summaryFormat = summaryFormat;
           config.memoryEnabled = memoryEnabled;

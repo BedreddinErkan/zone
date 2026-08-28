@@ -28180,24 +28180,94 @@ whether the request was issued at all, how many attempts fired, and — by its t
 whatever comes next — whether the delay was spent waiting on the network or somewhere else. That
 observation doesn't exist yet for this incident; it will for the next one.
 
+## 406. Closed — a gateway row the TUI rendered was invisible to provider resolution, and the whole gateway arc's suite could not have caught it
+
+**Bucket: Closed** by the commit carrying this line. Reported live on 2.2.1 and reproduced against a
+seeded temp HOME before anything was changed.
+
+**The observables, all four of which any candidate mechanism had to produce at once.**
+`~/.zone/keys.json` held one well-formed gateway row (`provider: "adesso"`, a `baseUrl`, no
+`protocol`); `/keys` rendered it with its URL; startup nonetheless printed
+`[zone] provider "adesso" is not recognized; falling back to anthropic.`; and every task in the
+session died with `No API key found for adesso. Add one with /keys, or set ANTHROPIC_API_KEY.` — one
+sentence naming two different providers.
+
+**That message is what localised it, before any repro.** `dispatch.ts` builds it from
+`profile?.id ?? provider` and `keyEnvVarForConfig`. A resolved gateway yields "adesso" plus
+`ZONE_GATEWAY_KEY_ADESSO`; a clean fallback yields "anthropic" plus `ANTHROPIC_API_KEY`. Neither
+gives the observed pair. Only `profile === undefined` **and** `provider === "adesso"` does — a state
+requiring a gateway id to be sitting in a field typed to two vendor values.
+
+**Two defects, and the second is why the first persisted.**
+
+*Proximate:* `cli/tui/index.tsx`'s startup block cast the disk-model provider straight into
+`config.provider` (`config.provider = diskModelSettings.provider as typeof config.provider`), with no
+gateway lookup. `/model`'s own apply path, twenty lines of comment away, resolved gateway ids
+correctly and even explained why the cast is wrong. **Two paths applied a provider and only one
+resolved gateways** — and `onModelApply`'s `else` branch carried the same cast, so it could seat a
+bad value too.
+
+*Root:* nothing ever re-resolved. `loadCliConfig` resolves once at startup; if the store has no row
+for the requested id at that instant, the id is dropped and only the anthropic fallback survives.
+`applyDiskKeyFallbacks` — which `runOneShotInner` calls at the top of *every* run for exactly the
+"a key set via /keys in the same session takes effect immediately" reason its own comment states —
+fills `profileApiKey` only `if (config.profile)`, so a run that never resolved a profile could never
+recover, no matter how correct the disk became.
+
+**Two independent orderings reach that state; both were reproduced.** (1) The row is added through
+`/keys` *after* startup — matches all four observables including "every task fails", since config is
+resolved once and the modal's "active on next run" reads as next task but means next process.
+(2) First run after a legacy migration: `loadDiskKeys` falls back to `<cwd>/.zone/keys.json` and
+migrates it, but `readGatewayProfilesSync` has **no such fallback** and runs first — so the sync
+reader returns `[]` for a store the async reader is about to create. Arrangement (2) self-heals on
+the next run; (1) does not, which is why the report says every task failed.
+
+**The fix.** One exported `applyProviderSelection` in `cli/config.ts` is now the single place a
+provider selection is applied, used by both TUI sites — deduping them *is* the fix, since their
+disagreement was the defect. It resolves gateway ids, and for an id that is neither a built-in nor a
+configured gateway it leaves `config.provider` a **valid** `LLMProvider` and records the request on a
+new `pendingProfileId` instead of seating the raw string. `applyDiskKeyFallbacks` then completes a
+pending profile from the store it has already read (`gatewayProfilesFrom` is pure and takes the
+store, so this costs no second disk read), which closes both orderings at once. `dispatch.ts` no
+longer pairs a gateway label with a vendor env var: a pending id gets its own message naming the
+gateway and pointing at `/keys → [G]ateway`. New marker `[zone-gateway-unresolved]` reports the case
+that was previously silent apart from a warning naming the fallback, which reads as "your id was
+wrong" when the real state is "no row for it yet".
+
+**R4 and R8 are what this restores**, and the defect was a direct violation of both: R8 because a
+gateway id occupied a two-valued observable provider field, R4 because the resolved profile object
+was not threaded — a provider *string* was, and then re-read downstream by `keyForConfig`'s
+`=== "openai"` ternary, which is precisely the re-derivation R4 forbids. R1 is why the helper lives
+in `config.ts` rather than `providerProfile.ts`; R10 governs the new marker.
+
+**The test gap, which is the part worth keeping.** Every gateway test in the arc seeds the store
+through `_setGatewayKeysPathForTest` and *then* calls `loadCliConfig` — so the suite only ever
+exercised the one ordering where the row already exists, and a resolver that is correct in isolation
+passed all of them. Nothing exercised the **composition**: `loadCliConfig` → `applyDiskKeyFallbacks`
+→ the model.json application, which is where both defects lived and neither of which is visible from
+any single unit. Nothing exercised a store arriving by the **legacy migration** path either. This is
+the same shape as the `/keys` key-edit defect closed earlier in this series: the unit was right, the
+composition around it was never run. The regression tests added here are ordering tests by
+construction — they seed the store *after* resolution, which no prior test did.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 405 to find out which ones still need something. No index of
+reader the trouble of reading all 406 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
 first.
 
-**Closed** (175): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42,
+**Closed** (176): 4, 6, 7, 8, 10, 12, 13, 14, 16, 20, 21, 22, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 40, 41, 42,
 44, 47, 48, 49, 55, 56, 57, 63, 64, 66, 69, 70, 71, 72, 82, 88, 91, 95, 98, 100, 101, 102, 108, 111, 113,
 116, 117, 120, 121, 126, 128, 129, 130, 134, 135, 137, 138, 142, 144, 148, 149, 150, 153, 156, 161, 162, 167,
 169, 171, 172, 176, 182, 183, 184, 185, 186, 187, 192, 193, 194, 198, 203, 204, 210, 212, 218, 221, 223, 228,
 229, 231, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 245, 246, 251, 252, 253, 255, 257, 258, 259, 260,
 262, 264, 265, 266, 267, 268, 269, 270, 271, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285,
 286, 288, 289, 290, 301, 302, 304, 308, 309, 310, 327, 336, 337, 343, 344, 345, 348, 351,
-320, 352, 353, 364, 370, 371, 372, 377, 378, 379, 384, 385, 388, 390, 391, 394
+320, 352, 353, 364, 370, 371, 372, 377, 378, 379, 384, 385, 388, 390, 391, 394, 406
 
 **Actionable now** — a fix is specified in the entry itself; nothing new needs to be learned
 first (23): 287, 291, 292, 293, 296, 299, 313, 328, 329, 334, 347, 358, 359, 365, 368, 373, 375, 383, 389, 395,

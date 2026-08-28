@@ -468,8 +468,14 @@ describe("drift check — today's figures against the real tree", () => {
     // (that marker is emitted from withExponentialBackoff.ts, not here), which is exactly the
     // sibling-marker-citation-in-prose shape item 387/391 already established as a legitimate
     // hazard row, not a bug — re-derived from the scan rather than assumed unchanged.
+    //
+    // 419 -> 420, one=356 -> 357: [zone-gateway-unresolved] (src/cli/config.ts), added by ledger
+    // item 406 so a provider id naming no configured gateway is reported for what it is rather than
+    // only through an unrecognized-provider warning that names the fallback. One marker, one
+    // emitter. Hazards stay 27 — its only other mention is docs/deferred-work.md, a "doc" file
+    // hazards() does not scan; re-derived from the scan rather than assumed unchanged.
     const result = scanTree(readTrackedFiles());
-    expect(result.size).toBe(419);
+    expect(result.size).toBe(420);
 
     const dist = { zero: 0, one: 0, several: 0 };
     for (const attr of result.values()) {
@@ -478,7 +484,7 @@ describe("drift check — today's figures against the real tree", () => {
       else if (c === 1) dist.one++;
       else dist.several++;
     }
-    expect(dist).toEqual({ zero: 43, one: 356, several: 20 });
+    expect(dist).toEqual({ zero: 43, one: 357, several: 20 });
     expect(hazards(result)).toHaveLength(27);
   });
 

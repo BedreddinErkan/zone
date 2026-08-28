@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { loadCliConfig, applyDiskKeyFallbacks, keyForConfig, keyEnvVarForConfig, validateCliConfig } from "./config.js";
+import { loadCliConfig, applyDiskKeyFallbacks, keyForConfig, keyEnvVarForConfig, validateCliConfig, applyProviderSelection } from "./config.js";
 import { _setGatewayKeysPathForTest } from "../llm/gatewayProfiles.js";
 import { loadDiskKeys } from "../api/diskKeys.js";
 import type { DiskKeysFile } from "../api/diskKeys.js";
@@ -150,5 +150,106 @@ describe("keys — a gateway and a vendor coexist without shadowing", () => {
     // Pointing a gateway user at OPENAI_API_KEY would send them looking for a key they do not need.
     expect(() => validateCliConfig(cfg)).toThrow(/provider "lab"/);
     expect(() => validateCliConfig(cfg)).toThrow(/ZONE_GATEWAY_KEY_LAB/);
+  });
+});
+
+/**
+ * The 2.2.0/2.2.1 regression this file's own harness could not have caught: every test above seeds
+ * the store BEFORE calling loadCliConfig, so the resolver was only ever exercised on the one
+ * ordering where the row already exists. Reproduced live on 2.2.1 — a well-formed row that /keys
+ * rendered correctly was invisible to provider resolution, and every task died with a message
+ * naming a gateway and a vendor env var in the same sentence.
+ */
+describe("a gateway row that arrives AFTER the config was resolved (the 2.2.1 report)", () => {
+  it("completes the profile on the next run when the row appears mid-session", async () => {
+    // Startup: model.json already names "lab" (a prior /model), but the store has no row yet.
+    const cfg = loadCliConfig({ repo: tmpDir, provider: "lab" }, {});
+    expect(cfg.profile).toBeUndefined();
+
+    // The user now adds the gateway through /keys. Disk is correct; config is stale.
+    writeStore(LAB);
+    vi.mocked(loadDiskKeys).mockResolvedValue({ version: 1, keys: [LAB] });
+
+    // runOneShotInner re-merges disk keys at the top of every run for exactly this reason.
+    await applyDiskKeyFallbacks(cfg);
+
+    expect(cfg.profile?.id).toBe("lab");
+    expect(cfg.profile?.baseUrl).toBe("http://localhost:4000/v1");
+    expect(cfg.provider).toBe("openai");
+    expect(keyForConfig(cfg)).toBe("sk-lab-key");
+  });
+
+  it("never leaves a gateway id sitting in cfg.provider, which is two-valued", async () => {
+    // The live symptom's root: a raw id in `provider` makes keyForConfig read the ANTHROPIC field
+    // (because the id !== "openai") and the error name two different providers at once.
+    const cfg = loadCliConfig({ repo: tmpDir, provider: "lab" }, {});
+    expect(["anthropic", "openai"]).toContain(cfg.provider);
+    writeStore(LAB);
+    vi.mocked(loadDiskKeys).mockResolvedValue({ version: 1, keys: [LAB] });
+    await applyDiskKeyFallbacks(cfg);
+    expect(["anthropic", "openai"]).toContain(cfg.provider);
+  });
+
+  it("an id that is neither a built-in nor a configured gateway still warns and stays valid", async () => {
+    // Item 385's warning must keep firing — the fix must not weaken it into accepting any string.
+    const cfg = loadCliConfig({ repo: tmpDir, provider: "not-a-thing" }, {});
+    expect(String(warnSpy.mock.calls[0]![0])).toMatch(/provider "not-a-thing" is not recognized/);
+    vi.mocked(loadDiskKeys).mockResolvedValue({ version: 1, keys: [] });
+    await applyDiskKeyFallbacks(cfg);
+    expect(cfg.profile).toBeUndefined();
+    expect(["anthropic", "openai"]).toContain(cfg.provider);
+  });
+});
+
+describe("applyProviderSelection — the one place a provider selection is applied", () => {
+  it("resolves a gateway id to a profile and keeps cfg.provider two-valued", () => {
+    writeStore(LAB);
+    const cfg = loadCliConfig({ repo: tmpDir }, {});
+    applyProviderSelection(cfg, "lab");
+    expect(cfg.profile?.id).toBe("lab");
+    expect(cfg.provider).toBe("openai");
+    expect(cfg.pendingProfileId).toBeUndefined();
+  });
+
+  it("a built-in id clears any active profile", () => {
+    writeStore(LAB);
+    const cfg = loadCliConfig({ repo: tmpDir, provider: "lab" }, {});
+    expect(cfg.profile?.id).toBe("lab");
+    applyProviderSelection(cfg, "anthropic");
+    expect(cfg.profile).toBeUndefined();
+    expect(cfg.provider).toBe("anthropic");
+  });
+
+  it("an unresolvable id NEVER seats itself in cfg.provider, and is remembered", () => {
+    // The 2.2.1 report's proximate cause was exactly this cast. A raw id here makes keyForConfig
+    // read the ANTHROPIC field (id !== "openai") and the error name two providers at once.
+    const cfg = loadCliConfig({ repo: tmpDir }, {});
+    applyProviderSelection(cfg, "not-a-gateway");
+    expect(cfg.provider).not.toBe("not-a-gateway");
+    expect(["anthropic", "openai"]).toContain(cfg.provider);
+    expect(cfg.pendingProfileId).toBe("not-a-gateway");
+  });
+
+  it("re-applying the SAME profile keeps an already-resolved key", async () => {
+    // Regression pin: clearing profileApiKey unconditionally wiped the key applyDiskKeyFallbacks
+    // had filled one step earlier in runTui's own startup order (937 fills, 944 applies).
+    writeStore(LAB);
+    vi.mocked(loadDiskKeys).mockResolvedValue({ version: 1, keys: [LAB] });
+    const cfg = loadCliConfig({ repo: tmpDir, provider: "lab" }, {});
+    await applyDiskKeyFallbacks(cfg);
+    expect(keyForConfig(cfg)).toBe("sk-lab-key");
+    applyProviderSelection(cfg, "lab");
+    expect(keyForConfig(cfg)).toBe("sk-lab-key");
+  });
+
+  it("switching to a DIFFERENT profile drops the previous profile's key", () => {
+    const LAB2 = { provider: "lab2", key: "sk-lab2", addedAt: "2026-08-03T00:00:00.000Z",
+                   baseUrl: "http://localhost:5000/v1" };
+    writeStore(LAB, LAB2);
+    const cfg = loadCliConfig({ repo: tmpDir, provider: "lab" }, {});
+    cfg.profileApiKey = "sk-lab-key";
+    applyProviderSelection(cfg, "lab2");
+    expect(cfg.profile?.id).toBe("lab2");
+    expect(cfg.profileApiKey).toBeUndefined();
   });
 });

@@ -8,7 +8,7 @@ import { providerOf, resolveProfile, type ProviderProfile } from "../llm/provide
 import { readDailyUsdCapOverride } from "../visual/tierSettings.js";
 import { loadDiskModelSync } from "../api/diskModel.js";
 import { loadDiskKeys } from "../api/diskKeys.js";
-import { readGatewayProfilesSync } from "../llm/gatewayProfiles.js";
+import { readGatewayProfilesSync, gatewayProfilesFrom } from "../llm/gatewayProfiles.js";
 
 export interface CliConfig {
   model: string;
@@ -27,6 +27,17 @@ export interface CliConfig {
   profile?: ProviderProfile;
   /** The resolved key for `profile`, when one is active. Vendor keys stay in their own fields. */
   profileApiKey?: string;
+  /**
+   * A provider id that named neither built-in nor any gateway in the key store AT RESOLUTION TIME,
+   * kept so a row that appears later in the same session can still complete it.
+   *
+   * The 2.2.1 report is what this exists for: `.zone/model.json` named a gateway, the store had no
+   * row for it yet, and `provider` fell back to a built-in — correctly, since `provider` is
+   * two-valued (R8) and a gateway id must never sit in it. But the REQUEST was then lost, so adding
+   * the row through `/keys` moments later could not take effect and every task in that session died
+   * on a missing key. `applyDiskKeyFallbacks` consumes this against the store it already reads.
+   */
+  pendingProfileId?: string;
   anthropicApiKey?: string;
   openaiApiKey?: string;
   dailyUsdCap: number;
@@ -131,6 +142,53 @@ function isGatewayProfile(profile: ProviderProfile): boolean {
   return profile.id !== "anthropic" && profile.id !== "openai";
 }
 
+/** The two ids that name a vendor rather than a gateway profile. Spelled out the same way
+ *  `isGatewayProfile` and `gatewayProfilesFrom` already do, rather than importing a private helper. */
+function isBuiltinProviderId(value: string): value is LLMProvider {
+  return value === "anthropic" || value === "openai";
+}
+
+/**
+ * Apply a provider SELECTION — a built-in id or a gateway profile id — to a config.
+ *
+ * The one place that decision is made, because it was previously made in two places that disagreed:
+ * `/model`'s apply path resolved gateway ids properly, while the TUI's startup path cast the id
+ * straight into `config.provider`. That cast is the 2.2.1 report's proximate cause — it seats a
+ * value in a two-valued field that no adapter branch matches, which makes `keyForConfig` read the
+ * ANTHROPIC key for a gateway and the resulting error name two different providers at once.
+ *
+ * R4 (resolve once, thread the profile OBJECT) and R8 (an observable provider field stays a valid
+ * string) are what this enforces; R1 is why it lives here rather than in `providerProfile.ts`.
+ */
+export function applyProviderSelection(config: CliConfig, requested: string): void {
+  const gw = readGatewayProfilesSync().find((p) => p.id === requested);
+  // Cleared only when the ACTIVE PROFILE CHANGES — the point is never to carry one profile's key
+  // onto another, not to discard a key that is still correct. Clearing unconditionally re-broke the
+  // startup path, where `applyDiskKeyFallbacks` has already filled this field one step earlier.
+  if (config.profile?.id !== gw?.id) config.profileApiKey = undefined;
+  if (gw) {
+    config.profile = gw;
+    config.provider = providerOf(gw);
+    config.pendingProfileId = undefined;
+    return;
+  }
+  config.profile = undefined;
+  if (isBuiltinProviderId(requested)) {
+    config.provider = requested;
+    config.pendingProfileId = undefined;
+    return;
+  }
+  // Neither. `provider` KEEPS its current valid value rather than taking the raw id, and the request
+  // is remembered so a row added later in this session still completes it. Announced rather than
+  // dropped: before this marker the only signal was an unrecognized-provider warning that names the
+  // fallback, which reads as "your id was wrong" when the real state is "no row for it yet".
+  config.pendingProfileId = requested;
+  console.warn(
+    `[zone-gateway-unresolved] provider "${requested}" names no configured gateway; ` +
+      `keeping ${config.provider} until a matching row exists in the key store.`
+  );
+}
+
 /**
  * The API key for whichever provider this config actually resolved to.
  *
@@ -184,6 +242,13 @@ export function loadCliConfig(
   let provider: LLMProvider;
   const resolvedProfile = resolveProviderProfile(explicitProvider);
   const gatewayProfile = isGatewayProfile(resolvedProfile) ? resolvedProfile : undefined;
+  // The request that could not be honoured, remembered rather than dropped. Only for a value that
+  // names neither built-in and no configured gateway — i.e. exactly the case item 385's warning
+  // above already reported, where today the intent was lost the moment the fallback took over.
+  const pendingProfileId =
+    !gatewayProfile && explicitProvider && !isBuiltinProviderId(explicitProvider)
+      ? explicitProvider
+      : undefined;
 
   // A gateway outranks the model->provider pin below. That pin exists to stop a catalog model from
   // running on the wrong vendor; but a proxy may legitimately serve a catalog id (a LiteLLM route
@@ -229,6 +294,9 @@ export function loadCliConfig(
     // Spread rather than assigned, so a non-gateway config has no `profile` key at all — the two
     // built-in paths stay byte-identical to what they returned before this pass.
     ...(gatewayProfile ? { profile: gatewayProfile } : {}),
+    // Spread, not assigned, for the same reason `profile` is: a config with nothing pending keeps
+    // the exact key set it had before this field existed.
+    ...(pendingProfileId ? { pendingProfileId } : {}),
     anthropicApiKey,
     openaiApiKey,
     dailyUsdCap,
@@ -256,6 +324,21 @@ export async function applyDiskKeyFallbacks(config: CliConfig): Promise<void> {
   }
   if (!config.openaiApiKey) {
     config.openaiApiKey = store.keys.find(k => k.provider === "openai")?.key;
+  }
+  // A gateway named before its row existed resolves HERE, against the store this function has
+  // already read — so `/keys`'s own "active on next run" holds within the session instead of
+  // requiring a restart. Two orderings reach this and both were live defects on 2.2.1: a row added
+  // through /keys after startup, and a row that only became visible to the sync reader once THIS
+  // function's `loadDiskKeys` performed the legacy `<cwd>/.zone/keys.json` migration — a fallback
+  // `readGatewayProfilesSync` does not have, and which runs after `loadCliConfig` has already
+  // resolved. `gatewayProfilesFrom` is pure and takes the store, so this costs no second read.
+  if (!config.profile && config.pendingProfileId) {
+    const gw = gatewayProfilesFrom(store).find(p => p.id === config.pendingProfileId);
+    if (gw) {
+      config.profile = gw;
+      config.provider = providerOf(gw);
+      config.pendingProfileId = undefined;
+    }
   }
   // A gateway's key lives under its own identity, so it neither reads from nor writes to the two
   // vendor fields — a configured gateway and a configured OpenAI key coexist without either

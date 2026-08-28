@@ -119,6 +119,16 @@ export async function runOneShotInner(
   {
     const _activeKey = keyForConfig(effectiveConfig);
     if (!_activeKey) {
+      // A gateway that was asked for but never resolved is its own failure, and naming a vendor env
+      // var for it is what made the 2.2.1 report's message name two providers in one sentence.
+      // `pendingProfileId` survives exactly that case, so say what is actually wrong: the row is
+      // missing from the store, not the environment variable.
+      if (effectiveConfig.pendingProfileId) {
+        throw new ApiKeyError(
+          `No gateway named "${effectiveConfig.pendingProfileId}" is configured. ` +
+            `Add it with /keys → [G]ateway (profile id, base URL, key).`
+        );
+      }
       const _envVar = keyEnvVarForConfig(effectiveConfig);
       // The profile id, not the protocol selector: a gateway resolves `provider` to "openai", and
       // naming that here would point the user at a vendor key they do not need.
