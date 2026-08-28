@@ -37,6 +37,12 @@ Part 3 is the whole point. Without it the tool still guesses, only better inform
 > records the first run where capture, propose, and verify all fired in one turn, unprompted, live
 > against an external page — after `7e9baeb7` closed unknown 14. The recommendation's shape is
 > unchanged; this is confirming evidence, not a new finding about it.
+>
+> **Amended a fifth time, same day.** **[Q12](#q12--the-selenium-conventions-run-the-same-page-a-different-expression)**
+> is the cross-framework control 11.3 flagged as missing: the same page, the same Playwright-based
+> capture, with `.zone/memory.md` swapped to Selenium conventions. The expression step followed the
+> project's conventions rather than the capture tool's, and verification ran on browser primitives
+> for the first time. The recommendation's shape is unchanged.
 
 ---
 
@@ -535,7 +541,7 @@ Attach to a user-launched Chrome on `--remote-debugging-port`.
 | 4 | Does the suite still pass with a 21st tool? Q2's "six always / four conditional" split is inferred, never run. | Add a no-op tool on a scratch branch, run `npm test`, read the failure list. Discard the branch. |
 | 5 | Would a `webServer`-backed Playwright run start the app for us, or expect it already running? | Read a real target repo's `playwright.config.ts` `webServer` block; `npx playwright test --list` shows resolution without executing. |
 | 6 | Is the `9805d055` Chromium objection still live for the *maintainer*, given MCP moves the install to the user? | Ask. It is a judgement about product burden, not a fact about the code — no instrument closes it. |
-| 7 | **(Q7)** How closely does browser-computed role+name matching track Playwright's `getByRole`? 7.3 calls it high-fidelity but unmeasured. | On one page, compare three counts for the same role+name: `queryAXTree`, a count over `browser_snapshot`'s tree, and `npx playwright` running `getByRole(...).count()`. Any divergence bounds the approximation. **First data point from 10.6 (n=1, one synthetic page, one locator, one browser): Playwright and CDP `queryAXTree` agreed exactly; a plain DOM count under-matched. Supports 7.3; does not settle it — this measurement compared Playwright/CDP/plain-DOM, not a count over `browser_snapshot`'s own captured tree as specified here.** |
+| 7 | **(Q7)** How closely does browser-computed role+name matching track Playwright's `getByRole`? 7.3 calls it high-fidelity but unmeasured. | On one page, compare three counts for the same role+name: `queryAXTree`, a count over `browser_snapshot`'s tree, and `npx playwright` running `getByRole(...).count()`. Any divergence bounds the approximation. **First data point from 10.6 (n=1, one synthetic page, one locator, one browser): Playwright and CDP `queryAXTree` agreed exactly; a plain DOM count under-matched. Supports 7.3; does not settle it — this measurement compared Playwright/CDP/plain-DOM, not a count over `browser_snapshot`'s own captured tree as specified here.** **Second data point from 12.2, live rather than synthetic, and distinct in what it covers: verifying `By.xpath`/CSS candidates via `browser_evaluate` confirmed CSS and XPath are countable on browser primitives alone (`document.querySelectorAll`/`document.evaluate`), in a real run, no test framework installed. The ARIA role+name leg is untouched by this run — Selenium conventions never reached for it — so it still rests on 10.6's synthetic comparison alone; this does not settle it either.** |
 | 8 | **(Q7)** Is counting over a *captured* snapshot equivalent to counting against the *live* page? Snapshots may omit hidden/offscreen nodes the live query would match. | Same page, same locator: count over the snapshot vs. via `browser_evaluate` against the live DOM. |
 | 9 | **(Q7)** Can the driver be inferred from the repo's test files when `detectFramework` says only `"jest"` or `"junit"`? | On 3–5 real repos, grep their test sources for `By\.`, `cy\.`, `page\.getBy`, `driver\.findElement`, `@AndroidFindBy`. Compare with what `detectFramework` reports. |
 | 10 | **(Q7)** Does an Appium page source support offline XPath counting in practice (7.5 argues structurally, nothing was run)? | Capture one `getPageSource` XML from an emulator; run an XPath count over it offline; compare with the same locator through the driver. |
@@ -1052,3 +1058,56 @@ iteration, 24 MCP tools loaded. The run used three: `browser_navigate`, `browser
 while differing in absolute chars, consistent with different prompts and iteration counts rather
 than a fixed per-run figure. This run also measures the actual minimal set directly, rather than
 naming one from inspection: three tools used out of 24 loaded.
+
+---
+
+## Q12 — The Selenium-conventions run: the same page, a different expression
+
+*Measured live in the same lab, same page, as Q11 — only `.zone/memory.md` changed. This is the
+cross-framework control 11.3 named as not yet done: does the expression step follow the project's
+conventions, or the capture tool's?*
+
+### 12.1 The measured run
+
+**Measured by the user.** `.zone/memory.md`'s `ZONE_INIT` block was replaced with Java Selenium
+conventions: prefer `By.id`; else `By.cssSelector` on a meaningful attribute; relative XPath with a
+text predicate only when no attribute identifies the element; never absolute XPath, `nth-child`, or
+generated class names; express in Java Selenium syntax. Same task text as Q11, with "button"
+changed to "element."
+
+Result, verbatim:
+
+```
+By.xpath("//a[normalize-space(.)='Get started']")
+Match count: 1
+I did not use By.id because the element has no id. I did not use the generated
+class getStarted_Sjon, per project conventions. A CSS locator using
+href="/docs/intro" matched 5 elements, so it was ambiguous.
+```
+
+### 12.2 What this establishes — the measurement Q7 was waiting for
+
+**Expression follows the project's conventions, not the capture tool's.** Q11 (Playwright
+conventions) produced `getByRole` from this same Playwright-based capture, against the same element
+on the same page; this run (Selenium conventions) produced `By.xpath`. The capture mechanism did not
+determine the shape of the output — Q7's constraint holds in practice, not only in argument.
+
+**Verification ran on browser primitives, not Playwright's API, for the first time.** The limitation
+10.7 and 11.3 both recorded — every prior verification reached for `browser_run_code_unsafe` — does
+not recur here. `browser_evaluate` counted three candidates in one call:
+`{ byIdGetStarted: 0, cssHrefDocsIntro: 5, xpathTextGetStarted: 1 }`. Q7.3's claim that CSS and
+XPath are countable via `document.querySelectorAll`/`document.evaluate`, with no test framework
+installed, is now measured rather than argued.
+
+**The convention order was applied, and the reasoning was reported.** `By.id` rejected (no id); CSS
+rejected (5 matches, ambiguous — discovered by counting, not by inspection, which is what the verify
+step exists to do); the generated class rejected by rule; XPath accepted at the position the
+conventions place it.
+
+### 12.3 Limits — stated plainly
+
+n=1 again: one page, one element, one model, one alternative framework. Only two of the named
+frameworks have now been exercised — Playwright and Selenium; Cypress, Puppeteer, and Appium remain
+untested, and mobile entirely so. The ARIA role+name family was not verified through browser
+primitives in this run — it did not arise, because Selenium conventions do not reach for it. Unknown
+7 keeps its partial status from 10.6's synthetic-page comparison; this run does not touch that leg.
