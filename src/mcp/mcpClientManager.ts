@@ -19,6 +19,42 @@ interface ToolRoute {
   client: Client;
   localName: string;
   serverName: string;
+  /** Whether a call to this tool must be approved before it reaches the server. */
+  requiresApproval: boolean;
+  /** Where that decision came from — carried for the marker, not for control flow. */
+  approvalSource: "config" | "annotation" | "unannotated";
+}
+
+/**
+ * Derives the approval decision for one tool, once, at connect time — the only moment the server's
+ * annotation and the user's config are both in hand.
+ *
+ * Order: the user's `requireApproval` wins outright, in either direction. Otherwise the server's
+ * `readOnlyHint` decides. A tool that declares neither is GATED — fail closed, because "the server
+ * said nothing" must never read as "the server said safe". That is the same direction item 410's
+ * allowlist chose over a denylist, for the same reason: the failure mode of over-gating is a prompt,
+ * and the failure mode of under-gating is an unreviewed mutation.
+ *
+ * Deliberately no built-in exception list: a shipped allowance would require Zone to know specific
+ * servers' tool names, and `browser_navigate` is one server's spelling of one operation. The
+ * override lives in the user's own file instead.
+ */
+function deriveApproval(
+  localName: string,
+  annotations: { readOnlyHint?: boolean; destructiveHint?: boolean } | undefined,
+  configured: Record<string, boolean> | undefined,
+): { requiresApproval: boolean; approvalSource: ToolRoute["approvalSource"] } {
+  const override = configured?.[localName];
+  if (typeof override === "boolean") {
+    return { requiresApproval: override, approvalSource: "config" };
+  }
+  if (typeof annotations?.readOnlyHint === "boolean") {
+    return { requiresApproval: !annotations.readOnlyHint, approvalSource: "annotation" };
+  }
+  if (typeof annotations?.destructiveHint === "boolean") {
+    return { requiresApproval: annotations.destructiveHint, approvalSource: "annotation" };
+  }
+  return { requiresApproval: true, approvalSource: "unannotated" };
 }
 
 interface McpServerState {
@@ -147,10 +183,51 @@ export class McpClientManager {
         },
       };
       registerTool({ name: namespacedName, capabilities: ["mcp.call"], definition });
-      this.toolRoutes.set(namespacedName, { client, localName: tool.name, serverName });
+      // The annotation is kept HERE rather than on the registry entry: RegisteredTool is a shared
+      // type feeding resolveToolList, and the model has no use for this — it is the approval gate's
+      // input, so it stays inside the MCP subsystem.
+      const { requiresApproval, approvalSource } = deriveApproval(
+        tool.name,
+        (tool as { annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean } }).annotations,
+        config.requireApproval,
+      );
+      this.toolRoutes.set(namespacedName, {
+        client,
+        localName: tool.name,
+        serverName,
+        requiresApproval,
+        approvalSource,
+      });
     }
 
     this.servers.set(serverName, { client, transport, serverName });
+
+    // One `[zone-mcp-approval]` marker family, two discriminated shapes: this "config" event fires
+    // once per server at connect, the "decision" event fires per gated call at dispatch. Reported
+    // through `log`, not `debugLog` — which of a server's tools are gated is exactly the thing a
+    // user needs to be able to check without having set an env var first (item 409).
+    //
+    // `unmatchedOverrides` names any requireApproval key that matches no registered tool. Such a key
+    // is silently inert — the same shape item 410's allowlist `unmatched` field exists to surface,
+    // and it happens for the same reason: a server renames a tool and the config still names the old
+    // one, so a user believes they have gated (or ungated) something they have not.
+    {
+      const registered = [...this.toolRoutes.values()].filter((r) => r.serverName === serverName);
+      const localNames = new Set(registered.map((r) => r.localName));
+      const unmatchedOverrides = Object.keys(config.requireApproval ?? {}).filter(
+        (n) => !localNames.has(n),
+      );
+      log("[zone-mcp-approval]", JSON.stringify({
+        event: "config",
+        serverName,
+        gated: registered.filter((r) => r.requiresApproval).map((r) => r.localName).sort(),
+        ungated: registered.filter((r) => !r.requiresApproval).map((r) => r.localName).sort(),
+        unannotated: registered.filter((r) => r.approvalSource === "unannotated").length,
+        overridden: registered.filter((r) => r.approvalSource === "config").length,
+        unmatchedOverrides,
+      }));
+    }
+
     // `tools` keeps its original meaning — how many the server reported — so no
     // existing reading of this marker changes. `registered` is what the model can
     // actually reach, and is always present rather than only when a filter is
@@ -166,6 +243,18 @@ export class McpClientManager {
 
   registeredToolNames(): string[] {
     return [...this.toolRoutes.keys()];
+  }
+
+  /**
+   * Whether a call to `namespacedName` must be approved first. Read by the MCP dispatch arm in
+   * agentLoop; the decision itself was made at connect time by `deriveApproval`.
+   *
+   * An unknown name returns true rather than false. It should be unreachable — the model can only
+   * call a tool that was offered, and only registered tools are offered — but the safe answer to
+   * "I have never heard of this" is not "go ahead".
+   */
+  requiresApproval(namespacedName: string): boolean {
+    return this.toolRoutes.get(namespacedName)?.requiresApproval ?? true;
   }
 
   async callTool(

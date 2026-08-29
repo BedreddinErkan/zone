@@ -163,6 +163,80 @@ describe("diskMcp — loadDiskMcp", () => {
     expect(Object.keys(cfg!.mcpServers)).toEqual(["good"]);
   });
 
+  // ── `requireApproval` override (per-tool approval declaration) ─────────────
+  //
+  // Bidirectional by construction: true forces the approval gate ON for a tool the server declared
+  // read-only, false forces it OFF for one the server declared destructive, and an absent key falls
+  // back to the server's own annotation. A map rather than two arrays (`require: []` / `skip: []`)
+  // because two arrays can name the same tool in both and then need a documented precedence rule —
+  // a map cannot contradict itself.
+
+  it("parses a valid requireApproval override in both directions", async () => {
+    const json = JSON.stringify({
+      version: 1,
+      mcpServers: {
+        playwright: {
+          command: "npx",
+          requireApproval: { browser_navigate: false, browser_snapshot: true },
+        },
+      },
+    });
+    await writeFile(join(tmp, ".zone", "mcp.json"), json);
+    const cfg = await loadDiskMcp(tmp);
+    expect(cfg).not.toBeNull();
+    expect(cfg!.mcpServers.playwright!.requireApproval).toEqual({
+      browser_navigate: false,
+      browser_snapshot: true,
+    });
+  });
+
+  it("leaves requireApproval undefined when absent — the unchanged-by-default case", async () => {
+    await writeFile(join(tmp, ".zone", "mcp.json"), VALID_MCP_JSON);
+    const cfg = await loadDiskMcp(tmp);
+    expect(cfg!.mcpServers.filesystem!.requireApproval).toBeUndefined();
+    expect("requireApproval" in cfg!.mcpServers.filesystem!).toBe(false);
+  });
+
+  it("accepts an empty requireApproval object — unlike tools:[], 'no overrides' is coherent", async () => {
+    // Deliberate asymmetry with the tools:[] case above. `tools: []` means "expose nothing", which
+    // is the silent zero-tool state item 410 exists to prevent. `requireApproval: {}` means "no
+    // overrides", which is exactly the same as omitting the field — harmless, so not an error.
+    const json = JSON.stringify({
+      version: 1,
+      mcpServers: { good: { command: "npx", requireApproval: {} } },
+    });
+    await writeFile(join(tmp, ".zone", "mcp.json"), json);
+    const cfg = await loadDiskMcp(tmp);
+    expect(Object.keys(cfg!.mcpServers)).toEqual(["good"]);
+    expect(cfg!.mcpServers.good!.requireApproval).toEqual({});
+  });
+
+  it("skips entries whose requireApproval is not an object, keeps others", async () => {
+    const json = JSON.stringify({
+      version: 1,
+      mcpServers: {
+        bad: { command: "npx", requireApproval: ["browser_click"] },
+        good: { command: "node" },
+      },
+    });
+    await writeFile(join(tmp, ".zone", "mcp.json"), json);
+    const cfg = await loadDiskMcp(tmp);
+    expect(Object.keys(cfg!.mcpServers)).toEqual(["good"]);
+  });
+
+  it("skips entries whose requireApproval has non-boolean values, keeps others", async () => {
+    const json = JSON.stringify({
+      version: 1,
+      mcpServers: {
+        bad: { command: "npx", requireApproval: { browser_click: "yes" } },
+        good: { command: "node" },
+      },
+    });
+    await writeFile(join(tmp, ".zone", "mcp.json"), json);
+    const cfg = await loadDiskMcp(tmp);
+    expect(Object.keys(cfg!.mcpServers)).toEqual(["good"]);
+  });
+
   it("skips entries with an empty tools array — 'expose nothing' is a mistake, not an intent", async () => {
     const json = JSON.stringify({
       version: 1,

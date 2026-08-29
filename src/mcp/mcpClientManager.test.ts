@@ -52,6 +52,16 @@ function makeTool(name: string) {
   };
 }
 
+/** A tool carrying the server-declared effect annotation, as a real MCP server sends it. */
+function makeAnnotatedTool(name: string, readOnly: boolean) {
+  return {
+    ...makeTool(name),
+    // Mirrors @playwright/mcp's own toMcpTool exactly: the two hints are a mutually-exclusive
+    // binary derived from one internal flag, never independently set.
+    annotations: { title: name, readOnlyHint: readOnly, destructiveHint: !readOnly, openWorldHint: true },
+  };
+}
+
 // ── Test setup ───────────────────────────────────────────────────────────────
 beforeEach(() => {
   _mockTransport.pid = 99999;
@@ -454,5 +464,74 @@ describe("tools allowlist", () => {
     // above pass for the wrong reason.
     expect(spy.mock.calls.some((c) => String(c[0]).includes("zone-mcp-tools-filtered"))).toBe(false);
     spy.mockRestore();
+  });
+});
+
+// ── Approval derivation: which tools the gate will stop ──────────────────────
+//
+// The gate itself lives at agentLoop's MCP dispatch arm; what is derived HERE is the input it
+// reads. Two separate claims, tested separately — this file pins the derivation, and
+// agentLoop.mcpApprovalGate.test.ts pins that the derivation is actually enforced. A tool marked
+// requiresApproval that is nonetheless dispatched would pass every test in this file.
+describe("approval derivation (requiresApproval)", () => {
+  it("T-APPROVAL-READONLY: a server-declared read-only tool is not gated", async () => {
+    const server = uniqueServer();
+    _mockClient.listTools.mockResolvedValue({ tools: [makeAnnotatedTool("browser_snapshot", true)] });
+
+    const manager = await McpClientManager.connect({ [server]: { command: "echo" } }, "/tmp");
+
+    expect(manager.requiresApproval(`mcp__${server}__browser_snapshot`)).toBe(false);
+  });
+
+  it("T-APPROVAL-DESTRUCTIVE: a server-declared destructive tool is gated", async () => {
+    const server = uniqueServer();
+    _mockClient.listTools.mockResolvedValue({ tools: [makeAnnotatedTool("browser_click", false)] });
+
+    const manager = await McpClientManager.connect({ [server]: { command: "echo" } }, "/tmp");
+
+    expect(manager.requiresApproval(`mcp__${server}__browser_click`)).toBe(true);
+  });
+
+  it("T-APPROVAL-UNANNOTATED: a tool declaring nothing is gated — fail closed", async () => {
+    // The load-bearing default. A server that omits annotations tells Zone nothing, and "nothing"
+    // must not read as "safe" — the same direction item 410's allowlist chose over a denylist.
+    const server = uniqueServer();
+    _mockClient.listTools.mockResolvedValue({ tools: [makeTool("mystery_tool")] });
+
+    const manager = await McpClientManager.connect({ [server]: { command: "echo" } }, "/tmp");
+
+    expect(manager.requiresApproval(`mcp__${server}__mystery_tool`)).toBe(true);
+  });
+
+  it("T-APPROVAL-OVERRIDE-ON: config true gates a tool the server called read-only", async () => {
+    const server = uniqueServer();
+    _mockClient.listTools.mockResolvedValue({ tools: [makeAnnotatedTool("browser_snapshot", true)] });
+
+    const manager = await McpClientManager.connect(
+      { [server]: { command: "echo", requireApproval: { browser_snapshot: true } } },
+      "/tmp"
+    );
+
+    expect(manager.requiresApproval(`mcp__${server}__browser_snapshot`)).toBe(true);
+  });
+
+  it("T-APPROVAL-OVERRIDE-OFF: config false ungates a tool the server called destructive", async () => {
+    // The direction the measured locator flow needs: browser_navigate is declared destructive by
+    // the server (it changes browser state) but is not the risk an approval gate exists for in a
+    // project that only loads pages to inspect them.
+    const server = uniqueServer();
+    _mockClient.listTools.mockResolvedValue({ tools: [makeAnnotatedTool("browser_navigate", false)] });
+
+    const manager = await McpClientManager.connect(
+      { [server]: { command: "echo", requireApproval: { browser_navigate: false } } },
+      "/tmp"
+    );
+
+    expect(manager.requiresApproval(`mcp__${server}__browser_navigate`)).toBe(false);
+  });
+
+  it("T-APPROVAL-UNKNOWN: an unregistered name is gated rather than silently allowed", async () => {
+    const manager = await McpClientManager.connect({}, "/tmp");
+    expect(manager.requiresApproval("mcp__nope__nothing")).toBe(true);
   });
 });

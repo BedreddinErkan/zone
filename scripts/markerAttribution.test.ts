@@ -385,7 +385,7 @@ describe("working-tree hazard — the tracked scan must agree with what staging 
  * shifts these numbers should make this test fail and prompt a review, not silently drift.
  */
 describe("drift check — today's figures against the real tree", () => {
-  it("425 marker names; emitter-count distribution zero=43 one=362 several=20; 31 hazards", () => {
+  it("426 marker names; emitter-count distribution zero=43 one=362 several=21; 31 hazards", () => {
     // Re-derived via this file's own scanTree/hazards, not hand-added to the prior 410/349 —
     // the repository-tree write guard (ledger item 236) landed one new marker,
     // `[zone-repo-guard]`, so the total moved 410->411. It lands in `several`, not `one`:
@@ -519,8 +519,17 @@ describe("drift check — today's figures against the real tree", () => {
     // deliberate cross-module pointers in comments — the sibling-marker-citation-in-prose shape
     // items 387/391 already established as a legitimate row rather than a bug. The two modules now
     // reference each other's markers in both directions, which is why one pass added three rows.
+    //
+    // 425 -> 426, several=20 -> 21, `one` and hazards UNCHANGED: [zone-mcp-approval], added by
+    // ledger item 408's closure (the MCP approval gate). It lands in `several` rather than `one`,
+    // deliberately: it is ONE marker name carrying two discriminated shapes — an `event:"config"`
+    // emitted once per server at connect from src/mcp/mcpClientManager.ts, and an
+    // `event:"decision"` emitted per gated call from src/llm/agentLoop.ts. That is co-emission by
+    // one mechanism, the same shape [zone-repo-guard] above already has, not two features
+    // accidentally sharing a name. Hazards stay 31: neither emitter cites the other's markers in
+    // prose, and this marker's only other mentions are its own tests and the ledger.
     const result = scanTree(readTrackedFiles());
-    expect(result.size).toBe(425);
+    expect(result.size).toBe(426);
 
     const dist = { zero: 0, one: 0, several: 0 };
     for (const attr of result.values()) {
@@ -529,7 +538,7 @@ describe("drift check — today's figures against the real tree", () => {
       else if (c === 1) dist.one++;
       else dist.several++;
     }
-    expect(dist).toEqual({ zero: 43, one: 362, several: 20 });
+    expect(dist).toEqual({ zero: 43, one: 362, several: 21 });
     expect(hazards(result)).toHaveLength(31);
   });
 

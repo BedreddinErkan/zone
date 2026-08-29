@@ -302,7 +302,19 @@ export function requestCommandApproval(input: {
     runId: string;
     command: string;
     approvalId: string;
+    kind?: "command" | "mcp";
   }) => void;
+  /**
+   * What is being approved. Defaults to a shell command; `"mcp"` is an MCP tool call.
+   *
+   * MCP reuses this function rather than getting a sibling module like `editApprovals.ts` because
+   * of TRUST: both the per-run `isCommandTrusted` set and the TUI's disk-backed
+   * `sessionTrustedPrefixes` hang off `command_approval_required`, and trust is what makes an
+   * approval gate usable rather than merely safe. `editApprovals` is separate precisely because
+   * edits need no trust — they are gated by `editApprovalMode` instead — so copying its shape here
+   * would have meant reimplementing trust.
+   */
+  kind?: "command" | "mcp";
   abortSignal?: AbortSignal;
   timeoutMs?: number;
   /**
@@ -320,7 +332,13 @@ export function requestCommandApproval(input: {
   const timeoutMs =
     typeof input.timeoutMs === "number" && input.timeoutMs > 0 ? input.timeoutMs : 5 * 60 * 1000;
 
-  if (isSafeCommand(command)) {
+  const kind = input.kind ?? "command";
+
+  // The safe-command allowlist is a statement about shell commands and means nothing for a tool
+  // name. Skipped explicitly rather than left to chance: no MCP tool name matches a SAFE_COMMAND
+  // prefix today, but that is a coincidence of naming, not a guarantee, and a future collision
+  // would silently auto-approve a gated call.
+  if (kind === "command" && isSafeCommand(command)) {
     // Emit transparency event so UI timeline can show what was auto-approved
     try {
       input.emit({
@@ -442,7 +460,17 @@ export function requestCommandApproval(input: {
     }
 
     // Emit LAST — synchronous resolvers (e.g. TUI bus) find the registered entry.
-    input.emit({ type: "command_approval_required", runId, command, approvalId });
+    // `kind` is emitted only when it is NOT the default. Sending `kind: "command"` unconditionally
+    // would change the event shape for every existing producer and consumer — which is exactly what
+    // the field's own doc comment promises it does not do, and what a deep-equal assertion in this
+    // module's tests correctly caught. Additive means additive.
+    input.emit({
+      type: "command_approval_required",
+      runId,
+      command,
+      approvalId,
+      ...(kind !== "command" ? { kind } : {}),
+    });
   });
 }
 

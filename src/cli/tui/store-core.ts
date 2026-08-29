@@ -184,7 +184,7 @@ export type StoreState = {
   parkStartedMs?: number;
   toastQueue: ToastEntry[];
   modalStack: ModalEntry[];
-  pendingApproval: { approvalId: string; runId: string; command: string; kind?: "command" | "edit" | "trust" } | null;
+  pendingApproval: { approvalId: string; runId: string; command: string; kind?: "command" | "edit" | "trust" | "mcp" } | null;
   /**
    * A question the agent is parked on. Deliberately NOT pendingApproval: that
    * field hard-blocks the Composer (Composer.tsx returns early while it is
@@ -423,7 +423,7 @@ export type StoreAction =
   | { type: "ASSISTANT_FINAL"; text: string }
   | { type: "TRANSCRIPT_CLEAR" }
   | { type: "TRANSCRIPT_REMOUNT" }
-  | { type: "PENDING_APPROVAL_SET"; approvalId: string; runId: string; command: string; kind?: "command" | "edit" | "trust" }
+  | { type: "PENDING_APPROVAL_SET"; approvalId: string; runId: string; command: string; kind?: "command" | "edit" | "trust" | "mcp" }
   | { type: "PENDING_APPROVAL_RESOLVED" }
   | { type: "USER_QUESTION_ASKED"; questionId: string; runId: string; question: string }
   | {

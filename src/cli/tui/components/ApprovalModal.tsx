@@ -10,12 +10,16 @@ interface Props {
   approvalId: string;
   runId: string;
   command: string;
-  kind?: "command" | "edit";
+  kind?: "command" | "edit" | "mcp";
   dispatch: Dispatch<StoreAction>;
 }
 
 export function ApprovalModal({ approvalId, runId, command, kind, dispatch }: Props): React.ReactElement {
   const isEdit = kind === "edit";
+  // MCP resolves through the command registry (requestCommandApproval), so it takes every
+  // non-edit path unchanged — including [T]rust, which is gated on !isEdit. Only the framing
+  // differs: a tool call is not a shell command and should not be rendered as one.
+  const isMcp = kind === "mcp";
 
   useInput((input, key) => {
     const ch = input.toLowerCase();
@@ -51,11 +55,13 @@ export function ApprovalModal({ approvalId, runId, command, kind, dispatch }: Pr
 
   return (
     <Box borderStyle="single" borderColor={role.caution} flexDirection="column" paddingX={1} marginX={2}>
-      <Text bold color={role.caution}>{isEdit ? "Edit approval required" : "Command approval required"}</Text>
+      <Text bold color={role.caution}>{isEdit ? "Edit approval required" : isMcp ? "MCP tool approval required" : "Command approval required"}</Text>
       <Box marginTop={1}>
         {isEdit
           ? <><Text color={role.accent}>  📄 </Text><Text>{command}</Text></>
-          : <><Text color={role.accent}>  $ </Text><Text>{command}</Text></>
+          : isMcp
+            ? <><Text color={role.accent}>  🔌 </Text><Text>{command}</Text></>
+            : <><Text color={role.accent}>  $ </Text><Text>{command}</Text></>
         }
       </Box>
       <Box marginTop={1}>

@@ -215,6 +215,9 @@ export type ZoneStructuredProgressEvent = {
   total_output?: number;
   iter_count?: number;
   approvalId?: string;
+  /** command_approval_required: what is being approved. Absent means a shell command (the
+   *  historical shape, so no existing producer or reader changes); "mcp" is an MCP tool call. */
+  kind?: "command" | "mcp";
   /** user_question_required: park handle, and the question to put to the user. */
   questionId?: string;
   question?: string;

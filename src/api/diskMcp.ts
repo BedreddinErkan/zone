@@ -28,6 +28,29 @@ export interface McpServerConfig {
    * it does not constrain the server process itself.
    */
   tools?: string[];
+  /**
+   * Per-tool approval override. `true` forces the approval gate ON for that tool, `false` forces it
+   * OFF, and an absent key falls back to the server's own `destructiveHint` annotation (with an
+   * unannotated tool gated — fail closed). Absent field means "no overrides", the unchanged default.
+   *
+   * BIDIRECTIONAL BY CONSTRUCTION, which is the requirement: the server's classification is a hint
+   * about its own internals, and it can be wrong for a project in either direction. `@playwright/mcp`
+   * declares `browser_navigate` destructive because navigation changes browser state — true, but not
+   * the risk an approval gate exists for in a project that only loads pages to inspect them. The
+   * same coarseness runs the other way for `browser_evaluate`, which is destructive in a much
+   * stronger sense than the single flag conveys.
+   *
+   * A MAP RATHER THAN TWO ARRAYS (`require: []` / `skip: []`): two arrays can name the same tool in
+   * both and then need a documented precedence rule to resolve it. A map cannot contradict itself.
+   * The field name is chosen so the value reads as the sentence it is —
+   * `"requireApproval": { "browser_navigate": false }` is unambiguous, where a bare `"approval"`
+   * key could be read as "not approved".
+   *
+   * NO BUILT-IN EXCEPTION LIST accompanies this, deliberately: shipping one would mean Zone knowing
+   * specific servers' tool names, and `browser_navigate` is one server's name for one operation
+   * today. The exception belongs in the user's own file, where it is visible.
+   */
+  requireApproval?: Record<string, boolean>;
 }
 
 export interface McpConfig {
@@ -81,6 +104,24 @@ function validateServer(raw: unknown, name: string): McpServerConfig | null {
       return null;
     }
     server.tools = obj.tools as string[];
+  }
+  if (obj.requireApproval !== undefined) {
+    const ra = obj.requireApproval;
+    if (
+      !ra ||
+      typeof ra !== "object" ||
+      Array.isArray(ra) ||
+      !Object.values(ra).every((v) => typeof v === "boolean")
+    ) {
+      log("[zone-mcp-load-warn]", `server '${name}': 'requireApproval' must be Record<string,boolean> — skipping`);
+      return null;
+    }
+    // Empty IS accepted here, unlike `tools: []` above — and the asymmetry is deliberate rather
+    // than an oversight. `tools: []` reads as "expose nothing", which no one writes on purpose and
+    // which produces the silent zero-tool server this field exists to prevent. `requireApproval: {}`
+    // reads as "no overrides", which is exactly what omitting the field means — harmless, so
+    // refusing it would be pedantry rather than protection.
+    server.requireApproval = ra as Record<string, boolean>;
   }
   return server;
 }

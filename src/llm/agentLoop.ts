@@ -5325,7 +5325,56 @@ Example:
         // MCP dynamic dispatch: route mcp__<server>__<tool> calls to the client manager;
         // all other tool names go through the static executeTool if-else.
         const result = name.startsWith("mcp__") && input.mcpManager
-          ? await ((): Promise<import("../tools/toolExecutor.js").ToolResult> => {
+          ? await (async (): Promise<import("../tools/toolExecutor.js").ToolResult> => {
+              // Item 408's approval gap, closed here. MCP calls bypass executeTool, and every gate
+              // inside executeTool is per-branch rather than generic (onApprovalRequired lives in
+              // the two command branches, checkWriteScope in the three write branches), so there
+              // was nothing to inherit by routing this through it — the gate had to be written at
+              // the dispatch site, which already holds the manager, the event sink and the signal.
+              //
+              // This runs strictly AFTER user PreToolUse hooks, which sit above the ternary and
+              // already covered MCP calls fail-closed. A hook veto short-circuits before this point,
+              // so the two do not duplicate or interfere with each other.
+              if (input.mcpManager!.requiresApproval(name)) {
+                const { requestCommandApproval } = await import("../api/commandApprovals.js");
+                // Tool name FIRST: the modal derives its trust prefix as command.split(/\s+/)[0],
+                // so leading with the name is what makes one [T]rust scope to that tool for the
+                // project — and is why no new trust mechanism was needed for MCP.
+                const argsPreview = (() => {
+                  try {
+                    const s = JSON.stringify(parsedArgs ?? {});
+                    return s === "{}" ? "" : s.length > 120 ? `${s.slice(0, 117)}...` : s;
+                  } catch { return ""; }
+                })();
+                const approval = await requestCommandApproval({
+                  runId: rid || input.runId || "",
+                  command: argsPreview ? `${name} ${argsPreview}` : name,
+                  kind: "mcp",
+                  emit: (evt) => input.onStructuredEvent?.(evt),
+                  abortSignal: input.abortSignal,
+                });
+                log("[zone-mcp-approval]", JSON.stringify({
+                  event: "decision",
+                  runId: input.runId ?? null,
+                  tool: name,
+                  approved: !!approval.approved,
+                  ...(approval.reason ? { reason: approval.reason } : {}),
+                }));
+                if (!approval.approved) {
+                  // A refusal the model can act on, never a throw — same structured-rejection shape
+                  // apply_patch's own gates use. callTool is never reached.
+                  return {
+                    success: false,
+                    output:
+                      `[mcp_approval_denied] The user declined the call to \`${name}\`. ` +
+                      `Do not retry this tool — the decision was the user's, not a transient error. ` +
+                      `Continue with the tools you have, or explain what you needed it for. ` +
+                      `(A project can pre-approve a tool via "requireApproval" in .zone/mcp.json.)`,
+                    error: "mcp_approval_denied",
+                    rejectionReason: approval.reason ?? "user_denied",
+                  };
+                }
+              }
               input.onStructuredEvent?.({ type: "mcp_tool_called", status: "info", title: name, runId: input.runId ?? "", ts: Date.now() });
               return input.mcpManager!.callTool(name, parsedArgs);
             })()

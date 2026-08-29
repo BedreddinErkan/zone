@@ -186,7 +186,7 @@ export function eventToActions(
         };
       }
       return {
-        actions: [{ type: "PENDING_APPROVAL_SET", approvalId: evt.approvalId, runId: evt.runId ?? "", command }],
+        actions: [{ type: "PENDING_APPROVAL_SET", approvalId: evt.approvalId, runId: evt.runId ?? "", command, ...(evt.kind ? { kind: evt.kind } : {}) }],
         intents: [],
       };
     }

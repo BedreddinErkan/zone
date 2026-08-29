@@ -51,6 +51,19 @@ export function McpTrustModal({ config, onApprove, onDeny }: McpTrustModalProps)
             {"      tools: "}
             {cfg.tools ? cfg.tools.join(", ") : "all tools this server provides"}
           </Text>
+          {/* The approval declaration is shown for the same reason the tools list is: this modal is
+              where the user consents to the file, and consenting to a config whose approval
+              overrides are invisible would approve something different from what runs. Only
+              rendered when set — the default (gate whatever the server calls destructive) needs no
+              line, and an empty one would imply a choice nobody made. */}
+          {cfg.requireApproval && Object.keys(cfg.requireApproval).length > 0 && (
+            <Text dimColor>
+              {"      approval: "}
+              {Object.entries(cfg.requireApproval)
+                .map(([tool, req]) => `${tool} ${req ? "always asks" : "never asks"}`)
+                .join(", ")}
+            </Text>
+          )}
         </Box>
       ))}
       <Text> </Text>

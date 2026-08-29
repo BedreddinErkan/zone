@@ -28392,6 +28392,39 @@ fires no `onApprovalRequired`; a user who lists `browser_click` gets exactly the
 this entry's own consequence paragraph describes. The allowlist changes how much surface exists, not
 whether the gate runs on it.
 
+**CLOSED by the commit carrying this line — a gate now runs on it.** `McpClientManager` keeps the
+server's `annotations` instead of discarding them and derives, once at connect time, whether each
+tool needs approval; the MCP dispatch arm consults that and routes through `requestCommandApproval`
+before `callTool` is reached. **Fail closed:** a tool the server declares destructive is gated, and
+so is a tool that declares nothing at all — "the server said nothing" must never read as "the server
+said safe", the same direction item 410's allowlist chose over a denylist. `.zone/mcp.json` gains
+`requireApproval?: Record<string, boolean>`, which overrides the server in **both** directions
+(`true` gates a tool the server called read-only, `false` ungates one it called destructive). A map
+rather than two arrays because two arrays can name the same tool in both and then need a precedence
+rule; a map cannot contradict itself.
+
+**No built-in exception list, deliberately.** Shipping one would mean Zone knowing specific servers'
+tool names — `browser_navigate` is Playwright MCP's spelling of one operation today and another
+server will call it something else — which is exactly the coupling the gateway arc avoided. The
+exception lives in the user's own file where it is visible, rather than in Zone's assumptions. The
+cost is accepted and measured: a first run of the locator flow prompts twice (`browser_navigate`
+then `browser_evaluate`, different names, so one `[T]rust` covers only one), and
+`sessionTrustedPrefixes` is disk-backed so later runs in that project are silent.
+
+**Measured against the real server**, through Zone's own manager (subprocess, no LLM call): 24 tools
+registered, 7 ungated, 17 gated, `unannotated: 0` — matching the annotation census in
+`docs/mcp-approval-investigation.md`'s Addendum exactly. The override flipped both directions live.
+A denied call did not reach the server and returned the structured refusal.
+
+**Where it sits relative to user PreToolUse hooks: strictly after, and it does not interfere.**
+Hooks run above the dispatch ternary and already covered MCP calls fail-closed, as this entry's own
+correction records; a hook veto short-circuits before the gate is consulted. The two are
+complementary, not duplicative.
+
+**Denial is a result, not a crash.** The model receives `success: false` with
+`error: "mcp_approval_denied"` and text telling it not to retry and to continue without the tool —
+the structured-rejection vocabulary `apply_patch`'s own gates use — and `callTool` is never invoked.
+
 **Two boundaries on the word "every".** MCP is TUI-only: the headless CLI entry never calls
 `loadDiskMcp` and never constructs a manager, so nothing changes for `--print`; adding it needs a
 non-TTY trust story the current code explicitly declines to invent. And three auxiliary
@@ -28867,11 +28900,43 @@ each `next()` rejection passes through the mapper, or handling provider errors a
 `planFullPatch` consumer where the `for await` actually runs. Those are different designs with
 different blast radii, and choosing between them is not a decision this entry makes.
 
+## 415. What the MCP approval gate leaves open
+
+**Bucket: Neither.** Three residual facts recorded together because they share one root — the gate
+decides *whether* a call is allowed and nothing about *what* it may then do. None has a fix
+specified, and two are not obviously worth fixing.
+
+**Trust granularity is per-tool, not per-server.** `ApprovalModal`'s `[T]rust` derives its prefix as
+`command.trim().split(/\s+/)[0]`, and the MCP display string leads with the tool name, so one
+`[T]rust` covers exactly one tool for the project. That is why a first run of the measured locator
+flow prompts **twice** rather than once: `browser_navigate` and `browser_evaluate` are different
+names. Server-wide trust (`mcp__playwright__`, "trust everything from this server") would need a
+different prefix derivation — splitting on `__` rather than whitespace — and was deliberately not
+built, because a coarser trust unit is a real weakening and nothing yet says two prompts per project
+is too many. The measurement is in `docs/mcp-approval-investigation.md`'s Addendum.
+
+**`checkWriteScope` still does not apply to MCP tools, and approval does not substitute for it.**
+The scope guard is a per-branch check inside the three write-tool handlers, keyed on a file path an
+MCP tool does not expose. An approved `browser_click` is bounded by the approval alone — the user
+consented to the call, not to a scope. This was true under every option the investigation
+considered, so it is not a consequence of the choice made; naming it here prevents the impression
+that gating made MCP calls scope-constrained. They are not.
+
+**The annotation is a hint, and the trust hash does not cover what it describes.** The gate reads
+the server's own `readOnlyHint`/`destructiveHint`; the SDK's documentation is explicit that these are
+hints, "not guaranteed to provide a faithful description of tool behavior." Zone's servers are
+user-authored and SHA-256 trust-gated, so the generic warning about untrusted servers carries less
+weight here — but the hash covers `.zone/mcp.json`, not the package that file launches. A server
+update can change what a tool does without changing its annotation or the config's hash. The
+mitigations already in place are that `requireApproval` is authoritative where a user disagrees, and
+that an unannotated tool is gated rather than allowed. Re-running the standalone `listTools` probe
+after a server upgrade is the check; nothing automates it.
+
 ## Status snapshot — a partition, not a priority ordering
 
 A snapshot, current as of this commit — it goes stale the moment any item closes or is
 reclassified; the numbered entries above are the source of truth, and this section only saves a
-reader the trouble of reading all 414 to find out which ones still need something. No index of
+reader the trouble of reading all 415 to find out which ones still need something. No index of
 this kind existed before this pass — the intro's own "not a changelog, not a roadmap, not a
 priority ordering" cautions against ranking by importance, which this section doesn't do: it
 groups by mechanical status only, items listed by number within each group, not by what to do
@@ -28945,14 +29010,14 @@ plan-prompt template whose fix turned out to belong in two prompts, not one — 
 
 **Blocked on data** — closing requires an observation that doesn't exist yet (19): 1, 18, 23, 75, 90, 110, 143, 157, 166, 170, 175, 178, 196, 250, 263, 318, 376, 405, 412
 
-**Neither — a structural fact recorded, with no fix proposed** (190): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
+**Neither — a structural fact recorded, with no fix proposed** (191): 2, 3, 5, 9, 11, 15, 17, 19, 27, 36, 38, 43, 45, 46, 50, 51, 52, 53, 54, 58, 59, 60, 61, 62, 65, 67, 68, 73,
 74, 76, 77, 78, 79, 80, 81, 83, 84, 85, 86, 87, 89, 92, 93, 94, 96, 97, 99, 103, 104, 105, 106, 107, 109,
 112, 114, 115, 118, 119, 122, 123, 124, 125, 127, 131, 132, 133, 136, 139, 140, 141, 145, 146, 147, 151, 152,
 154, 155, 158, 159, 160, 163, 164, 165, 168, 173, 174, 177, 179, 180, 181, 188, 189, 190, 191, 195, 197, 199,
 200, 201, 202, 205, 206, 207, 208, 209, 211, 213, 214, 215, 216, 217, 219, 220, 222, 224, 225, 226, 227, 230,
 232, 243, 244, 247, 248, 249, 254, 256, 261, 272, 294, 295, 297, 298, 300, 303, 305, 306, 307, 311, 312,
 314, 315, 316, 317, 319, 321, 322, 323, 324, 325, 326, 331, 332, 333, 335,
-338, 339, 340, 341, 342, 346, 349, 350, 354, 355, 356, 357, 360, 361, 362, 363, 366, 367, 369, 374, 380, 381, 382, 386, 387, 392, 393, 396, 397, 398, 399, 400, 402, 407, 414
+338, 339, 340, 341, 342, 346, 349, 350, 354, 355, 356, 357, 360, 361, 362, 363, 366, 367, 369, 374, 380, 381, 382, 386, 387, 392, 393, 396, 397, 398, 399, 400, 402, 407, 414, 415
 
 Items 1, 2, 17, 18, 36, 38, 57, 61, 62, 65, 78, 79, 88, 91, 93, and 110 are partially closed or corrected;
 this partition covers only the portion still open in each, not the whole entry.
