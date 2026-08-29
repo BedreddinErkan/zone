@@ -4,6 +4,60 @@ All notable changes to Zone are documented in this file.
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [2.3.0] — 2026-08-28
+
+10 commits since the 2.2.2 release (`e3a4e194`). Every claim below names the commit or the
+`docs/deferred-work.md` item it comes from, so a reader can check it.
+
+### Added
+
+- **MCP servers can declare which of their tools to expose** — a `tools` allowlist in
+  `.zone/mcp.json` (`ce419b0b`, item 410). Omitted, every tool the server reports still loads:
+  measured at 65–67% of an iteration's tokens across two live runs with 24 tools loaded, of which
+  only three were ever called. An allowlist entry matching no registered tool (a server rename, for
+  example) is reported by `[zone-mcp-tools-filtered]` rather than silently doing nothing.
+- **Destructive MCP tool calls now require approval** (`46f1f41f`, item 408). The server declares
+  which of its tools mutate; Zone now keeps that declaration instead of discarding it at
+  registration, and gates any tool the server calls destructive — or annotates not at all,
+  fail-closed. `requireApproval` in `.zone/mcp.json` overrides the server's own claim in either
+  direction. A first run of a flow that drives a browser will prompt once per distinct tool it uses;
+  approval is per tool and, like command approval, persists across runs in that project ([T]rust).
+- **An approved MCP server's tools are now available in every pipeline** (`7e9baeb7`, item 408).
+  Before this, MCP tools cleared the tier and capability filters in only one accidental combination
+  of task shape and tier — a user who declared and approved a server saw its tools withheld from
+  ordinary tasks, with no way to discover why.
+
+### Fixed
+
+- **`--force-tier` now overrides the tier everywhere, not only the iteration budget** (`2876e6e6`,
+  items 328, 330). The flag reached the token and iteration budget but not the tool-subset filter a
+  forced tier is meant to unlock, so forcing `complex` raised the iteration cap while the
+  `simple`-tier tool list stayed in place. The `--help` text already promised this behavior; the
+  code now matches it.
+- **An OpenAI 429 that means the account is out of credit is no longer retried** (`370607e1`,
+  item 411). OpenAI returns the same HTTP 429 for transient rate-limiting and for exhausted quota,
+  and Zone retried both alike — burning the retry budget against a condition no wait clears, then
+  reporting it as an upstream outage. A quota-exhausted 429 is now reported immediately as a credit
+  problem instead.
+- **Anthropic credit exhaustion now produces its own message** (`3e052572`, item 413). The mapping
+  keyed on HTTP 400, a shape only a gateway produces; direct Anthropic sends 402, which fell through
+  unmapped — including on the streaming path the agent loop actually takes on every iteration.
+- **A plan-generation prompt template no longer contradicts its own schema** (`80e504bb`, item 409).
+  The template listed two subagent-annotation fields as always present while the schema rejected
+  `null` for them and the surrounding prose taught omitting them entirely — a model that followed
+  the template literally failed validation, silently enough that only verbose logging surfaced it.
+  The schema now also accepts a `null` for these two fields and normalizes it to absent.
+
+### Known limitations
+
+- MCP is TUI-only; headless (`--print` / non-TTY) never loads it (item 408).
+- Approval trust for an MCP tool is per tool, not per server, so a flow that uses several tools for
+  the first time in a project prompts once per tool (item 415).
+- `createChatCompletionStream` still maps no provider errors, on either adapter (item 414).
+- The annotation the MCP approval gate reads is the server's own claim, current only as of that
+  server's version — an update can change what a tool does without changing the annotation or
+  invalidating `.zone/mcp.json`'s trust hash (item 415).
+
 ## [2.2.2] — 2026-08-28
 
 1 commit (`27e49753`) since the 2.2.1 release (`657bc87d`). Every claim below names the commit or the
