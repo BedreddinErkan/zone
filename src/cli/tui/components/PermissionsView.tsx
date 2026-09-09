@@ -1,7 +1,7 @@
 import { Box, Text, useInput } from "ink";
 import { useStore } from "../store.js";
 import { removeDiskTrustPrefix } from "../../../api/diskTrust.js";
-import { role, glyph } from "../theme.js";
+import { role, glyph, spacing } from "../theme.js";
 
 export function PermissionsView(): React.ReactElement {
   const { state, dispatch } = useStore();
@@ -25,7 +25,7 @@ export function PermissionsView(): React.ReactElement {
   });
 
   return (
-    <Box borderStyle="round" borderColor={role.accent} flexDirection="column" paddingX={1} marginX={2}>
+    <Box borderStyle="round" borderColor={role.accent} flexDirection="column" paddingX={spacing.sm} marginX={spacing.md}>
       <Text bold color={role.accent}>Permissions</Text>
       <Text dimColor>Trusted command prefixes (.zone/trust.json):</Text>
       <Box height={1} />

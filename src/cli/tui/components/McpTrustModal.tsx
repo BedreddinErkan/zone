@@ -1,6 +1,6 @@
 import { Box, Text, useInput } from "ink";
 import type { McpConfig } from "../../../api/diskMcp.js";
-import { role, glyph } from "../theme.js";
+import { role, glyph, spacing } from "../theme.js";
 
 interface McpTrustModalProps {
   config: McpConfig;
@@ -30,9 +30,9 @@ export function McpTrustModal({ config, onApprove, onDeny }: McpTrustModalProps)
       flexDirection="column"
       borderStyle="round"
       borderColor={role.caution}
-      paddingX={2}
-      paddingY={1}
-      marginY={1}
+      paddingX={spacing.md}
+      paddingY={spacing.sm}
+      marginY={spacing.sm}
     >
       <Text bold color={role.caution}>MCP Servers — Trust Required</Text>
       <Text> </Text>

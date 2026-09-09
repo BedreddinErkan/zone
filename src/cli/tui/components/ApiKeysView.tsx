@@ -3,7 +3,7 @@ import { Box, Text, useInput, usePaste } from "ink";
 import { useStore } from "../store.js";
 import { loadDiskKeys, setDiskKey, removeDiskKey, maskKey } from "../../../api/diskKeys.js";
 import type { DiskApiKey } from "../../../api/diskKeys.js";
-import { role, glyph } from "../theme.js";
+import { role, glyph, spacing } from "../theme.js";
 
 /**
  * One line describing a gateway row's pricing, and specifically whether a $0 cache rate is there
@@ -195,7 +195,7 @@ export function ApiKeysView(): React.ReactElement {
   }, { isActive: true });
 
   return (
-    <Box borderStyle="round" borderColor={role.caution} flexDirection="column" paddingX={1} marginX={2}>
+    <Box borderStyle="round" borderColor={role.caution} flexDirection="column" paddingX={spacing.sm} marginX={spacing.md}>
       <Text bold color={role.caution}>API Keys</Text>
       {mode === "view" && (
         <>

@@ -1,6 +1,6 @@
 import React from "react";
 import { Box, Text } from "ink";
-import { role } from "../theme.js";
+import { role, spacing } from "../theme.js";
 
 /**
  * The agent's pending question, pinned above the StatusBar.
@@ -26,7 +26,7 @@ export function QuestionPanel({
   conversationLost?: boolean;
 }): React.ReactElement {
   return (
-    <Box flexDirection="column" paddingX={2}>
+    <Box flexDirection="column" paddingX={spacing.md}>
       <Box>
         <Text color={role.accent}>? </Text>
         <Box flexGrow={1}>

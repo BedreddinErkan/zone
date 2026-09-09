@@ -19,7 +19,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { role, glyph } from "./theme.js";
 
 const REPO_ROOT = path.resolve(__dirname, "../../..");
@@ -71,6 +71,18 @@ const EXTRACTED_FILES = [
   // NOT declared here — after the extraction it holds no colour and imports no seam, so the
   // "must import theme.ts" assertion below would fail on it.
   "src/cli/tui/banner.ts",
+  // Phase 2a — spacing tokens (App.tsx's only theme import; no colour literals).
+  "src/cli/tui/App.tsx",
+  // Phase 2b — layout primitives. Pure presentation, no colour literals (they consume role
+  // and glyph from the seam; no raw ANSI, no literal hex, no named glyph character).
+  // IndentedWrap.tsx deliberately omits theme.ts — it is pure layout (just paddingLeft),
+  // so it is declared only in the "no numeric spacing literal" walk below, not here.
+  "src/cli/tui/components/primitives/KeyHints.tsx",
+  "src/cli/tui/components/primitives/OverlayShell.tsx",
+  "src/cli/tui/components/primitives/Row.tsx",
+  "src/cli/tui/components/primitives/SectionTitle.tsx",
+  "src/cli/tui/components/primitives/ListItem.tsx",
+  "src/cli/tui/components/primitives/Panel.tsx",
 ];
 
 const FORBIDDEN_COLOUR_LITERALS = [...new Set(Object.values(role))];
@@ -197,5 +209,105 @@ describe("theme-seam completeness — no colour literal or extracted glyph survi
         `${rel} is declared in EXTRACTED_FILES but does not import from theme.ts`
       ).toBe(true);
     }
+  });
+});
+
+/**
+ * Phase 2a — layout-token coverage.
+ *
+ * The colour/glyph sweep above is completeness-driven (a seam consumer must declare itself);
+ * layout is a different invariant. Numeric padding/margin literals re-introduce the very drift
+ * the spacing tokens exist to prevent — two modals that *mean* "a normal gutter" picking
+ * different integers. The lint fails on any numeric literal in a JSX spacing prop under the
+ * TUI tree. Width literals get the same treatment, with an explicit `// width: intentional`
+ * escape hatch for the rare component whose width is genuinely not one of the three policies
+ * (narrow / wide / full) — Composer's full-bleed surface panel is the only current case.
+ *
+ * Scope: every .tsx under src/cli/tui, not just EXTRACTED_FILES — a new component file is a
+ * new chance to reintroduce a literal, and the layout tokens' whole value is that the
+ * *absence* of a literal is enforced across the tree, not just across declared consumers.
+ */
+const LAYOUT_SPACING_PROPS = [
+  "paddingX",
+  "paddingY",
+  "paddingTop",
+  "paddingBottom",
+  "paddingLeft",
+  "paddingRight",
+  "marginX",
+  "marginY",
+  "marginTop",
+  "marginBottom",
+  "marginLeft",
+  "marginRight",
+] as const;
+
+const LAYOUT_SPACING_RE = new RegExp(
+  `(?:${LAYOUT_SPACING_PROPS.join("|")})=\\{\\d+\\}`,
+  "g"
+);
+
+/** Matches `width={<expression>}` where the expression references stdout.columns, `cols`, or
+ *  is a bare numeric literal. Intentionally does NOT match `width={someFn(cols)}` (a token
+ *  call site) nor `width="100%"`-shaped string literals (none exist in the tree today). */
+const LAYOUT_WIDTH_LITERAL_RE = /width=\{(?:\d+|stdout\.columns|[^}]*\?\?[^}]*)\}/g;
+
+function walkTsx(dir: string, sink: string[]): void {
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const abs = path.join(dir, e.name);
+    if (e.isDirectory()) {
+      walkTsx(abs, sink);
+      continue;
+    }
+    if (/\.tsx$/.test(e.name) && !/\.test\.tsx$/.test(e.name)) sink.push(abs);
+  }
+}
+
+describe("Phase 2a — layout-token coverage (no hard-coded spacing or width survives under src/cli/tui)", () => {
+  const TUI_ROOT = path.join(REPO_ROOT, "src/cli/tui");
+  let tsxFiles: string[] = [];
+  beforeAll(() => {
+    tsxFiles = [];
+    walkTsx(TUI_ROOT, tsxFiles);
+  });
+
+  it("the scanner walks at least one file (an empty walk passes every assertion below vacuously)", () => {
+    expect(tsxFiles.length).toBeGreaterThan(0);
+  });
+
+  it("no .tsx file under src/cli/tui contains a numeric spacing literal", () => {
+    const offenders: string[] = [];
+    for (const abs of tsxFiles) {
+      const text = fs.readFileSync(abs, "utf8");
+      const rel = path.relative(REPO_ROOT, abs);
+      const lines = text.split("\n");
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i]!;
+        LAYOUT_SPACING_RE.lastIndex = 0;
+        if (LAYOUT_SPACING_RE.test(line)) {
+          offenders.push(`${rel}:${i + 1}: ${line.trim()}`);
+        }
+      }
+    }
+    expect(offenders, offenders.join("\n")).toEqual([]);
+  });
+
+  it("no .tsx file under src/cli/tui contains a hard-coded width expression unless marked '// width: intentional'", () => {
+    const offenders: string[] = [];
+    for (const abs of tsxFiles) {
+      const text = fs.readFileSync(abs, "utf8");
+      const rel = path.relative(REPO_ROOT, abs);
+      const lines = text.split("\n");
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i]!;
+        // Accept either a line comment (`// width: intentional`) or a JSX block comment
+        // (`{/* width: intentional */}`) — both are common shapes in this tree.
+        if (/width\s*:\s*intentional/.test(line)) continue;
+        LAYOUT_WIDTH_LITERAL_RE.lastIndex = 0;
+        const match = LAYOUT_WIDTH_LITERAL_RE.exec(line);
+        if (match) offenders.push(`${rel}:${i + 1}: ${match[0]} — ${line.trim()}`);
+      }
+    }
+    expect(offenders, offenders.join("\n")).toEqual([]);
   });
 });

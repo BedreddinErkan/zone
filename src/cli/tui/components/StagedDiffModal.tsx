@@ -4,7 +4,7 @@ import type { Dispatch } from "react";
 import type { StoreAction, StoreState } from "../store.js";
 import { resolveStagedApproval } from "../../../api/stagedApprovals.js";
 import { DiffView } from "./DiffView.js";
-import { role, glyph } from "../theme.js";
+import { role, glyph, spacing } from "../theme.js";
 
 interface StagedDiffModalProps {
   proposal: NonNullable<StoreState["stagedDiffProposal"]>;
@@ -84,7 +84,7 @@ export function StagedDiffModal({ proposal, dispatch }: StagedDiffModalProps): R
   }, { isActive: true });
 
   return (
-    <Box flexDirection="column" borderStyle="double" borderColor={role.accent} paddingX={2} paddingY={1}>
+    <Box flexDirection="column" borderStyle="double" borderColor={role.accent} paddingX={spacing.md} paddingY={spacing.sm}>
       <Text bold color={role.accent}>Review staged changes</Text>
       <Text dimColor>
         {proposal.trigger === "natural_completion" ? "Task complete" : "Iteration limit reached"}
@@ -92,7 +92,7 @@ export function StagedDiffModal({ proposal, dispatch }: StagedDiffModalProps): R
       </Text>
       <Text> </Text>
       {proposal.files.map((f, i) => (
-        <Box key={i} flexDirection="column" marginBottom={1}>
+        <Box key={i} flexDirection="column" marginBottom={spacing.sm}>
           <Box flexDirection="row">
             <Text bold>{f.path}</Text>
             <Text dimColor>{`  +${f.added}  −${f.removed}`}</Text>

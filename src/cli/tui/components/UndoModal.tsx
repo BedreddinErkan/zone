@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { StoreAction } from "../store.js";
 import type { SnapshotManifest } from "../../../snapshots/snapshotStore.js";
 import { restoreSnapshot } from "../../../snapshots/snapshotStore.js";
-import { role, glyph } from "../theme.js";
+import { role, glyph, spacing } from "../theme.js";
 
 interface Props {
   data: { manifest: SnapshotManifest; driftedPaths: string[] };
@@ -43,7 +43,7 @@ export function UndoModal({ data, dispatch }: Props): React.ReactElement | null 
   const width = Math.min(cols - 4, 62);
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={role.caution} paddingX={1} width={width}>
+    <Box flexDirection="column" borderStyle="round" borderColor={role.caution} paddingX={spacing.sm} width={width}>
       <Text bold color={role.caution}> Undo last run?</Text>
       <Text> </Text>
       <Text>{` Revert ${manifest.files.length} file(s) to state before last run:`}</Text>

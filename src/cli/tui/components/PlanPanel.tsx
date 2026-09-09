@@ -1,7 +1,7 @@
 import React from "react";
 import { Box, Text } from "ink";
 import type { RunTodo, TodoStatus } from "../../../core/todoLifecycle.js";
-import { role, glyph as themeGlyph } from "../theme.js";
+import { role, glyph as themeGlyph, spacing } from "../theme.js";
 
 function glyphFor(status: TodoStatus): { glyph: string; color?: string; dim?: boolean } {
   switch (status) {
@@ -15,7 +15,7 @@ function glyphFor(status: TodoStatus): { glyph: string; color?: string; dim?: bo
 
 export function PlanPanel({ todos }: { todos: RunTodo[] }): React.ReactElement {
   return (
-    <Box flexDirection="column" paddingX={2}>
+    <Box flexDirection="column" paddingX={spacing.md}>
       {todos.map((todo) => {
         const { glyph, color, dim } = glyphFor(todo.status);
         return (

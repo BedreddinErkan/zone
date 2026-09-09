@@ -2,7 +2,7 @@ import { Box, Text, useInput } from "ink";
 import { useState, useEffect } from "react";
 import { useStore } from "../store.js";
 import { buildRunRecords, aggregateMetrics, type MetricsResponse } from "../../../llm/metricsAggregator.js";
-import { role } from "../theme.js";
+import { role, spacing } from "../theme.js";
 
 type Period = "day" | "week" | "month" | "all";
 const PERIODS: Period[] = ["day", "week", "month", "all"];
@@ -91,7 +91,7 @@ export function MetricsModal(): React.ReactElement {
       flexDirection="column"
       borderStyle="round"
       borderColor={role.accent}
-      paddingX={1}
+      paddingX={spacing.sm}
       width={innerWidth}
     >
       <Text bold color={role.accent}> Metrics</Text>

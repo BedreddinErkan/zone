@@ -7,7 +7,7 @@ import { getToolDisplayName, formatToolArgs } from "./toolCallFormat.js";
 import { MarkdownText } from "./MarkdownText.js";
 import { DiffView } from "./DiffView.js";
 import { PlanBody } from "./PlanBody.js";
-import { role, glyph } from "../theme.js";
+import { role, glyph, spacing } from "../theme.js";
 
 function renderEntry(entry: TranscriptEntry, index: number, colWidth: number): React.ReactElement {
   switch (entry.kind) {
@@ -43,13 +43,13 @@ function renderEntry(entry: TranscriptEntry, index: number, colWidth: number): R
     }
     case "tool_call":
       return (
-        <Box key={index} marginTop={1}>
+        <Box key={index} marginTop={spacing.sm}>
           <ToolCall toolName={entry.toolName} args={entry.args} results={entry.results} patch={entry.patch} />
         </Box>
       );
     case "tool_call_group":
       return (
-        <Box key={index} marginTop={1}>
+        <Box key={index} marginTop={spacing.sm}>
           <ToolCallGroup calls={entry.calls} />
         </Box>
       );
@@ -63,7 +63,7 @@ function renderEntry(entry: TranscriptEntry, index: number, colWidth: number): R
         // rather than as body text, and its ratio against the fill stays terminal-dependent, which
         // surfacePairing.test.ts does not claim to fix.
         <Box key={index} backgroundColor={role.surface} width={colWidth}
-             paddingX={2} marginTop={1} marginBottom={1}>
+             paddingX={spacing.md} marginTop={spacing.sm} marginBottom={spacing.sm}>
           <Text bold color={role.accent}>{glyph.promptMarker}</Text>
           <Box flexGrow={1}>
             <Text bold color={role.surfaceForeground}>{entry.text}</Text>
@@ -72,7 +72,7 @@ function renderEntry(entry: TranscriptEntry, index: number, colWidth: number): R
       );
     case "assistant_final":
       return (
-        <Box key={index} flexDirection="column" marginTop={1} marginBottom={1}>
+        <Box key={index} flexDirection="column" marginTop={spacing.sm} marginBottom={spacing.sm}>
           <MarkdownText text={entry.text} />
         </Box>
       );
@@ -85,7 +85,7 @@ function renderEntry(entry: TranscriptEntry, index: number, colWidth: number): R
       // intact, because neither produces a matching inline one.
       const alreadyShown = new Set(entry.diffShownInline ?? []);
       return (
-        <Box key={index} flexDirection="column" marginTop={1}>
+        <Box key={index} flexDirection="column" marginTop={spacing.sm}>
           <Text dimColor>── {files.length} file{files.length === 1 ? "" : "s"} changed ──</Text>
           {files.map((f) => (
             <Box key={f.path} flexDirection="column">
@@ -101,7 +101,7 @@ function renderEntry(entry: TranscriptEntry, index: number, colWidth: number): R
     }
     case "plan_ready":
       return (
-        <Box key={index} marginTop={1} marginBottom={1}>
+        <Box key={index} marginTop={spacing.sm} marginBottom={spacing.sm}>
           <PlanBody
             objective={entry.objective}
             steps={entry.steps}

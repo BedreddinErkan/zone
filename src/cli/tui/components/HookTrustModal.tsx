@@ -1,7 +1,7 @@
 import React from "react";
 import { Box, Text, useInput } from "ink";
 import type { UserHooksConfig, UserHookEntry } from "../../../api/diskHooks.js";
-import { role, glyph } from "../theme.js";
+import { role, glyph, spacing } from "../theme.js";
 
 interface HookTrustModalProps {
   config: UserHooksConfig;
@@ -13,7 +13,7 @@ interface HookTrustModalProps {
 function renderHookEntry(entry: UserHookEntry, index: number): React.ReactElement {
   const label = entry.description ? `[${entry.description}]` : `[hook ${index + 1}]`;
   return (
-    <Box key={index} paddingLeft={2}>
+    <Box key={index} paddingLeft={spacing.md}>
       <Text>{glyph.groupMarker} </Text>
       <Text color={role.caution}>{label}</Text>
       <Text>{" "}{entry.command}</Text>
@@ -35,28 +35,28 @@ export function HookTrustModal({ config, projectPath, onApprove, onDeny }: HookT
   const totalCount = preHooks.length + postHooks.length;
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={role.caution} paddingX={2} paddingY={1} marginY={1}>
+    <Box flexDirection="column" borderStyle="round" borderColor={role.caution} paddingX={spacing.md} paddingY={spacing.sm} marginY={spacing.sm}>
       <Text bold color={role.caution}>{glyph.warningMark}  Hook Trust Required</Text>
-      <Box marginTop={1}>
+      <Box marginTop={spacing.sm}>
         <Text>This project defines {totalCount} shell hook{totalCount !== 1 ? "s" : ""} in .zone/hooks.json</Text>
       </Box>
       <Text dimColor>Project: {projectPath}</Text>
-      <Box marginTop={1} flexDirection="column">
+      <Box marginTop={spacing.sm} flexDirection="column">
         <Text dimColor>These commands will run during agent tool execution:</Text>
       </Box>
       {preHooks.length > 0 && (
-        <Box flexDirection="column" marginTop={1}>
+        <Box flexDirection="column" marginTop={spacing.sm}>
           <Text bold>PreToolUse ({preHooks.length} hook{preHooks.length !== 1 ? "s" : ""}):</Text>
           {preHooks.map((entry, i) => renderHookEntry(entry, i))}
         </Box>
       )}
       {postHooks.length > 0 && (
-        <Box flexDirection="column" marginTop={1}>
+        <Box flexDirection="column" marginTop={spacing.sm}>
           <Text bold>PostToolUse ({postHooks.length} hook{postHooks.length !== 1 ? "s" : ""}):</Text>
           {postHooks.map((entry, i) => renderHookEntry(entry, i))}
         </Box>
       )}
-      <Box marginTop={1}>
+      <Box marginTop={spacing.sm}>
         <Text bold color={role.success}>{"[a]"}</Text>
         <Text> Approve and arm  </Text>
         <Text bold color={role.danger}>{"[N]"}</Text>

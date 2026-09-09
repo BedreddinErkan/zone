@@ -1,6 +1,7 @@
 import { Box, useInput, useApp } from "ink";
 import { useEffect, useRef, type Dispatch } from "react";
 import { StoreProvider, useStore } from "./store.js";
+import { spacing } from "./theme.js";
 import type { ApiKeyProvider } from "../../api/diskKeys.js";
 import { useAgentEvents } from "./hooks/useAgentEvents.js";
 import { Transcript } from "./components/Transcript.js";
@@ -291,7 +292,7 @@ function AppInner({ bus, initialPrompt, initialMode, onSubmit, onUndoRequest, on
 
   return (
     <Box flexDirection="column">
-      <Box paddingX={2}>
+      <Box paddingX={spacing.md}>
         <Transcript />
       </Box>
       <Spinner />

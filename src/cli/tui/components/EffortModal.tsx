@@ -5,7 +5,7 @@ import type { StoreAction } from "../store.js";
 import { supportsEffort, getDefaultModelId, effortLevelsFor } from "../../../llm/modelRegistry.js";
 import type { EffortLevel } from "../../../llm/modelRegistry.js";
 import { saveDiskModel } from "../../../api/diskModel.js";
-import { role, glyph } from "../theme.js";
+import { role, glyph, spacing } from "../theme.js";
 
 interface Props {
   dispatch: Dispatch<StoreAction>;
@@ -57,7 +57,7 @@ export function EffortModal({ dispatch }: Props): React.ReactElement {
       flexDirection="column"
       borderStyle="round"
       borderColor={role.accent}
-      paddingX={1}
+      paddingX={spacing.sm}
       width={innerWidth}
     >
       <Text bold color={role.accent}> Reasoning effort</Text>

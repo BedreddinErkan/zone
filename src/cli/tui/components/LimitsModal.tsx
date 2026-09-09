@@ -2,7 +2,7 @@ import { Box, Text, useInput } from "ink";
 import { useState } from "react";
 import { useStore } from "../store.js";
 import { writeDailyUsdCapOverride } from "../../../visual/tierSettings.js";
-import { role } from "../theme.js";
+import { role, spacing } from "../theme.js";
 
 export function LimitsModal(): React.ReactElement {
   const { state, dispatch } = useStore();
@@ -50,7 +50,7 @@ export function LimitsModal(): React.ReactElement {
       flexDirection="column"
       borderStyle="round"
       borderColor={role.accent}
-      paddingX={1}
+      paddingX={spacing.sm}
       width={innerWidth}
     >
       <Text bold color={role.accent}> Daily USD Cap</Text>

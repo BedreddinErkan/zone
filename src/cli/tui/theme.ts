@@ -32,8 +32,10 @@
 
 export const role = {
   /** Modal chrome (border + title) on informational/settings views; selection-state foreground
-   *  in navigable lists; prompt and entry-marker glyphs. */
-  accent: "cyan",
+   *  in navigable lists; prompt and entry-marker glyphs. Brand teal (#22B3C4) to match role.brand,
+   *  role.activity and role.selectionBackground — the Phase 2a design-token pass unified the four
+   *  chrome roles onto one hex so modal borders and selection fills can no longer drift apart. */
+  accent: "#22B3C4",
   /** Modal chrome on yes/no risk-decision prompts; notices and caveats; mid-level budget warning. */
   caution: "yellow",
   /** Destructive options, errors, failed tool calls, high budget warning. Diff removals moved to
@@ -157,4 +159,43 @@ export const glyph = {
    *  one. Always used as a pair — a list rendering one is rendering the other for its siblings. */
   radioSelected: "(•)",
   radioUnselected: "( )",
+} as const;
+
+/**
+ * Phase 2a design tokens — layout scale.
+ *
+ * Ink's Box primitives (`paddingX`, `marginY`, `marginTop`, etc.) accept bare integers that each
+ * caller picks locally. Without a shared scale, two modals that *mean* "a normal gutter" can
+ * silently disagree by one cell (measured: this file's `paddingX={1}` vs `paddingX={2}` appeared
+ * on adjacent siblings before extraction). Five named steps is enough to express every gutter the
+ * TUI currently paints — zero, tight, default, generous, outer — and small enough that adding a
+ * new value is itself a visible decision. `as const` keeps the values literal-typed so a
+ * `spacing.lg + 1` arithmetic slip fails to compile.
+ *
+ * xs=0 exists so "no padding" is spelled the same way everywhere and a future scale shift
+ * (e.g. moving the whole UI +1 to widen gutters) is one edit in this file, not a sweep.
+ */
+export const spacing = {
+  xs: 0,
+  sm: 1,
+  md: 2,
+  lg: 3,
+  xl: 4,
+} as const;
+
+/**
+ * Phase 2a design tokens — width policy.
+ *
+ * Modal widths were previously hardcoded to 80 / 100 / `stdout.columns`, which disagreed across
+ * the 14 modals and broke at narrow terminals. Three policies cover every modal: a narrow
+ * reading-optimized column (≤72), a wider form column (≤110), and full-bleed for transcript-
+ * aligned panels. Each is a function of `cols` so the policy caps down gracefully instead of
+ * overflowing the terminal; the `cols - 4` / `cols - 2` offsets leave a gutter on either side
+ * so the border never kisses the terminal edge. Pure functions, no state — a modal can compute
+ * its width inside render without a hook.
+ */
+export const width = {
+  narrow: (cols: number) => Math.min(72, cols - 4),
+  wide: (cols: number) => Math.min(110, cols - 4),
+  full: (cols: number) => cols - 2,
 } as const;

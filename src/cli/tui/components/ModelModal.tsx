@@ -6,7 +6,7 @@ import type { StoreAction } from "../store.js";
 import { USER_FACING_MODELS, getDefaultModelId } from "../../../llm/modelRegistry.js";
 import { saveDiskModel } from "../../../api/diskModel.js";
 import type { DiskModelSettings } from "../../../api/diskModel.js";
-import { role, glyph } from "../theme.js";
+import { role, glyph, spacing } from "../theme.js";
 import { visibleModelRows, hiddenRowCount } from "../modelPickerList.js";
 
 interface Props {
@@ -133,7 +133,7 @@ export function ModelModal({ dispatch }: Props): React.ReactElement {
       flexDirection="column"
       borderStyle="round"
       borderColor={role.accent}
-      paddingX={1}
+      paddingX={spacing.sm}
       width={innerWidth}
     >
       <Text bold color={role.accent}> Model</Text>

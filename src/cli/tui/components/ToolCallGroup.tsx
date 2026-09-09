@@ -1,7 +1,7 @@
 import React from "react";
 import { Box, Text } from "ink";
 import { getToolDisplayName, formatToolArgs } from "./toolCallFormat.js";
-import { glyph } from "../theme.js";
+import { glyph, spacing } from "../theme.js";
 
 export interface ToolCallGroupProps {
   calls: Array<{ toolName: string; arg: string }>;
@@ -50,7 +50,7 @@ export function ToolCallGroup({ calls }: ToolCallGroupProps): React.ReactElement
       </Box>
       {calls.map((call, i) =>
         call.arg === "" ? null : (
-          <Box key={i} paddingLeft={2}>
+          <Box key={i} paddingLeft={spacing.md}>
             <Text
               dimColor
               italic={call.toolName === "search_in_files" || call.toolName === "find_references"}

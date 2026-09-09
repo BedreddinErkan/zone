@@ -1,7 +1,7 @@
 import { Box, Text, useInput } from "ink";
 import { useStore } from "../store.js";
 import { loadSession } from "../../../api/diskSessions.js";
-import { role, glyph } from "../theme.js";
+import { role, glyph, spacing } from "../theme.js";
 
 function truncate(s: string, max: number): string {
   return s.length > max ? s.slice(0, max - 1) + "…" : s;
@@ -33,7 +33,7 @@ export function SessionsModal(): React.ReactElement {
   });
 
   return (
-    <Box borderStyle="round" borderColor={role.accent} flexDirection="column" paddingX={1} marginX={2}>
+    <Box borderStyle="round" borderColor={role.accent} flexDirection="column" paddingX={spacing.sm} marginX={spacing.md}>
       <Text bold color={role.accent}>Sessions</Text>
       <Text dimColor>Past sessions — Enter to resume, Esc to cancel:</Text>
       <Box height={1} />

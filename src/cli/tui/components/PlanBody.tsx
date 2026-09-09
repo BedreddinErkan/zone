@@ -1,7 +1,15 @@
 import React from "react";
 import { Box, Text } from "ink";
 import { MarkdownText } from "./MarkdownText.js";
-import { role, glyph } from "../theme.js";
+import { role, glyph, spacing } from "../theme.js";
+
+/** Width of the step-ordinal column (e.g. "1. ") — the description and file-list lines
+ *  below each step indent to this column so continuation text aligns with the first line.
+ *  Kept local (not in theme.ts's spacing scale) on purpose: the scale is generic gutters,
+ *  this is a column-width tied to this component's specific ordinal layout, and lifting
+ *  it to a shared token would pretend two unrelated concerns are one. Phase 2a's layout
+ *  lint permits it because no literal appears at the call site. */
+const STEP_COLUMN_WIDTH = 5;
 
 export interface PlanBodyProps {
   objective: string;
@@ -49,7 +57,7 @@ export function PlanBody({
         <>
           <MarkdownText text={narrative} />
           {(noChangeReason || cannotVerifyReason || answerOnlyReason) && (
-            <Box flexDirection="column" marginTop={1}>
+            <Box flexDirection="column" marginTop={spacing.sm}>
               <Text bold color={role.caution}>
                 {noChangeReason ? "No changes needed:" : cannotVerifyReason ? "Could not verify:" : "Answering read-only:"}
               </Text>
@@ -57,7 +65,7 @@ export function PlanBody({
             </Box>
           )}
           {filesLikely && filesLikely.length > 0 && (
-            <Box marginTop={1}>
+            <Box marginTop={spacing.sm}>
               <Text dimColor>{`Files: ${filesLikely.join(", ")}`}</Text>
             </Box>
           )}
@@ -75,7 +83,7 @@ export function PlanBody({
           )}
           <Text> </Text>
           {(noChangeReason || cannotVerifyReason || answerOnlyReason) && (
-            <Box flexDirection="column" marginBottom={1}>
+            <Box flexDirection="column" marginBottom={spacing.sm}>
               <Text bold color={role.caution}>
                 {noChangeReason ? "No changes needed:" : cannotVerifyReason ? "Could not verify:" : "Answering read-only:"}
               </Text>
@@ -94,12 +102,12 @@ export function PlanBody({
                   beside it stays dim as a label — label-dim / content-default, the same
                   pairing as Objective:/objective above. */}
               {!!step.description && (
-                <Box flexGrow={1} marginLeft={5}>
+                <Box flexGrow={1} marginLeft={STEP_COLUMN_WIDTH}>
                   <Text>{step.description}</Text>
                 </Box>
               )}
               {step.filesLikely.length > 0 && (
-                <Box marginLeft={5}>
+                <Box marginLeft={STEP_COLUMN_WIDTH}>
                   <Text dimColor>{`(${step.filesLikely.join(", ")})`}</Text>
                 </Box>
               )}

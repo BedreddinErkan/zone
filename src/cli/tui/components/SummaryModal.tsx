@@ -4,7 +4,7 @@ import { useStore } from "../store.js";
 import type { StoreAction } from "../store.js";
 import { saveDiskModel } from "../../../api/diskModel.js";
 import { getDefaultModelId } from "../../../llm/modelRegistry.js";
-import { role, glyph } from "../theme.js";
+import { role, glyph, spacing } from "../theme.js";
 
 interface Props {
   dispatch: Dispatch<StoreAction>;
@@ -49,7 +49,7 @@ export function SummaryModal({ dispatch }: Props): React.ReactElement {
       flexDirection="column"
       borderStyle="round"
       borderColor={role.accent}
-      paddingX={1}
+      paddingX={spacing.sm}
       width={innerWidth}
     >
       <Text bold color={role.accent}> Summary format</Text>

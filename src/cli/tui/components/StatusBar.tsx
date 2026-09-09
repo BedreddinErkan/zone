@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Box, Text } from "ink";
 import { useStore, type RunState, type TuiMode } from "../store.js";
-import { role, glyph } from "../theme.js";
+import { role, glyph, spacing } from "../theme.js";
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -123,12 +123,12 @@ export function StatusBar(): React.ReactElement {
   return (
     <Box flexDirection="column">
       <Text dimColor>{sep}</Text>
-      <Box justifyContent="space-between" paddingX={1}>
+      <Box justifyContent="space-between" paddingX={spacing.sm}>
         <Text color={tokenColor}>{leftText(runState, costUsd, model, elapsedSec, cumulativeTokens, waitedSec, liveElapsedSec)}{webSearch ? " · [W]" : ""}{mem ? " · [M]" : ""}</Text>
         {pill ? <Text color={pillColor}>{pill}</Text> : null}
         <Text dimColor>{rightHint(runState, state.pendingQuestion?.kind ?? null)}</Text>
       </Box>
-      <Box paddingX={1}>
+      <Box paddingX={spacing.sm}>
         <Text dimColor>{badgeLine}</Text>
       </Box>
       <Text dimColor>{sep}</Text>

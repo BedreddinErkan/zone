@@ -6,7 +6,7 @@ import { useState } from "react";
 import type { Dispatch } from "react";
 import { useStore } from "../store.js";
 import type { StoreAction } from "../store.js";
-import { role, glyph } from "../theme.js";
+import { role, glyph, spacing } from "../theme.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -92,7 +92,7 @@ export function CommitModal({ dispatch }: Props): React.ReactElement {
       flexDirection="column"
       borderStyle="round"
       borderColor={role.accent}
-      paddingX={1}
+      paddingX={spacing.sm}
       width={innerWidth}
     >
       <Text bold color={role.accent}> Commit changes</Text>

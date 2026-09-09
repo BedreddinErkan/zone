@@ -11,7 +11,7 @@ import {
 import { DiffView } from "./DiffView.js";
 import { CommandTail } from "./CommandTail.js";
 import { WRITE_FILE_PREVIEW_LINES } from "../../../core/toolCallPatch.js";
-import { role, glyph as themeGlyph } from "../theme.js";
+import { role, glyph as themeGlyph, spacing } from "../theme.js";
 
 const DIFF_TOOLS = new Set(["apply_patch", "write_file", "multi_edit"]);
 
@@ -66,7 +66,7 @@ export function ToolCall({ toolName, args, results, patch }: ToolCallProps): Rea
         )}
       </Box>
       {secondLine && (
-        <Box paddingLeft={2}>
+        <Box paddingLeft={spacing.md}>
           {secondLineColor ? (
             <Text color={secondLineColor}>{themeGlyph.detailConnector}{secondLine}</Text>
           ) : (
@@ -75,12 +75,12 @@ export function ToolCall({ toolName, args, results, patch }: ToolCallProps): Rea
         </Box>
       )}
       {patch && DIFF_TOOLS.has(toolName) && lastResult?.ok && !lastResult.blocked && (
-        <Box paddingLeft={2}>
+        <Box paddingLeft={spacing.md}>
           <DiffView patch={patch} maxLines={toolName === "write_file" ? WRITE_FILE_PREVIEW_LINES : undefined} />
         </Box>
       )}
       {isBash && lastResult && !lastResult.blocked && (
-        <Box paddingLeft={2}>
+        <Box paddingLeft={spacing.md}>
           <CommandTail detail={lastResult.detail} ok={lastResult.ok} />
         </Box>
       )}

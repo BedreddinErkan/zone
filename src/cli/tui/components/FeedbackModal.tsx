@@ -7,7 +7,7 @@ import type { FeedbackReport } from "../../../feedback/buildFeedbackReport.js";
 import { useStore } from "../store.js";
 import type { StoreAction } from "../store.js";
 import { copyToClipboard, openUrlInBrowser } from "../../../utils/clipboardMailto.js";
-import { role, glyph } from "../theme.js";
+import { role, glyph, spacing } from "../theme.js";
 
 const REPO_SLUG = "BedreddinErkan/zone";
 
@@ -88,7 +88,7 @@ export function FeedbackModal({ dispatch }: Props): React.ReactElement {
       flexDirection="column"
       borderStyle="round"
       borderColor={role.accent}
-      paddingX={1}
+      paddingX={spacing.sm}
       width={innerWidth}
     >
       <Text bold color={role.accent}> Send feedback</Text>

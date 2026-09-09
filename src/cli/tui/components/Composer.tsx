@@ -3,7 +3,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import fg from "fast-glob";
 import { readAtFileContext } from "../atFileContext.js";
 import { useStore } from "../store.js";
-import { role, glyph } from "../theme.js";
+import { role, glyph, spacing } from "../theme.js";
 import { loadDiskTrust } from "../../../api/diskTrust.js";
 import { loadDiskKeys } from "../../../api/diskKeys.js";
 import { listSessionsMeta } from "../../../api/diskSessions.js";
@@ -148,7 +148,7 @@ interface PaletteProps {
 
 function SlashCommandPalette({ commands, selectedIdx }: PaletteProps): React.ReactElement {
   return (
-    <Box flexDirection="column" borderStyle="single" borderColor={role.muted} paddingX={1}>
+    <Box flexDirection="column" borderStyle="single" borderColor={role.muted} paddingX={spacing.sm}>
       {/* Selection is marked two ways on purpose. The cursor glyph is the structural half — it
           survives a terminal with no colour at all, and matches what SessionsModal/PermissionsView/
           ApiKeysView already do. role.brand is the colour half, chosen over role.accent (the
@@ -748,7 +748,7 @@ export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, onRemot
   return (
     <Box flexDirection="column">
       {atPaletteOpen && atFiles.length > 0 && (
-        <Box flexDirection="column" borderStyle="single" borderColor={role.muted} paddingX={1}>
+        <Box flexDirection="column" borderStyle="single" borderColor={role.muted} paddingX={spacing.sm}>
           {atFiles.map((f, i) => (
             <Text key={f} color={i === atIdx ? role.accent : undefined}>{f}</Text>
           ))}
@@ -761,7 +761,11 @@ export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, onRemot
           controls; leaving the foreground to the terminal made the pairing uncomputable and, on a
           light theme, near-invisible at 1.08:1. dimColor still applies on top — it modulates a
           known colour now rather than an unknown one. */}
-      <Box backgroundColor={role.surface} paddingX={2} width={stdout.columns ?? 80}>
+      <Box
+        backgroundColor={role.surface}
+        paddingX={spacing.md}
+        width={stdout.columns ?? 80 /* width: intentional — full-bleed composer chrome, not a content column */}
+      >
         <Text color={role.surfaceForeground} dimColor={disabled}>{disabled ? "  " : "> "}</Text>
         <Box flexGrow={1}>
           <Text color={role.surfaceForeground} dimColor={disabled}>{displayBuffer}</Text>
