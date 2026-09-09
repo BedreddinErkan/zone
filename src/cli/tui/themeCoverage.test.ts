@@ -83,6 +83,12 @@ const EXTRACTED_FILES = [
   "src/cli/tui/components/primitives/SectionTitle.tsx",
   "src/cli/tui/components/primitives/ListItem.tsx",
   "src/cli/tui/components/primitives/Panel.tsx",
+  // Phase 2c — content components that render via the OverlayLayer stack, plus the stack
+  // renderer itself. All four consume role/glyph/spacing from the seam.
+  "src/cli/tui/components/ModelPicker.tsx",
+  "src/cli/tui/components/ApiKeysManager.tsx",
+  "src/cli/tui/components/MetricsDashboard.tsx",
+  "src/cli/tui/components/OverlayLayer.tsx",
 ];
 
 const FORBIDDEN_COLOUR_LITERALS = [...new Set(Object.values(role))];
@@ -155,8 +161,19 @@ describe("theme-seam completeness — no colour literal or extracted glyph survi
     const files = readExtracted();
     const offenders: string[] = [];
     for (const [rel, text] of files) {
-      for (const g of FORBIDDEN_GLYPHS) {
-        if (quotedLiteralCount(text, g) > 0) offenders.push(`${rel}: "${g}"`);
+      const lines = text.split("\n");
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i]!;
+        // `// glyph: keyboard-shortcut` opts a line out — Phase 2c's OverlayLayer uses
+        // arrow keys as physical-key labels in KeyHint props (e.g. `key: "↑↓"`), which is
+        // a different semantic from the navigateArrows glyph the seam owns (a visual hint
+        // rendered inside a modal's body text). Same characters, different job; conflating
+        // them would force the seam to grow a "physical key label" role that no other
+        // consumer needs.
+        if (/\/\/\s*glyph:\s*keyboard-shortcut/.test(line)) continue;
+        for (const g of FORBIDDEN_GLYPHS) {
+          if (quotedLiteralCount(line, g) > 0) offenders.push(`${rel}:${i + 1}: "${g}"`);
+        }
       }
     }
     expect(offenders, offenders.join("\n")).toEqual([]);

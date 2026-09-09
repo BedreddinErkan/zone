@@ -12,17 +12,14 @@ import { Composer } from "./components/Composer.js";
 import { ApprovalModal } from "./components/ApprovalModal.js";
 import { TrustModal } from "./components/TrustModal.js";
 import { PermissionsView } from "./components/PermissionsView.js";
-import { ApiKeysView } from "./components/ApiKeysView.js";
 import { SessionsModal } from "./components/SessionsModal.js";
 import { PlanModal } from "./components/PlanModal.js";
 import { PlanActionPrompt } from "./components/PlanActionPrompt.js";
 import { StagedDiffModal } from "./components/StagedDiffModal.js";
-import { ModelModal } from "./components/ModelModal.js";
 import { EffortModal } from "./components/EffortModal.js";
 import { SummaryModal } from "./components/SummaryModal.js";
 import { PlanModeModal } from "./components/PlanModeModal.js";
 import { SessionMemoryModal } from "./components/SessionMemoryModal.js";
-import { MetricsModal } from "./components/MetricsModal.js";
 import { LimitsModal } from "./components/LimitsModal.js";
 import { CommitModal } from "./components/CommitModal.js";
 import { FeedbackModal } from "./components/FeedbackModal.js";
@@ -31,6 +28,8 @@ import { HookTrustModal } from "./components/HookTrustModal.js";
 import { McpTrustModal } from "./components/McpTrustModal.js";
 import { PlanPanel } from "./components/PlanPanel.js";
 import { QuestionPanel } from "./components/QuestionPanel.js";
+import { OverlayLayer } from "./components/OverlayLayer.js";
+import { selectIsBlockingModalOpen } from "./store-core.js";
 import { resolveCommandApproval } from "../../api/commandApprovals.js";
 import { resolveEditApproval } from "../../api/editApprovals.js";
 import { declineUserQuestion } from "../../api/questionApprovals.js";
@@ -230,18 +229,19 @@ function AppInner({ bus, initialPrompt, initialMode, onSubmit, onUndoRequest, on
         />
       )}
       {state.modalView === "permissions" && <PermissionsView />}
-      {state.modalView === "keys" && <ApiKeysView />}
       {state.modalView === "sessions" && <SessionsModal />}
-      {state.modalView === "model" && <ModelModal dispatch={dispatch} />}
       {state.modalView === "effort" && <EffortModal dispatch={dispatch} />}
       {state.modalView === "summary" && <SummaryModal dispatch={dispatch} />}
       {state.modalView === "planMode" && <PlanModeModal dispatch={dispatch} />}
       {state.modalView === "session" && <SessionMemoryModal dispatch={dispatch} onSessionClear={onSessionClear} />}
-      {state.modalView === "metrics" && <MetricsModal />}
       {state.modalView === "limits" && <LimitsModal />}
       {state.modalView === "commit" && <CommitModal dispatch={dispatch} />}
       {state.modalView === "feedback" && <FeedbackModal dispatch={dispatch} />}
       {state.modalView === "undo" && state.undoModalData !== null && <UndoModal data={state.undoModalData} dispatch={dispatch} />}
+      {/* Phase 2c — migrated modals render through the OverlayLayer stack rather than the
+          legacy modalView single-slot. Keys/model/metrics now dispatch OVERLAY_PUSH; the
+          remaining twelve modals still use modalView and will migrate in Phase 2d. */}
+      <OverlayLayer />
       {state.pendingHookTrust !== null && (
         <HookTrustModal
           config={state.pendingHookTrust.config}
@@ -298,17 +298,24 @@ function AppInner({ bus, initialPrompt, initialMode, onSubmit, onUndoRequest, on
       <Spinner />
       {modals}
       <PlanActionPrompt proposal={state.planReadyProposal} dispatch={dispatch} />
-      <Composer
-        onSubmit={handleComposerSubmit}
-        onExit={() => { runAcRef.current?.abort(); exit(); }}
-        onInitStart={(ac) => { runAcRef.current = ac; }}
-        onUndoRequest={onUndoRequest}
-        onRemoteControlCommand={onRemoteControlCommand}
-        onEnvelopeResume={onEnvelopeResume}
-        onCarriedAnswer={onCarriedAnswer}
-        getCommitData={getCommitData}
-        getFeedbackData={getFeedbackData}
-      />
+      {/* Phase 2c — Composer is hidden while a blocking modal is open (approval, trust,
+          plan-ready, staged-diffs, or anything on the overlayStack). The user talks to the
+          modal, not the agent, while it's up; leaving the Composer visible would invite a
+          submission that the run-loop cannot accept. QuestionPanel is NOT gated — a pending
+          question IS the conversation, so the Composer must stay live to receive the answer. */}
+      {!selectIsBlockingModalOpen(state) && (
+        <Composer
+          onSubmit={handleComposerSubmit}
+          onExit={() => { runAcRef.current?.abort(); exit(); }}
+          onInitStart={(ac) => { runAcRef.current = ac; }}
+          onUndoRequest={onUndoRequest}
+          onRemoteControlCommand={onRemoteControlCommand}
+          onEnvelopeResume={onEnvelopeResume}
+          onCarriedAnswer={onCarriedAnswer}
+          getCommitData={getCommitData}
+          getFeedbackData={getFeedbackData}
+        />
+      )}
       {state.pendingQuestion !== null && (
         <QuestionPanel
           question={state.pendingQuestion.question}

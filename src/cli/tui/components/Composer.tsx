@@ -284,6 +284,9 @@ export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, onRemot
       case "/keys":
         void loadDiskKeys().then(store => {
           dispatch({ type: "KEYS_OPEN", list: store.keys });
+          // Phase 2c — ApiKeysManager renders via the OverlayLayer stack; the KEYS_OPEN
+          // above only seeds keysList, it no longer opens the modal.
+          dispatch({ type: "OVERLAY_PUSH", overlayId: "keys" });
         });
         break;
       case "/sessions":
@@ -329,7 +332,8 @@ export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, onRemot
           dispatch({ type: "USER_PROMPT", text: "Cannot change /model while a run is in progress." });
           break;
         }
-        dispatch({ type: "MODEL_MODAL_OPEN" });
+        // Phase 2c — ModelPicker renders via the OverlayLayer stack.
+        dispatch({ type: "OVERLAY_PUSH", overlayId: "model" });
         break;
       case "/effort":
         if (disabled) {
@@ -360,7 +364,8 @@ export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, onRemot
         dispatch({ type: "MEMORY_MODAL_OPEN" });
         break;
       case "/metrics":
-        dispatch({ type: "METRICS_MODAL_OPEN" });
+        // Phase 2c — MetricsDashboard renders via the OverlayLayer stack.
+        dispatch({ type: "OVERLAY_PUSH", overlayId: "metrics" });
         break;
       case "/limits":
         if (disabled) {

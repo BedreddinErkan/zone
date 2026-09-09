@@ -117,6 +117,28 @@ export type StatusBarState = {
 export type RunState = "idle" | "running" | "done" | "aborted" | "failed" | "awaiting_input";
 
 /**
+ * Phase 2c — overlay identifiers. One entry per modal that has migrated from the legacy
+ * `modalView` single-slot to the OverlayLayer stack. Kept as a string union rather than a
+ * generic string so dispatching an unknown overlay ID is a compile error, not a silent
+ * no-op. Extend when a new modal lands in OverlayLayer (Phase 2d will add the remaining
+ * twelve entries currently on `modalView`); remove when an overlay is retired.
+ */
+export type OverlayId =
+  | "model"
+  | "keys"
+  | "metrics"
+  | "effort"
+  | "summary"
+  | "planMode"
+  | "session"
+  | "sessions"
+  | "permissions"
+  | "limits"
+  | "commit"
+  | "feedback"
+  | "undo";
+
+/**
  * The run is still in flight — inference or a human, either way not finished.
  * Anything that resets per-run state on ENTERING a run must use this rather than
  * `=== "running"`, or parking on a question would read as a fresh task.
@@ -204,6 +226,14 @@ export type StoreState = {
     unnecessaryFiles?: string[];
   } | null;
   modalView: "none" | "permissions" | "keys" | "sessions" | "plan" | "model" | "effort" | "metrics" | "limits" | "plan_ready" | "staged_diffs" | "summary" | "session" | "commit" | "planMode" | "undo" | "feedback";
+  /**
+   * Phase 2c — overlay stack. Replaces the single-slot `modalView` for the modals that
+   * migrate to OverlayShell. Stack semantics (push/pop/clear) so a modal that opens another
+   * (e.g. model picker → gateway picker) keeps the parent alive beneath. Old `modalView`
+   * is retained for the 12 modals that have NOT migrated yet (Phase 2d); both coexist
+   * during the migration and `selectIsBlockingModalOpen` reads both.
+   */
+  overlayStack: OverlayId[];
   undoModalData: { manifest: import("../../snapshots/snapshotStore.js").SnapshotManifest; driftedPaths: string[] } | null;
   planModeSelectedIndex: number;
   commitData: { filePaths: string[]; message: string; repoPath: string } | null;
@@ -397,6 +427,7 @@ export function buildInitialState(initialValues?: {
     pendingHookTrust: initialValues?.pendingHookTrust ?? null,
     armedMcpManager: initialValues?.armedMcpManager ?? null,
     pendingMcpTrust: initialValues?.pendingMcpTrust ?? null,
+    overlayStack: [],
   };
 }
 
@@ -550,7 +581,15 @@ export type StoreAction =
   | { type: "HOOKS_TRUST_APPROVED"; hash: string; projectPath: string }
   | { type: "HOOKS_TRUST_DENIED" }
   | { type: "MCP_TRUST_APPROVED"; manager: import("../../mcp/mcpClientManager.js").McpClientManager }
-  | { type: "MCP_TRUST_DENIED" };
+  | { type: "MCP_TRUST_DENIED" }
+  // Phase 2c — overlay stack management. OVERLAY_PUSH appends (stack semantics, so the same
+  // id can legitimately appear twice if a modal re-opens itself); OVERLAY_POP removes the
+  // top entry regardless of id (the central Esc handler's job is "close what's on top", not
+  // "close a specific id"); OVERLAY_CLEAR empties the whole stack (used by RUN_DONE so a
+  // run ending does not leave a stale overlay parked on screen).
+  | { type: "OVERLAY_PUSH"; overlayId: OverlayId }
+  | { type: "OVERLAY_POP" }
+  | { type: "OVERLAY_CLEAR" };
 
 /**
  * Commits the pending read-only batch as one `tool_call_group` transcript entry,
@@ -1432,7 +1471,47 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
     case "MCP_TRUST_DENIED":
       return { ...state, pendingMcpTrust: null, armedMcpManager: null };
 
+    // Phase 2c — overlay stack. Push appends (a modal re-opening itself stacks, deliberately —
+    // the user can Esc through the history). Pop removes the top regardless of id so the
+    // central Esc handler (Phase 3b) can close "whatever is on top" without knowing what it
+    // is. Clear is the teardown primitive — used when a run ends or a session resets so a
+    // stale overlay does not survive the transition.
+    case "OVERLAY_PUSH":
+      return { ...state, overlayStack: [...state.overlayStack, action.overlayId] };
+    case "OVERLAY_POP":
+      // Empty-stack pop is a pure no-op — return the same state reference so cheap
+      // equality checks (`next === state`) detect no-change and the reducer doesn't
+      // spuriously re-render consumers on a stray Esc.
+      if (state.overlayStack.length === 0) return state;
+      return { ...state, overlayStack: state.overlayStack.slice(0, -1) };
+    case "OVERLAY_CLEAR":
+      return { ...state, overlayStack: [] };
+
     default:
       return state;
   }
 }
+
+/**
+ * Phase 2c — single source of truth for "is a blocking modal open?".
+ *
+ * Replaces three+ inline boolean computations that used to live in App.tsx, Composer.tsx, and
+ * individual modal gates, each slightly out of sync (one missed `planProposal`, another
+ * missed `overlayStack`). Every site that decides behaviour based on "is the user talking to
+ * a modal right now?" reads this selector.
+ *
+ * "Blocking" means the Composer should stop accepting new submissions — approval, trust,
+ * plan-ready, staged-diffs, scope-revision, and the new overlay stack all count. A pending
+ * question does NOT (the question IS the conversation, so the composer must stay live to
+ * receive the answer). A `modalView !== "none"` that is not also on `overlayStack` does NOT
+ * count either — the legacy modals still on `modalView` coexist with the new stack during
+ * Phase 2d migration and will be added here as they land.
+ */
+export const selectIsBlockingModalOpen = (state: StoreState): boolean =>
+  state.pendingApproval !== null ||
+  state.pendingHookTrust !== null ||
+  state.pendingMcpTrust !== null ||
+  state.planProposal !== null ||
+  state.planReadyProposal !== null ||
+  state.stagedDiffProposal !== null ||
+  state.overlayStack.length > 0;
