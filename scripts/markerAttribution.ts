@@ -226,6 +226,9 @@ export const SELF_EXCLUDED_PATHS: readonly string[] = [
   "scripts/markerAttribution.test.ts",
 ];
 
+/** Prose docs may reference not-yet-implemented markers; exclude from the code-only inventory. */
+const SELF_EXCLUDED_DIR_PREFIXES: readonly string[] = ["docs/"];
+
 /** Reads every tracked file that could contain a marker, minus this tool's own two. */
 export function readTrackedFiles(): FileInput[] {
   const raw = execFileSync("git", ["ls-files", "-z"], { cwd: REPO_ROOT, encoding: "utf8" });
@@ -233,6 +236,7 @@ export function readTrackedFiles(): FileInput[] {
   const files: FileInput[] = [];
   for (const p of paths) {
     if (SELF_EXCLUDED_PATHS.includes(p)) continue;
+    if (SELF_EXCLUDED_DIR_PREFIXES.some((d) => p.startsWith(d))) continue;
     let text: string;
     try {
       text = fs.readFileSync(path.join(REPO_ROOT, p), "utf8");
@@ -265,6 +269,7 @@ export function readWorktreeFiles(): FileInput[] {
   const files: FileInput[] = [];
   for (const p of paths) {
     if (SELF_EXCLUDED_PATHS.includes(p)) continue;
+    if (SELF_EXCLUDED_DIR_PREFIXES.some((d) => p.startsWith(d))) continue;
     let text: string;
     try {
       text = fs.readFileSync(path.join(REPO_ROOT, p), "utf8");
