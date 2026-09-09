@@ -64,6 +64,7 @@ export function StatusBar(): React.ReactElement {
   const { runState, runStartMs, runEndMs, parkedMs, mode } = state;
   // webSearch defaults ON (absence = enabled); show indicator when active
   const webSearch = state.modelSettings?.webSearchEnabled !== false;
+  const mem = state.modelSettings?.memoryEnabled;
 
   // Per-task execution time: start (task begin) → end (task complete), frozen at
   // completion so it doesn't keep ticking while the "done" status is displayed.
@@ -123,7 +124,7 @@ export function StatusBar(): React.ReactElement {
     <Box flexDirection="column">
       <Text dimColor>{sep}</Text>
       <Box justifyContent="space-between" paddingX={1}>
-        <Text color={tokenColor}>{leftText(runState, costUsd, model, elapsedSec, cumulativeTokens, waitedSec, liveElapsedSec)}{webSearch ? " · [W]" : ""}</Text>
+        <Text color={tokenColor}>{leftText(runState, costUsd, model, elapsedSec, cumulativeTokens, waitedSec, liveElapsedSec)}{webSearch ? " · [W]" : ""}{mem ? " · [M]" : ""}</Text>
         {pill ? <Text color={pillColor}>{pill}</Text> : null}
         <Text dimColor>{rightHint(runState, state.pendingQuestion?.kind ?? null)}</Text>
       </Box>

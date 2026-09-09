@@ -1062,6 +1062,7 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         runStartMs: undefined,
         runEndMs: undefined,
         modalView: "none",
+        planProposal: null,
         planReadyProposal: null,
         statusBar: { ...state.statusBar, costUsd: 0, iter: 0 },
         transcriptGeneration: state.transcriptGeneration + 1,

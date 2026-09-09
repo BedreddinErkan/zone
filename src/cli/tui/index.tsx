@@ -920,6 +920,9 @@ export async function runTui(
   process.on("exit", restoreStdout);
   process.on("exit", restoreStderr);
 
+  // Default to the cheap plan-approval path; users can override before launch.
+  process.env.ZONE_PLAN_APPROVAL_CYCLE ??= "1";
+
   type CommitData = { filePaths: string[]; message: string; repoPath: string };
   type FeedbackData = { runId: string; sessionId: string; logs: string; version: string; repoPath: string };
   const storeCapture: { state: StoreState | null; lastCommitData: CommitData | null; lastFeedbackData: FeedbackData | null; dispatch: ((action: StoreAction) => void) | null; currentEnvelopeKey?: string | null } = { state: null, lastCommitData: null, lastFeedbackData: null, dispatch: null, currentEnvelopeKey: null };

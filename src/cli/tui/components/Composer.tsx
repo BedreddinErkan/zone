@@ -78,6 +78,7 @@ const HELP_LINES = [
   "  Ctrl+C      exit zone",
   "  ↑/↓         navigate history (when input empty)",
   "  ←/→ Home End  cursor movement",
+  "  Shift+Tab   cycle mode (normal → auto-accept → plan)",
   "Slash commands:",
   "  /help  /clear  /cost  /exit  /permissions  /keys  /sessions  /init  /memory  /model  /effort  /summary  /plan-mode  /session  /metrics  /limits  /commit  /autocommit  /websearch  /image  /remote-control  /undo  /feedback",
 ];
