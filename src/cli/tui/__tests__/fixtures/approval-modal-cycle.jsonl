@@ -1,0 +1,7 @@
+{"runId":"run-golden-2","ts":1700000100000,"type":"agent_loop_start","title":"Starting agent tool loop"}
+{"runId":"run-golden-2","ts":1700000101000,"type":"narration","title":"","text":"Running the test suite to verify."}
+{"runId":"run-golden-2","ts":1700000102000,"type":"tool_call","title":"[tool] run_command: npm test","toolName":"run_command","detail":"npm test"}
+{"runId":"run-golden-2","ts":1700000103000,"type":"command_approval_required","title":"Approve command: npm test","approvalId":"appr-1","runId":"run-golden-2","command":"npm test","kind":"command"}
+{"runId":"run-golden-2","ts":1700000104000,"type":"approval_granted","runId":"run-golden-2","approvalId":"appr-1"}
+{"runId":"run-golden-2","ts":1700000105000,"type":"tool_result","title":"exit 0","detail":"Tests passed: 6707","status":"success","toolName":"run_command"}
+{"runId":"run-golden-2","ts":1700000106000,"type":"agent_loop_complete","title":"Done","iter_count":1,"cumulativeCost":0.0021}

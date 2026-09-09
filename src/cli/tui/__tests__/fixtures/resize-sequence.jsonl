@@ -1,0 +1,7 @@
+{"runId":"run-golden-3","ts":1700000200000,"type":"agent_loop_start","title":"Starting agent tool loop"}
+{"runId":"run-golden-3","ts":1700000201000,"type":"tool_call","title":"[tool] read_file: src/cli/tui/App.tsx","toolName":"read_file","detail":"src/cli/tui/App.tsx"}
+{"runId":"run-golden-3","ts":1700000202000,"type":"tool_result","title":"read 412 lines","detail":"412 lines read","status":"success","toolName":"read_file"}
+{"runId":"run-golden-3","ts":1700000203000,"type":"transcript_remount","runId":"run-golden-3"}
+{"runId":"run-golden-3","ts":1700000204000,"type":"tool_call","title":"[tool] write_file: src/cli/tui/App.tsx","toolName":"write_file","detail":"src/cli/tui/App.tsx","patch":"--- a/src/cli/tui/App.tsx\n+++ b/src/cli/tui/App.tsx\n@@ -1,1 +1,1 @@\n-old\n+new\n"}
+{"runId":"run-golden-3","ts":1700000205000,"type":"tool_result","title":"file written","detail":"file written","status":"success","toolName":"write_file"}
+{"runId":"run-golden-3","ts":1700000206000,"type":"agent_loop_complete","title":"Done","iter_count":1,"cumulativeCost":0.0015}

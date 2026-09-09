@@ -1,0 +1,34 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`golden replay tests > approval-modal-cycle renders approval modal 1`] = `
+"◆ Running the test suite to verify.
+
+● Bash(npm test)
+  ✓
+  Tests passed: 6707
+"
+`;
+
+exports[`golden replay tests > resize-sequence remounts transcript cleanly 1`] = `
+"
+● Read ×1
+  └ src/cli/tui/App.tsx
+
+● Write(src/cli/tui/App.tsx)
+"
+`;
+
+exports[`golden replay tests > run-with-tool-calls renders expected transcript 1`] = `
+"◆ Let me look at the project structure to understand what's going on.
+
+● Read ×1
+  └ src/cli/tui/store-core.ts
+
+● Edit(src/cli/tui/store-core.ts)
+
+● Bash(npm test)
+  ✓
+  PASS  src/cli/tui/store-core.test.ts
+◆ All three tool calls completed successfully.
+"
+`;

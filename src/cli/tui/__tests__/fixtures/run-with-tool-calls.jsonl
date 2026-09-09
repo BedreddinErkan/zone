@@ -1,0 +1,12 @@
+{"runId":"run-golden-1","ts":1700000000000,"type":"agent_loop_start","title":"Starting agent tool loop"}
+{"runId":"run-golden-1","ts":1700000001000,"type":"narration","title":"","text":"Let me look at "}
+{"runId":"run-golden-1","ts":1700000001500,"type":"narration","title":"","text":"the project structure "}
+{"runId":"run-golden-1","ts":1700000002000,"type":"narration","title":"","text":"to understand what's going on."}
+{"runId":"run-golden-1","ts":1700000003000,"type":"tool_call","title":"[tool] read_file: src/cli/tui/store-core.ts","toolName":"read_file","detail":"src/cli/tui/store-core.ts"}
+{"runId":"run-golden-1","ts":1700000004000,"type":"tool_result","title":"read 1439 lines","detail":"1439 lines read","status":"success","toolName":"read_file"}
+{"runId":"run-golden-1","ts":1700000005000,"type":"tool_call","title":"[tool] apply_patch","toolName":"apply_patch","detail":"src/cli/tui/store-core.ts","patch":"--- a/src/cli/tui/store-core.ts\n+++ b/src/cli/tui/store-core.ts\n@@ -601,1 +601,1 @@\n-old\n+new\n"}
+{"runId":"run-golden-1","ts":1700000006000,"type":"tool_result","title":"patch applied","detail":"1 hunk applied","status":"success","toolName":"apply_patch"}
+{"runId":"run-golden-1","ts":1700000007000,"type":"tool_call","title":"[tool] run_command: npm test","toolName":"run_command","detail":"npm test"}
+{"runId":"run-golden-1","ts":1700000008000,"type":"tool_result","title":"exit 0","detail":"PASS  src/cli/tui/store-core.test.ts","status":"success","toolName":"run_command"}
+{"runId":"run-golden-1","ts":1700000009000,"type":"narration","title":"","text":"All three tool calls completed successfully."}
+{"runId":"run-golden-1","ts":1700000010000,"type":"agent_loop_complete","title":"Done","iter_count":1,"cumulativeCost":0.0042}
