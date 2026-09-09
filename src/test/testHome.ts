@@ -43,6 +43,9 @@ export function realZoneDir(): string {
  * One measured reason each — no unexplained entries:
  *  - `node_modules`: vitest writes `.vite/vitest/results.json` on every run.
  *  - `.git`: version-control plumbing, not test output.
+ *  - `__snapshots__`: vitest's default sibling dir for `toMatchSnapshot()`
+ *    output; without this, the golden replay harness (Phase 1 of the TUI
+ *    redesign) cannot write its committed fixtures under src/cli/tui/.
  *
  * `dist` and `.zone` are deliberately absent. A full clean run was inventoried
  * at 5,840 files before and after and wrote to neither, so listing them would
@@ -50,4 +53,8 @@ export function realZoneDir(): string {
  * both are named in item 236's own text as assumed-necessary exemptions, which
  * the measurement contradicts.
  */
-export const REPO_GUARD_ALLOWED_DIRS: readonly string[] = ["node_modules", ".git"];
+export const REPO_GUARD_ALLOWED_DIRS: readonly string[] = [
+  "node_modules",
+  ".git",
+  "__snapshots__",
+];
