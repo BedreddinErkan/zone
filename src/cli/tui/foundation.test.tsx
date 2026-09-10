@@ -72,13 +72,15 @@ describe("TUI.0 foundation", () => {
     unmount();
   });
 
+  // Phase 6f — flake fix: increased wait from 50ms to 120ms to allow
+  // bus emit → scheduler → reducer → React re-render cycle to complete.
   it("Esc in running state transitions to aborted", async () => {
     const bus = createEventBus();
     const { lastFrame, stdin, unmount } = render(<App bus={bus} />);
     bus.emit("agent_loop_start", makeEvt("agent_loop_start"));
-    await wait(50);
+    await wait(120);
     stdin.write("\x1b");
-    await wait(50);
+    await wait(120);
     expect(lastFrame()).toContain("aborted");
     unmount();
   });

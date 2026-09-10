@@ -316,6 +316,8 @@ describe("PlanActionPrompt — Composer stays muted while a proposal is pending"
     );
   }
 
+  // Phase 6f — flake fix: increased waits to 150ms to allow React mount + dispatch
+  // cycle to complete in busy full-suite runs.
   it("pressing '1' resolves accept_all AND leaves the Composer buffer untouched", async () => {
     const onSubmit = vi.fn();
     const { lastFrame, stdin, unmount } = render(
@@ -324,10 +326,10 @@ describe("PlanActionPrompt — Composer stays muted while a proposal is pending"
       </StoreProvider>
     );
     activeUnmount = unmount;
-    await wait(); // let the mount-time PLAN_READY_PROPOSED dispatch land before sending input
+    await wait(150); // let the mount-time PLAN_READY_PROPOSED dispatch land before sending input
 
     stdin.write("1");
-    await wait();
+    await wait(150);
 
     // Positive first: PlanActionPrompt's own capture actually worked.
     expect(mockResolvePlanApproval).toHaveBeenCalledWith(

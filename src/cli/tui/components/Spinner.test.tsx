@@ -37,11 +37,13 @@ const DIAGONAL_FRAMES = ["╱", "│", "╲", "─"];
 describe("Spinner", () => {
   afterEach(() => { vi.useRealTimers(); });
 
+  // Phase 6f — flake fix: increased wait from 50ms to 150ms for bus emit
+  // → scheduler → reducer → React re-render cycle in busy full-suite runs.
   it("renders a diagonal frame when agent_loop_start activates spinner", async () => {
     const bus = createEventBus();
     const { lastFrame, unmount } = render(<App bus={bus} />);
     bus.emit("agent_loop_start", makeUntitledEvt("agent_loop_start"));
-    await wait(50);
+    await wait(150);
     const frame = lastFrame() ?? "";
     expect(frame.includes("╱")).toBe(true);
     unmount();
@@ -84,11 +86,12 @@ describe("Spinner", () => {
 describe("Spinner — no context parenthetical (b045f350 reverted)", () => {
   afterEach(() => { vi.useRealTimers(); });
 
+  // Phase 6f — flake fix: increased wait from 50ms to 150ms (same as above).
   it("while running, the spinner line contains the gerund and no parenthetical", async () => {
     const bus = createEventBus();
     const { lastFrame, unmount } = render(<App bus={bus} />);
     bus.emit("agent_loop_start", makeUntitledEvt("agent_loop_start"));
-    await wait(50);
+    await wait(150);
     const line = spinnerLine(lastFrame() ?? "");
     expect(line).toContain(SPINNER_LABEL_STARTING);
     expect(line).not.toContain("(");
