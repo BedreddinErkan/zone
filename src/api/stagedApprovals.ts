@@ -1,12 +1,15 @@
 import crypto from "node:crypto";
 import type { StagedFile } from "../core/fileDiff.js";
+import * as registry from "../cli/interactionRegistry.js";
+
+// Phase 6b — delegates to the unified interaction registry.
 
 export type StagedDecision =
-  | "approve_all"  // flush all staged files
-  | "manual"       // per-file approval via approveFile()
-  | "refine"       // discard staging, re-run with feedback
-  | "reject"       // discard staging, abort run
-  | "timeout";     // approval wait exceeded timeout
+  | "approve_all"
+  | "manual"
+  | "refine"
+  | "reject"
+  | "timeout";
 
 export interface StagedCheckpointHandler {
   run: (ctx: {
@@ -16,14 +19,6 @@ export interface StagedCheckpointHandler {
   }) => Promise<{ decision: StagedDecision; feedback?: string }>;
   approveFile: (filePath: string) => Promise<boolean>;
 }
-
-type PendingStaged = {
-  runId: string;
-  resolve: (result: { decision: StagedDecision; feedback?: string }) => void;
-  timeout: NodeJS.Timeout;
-};
-
-const pendingStagedApprovals = new Map<string, PendingStaged>();
 
 export function requestStagedApproval(input: {
   runId: string;
@@ -42,7 +37,6 @@ export function requestStagedApproval(input: {
   }) => void;
   abortSignal?: AbortSignal;
   timeoutMs?: number;
-  /** When true, resolve immediately as "approve_all" without emission or pending state. */
   autoApprove?: boolean;
 }): Promise<{ approvalId: string; decision: StagedDecision; feedback?: string }> {
   const runId = String(input.runId || "").trim();
@@ -56,24 +50,23 @@ export function requestStagedApproval(input: {
 
   return new Promise((resolve) => {
     const finish = (result: { decision: StagedDecision; feedback?: string }): void => {
-      const entry = pendingStagedApprovals.get(approvalId);
-      if (entry) {
-        try { clearTimeout(entry.timeout); } catch {}
-        pendingStagedApprovals.delete(approvalId);
-      }
       resolve({ approvalId, ...result });
     };
 
-    const timeout = setTimeout(() => finish({ decision: "timeout" }), timeoutMs);
-    pendingStagedApprovals.set(approvalId, { runId, resolve: finish, timeout });
+    stagedRunIds.set(approvalId, runId);
+    registry.request("staged_diff", approvalId, {
+      runId,
+      resolve: (result: any) => { stagedRunIds.delete(approvalId); finish(result); },
+      abortSignal: input.abortSignal,
+      timeoutMs,
+      timeoutResult: { decision: "timeout" as StagedDecision },
+      abortResult: { decision: "reject" as StagedDecision },
+    });
 
-    if (input.abortSignal) {
-      if (input.abortSignal.aborted) { finish({ decision: "reject" }); return; }
-      const onAbort = (): void => {
-        try { input.abortSignal?.removeEventListener("abort", onAbort); } catch {}
-        finish({ decision: "reject" });
-      };
-      try { input.abortSignal.addEventListener("abort", onAbort, { once: true }); } catch {}
+    if (!registry._hasPending("staged_diff", approvalId)) {
+      // Already aborted — resolve with reject
+      resolve({ approvalId, decision: "reject" });
+      return;
     }
 
     // Emit LAST — synchronous resolvers find the registered entry.
@@ -90,6 +83,9 @@ export function requestStagedApproval(input: {
   });
 }
 
+// Side-map for runId validation
+const stagedRunIds = new Map<string, string>();
+
 export function resolveStagedApproval(input: {
   approvalId: string;
   runId: string;
@@ -98,24 +94,18 @@ export function resolveStagedApproval(input: {
 }): { ok: boolean; message?: string } {
   const approvalId = String(input.approvalId || "").trim();
   const runId = String(input.runId || "").trim();
-  const entry = pendingStagedApprovals.get(approvalId);
-  if (!entry) return { ok: false, message: "unknown_approval_id" };
-  if (runId && entry.runId && runId !== entry.runId) return { ok: false, message: "run_id_mismatch" };
-  entry.resolve({ decision: input.decision, feedback: input.feedback });
-  return { ok: true };
+  if (!approvalId) return { ok: false, message: "unknown_approval_id" };
+  const storedRunId = stagedRunIds.get(approvalId);
+  if (!storedRunId) return { ok: false, message: "unknown_approval_id" };
+  if (runId && storedRunId && runId !== storedRunId) return { ok: false, message: "run_id_mismatch" };
+  const resolved = registry.resolve("staged_diff", approvalId, {
+    decision: input.decision,
+    feedback: input.feedback,
+  });
+  if (resolved) stagedRunIds.delete(approvalId);
+  return resolved ? { ok: true } : { ok: false, message: "unknown_approval_id" };
 }
 
 export function rejectPendingStagedForRun(runIdRaw: string): number {
-  const runId = String(runIdRaw || "").trim();
-  if (!runId) return 0;
-  let n = 0;
-  for (const [approvalId, entry] of Array.from(pendingStagedApprovals.entries())) {
-    if (entry.runId === runId) {
-      n++;
-      try { entry.resolve({ decision: "reject" }); } catch {}
-      pendingStagedApprovals.delete(approvalId);
-      try { clearTimeout(entry.timeout); } catch {}
-    }
-  }
-  return n;
+  return registry.rejectByKindAndRun("staged_diff", runIdRaw);
 }

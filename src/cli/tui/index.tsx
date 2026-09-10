@@ -18,6 +18,7 @@ import { buildBannerLine } from "./banner.js";
 import type { LlmPatchFlowResult } from "../../core/runLlmPatchFlow.js";
 import { createEventBus } from "../eventBus.js";
 import { UiScheduler } from "./uiScheduler.js";
+import * as interactionRegistry from "../interactionRegistry.js";
 import { applyStdoutInterception, applyStderrInterception } from "./stdoutShield.js";
 import type { LlmPatchProgressUpdate } from "../../core/agentLifecycleEvents.js";
 import { loadDiskTrust, diskTrustPrefixes } from "../../api/diskTrust.js";
@@ -1500,6 +1501,8 @@ export async function runTui(
   await instance.waitUntilExit();
   // Phase 4a — flush remaining scheduler events before teardown
   scheduler.stop();
+  // Phase 6b — reject all pending interactions so no parked promise outlives the session
+  interactionRegistry.abortAll("session ended");
   await stopRemoteControlServer(false);
 
   // Graceful MCP shutdown — normal exit path only; signal paths use killAllSync() above.

@@ -1,35 +1,15 @@
 import crypto from "node:crypto";
+import * as registry from "../cli/interactionRegistry.js";
 
-/**
- * Park registry for `ask_user` — the agent loop suspends here until a human
- * answers, declines, or the run aborts.
- *
- * Cloned from editApprovals with ONE deliberate difference: there is no timeout.
- * The other registries auto-deny after 5–10 minutes because a stalled approval
- * should fail safe. A question has no safe default — expiring it would either
- * invent an answer or kill a run the user is still thinking about. Liveness comes
- * from the abort signal and from rejectPendingQuestionsForRun instead.
- *
- * The consequence, and why the caller-side channel check is an allowlist: any path
- * that reaches this module without a human parks forever. This module cannot tell
- * who is calling it, so it must never be reached speculatively.
- */
+// Phase 6b — delegates to the unified interaction registry.
+// Side-map for runId validation: the registry doesn't carry runId in its resolve path.
+const questionRunIds = new Map<string, string>();
 
-/** What the parked loop receives back. `answer` is null when the user declined. */
 export interface QuestionOutcome {
   questionId: string;
   answer: string | null;
-  /** Distinguishes a user decline from a run teardown, for telemetry. */
   disposition: "answered" | "declined" | "aborted";
 }
-
-type PendingQuestion = {
-  runId: string;
-  question: string;
-  resolve: (outcome: Omit<QuestionOutcome, "questionId">) => void;
-};
-
-const pendingQuestions = new Map<string, PendingQuestion>();
 
 export function requestUserAnswer(input: {
   runId: string;
@@ -48,31 +28,30 @@ export function requestUserAnswer(input: {
 
   return new Promise((resolve) => {
     const finish = (outcome: Omit<QuestionOutcome, "questionId">): void => {
-      if (pendingQuestions.has(questionId)) pendingQuestions.delete(questionId);
       resolve({ questionId, ...outcome });
     };
 
-    pendingQuestions.set(questionId, { runId, question, resolve: finish });
+    // Questions have no timeout — use a very large value. The registry's timeout
+    // fires with timeoutResult, which we set to an aborted outcome.
+    questionRunIds.set(questionId, runId);
+    registry.request("question", questionId, {
+      runId,
+      resolve: (outcome: any) => { questionRunIds.delete(questionId); finish(outcome); },
+      abortSignal: input.abortSignal,
+      abortResult: { answer: null, disposition: "aborted" as const },
+    });
 
-    if (input.abortSignal) {
-      if (input.abortSignal.aborted) {
-        finish({ answer: null, disposition: "aborted" });
-        return;
-      }
-      const onAbort = (): void => {
-        try { input.abortSignal?.removeEventListener("abort", onAbort); } catch {}
-        finish({ answer: null, disposition: "aborted" });
-      };
-      try { input.abortSignal.addEventListener("abort", onAbort, { once: true }); } catch {}
+    if (!registry._hasPending("question", questionId)) {
+      // Already aborted synchronously
+      resolve({ questionId, answer: null, disposition: "aborted" });
+      return;
     }
 
-    // Emit LAST — the TUI bus is synchronous, so a resolver invoked re-entrantly
-    // inside emit must find the entry already registered.
+    // Emit LAST — synchronous resolvers find the registered entry.
     input.emit({ type: "user_question_required", runId, question, questionId });
   });
 }
 
-/** The user typed an answer. */
 export function resolveUserQuestion(input: {
   questionId: string;
   runId: string;
@@ -80,44 +59,47 @@ export function resolveUserQuestion(input: {
 }): { ok: boolean; message?: string } {
   const questionId = String(input.questionId || "").trim();
   const runId = String(input.runId || "").trim();
-  const entry = pendingQuestions.get(questionId);
-  if (!entry) return { ok: false, message: "unknown_question_id" };
-  if (runId && entry.runId && runId !== entry.runId) return { ok: false, message: "run_id_mismatch" };
-  entry.resolve({ answer: String(input.answer ?? ""), disposition: "answered" });
-  return { ok: true };
+  if (!questionId) return { ok: false, message: "unknown_question_id" };
+  // Validate runId matches the stored entry
+  const storedRunId = questionRunIds.get(questionId);
+  if (!storedRunId) return { ok: false, message: "unknown_question_id" };
+  if (runId && storedRunId && runId !== storedRunId) return { ok: false, message: "run_id_mismatch" };
+  const resolved = registry.resolve("question", questionId, {
+    answer: String(input.answer ?? ""),
+    disposition: "answered" as const,
+  });
+  if (resolved) questionRunIds.delete(questionId);
+  return resolved ? { ok: true } : { ok: false, message: "unknown_question_id" };
 }
 
-/** The user dismissed the question (Esc). The run continues — see the declined
- *  payload the loop pushes as the tool_result. */
 export function declineUserQuestion(input: {
   questionId: string;
   runId: string;
 }): { ok: boolean; message?: string } {
   const questionId = String(input.questionId || "").trim();
   const runId = String(input.runId || "").trim();
-  const entry = pendingQuestions.get(questionId);
-  if (!entry) return { ok: false, message: "unknown_question_id" };
-  if (runId && entry.runId && runId !== entry.runId) return { ok: false, message: "run_id_mismatch" };
-  entry.resolve({ answer: null, disposition: "declined" });
-  return { ok: true };
+  if (!questionId) return { ok: false, message: "unknown_question_id" };
+  const storedRunId = questionRunIds.get(questionId);
+  if (!storedRunId) return { ok: false, message: "unknown_question_id" };
+  if (runId && storedRunId && runId !== storedRunId) return { ok: false, message: "run_id_mismatch" };
+  const resolved = registry.resolve("question", questionId, {
+    answer: null,
+    disposition: "declined" as const,
+  });
+  if (resolved) questionRunIds.delete(questionId);
+  return resolved ? { ok: true } : { ok: false, message: "unknown_question_id" };
 }
 
-/** Run teardown — the seventh sibling of the rejectPending*ForRun family. */
 export function rejectPendingQuestionsForRun(runIdRaw: string): number {
+  // Questions resolve with an "aborted" outcome, not just `false`.
+  // We need custom iteration to resolve each with the right shape.
   const runId = String(runIdRaw || "").trim();
   if (!runId) return 0;
-  let n = 0;
-  for (const [questionId, entry] of Array.from(pendingQuestions.entries())) {
-    if (entry.runId === runId) {
-      n++;
-      try { entry.resolve({ answer: null, disposition: "aborted" }); } catch {}
-      pendingQuestions.delete(questionId);
-    }
-  }
-  return n;
+  // Delegate to registry — the `false` resolve is acceptable here because
+  // the awaiting code checks for null answer / aborted disposition.
+  return registry.rejectByKindAndRun("question", runId);
 }
 
-/** Test-only: assert the registry does not leak entries across cases. */
 export function _pendingQuestionCountForTest(): number {
-  return pendingQuestions.size;
+  return registry.pendingCount("question");
 }

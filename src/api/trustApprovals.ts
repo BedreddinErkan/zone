@@ -1,11 +1,7 @@
-type PendingTrust = {
-  runId: string;
-  projectPath: string;
-  resolve: (ok: boolean) => void;
-  timeout: NodeJS.Timeout;
-};
+import * as registry from "../cli/interactionRegistry.js";
 
-const pendingTrusts = new Map<string, PendingTrust>(); // key = runId (one trust approval per run)
+// Phase 6b — delegates to the unified interaction registry.
+// Key is runId (one trust approval per run), not a UUID.
 
 export function requestTrustApproval(input: {
   runId: string;
@@ -28,25 +24,18 @@ export function requestTrustApproval(input: {
 
   return new Promise((resolve) => {
     const finish = (ok: boolean): void => {
-      const entry = pendingTrusts.get(runId);
-      if (entry) {
-        try { clearTimeout(entry.timeout); } catch {}
-        pendingTrusts.delete(runId);
-      }
       resolve(ok);
     };
 
-    const timeout = setTimeout(() => finish(false), timeoutMs);
-    pendingTrusts.set(runId, { runId, projectPath, resolve: finish, timeout });
+    registry.request("trust", runId, {
+      runId,
+      resolve: finish,
+      abortSignal: input.abortSignal,
+      timeoutMs,
+      timeoutResult: false,
+    });
 
-    if (input.abortSignal) {
-      if (input.abortSignal.aborted) { finish(false); return; }
-      const onAbort = (): void => {
-        try { input.abortSignal?.removeEventListener("abort", onAbort); } catch {}
-        finish(false);
-      };
-      try { input.abortSignal.addEventListener("abort", onAbort, { once: true }); } catch {}
-    }
+    if (!registry._hasPending("trust", runId)) return;
 
     // Emit LAST — synchronous resolvers find the registered entry.
     input.emit({
@@ -62,22 +51,11 @@ export function requestTrustApproval(input: {
 
 export function resolveTrustApproval(runId: string, ok: boolean): { ok: boolean; message?: string } {
   const runIdStr = String(runId || "").trim();
-  const entry = pendingTrusts.get(runIdStr);
-  if (!entry) return { ok: false, message: "unknown_run_id" };
-  entry.resolve(!!ok);
-  return { ok: true };
+  if (!runIdStr) return { ok: false, message: "unknown_run_id" };
+  const resolved = registry.resolve("trust", runIdStr, !!ok);
+  return resolved ? { ok: true } : { ok: false, message: "unknown_run_id" };
 }
 
 export function rejectPendingTrustForRun(runIdRaw: string): number {
-  const runId = String(runIdRaw || "").trim();
-  if (!runId) return 0;
-  let n = 0;
-  const entry = pendingTrusts.get(runId);
-  if (entry) {
-    n++;
-    try { entry.resolve(false); } catch {}
-    pendingTrusts.delete(runId);
-    try { clearTimeout(entry.timeout); } catch {}
-  }
-  return n;
+  return registry.rejectByKindAndRun("trust", runIdRaw);
 }

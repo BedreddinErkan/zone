@@ -1,10 +1,10 @@
 /**
  * Scope revision approval gate.
- * Tracks pending revision approvals for a run; live cleanup paths
- * (resolveRevisionApproval, rejectPendingRevisionsForRun) remain in use.
+ * Phase 6b — delegates to the unified interaction registry.
  */
 
 import crypto from "node:crypto";
+import * as registry from "../cli/interactionRegistry.js";
 
 export interface RevisionProposal {
   runId: string;
@@ -16,20 +16,7 @@ export interface RevisionProposal {
   unnecessaryFiles?: string[];
 }
 
-/** Y.0: "auto_apply" is emitted when a minor mismatch is silently applied
- *  (plan review off + severity=minor). UI shows a log line; no user prompt.
- *  Y.1.2: "timeout" is emitted when the approval wait exceeds the configured
- *  timeout — distinct from "reject" so callers can return revision_approval_timeout. */
 export type RevisionDecision = "approve" | "reject" | "auto_apply" | "timeout";
-
-type PendingRevision = {
-  runId: string;
-  proposal: RevisionProposal;
-  resolve: (decision: RevisionDecision) => void;
-  timeout: NodeJS.Timeout;
-};
-
-const pendingRevisions = new Map<string, PendingRevision>();
 
 export function requestRevisionApproval(input: {
   proposal: RevisionProposal;
@@ -46,7 +33,6 @@ export function requestRevisionApproval(input: {
   }) => void;
   abortSignal?: AbortSignal;
   timeoutMs?: number;
-  /** Y.1.1: when true, resolve immediately as "approve" without SSE emission or pending state. */
   autoApprove?: boolean;
 }): Promise<{ revisionId: string; decision: RevisionDecision }> {
   const revisionId = crypto.randomUUID();
@@ -62,31 +48,26 @@ export function requestRevisionApproval(input: {
   const { proposal } = input;
 
   return new Promise((resolve) => {
-    const finish = (decision: RevisionDecision) => {
-      const entry = pendingRevisions.get(revisionId);
-      if (entry) {
-        try { clearTimeout(entry.timeout); } catch {}
-        pendingRevisions.delete(revisionId);
-      }
+    const finish = (decision: RevisionDecision): void => {
       resolve({ revisionId, decision });
     };
 
-    const timeout = setTimeout(() => finish("timeout"), timeoutMs);
-    pendingRevisions.set(revisionId, { runId: proposal.runId, proposal, resolve: finish, timeout });
+    revisionRunIds.set(revisionId, proposal.runId);
+    registry.request("plan_revision", revisionId, {
+      runId: proposal.runId,
+      resolve: (decision: any) => { revisionRunIds.delete(revisionId); finish(decision); },
+      abortSignal: input.abortSignal,
+      timeoutMs,
+      timeoutResult: "timeout" as RevisionDecision,
+      abortResult: "reject" as RevisionDecision,
+    });
 
-    if (input.abortSignal) {
-      if (input.abortSignal.aborted) {
-        finish("reject");
-        return;
-      }
-      const onAbort = () => {
-        try { input.abortSignal?.removeEventListener("abort", onAbort as () => void); } catch {}
-        finish("reject");
-      };
-      try { input.abortSignal.addEventListener("abort", onAbort, { once: true }); } catch {}
+    if (!registry._hasPending("plan_revision", revisionId)) {
+      resolve({ revisionId, decision: "reject" });
+      return;
     }
 
-    // Emit LAST — synchronous resolvers (e.g. TUI bus) find the registered entry.
+    // Emit LAST — synchronous resolvers find the registered entry.
     input.emit({
       type: "scope_revision_proposed",
       runId: proposal.runId,
@@ -101,6 +82,9 @@ export function requestRevisionApproval(input: {
   });
 }
 
+// Side-map for runId validation
+const revisionRunIds = new Map<string, string>();
+
 export function resolveRevisionApproval(input: {
   revisionId: string;
   runId: string;
@@ -108,24 +92,15 @@ export function resolveRevisionApproval(input: {
 }): { ok: boolean; message?: string } {
   const revisionId = String(input.revisionId || "").trim();
   const runId = String(input.runId || "").trim();
-  const entry = pendingRevisions.get(revisionId);
-  if (!entry) return { ok: false, message: "unknown_revision_id" };
-  if (runId && entry.runId && runId !== entry.runId) return { ok: false, message: "run_id_mismatch" };
-  entry.resolve(input.decision);
-  return { ok: true };
+  if (!revisionId) return { ok: false, message: "unknown_revision_id" };
+  const storedRunId = revisionRunIds.get(revisionId);
+  if (!storedRunId) return { ok: false, message: "unknown_revision_id" };
+  if (runId && storedRunId && runId !== storedRunId) return { ok: false, message: "run_id_mismatch" };
+  const resolved = registry.resolve("plan_revision", revisionId, input.decision);
+  if (resolved) revisionRunIds.delete(revisionId);
+  return resolved ? { ok: true } : { ok: false, message: "unknown_revision_id" };
 }
 
 export function rejectPendingRevisionsForRun(runIdRaw: string): number {
-  const runId = String(runIdRaw || "").trim();
-  if (!runId) return 0;
-  let n = 0;
-  for (const [revisionId, entry] of Array.from(pendingRevisions.entries())) {
-    if (entry.runId === runId) {
-      n += 1;
-      try { entry.resolve("reject"); } catch {}
-      pendingRevisions.delete(revisionId);
-      try { clearTimeout(entry.timeout); } catch {}
-    }
-  }
-  return n;
+  return registry.rejectByKindAndRun("plan_revision", runIdRaw);
 }

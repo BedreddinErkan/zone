@@ -1,73 +1,47 @@
 /**
  * Plan-ready approval gate.
- * Emitted after plan generation when ZONE_PLAN_APPROVAL_CYCLE=1.
- * User chooses how to proceed before execution begins.
+ * Phase 6b — delegates to the unified interaction registry.
  */
 
 import { log } from "../utils/logger.js";
+import * as registry from "../cli/interactionRegistry.js";
 
 export interface PlanReadyProposal {
   runId: string;
   planId: string;
-  /** Optional — mirrors ExecutionPlan.objective (this pass). See executionPlan.ts's
-   *  type-level comment for why. */
   objective?: string;
   steps: Array<{ title: string; description: string; filesLikely: string[]; subagentEligible?: boolean }>;
   scopeNotes?: string;
   noChangeReason?: string;
   cannotVerifyReason?: string;
   answerOnlyReason?: string;
-  /** Optional — mirrors ExecutionPlan.riskHints. */
   riskHints?: string[];
-  /** Optional — mirrors ExecutionPlan.scopeSummary. */
   scopeSummary?: string;
-  /** D1/D3 (plan widening). */
   narrative?: string;
   filesLikely?: string[];
 }
 
-/**
- * A stepless (`noChangeReason`/`cannotVerifyReason`) plan reached this gate.
- *
- * The three gates that normally guarantee non-empty steps before the plan-first
- * loop starts (E8a, E8b, the forceSteps/synthesizeMinimalPlan safety net —
- * dispatch.ts) do not re-run after a replan. `reviewed` separates the two ways
- * this can happen: `feedback`/`refine` loop back into `requestPlanApproval`, so
- * the user sees it; `approve_with_feedback` does not loop back — the plan goes
- * straight to execution with nothing shown. The unreviewed count is the one
- * that matters, which is why this is one marker with a field rather than two.
- *
- * `log()`, matching `[zone-tier-grant-unusable]` (loopTelemetry.ts) — fires
- * unconditionally, no ZONE_VERBOSE_LOGS gate. This is diagnostic only: it does
- * not change what happens next, and it does not itself make the count
- * queryable — see the commit message for what that claim does and does not
- * cover.
- */
 export function emitPlanEmptyApproval(data: {
   runId: string;
   reasonField: "noChangeReason" | "cannotVerifyReason" | "answerOnlyReason" | "unknown";
   reviewed: boolean;
 }): void {
+  // `log()`, matching `[zone-tier-grant-unusable]` (loopTelemetry.ts) — fires
+  // unconditionally, no ZONE_VERBOSE_LOGS gate. This is diagnostic only: it does
+  // not change what happens next, and it does not itself make the count
+  // queryable — see the commit message for what that claim does and does not
+  // cover.
   log("[zone-plan-empty-approval]", JSON.stringify(data));
 }
 
 export type PlanDecision =
-  | "accept_all"           // auto-approve all edits + commands for this run
-  | "manual"               // approve commands normally; edits auto-apply
-  | "refine"               // regenerate the plan without feedback
-  | "feedback"             // give feedback, regenerate, re-show modal (stay in plan mode)
-  | "approve_with_feedback" // give feedback, regenerate once, then execute
-  | "reject"               // cancel the run
-  | "timeout";             // approval wait exceeded timeout
-
-type PendingPlan = {
-  runId: string;
-  proposal: PlanReadyProposal;
-  resolve: (result: { decision: PlanDecision; feedback?: string }) => void;
-  timeout: NodeJS.Timeout;
-};
-
-const pendingPlans = new Map<string, PendingPlan>();
+  | "accept_all"
+  | "manual"
+  | "refine"
+  | "feedback"
+  | "approve_with_feedback"
+  | "reject"
+  | "timeout";
 
 export function requestPlanApproval(input: {
   proposal: PlanReadyProposal;
@@ -77,8 +51,6 @@ export function requestPlanApproval(input: {
     ts: number;
     title: string;
     planId: string;
-    // objective/riskHints/scopeSummary optional (this pass) — mirrors ExecutionPlan's own
-    // fields, all three demoted the same way and for the same reason.
     planObjective?: string;
     planStepsJson: string;
     planScopeNotes?: string;
@@ -92,7 +64,6 @@ export function requestPlanApproval(input: {
   }) => void;
   abortSignal?: AbortSignal;
   timeoutMs?: number;
-  /** When true, resolve immediately as "accept_all" without SSE emission or pending state. */
   autoApprove?: boolean;
 }): Promise<{ planId: string; decision: PlanDecision; feedback?: string; modalEmitted: boolean }> {
   const { proposal } = input;
@@ -108,36 +79,27 @@ export function requestPlanApproval(input: {
       : 10 * 60 * 1000;
 
   return new Promise((resolve) => {
-    // Whether input.emit (the thing that renders PlanReadyModal) actually fired. Read by
-    // `finish` at call time, not capture time — a caller resolving before the flag flips
-    // (the already-aborted branch below) correctly reports false; every other resolver runs
-    // after it flips, since all of them are responses to a modal that was already shown.
     let modalEmitted = false;
-    const finish = (result: { decision: PlanDecision; feedback?: string }) => {
-      const entry = pendingPlans.get(planId);
-      if (entry) {
-        try { clearTimeout(entry.timeout); } catch {}
-        pendingPlans.delete(planId);
-      }
+    const finish = (result: { decision: PlanDecision; feedback?: string }): void => {
       resolve({ planId, decision: result.decision, feedback: result.feedback, modalEmitted });
     };
 
-    const timeout = setTimeout(() => finish({ decision: "timeout" }), timeoutMs);
-    pendingPlans.set(planId, { runId: proposal.runId, proposal, resolve: finish, timeout });
+    planRunIds.set(planId, proposal.runId);
+    registry.request("plan_ready", planId, {
+      runId: proposal.runId,
+      resolve: (result: any) => { planRunIds.delete(planId); finish(result); },
+      abortSignal: input.abortSignal,
+      timeoutMs,
+      timeoutResult: { decision: "timeout" as PlanDecision },
+      abortResult: { decision: "reject" as PlanDecision },
+    });
 
-    if (input.abortSignal) {
-      if (input.abortSignal.aborted) {
-        finish({ decision: "reject" });
-        return;
-      }
-      const onAbort = () => {
-        try { input.abortSignal?.removeEventListener("abort", onAbort as () => void); } catch {}
-        finish({ decision: "reject" });
-      };
-      try { input.abortSignal.addEventListener("abort", onAbort, { once: true }); } catch {}
+    if (!registry._hasPending("plan_ready", planId)) {
+      finish({ decision: "reject" });
+      return;
     }
 
-    // Emit LAST — synchronous resolvers (e.g. TUI bus) find the registered entry.
+    // Emit LAST — synchronous resolvers find the registered entry.
     input.emit({
       type: "plan_ready_for_approval",
       runId: proposal.runId,
@@ -159,6 +121,9 @@ export function requestPlanApproval(input: {
   });
 }
 
+// Side-map for runId validation
+const planRunIds = new Map<string, string>();
+
 export function resolvePlanApproval(input: {
   planId: string;
   runId: string;
@@ -167,24 +132,18 @@ export function resolvePlanApproval(input: {
 }): { ok: boolean; message?: string } {
   const planId = String(input.planId || "").trim();
   const runId = String(input.runId || "").trim();
-  const entry = pendingPlans.get(planId);
-  if (!entry) return { ok: false, message: "unknown_plan_id" };
-  if (runId && entry.runId && runId !== entry.runId) return { ok: false, message: "run_id_mismatch" };
-  entry.resolve({ decision: input.decision, feedback: input.feedback });
-  return { ok: true };
+  if (!planId) return { ok: false, message: "unknown_plan_id" };
+  const storedRunId = planRunIds.get(planId);
+  if (!storedRunId) return { ok: false, message: "unknown_plan_id" };
+  if (runId && storedRunId && runId !== storedRunId) return { ok: false, message: "run_id_mismatch" };
+  const resolved = registry.resolve("plan_ready", planId, {
+    decision: input.decision,
+    feedback: input.feedback,
+  });
+  if (resolved) planRunIds.delete(planId);
+  return resolved ? { ok: true } : { ok: false, message: "unknown_plan_id" };
 }
 
 export function rejectPendingPlansForRun(runIdRaw: string): number {
-  const runId = String(runIdRaw || "").trim();
-  if (!runId) return 0;
-  let n = 0;
-  for (const [planId, entry] of Array.from(pendingPlans.entries())) {
-    if (entry.runId === runId) {
-      n += 1;
-      try { entry.resolve({ decision: "reject" }); } catch {}
-      pendingPlans.delete(planId);
-      try { clearTimeout(entry.timeout); } catch {}
-    }
-  }
-  return n;
+  return registry.rejectByKindAndRun("plan_ready", runIdRaw);
 }
