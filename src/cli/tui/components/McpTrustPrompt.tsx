@@ -22,7 +22,7 @@ export function McpTrustPrompt(): React.ReactElement | null {
   const { config, projectPath } = pending;
 
   useInput((input, key) => {
-    if (input === "a" || input === "A") {
+    if (input === "y" || input === "Y") {
       (async () => {
         try {
           const [{ recordMcpTrust }, { McpClientManager }] = await Promise.all([
@@ -70,7 +70,7 @@ export function McpTrustPrompt(): React.ReactElement | null {
         ))}
       </Box>
       <Box marginTop={spacing.sm}>
-        <Text bold color={role.success}>[a]</Text>
+        <Text bold color={role.success}>[y]</Text>
         <Text> Approve and connect{"  "}</Text>
         <Text bold color={role.danger}>[N]</Text>
         <Text> Keep disabled</Text>

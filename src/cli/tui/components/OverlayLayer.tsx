@@ -185,14 +185,14 @@ export function OverlayLayer(): React.ReactElement | null {
     case "hookTrust":
       children = <HookTrustPrompt />;
       keyHints = [
-        { key: "a", label: "approve", primary: true },
+        { key: "y", label: "approve", primary: true },
         { key: "N", label: "disable" },
       ];
       break;
     case "mcpTrust":
       children = <McpTrustPrompt />;
       keyHints = [
-        { key: "a", label: "approve", primary: true },
+        { key: "y", label: "approve", primary: true },
         { key: "N", label: "disable" },
       ];
       break;

@@ -28,7 +28,7 @@ export function HookTrustPrompt(): React.ReactElement | null {
   const { config, projectPath } = pending;
 
   useInput((input, key) => {
-    if (input === "a" || input === "A") {
+    if (input === "y" || input === "Y") {
       import("../../../api/diskTrustedHooks.js").then(({ recordHooksTrust }) => {
         if (state.pendingHookTrust) {
           recordHooksTrust(state.pendingHookTrust.projectPath, state.pendingHookTrust.hash);
@@ -71,7 +71,7 @@ export function HookTrustPrompt(): React.ReactElement | null {
         </Box>
       )}
       <Box marginTop={spacing.sm}>
-        <Text bold color={role.success}>{"[a]"}</Text>
+        <Text bold color={role.success}>{"[y]"}</Text>
         <Text> Approve and arm  </Text>
         <Text bold color={role.danger}>{"[N]"}</Text>
         <Text> Keep disabled</Text>
