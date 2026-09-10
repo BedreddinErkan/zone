@@ -1,4 +1,4 @@
-import { useEffect, useRef, type Dispatch, type MutableRefObject, type RefObject } from "react";
+import { useEffect, useRef, type Dispatch, type RefObject } from "react";
 import type { EventBus } from "../../eventBus.js";
 import type { StoreAction, TuiMode } from "../store.js";
 import type { ZoneStructuredProgressEvent } from "../../../core/agentLifecycleEvents.js";
@@ -111,22 +111,15 @@ export function handleStagedDiffsReadyExported(
 }
 
 // ---------------------------------------------------------------------------
-// flushBuffer — stateful utility; stays here because it owns the refs
+// flushBuffer — Phase 4a: scheduler now owns narration coalescing and ordering.
+// flushFirst handlers still call this, but it is now a no-op since there is
+// no local buffer to drain. Kept as a function so call sites stay unchanged
+// and the scheduler's ordering guarantee is the single source of truth.
 // ---------------------------------------------------------------------------
 
-function flushBuffer(
-  localBuffer: MutableRefObject<string>,
-  debounceTimer: MutableRefObject<ReturnType<typeof setTimeout> | null>,
-  dispatch: Dispatch<StoreAction>
-): void {
-  if (debounceTimer.current !== null) {
-    clearTimeout(debounceTimer.current);
-    debounceTimer.current = null;
-  }
-  if (localBuffer.current) {
-    dispatch({ type: "TRANSCRIPT_APPEND_NARRATION", text: localBuffer.current });
-    localBuffer.current = "";
-  }
+function flushBuffer(): void {
+  // No-op: the uiScheduler flushes coalesce buffers before every batch/priority
+  // emission, guaranteeing narration_batch arrives before the tool_call that follows.
 }
 
 // ---------------------------------------------------------------------------
@@ -172,50 +165,35 @@ export function useAgentEvents(
   trustedPrefixesRef: RefObject<string[]> = { current: [] },
   modeRef: RefObject<TuiMode> = { current: "normal" }
 ): void {
-  const localBuffer = useRef("");
-  const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Assistant-text deltas: a dedicated buffer, deliberately NOT localBuffer/debounceTimer
-  // above — reusing those would commit streamed fragments into the same narration entries
-  // ASSISTANT_FINAL also writes. Reset/accumulate/cap logic lives in the pure
-  // computeStreamingAnswerUpdate above (see its own doc comment); these refs just hold its
-  // running state across events.
+  // Phase 4a — streaming answer state still lives here (the scheduler only
+  // coalesces deltas into streaming_batch; the reset/accumulate/cap logic for
+  // the store field stays in the consumer).
   const streamingAnswerBuffer = useRef("");
   const streamingAnswerLastKey = useRef<string | null>(null);
-  const streamingAnswerTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!bus) return;
 
-    // Narration text: debounced — NOT handled by eventToActions
-    function handleTextEvent(evt: ZoneStructuredProgressEvent): void {
-      const text = evt.text ?? evt.delta ?? evt.title ?? "";
+    // Phase 4a — narration_batch arrives from the scheduler with aggregated text.
+    // Same dispatch the old debounced flush produced.
+    function handleNarrationBatch(evt: ZoneStructuredProgressEvent): void {
+      const text = (evt as any).text as string | undefined;
       if (!text) return;
-      localBuffer.current += text;
-      if (debounceTimer.current !== null) clearTimeout(debounceTimer.current);
-      debounceTimer.current = setTimeout(() => {
-        dispatch({ type: "TRANSCRIPT_APPEND_NARRATION", text: localBuffer.current });
-        localBuffer.current = "";
-        debounceTimer.current = null;
-      }, 200);
+      dispatch({ type: "TRANSCRIPT_APPEND_NARRATION", text });
     }
 
-    function handleStreamingAnswerEvent(evt: ZoneStructuredProgressEvent): void {
-      if (!evt.delta) return;
+    // Phase 4a — streaming_batch arrives from the scheduler with aggregated delta text.
+    // Uses the same computeStreamingAnswerUpdate for reset/accumulate/cap semantics.
+    function handleStreamingBatch(evt: ZoneStructuredProgressEvent): void {
+      const text = (evt as any).text as string | undefined;
+      if (!text) return;
       const { buffer, key } = computeStreamingAnswerUpdate(
         { buffer: streamingAnswerBuffer.current, key: streamingAnswerLastKey.current },
-        evt
+        { runId: evt.runId, iter: evt.iter, delta: text },
       );
       streamingAnswerBuffer.current = buffer;
       streamingAnswerLastKey.current = key;
-      if (streamingAnswerTimer.current !== null) clearTimeout(streamingAnswerTimer.current);
-      streamingAnswerTimer.current = setTimeout(() => {
-        // Intentionally NOT cleared after dispatch, unlike localBuffer above: this ref holds
-        // the full accumulated text for the current turn, because STREAMING_ANSWER_SET is a
-        // wholesale set, not an append — the store field must receive the complete string on
-        // every flush, not just the newest increment.
-        dispatch({ type: "STREAMING_ANSWER_SET", text: streamingAnswerBuffer.current });
-        streamingAnswerTimer.current = null;
-      }, 200);
+      dispatch({ type: "STREAMING_ANSWER_SET", text: streamingAnswerBuffer.current });
     }
 
     const ctx = (): EventCtx => ({
@@ -242,9 +220,10 @@ export function useAgentEvents(
       applyActions(actions);
     };
 
-    // Flush-first: flushBuffer before intents/actions
+    // Flush-first: Phase 4a — flushBuffer is now a no-op (scheduler owns ordering).
+    // The handler still runs eventToActions + intents/actions in the same order.
     const flushFirst = (evt: ZoneStructuredProgressEvent) => {
-      flushBuffer(localBuffer, debounceTimer, dispatch);
+      flushBuffer();
       const { actions, intents } = eventToActions(evt, ctx());
       applyIntents(intents);
       applyActions(actions);
@@ -257,7 +236,7 @@ export function useAgentEvents(
       const { actions, intents } = eventToActions(evt, ctx());
       applyIntents(intents);
       if (actions.length > 0) {
-        flushBuffer(localBuffer, debounceTimer, dispatch);
+        flushBuffer();
         applyActions(actions);
       }
     };
@@ -267,10 +246,13 @@ export function useAgentEvents(
     bus.on("agent_loop_start",         simple);
     bus.on("agent_loop_complete",      flushFirst);
     bus.on("run_summary",              flushFirst);
-    bus.on("narration",                handleTextEvent);
+    // Phase 4a — scheduler emits narration_batch on "narration" channel and
+    // streaming_batch on "chat_chunk" channel. The original event types are
+    // coalesced by the scheduler and never reach these handlers directly.
+    bus.on("narration",                handleNarrationBatch);
     bus.on("thinking",                 simple);
-    bus.on("chat_chunk",               handleStreamingAnswerEvent);
-    bus.on("chat_response",            handleTextEvent);
+    bus.on("chat_chunk",               handleStreamingBatch);
+    bus.on("chat_response",            handleNarrationBatch);
     bus.on("tool_call",                flushFirst);
     bus.on("tool_result",              simple);
     bus.on("terminal_output",          simple);
@@ -312,19 +294,15 @@ export function useAgentEvents(
     bus.on("mcp_tool_called",                 simple);
 
     return () => {
-      if (debounceTimer.current !== null) {
-        clearTimeout(debounceTimer.current);
-        debounceTimer.current = null;
-      }
       bus.off("run_failed",               flushFirst);
       bus.off("plan_ready_for_approval",  simple);
       bus.off("agent_loop_start",         simple);
       bus.off("agent_loop_complete",      flushFirst);
       bus.off("run_summary",              flushFirst);
-      bus.off("narration",                handleTextEvent);
+      bus.off("narration",                handleNarrationBatch);
       bus.off("thinking",                 simple);
-      bus.off("chat_chunk",               handleStreamingAnswerEvent);
-      bus.off("chat_response",            handleTextEvent);
+      bus.off("chat_chunk",               handleStreamingBatch);
+      bus.off("chat_response",            handleNarrationBatch);
       bus.off("tool_call",                flushFirst);
       bus.off("tool_result",              simple);
       bus.off("terminal_output",          simple);

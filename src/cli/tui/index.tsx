@@ -17,6 +17,7 @@ import { resolveInitialTuiMode } from "./initialMode.js";
 import { buildBannerLine } from "./banner.js";
 import type { LlmPatchFlowResult } from "../../core/runLlmPatchFlow.js";
 import { createEventBus } from "../eventBus.js";
+import { UiScheduler } from "./uiScheduler.js";
 import { applyStdoutInterception, applyStderrInterception } from "./stdoutShield.js";
 import type { LlmPatchProgressUpdate } from "../../core/agentLifecycleEvents.js";
 import { loadDiskTrust, diskTrustPrefixes } from "../../api/diskTrust.js";
@@ -279,6 +280,8 @@ export interface _RunPromptDeps {
     currentEnvelopeKey?: string | null;
   };
   bus: import("../eventBus.js").EventBus;
+  /** Phase 4a — scheduler sits between the producer and the bus. */
+  scheduler: import("./uiScheduler.js").UiScheduler;
   localSessionId: string;
   /** Durable resume: consumed on the first prompt run if set; null afterward. */
   pendingEnvelopeResume?: Awaited<ReturnType<typeof buildResumeFlowInput>> | null;
@@ -552,7 +555,8 @@ export async function _runPromptImpl(
     if (typeof update === "string") return;
     const evt = update.progress;
     if (evt) {
-      bus.emit(evt.type, evt);
+      // Phase 4a — scheduler owns lane assignment and ordering guarantees.
+      deps.scheduler.enqueue(evt);
     }
   };
   let runResult: LlmPatchFlowResult | undefined;
@@ -1173,11 +1177,15 @@ export async function runTui(
   });
 
   const bus = createEventBus();
+  // Phase 4a — scheduler between producer and bus. Start before render so
+  // the 16ms tick is running when the first events arrive.
+  const scheduler = new UiScheduler(bus);
+  scheduler.start();
   // Pre-compute the session ID before React renders. On the first prompt (mount useEffect),
   // storeCapture.state is null → _resolveSessionId falls back to this guaranteed ID.
   // App.tsx receives it as initialSessionId so the store's sessionId matches (same .jsonl file).
   const localSessionId = pendingEnvelopeResume?.sessionId ?? resumedSession?.sessionId ?? randomUUID();
-  const runPromptDeps: _RunPromptDeps = { config, storeCapture, bus, localSessionId, pendingEnvelopeResume };
+  const runPromptDeps: _RunPromptDeps = { config, storeCapture, bus, scheduler, localSessionId, pendingEnvelopeResume };
   const runPrompt = (prompt: string, ac: AbortController, mode: TuiMode = "normal", images?: import("../../api/imageUpload.js").ImageAttachment[]): void => {
     void _runPromptImpl(prompt, ac, mode, images, runPromptDeps);
   };
@@ -1444,6 +1452,8 @@ export async function runTui(
 
   // Single path: wait for explicit exit (Ctrl+C → \x03 in useInput → useApp.exit())
   await instance.waitUntilExit();
+  // Phase 4a — flush remaining scheduler events before teardown
+  scheduler.stop();
   await stopRemoteControlServer(false);
 
   // Graceful MCP shutdown — normal exit path only; signal paths use killAllSync() above.

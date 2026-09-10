@@ -57,8 +57,8 @@ describe("TUI.2 transcript rendering", () => {
     const bus = createEventBus();
     const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
 
-    bus.emit("chat_chunk", makeEvt("chat_chunk", { delta: "Hello ", iter: 1 }));
-    bus.emit("chat_chunk", makeEvt("chat_chunk", { delta: "world", iter: 1 }));
+    // Phase 4a — tests bypass the scheduler, so emit the post-scheduler streaming_batch shape
+    bus.emit("chat_chunk", makeEvt("chat_chunk", { text: "Hello world", iter: 1 }));
     await wait(250);
 
     // Visible while streaming — the live region below <Static>.
@@ -79,9 +79,10 @@ describe("TUI.2 transcript rendering", () => {
     const bus = createEventBus();
     const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
 
-    for (let i = 0; i < 10; i++) {
-      bus.emit("chat_chunk", makeEvt("chat_chunk", { delta: `chunk${i} `, iter: 1 }));
-    }
+    // Phase 4a — emit the post-scheduler streaming_batch shape (all fragments pre-concatenated
+    // since the scheduler coalesces them; the test verifies the consumer renders the result)
+    const allChunks = Array.from({ length: 10 }, (_, i) => `chunk${i} `).join("");
+    bus.emit("chat_chunk", makeEvt("chat_chunk", { text: allChunks, iter: 1 }));
     await wait(250);
 
     // Previously this test emitted, waited, and unmounted with no assertion at all — its comment

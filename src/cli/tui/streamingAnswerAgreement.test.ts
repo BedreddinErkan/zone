@@ -41,15 +41,17 @@ function producerType(): string {
 /** The type string the TUI routes to the live-preview handler. */
 function consumerType(): string {
   const src = fs.readFileSync(HOOK, "utf8");
-  const m = /bus\.on\("([a-z_]+)",\s*handleStreamingAnswerEvent\)/.exec(src);
-  expect(m, "no bus.on registration for handleStreamingAnswerEvent").not.toBeNull();
+  // Phase 4a — handler renamed from handleStreamingAnswerEvent to handleStreamingBatch
+  const m = /bus\.on\("([a-z_]+)",\s*handleStreamingBatch\)/.exec(src);
+  expect(m, "no bus.on registration for handleStreamingBatch").not.toBeNull();
   return m![1]!;
 }
 
 /** Every type string bound to the narration/commit handler. */
 function committedTypes(): string[] {
   const src = fs.readFileSync(HOOK, "utf8");
-  return [...src.matchAll(/bus\.on\("([a-z_]+)",\s*handleTextEvent\)/g)].map((m) => m[1]!);
+  // Phase 4a — handler renamed from handleTextEvent to handleNarrationBatch
+  return [...src.matchAll(/bus\.on\("([a-z_]+)",\s*handleNarrationBatch\)/g)].map((m) => m[1]!);
 }
 
 /** Does a consumer file carry a switch arm for this type? */
