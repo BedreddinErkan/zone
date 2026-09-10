@@ -8,6 +8,7 @@ import type { DiskModelSettings } from "../../api/diskModel.js";
 import { visibleModelRows, selectedIndexForCurrent } from "./modelPickerList.js";
 import { supportsEffort, effortLevelsFor, USER_FACING_MODELS, getDefaultModelId } from "../../llm/modelRegistry.js";
 import type { EffortLevel } from "../../llm/modelRegistry.js";
+import type { LLMProvider } from "../../llm/types.js";
 import type { RunTodo, TodoStatus } from "../../core/todoLifecycle.js";
 import { startTodo, completeTodo } from "../../core/todoLifecycle.js";
 import type { UserCommand } from "./userCommands.js";
@@ -196,7 +197,29 @@ export interface SubagentThread {
   summary?: string;
 }
 
+/** Phase 6a — config-as-state. The store is the single source of truth for anything the TUI
+ *  reads; disk is a persistence effect; runs consume an immutable snapshot taken at run start.
+ *  Fields mirror the mutable subset of CliConfig so that onModelApply and key fallbacks route
+ *  through CONFIG_PATCHED instead of mutating the original object. */
+export interface RunConfigShape {
+  model: string;
+  provider: LLMProvider;
+  profile?: ProviderProfile;
+  profileApiKey?: string;
+  pendingProfileId?: string;
+  anthropicApiKey?: string;
+  openaiApiKey?: string;
+  effort?: EffortLevel;
+  summaryFormat?: "compact" | "detailed";
+  memoryEnabled?: boolean;
+  commitOnSuccess?: boolean;
+  webSearchEnabled?: boolean;
+  dailyCapUsd: number;
+}
+
 export type StoreState = {
+  /** Phase 6a — immutable config snapshot. Mutated only via CONFIG_PATCHED. */
+  config: RunConfigShape;
   transcript: TranscriptEntry[];
   sessionId: string;
   sessionStartedAt: string;
@@ -381,8 +404,18 @@ export function buildInitialState(initialValues?: {
   carriedQuestion?: Extract<PendingQuestion, { kind: "carried" }> | null;
   /** Test-only seed for the live streaming-answer preview (frame-cost measurement harness). */
   seedStreamingAnswer?: string;
+  /** Phase 6a — initial config snapshot from CliConfig. Required at startup. */
+  initialConfig?: RunConfigShape;
 }): StoreState {
+  // Phase 6a — config-as-state: the store owns the config snapshot. If no initial config
+  // is provided (tests), construct a minimal default.
+  const config: RunConfigShape = initialValues?.initialConfig ?? {
+    model: initialValues?.model ?? "",
+    provider: "anthropic" as LLMProvider,
+    dailyCapUsd: initialValues?.capUsd ?? 10,
+  };
   return {
+    config,
     transcript: initialValues?.resumedTranscript ?? [],
     sessionId: initialValues?.resumedSessionId ?? randomUUID(),
     sessionStartedAt: initialValues?.resumedStartedAt ?? new Date().toISOString(),
@@ -474,6 +507,10 @@ export function buildInitialState(initialValues?: {
 }
 
 export type StoreAction =
+  // Phase 6a — config-as-state. CONFIG_PATCHED merges a partial config update immutably.
+  // CONFIG_PERSISTED is dispatched after the disk write succeeds (informational only).
+  | { type: "CONFIG_PATCHED"; patch: Partial<RunConfigShape> }
+  | { type: "CONFIG_PERSISTED"; path: string }
   | { type: "SPINNER_START"; label: string }
   | { type: "SPINNER_UPDATE"; label: string }
   | { type: "SPINNER_RESUME" }
@@ -742,8 +779,22 @@ function appendEntry(state: StoreState, entry: TranscriptEntry): StoreState {
   return { ...state, transcript };
 }
 
+/** Phase 6a — constructs an immutable config snapshot from the current store state.
+ *  Runs consume this snapshot at startup; mid-run CONFIG_PATCHED changes apply to the
+ *  NEXT run, never the current one. The returned object is a fresh copy each time. */
+export function buildRunConfig(state: StoreState): RunConfigShape {
+  return { ...state.config };
+}
+
 export function reducer(state: StoreState, action: StoreAction): StoreState {
   switch (action.type) {
+    // Phase 6a — config-as-state. Immutable merge; the old config object is never mutated.
+    case "CONFIG_PATCHED":
+      return { ...state, config: { ...state.config, ...action.patch } };
+    case "CONFIG_PERSISTED":
+      // Informational only — the disk write succeeded. No state change needed.
+      return state;
+
     case "SPINNER_START":
       return {
         ...state,

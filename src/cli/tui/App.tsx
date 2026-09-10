@@ -65,6 +65,8 @@ interface AppProps {
   initialPendingMcpTrust?: { config: import("../../api/diskMcp.js").McpConfig; hash: string; projectPath: string } | null;
   /** --resume landing on an envelope that stopped mid-question. */
   initialCarriedQuestion?: Extract<import("./store-core.js").PendingQuestion, { kind: "carried" }> | null;
+  /** Phase 6a — initial config snapshot from CliConfig. */
+  initialConfig?: import("./store-core.js").RunConfigShape;
 }
 
 interface AppInnerProps {
@@ -270,7 +272,7 @@ function AppInner({ bus, initialPrompt, initialMode, onSubmit, onUndoRequest, on
   );
 }
 
-export function App({ initialPrompt, initialMode, bus, initialModel, capUsd, initialDailyUsedUsd, onSubmit, onUndoRequest, onRemoteControlCommand, onEnvelopeResume, onCarriedAnswer, onCarriedDiscard, initialTrustedPrefixes, resumedSession, initialSessionId, onStateChange, initialModelSettings, initialProvidersWithKey, gatewayIds, activeProfile, onModelApply, getCommitData, getFeedbackData, onDispatchCapture, onSessionClear, initialUserCommands, initialArmedUserHooks, initialPendingHookTrust, initialArmedMcpManager, initialPendingMcpTrust, initialCarriedQuestion }: AppProps): React.ReactElement {
+export function App({ initialPrompt, initialMode, bus, initialModel, capUsd, initialDailyUsedUsd, onSubmit, onUndoRequest, onRemoteControlCommand, onEnvelopeResume, onCarriedAnswer, onCarriedDiscard, initialTrustedPrefixes, resumedSession, initialSessionId, onStateChange, initialModelSettings, initialProvidersWithKey, gatewayIds, activeProfile, onModelApply, getCommitData, getFeedbackData, onDispatchCapture, onSessionClear, initialUserCommands, initialArmedUserHooks, initialPendingHookTrust, initialArmedMcpManager, initialPendingMcpTrust, initialCarriedQuestion, initialConfig }: AppProps): React.ReactElement {
   return (
     <StoreProvider initialValues={{
       model: initialModel ?? "",
@@ -291,6 +293,7 @@ export function App({ initialPrompt, initialMode, bus, initialModel, capUsd, ini
       armedMcpManager: initialArmedMcpManager,
       pendingMcpTrust: initialPendingMcpTrust,
       carriedQuestion: initialCarriedQuestion,
+      initialConfig,
     }}>
       <AppInner bus={bus} initialPrompt={initialPrompt} initialMode={initialMode} onSubmit={onSubmit} onUndoRequest={onUndoRequest} onRemoteControlCommand={onRemoteControlCommand} onEnvelopeResume={onEnvelopeResume} onCarriedAnswer={onCarriedAnswer} onCarriedDiscard={onCarriedDiscard} onStateChange={onStateChange} onModelApply={onModelApply} getCommitData={getCommitData} getFeedbackData={getFeedbackData} onDispatchCapture={onDispatchCapture} onSessionClear={onSessionClear} />
     </StoreProvider>

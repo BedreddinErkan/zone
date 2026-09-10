@@ -1416,19 +1416,46 @@ export async function runTui(
         initialPendingHookTrust={initialPendingHookTrust}
         initialArmedMcpManager={initialArmedMcpManager}
         initialPendingMcpTrust={initialPendingMcpTrust}
+        // Phase 6a — config-as-state. initialConfig snapshots the CliConfig at startup;
+        // onModelApply dispatches CONFIG_PATCHED instead of mutating the config object.
+        // The original CliConfig stays as the run-consumed snapshot for the CURRENT run;
+        // mid-run changes apply to the NEXT run via buildRunConfig(state).
+        initialConfig={{
+          model: config.model,
+          provider: config.provider,
+          ...(config.profile ? { profile: config.profile } : {}),
+          ...(config.profileApiKey ? { profileApiKey: config.profileApiKey } : {}),
+          ...(config.pendingProfileId ? { pendingProfileId: config.pendingProfileId } : {}),
+          ...(config.anthropicApiKey ? { anthropicApiKey: config.anthropicApiKey } : {}),
+          ...(config.openaiApiKey ? { openaiApiKey: config.openaiApiKey } : {}),
+          effort: config.effort,
+          summaryFormat: config.summaryFormat,
+          memoryEnabled: config.memoryEnabled,
+          commitOnSuccess: config.commitOnSuccess,
+          webSearchEnabled: config.webSearchEnabled,
+          dailyCapUsd: config.dailyUsdCap,
+        }}
         onModelApply={(model, provider, effort, summaryFormat, memoryEnabled, commitOnSuccess) => {
-          config.model = model;
-          // A gateway id is NOT an LLMProvider, so casting it into `config.provider` would put a
-          // value there that no adapter branch matches. `applyProviderSelection` resolves it to a
-          // profile and lets `providerOf` supply the protocol selector; `applyDiskKeyFallbacks`
-          // fills the key on the next run, the same "active on next run" contract /keys states.
-          // Shared with the startup path above, which is what makes the two agree — they did not,
-          // and that disagreement is the 2.2.1 report.
-          applyProviderSelection(config, provider);
-          config.effort = effort;
-          config.summaryFormat = summaryFormat;
-          config.memoryEnabled = memoryEnabled;
-          config.commitOnSuccess = commitOnSuccess ?? false;
+          // Phase 6a — instead of mutating the CliConfig in-place, resolve the provider
+          // selection on a scratch copy, then dispatch CONFIG_PATCHED with the delta.
+          // The original config object is not mutated; it remains the snapshot the current
+          // run consumed at startup. Changes take effect on the NEXT run.
+          const scratch = { ...config };
+          applyProviderSelection(scratch, provider);
+          storeCapture.dispatch?.({
+            type: "CONFIG_PATCHED",
+            patch: {
+              model,
+              provider: scratch.provider,
+              ...(scratch.profile ? { profile: scratch.profile } : { profile: undefined }),
+              ...(scratch.profileApiKey ? { profileApiKey: scratch.profileApiKey } : {}),
+              ...(scratch.pendingProfileId ? { pendingProfileId: scratch.pendingProfileId } : { pendingProfileId: undefined }),
+              effort,
+              summaryFormat,
+              memoryEnabled,
+              commitOnSuccess: commitOnSuccess ?? false,
+            },
+          });
         }}
         getCommitData={() => storeCapture.lastCommitData}
         getFeedbackData={() => storeCapture.lastFeedbackData}
