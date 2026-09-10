@@ -75,6 +75,10 @@ export type TranscriptEntry =
   | { kind: "thinking"; text: string }
   | { kind: "tool_call"; toolName: string; args: string; patch?: string; results: { ok: boolean; detail: string; blocked?: true }[]; subagentId?: string }
   | { kind: "tool_call_group"; calls: Array<{ toolName: string; arg: string }>; subagentId?: string }
+  /** Phase 6c — frozen plan/todo snapshot committed to <Static> via appendEntry.
+   *  Rendered as a checklist inside the transcript. A new snapshot is appended on
+   *  todos_initialized, todo_revised, and agent_loop_complete (if todos changed). */
+  | { kind: "plan_snapshot"; todos: Array<{ id: string; text: string; status: TodoStatus }> }
   | { kind: "error"; text: string }
   | { kind: "user_prompt"; text: string }
   | { kind: "assistant_final"; text: string }
@@ -779,6 +783,24 @@ function appendEntry(state: StoreState, entry: TranscriptEntry): StoreState {
   return { ...state, transcript };
 }
 
+/** Phase 6c — appends a plan_snapshot transcript entry if the todos differ from the
+ *  last snapshot. Returns the new state (with the appended entry) or the original
+ *  state if no append was needed. */
+function maybeAppendPlanSnapshot(state: StoreState, todos: RunTodo[]): StoreState {
+  if (todos.length === 0) return state;
+  const snapshotTodos = todos.map(t => ({ id: t.id, text: t.text, status: t.status }));
+  // Check if the last transcript entry is already an identical snapshot
+  const lastEntry = state.transcript[state.transcript.length - 1];
+  if (lastEntry?.kind === "plan_snapshot") {
+    const lastTodos = lastEntry.todos;
+    if (lastTodos.length === snapshotTodos.length &&
+        lastTodos.every((t, i) => t.id === snapshotTodos[i]!.id && t.status === snapshotTodos[i]!.status)) {
+      return state; // No change — skip append
+    }
+  }
+  return appendEntry(state, { kind: "plan_snapshot", todos: snapshotTodos });
+}
+
 /** Phase 6a — constructs an immutable config snapshot from the current store state.
  *  Runs consume this snapshot at startup; mid-run CONFIG_PATCHED changes apply to the
  *  NEXT run, never the current one. The returned object is a fresh copy each time. */
@@ -927,19 +949,23 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
       // is dispatched from multiple call sites (init.ts, eventToActions.ts), and a
       // run that ends with reads still buffered must not drop them from the record.
       const flushed = flushReadOnlyBatch(state);
+      // Phase 6c — if todos exist and differ from the last snapshot, append a final one
+      const withSnapshot = flushed.todos.length > 0
+        ? maybeAppendPlanSnapshot(flushed, flushed.todos)
+        : flushed;
       return {
-        ...flushed,
+        ...withSnapshot,
         spinner: null,
         runState: "done",
         // Bank a park still in flight. A run that ENDS while parked — which is
         // exactly what suspending on a question does — would otherwise report
         // the whole wait as work.
-        parkedMs: flushed.parkedMs + (flushed.parkStartedMs != null ? Date.now() - flushed.parkStartedMs : 0),
+        parkedMs: withSnapshot.parkedMs + (withSnapshot.parkStartedMs != null ? Date.now() - withSnapshot.parkStartedMs : 0),
         parkStartedMs: undefined,
         // Freeze the duration at completion (excludes idle / reading time).
         runEndMs: Date.now(),
         pendingQuestion: null,
-        liveTail: { ...flushed.liveTail, currentToolCall: null, streamingAnswer: "" },
+        liveTail: { ...withSnapshot.liveTail, currentToolCall: null, streamingAnswer: "" },
       };
     }
 
@@ -1591,8 +1617,11 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
       return { ...state, modelSettings: updated };
     }
 
-    case "TODOS_SET":
-      return { ...state, todos: action.todos };
+    case "TODOS_SET": {
+      // Phase 6c — append a plan_snapshot on todos_initialized / todo_revised
+      const next = { ...state, todos: action.todos };
+      return maybeAppendPlanSnapshot(next, action.todos);
+    }
 
     case "TODO_STATUS_SET": {
       if (state.todos.length === 0) return state;
@@ -1607,6 +1636,8 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         );
       }
       if (next === state.todos) return state;
+      // Phase 6c — status changes update the live slice only (no transcript append).
+      // The final snapshot is appended on agent_loop_complete.
       return { ...state, todos: next };
     }
 

@@ -79,7 +79,7 @@ export function request<T>(
   if (payload.abortSignal) {
     if (payload.abortSignal.aborted) {
       // Already aborted — resolve immediately with abortResult (or false)
-      payload.resolve(payload.abortResult !== undefined ? payload.abortResult : false);
+      payload.resolve((payload.abortResult !== undefined ? payload.abortResult : false) as T);
       return;
     }
     const onAbort = (): void => {

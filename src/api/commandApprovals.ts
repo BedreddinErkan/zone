@@ -259,7 +259,7 @@ export function rejectPendingApprovalsForRun(runIdRaw: string): number {
   if (!runId) return 0;
   let n = 0;
   // Iterate the meta side-map to find entries for this run and call their finish functions
-  for (const [id, meta] of Array.from(approvalMeta.entries())) {
+  for (const [_id, meta] of Array.from(approvalMeta.entries())) {
     if (meta.runId === runId) {
       n++;
       meta.finish(false, "run_ending");

@@ -1,0 +1,18 @@
+{"runId":"run-todos-1","ts":1700000000000,"type":"agent_loop_start","title":"Starting agent loop"}
+{"runId":"run-todos-1","ts":1700000001000,"type":"todos_initialized","title":"Plan ready","todos":[{"id":"t1","text":"Read the source files","status":"pending"},{"id":"t2","text":"Implement the fix","status":"pending"},{"id":"t3","text":"Run the tests","status":"pending"}]}
+{"runId":"run-todos-1","ts":1700000002000,"type":"todo_status_changed","title":"Step started","todoId":"t1","todoStatus":"in_progress"}
+{"runId":"run-todos-1","ts":1700000003000,"type":"tool_call","title":"[tool] read_file","toolName":"read_file","detail":"src/foo.ts"}
+{"runId":"run-todos-1","ts":1700000004000,"type":"tool_result","title":"read 50 lines","detail":"50 lines","status":"success","toolName":"read_file"}
+{"runId":"run-todos-1","ts":1700000005000,"type":"todo_status_changed","title":"Step completed","todoId":"t1","todoStatus":"completed"}
+{"runId":"run-todos-1","ts":1700000006000,"type":"todo_status_changed","title":"Step started","todoId":"t2","todoStatus":"in_progress"}
+{"runId":"run-todos-1","ts":1700000007000,"type":"todo_revised","title":"Plan revised","todos":[{"id":"t1","text":"Read the source files","status":"completed"},{"id":"t2","text":"Implement the fix","status":"in_progress"},{"id":"t3","text":"Run the tests","status":"pending"},{"id":"t4","text":"Update documentation","status":"pending"}]}
+{"runId":"run-todos-1","ts":1700000008000,"type":"tool_call","title":"[tool] write_file","toolName":"write_file","detail":"src/foo.ts"}
+{"runId":"run-todos-1","ts":1700000009000,"type":"tool_result","title":"wrote 60 lines","detail":"60 lines","status":"success","toolName":"write_file"}
+{"runId":"run-todos-1","ts":1700000010000,"type":"todo_status_changed","title":"Step completed","todoId":"t2","todoStatus":"completed"}
+{"runId":"run-todos-1","ts":1700000011000,"type":"todo_status_changed","title":"Step started","todoId":"t3","todoStatus":"in_progress"}
+{"runId":"run-todos-1","ts":1700000012000,"type":"tool_call","title":"[tool] run_command","toolName":"run_command","detail":"npm test"}
+{"runId":"run-todos-1","ts":1700000013000,"type":"tool_result","title":"exit 0","detail":"PASS","status":"success","toolName":"run_command"}
+{"runId":"run-todos-1","ts":1700000014000,"type":"todo_status_changed","title":"Step completed","todoId":"t3","todoStatus":"completed"}
+{"runId":"run-todos-1","ts":1700000015000,"type":"todo_status_changed","title":"Step started","todoId":"t4","todoStatus":"in_progress"}
+{"runId":"run-todos-1","ts":1700000016000,"type":"todo_status_changed","title":"Step completed","todoId":"t4","todoStatus":"completed"}
+{"runId":"run-todos-1","ts":1700000017000,"type":"agent_loop_complete","title":"Done","iter_count":4}

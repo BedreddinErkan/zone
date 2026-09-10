@@ -35,6 +35,21 @@ describe("golden replay tests", () => {
     harness.unmount();
   });
 
+  it("todos-run: plan_snapshot entries rendered in transcript frame", async () => {
+    const events = loadFixture("todos-run.jsonl");
+    const harness = await replayEvents(events);
+    const frame = harness.lastFrame();
+    // plan_snapshot entries render todo text — verify key steps appear
+    expect(frame).toContain("Read the source files");
+    expect(frame).toContain("Implement the fix");
+    expect(frame).toContain("Run the tests");
+    // The revised plan added a 4th todo
+    expect(frame).toContain("Update documentation");
+    // The frame should contain snapshot glyphs (successMark for completed)
+    expect(frame).toContain("✓");
+    harness.unmount();
+  });
+
   it("flood test: 10,000 synthetic events do not crash the reducer", async () => {
     const events: ZoneStructuredProgressEvent[] = [];
     events.push({

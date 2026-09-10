@@ -13,7 +13,7 @@ import { ApprovalModal } from "./components/ApprovalModal.js";
 import { PlanModal } from "./components/PlanModal.js";
 import { PlanActionPrompt } from "./components/PlanActionPrompt.js";
 import { StagedDiffModal } from "./components/StagedDiffModal.js";
-import { PlanPanel } from "./components/PlanPanel.js";
+import { PlanCursor } from "./components/PlanCursor.js";
 import { QuestionPanel } from "./components/QuestionPanel.js";
 import { OverlayLayer } from "./components/OverlayLayer.js";
 import { selectIsBlockingModalOpen, selectEscTarget } from "./store-core.js";
@@ -264,9 +264,8 @@ function AppInner({ bus, initialPrompt, initialMode, onSubmit, onUndoRequest, on
           }
         />
       )}
-      {state.runState === "running" && state.todos.length > 0 && (
-        <PlanPanel todos={state.todos} />
-      )}
+      {/* Phase 6c — PlanCursor: one-line live cursor; full checklist in <Static> via plan_snapshot */}
+      <PlanCursor />
       <StatusBar />
     </Box>
   );

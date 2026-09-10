@@ -43,7 +43,7 @@ const EXTRACTED_FILES = [
   "src/cli/tui/components/CommandTail.tsx",
   "src/cli/tui/components/ToolCall.tsx",
   "src/cli/tui/components/toolCallFormat.ts",
-  "src/cli/tui/components/PlanPanel.tsx",
+  // Phase 6c — PlanPanel.tsx deleted; replaced by PlanCursor.tsx (added below)
   // Part 2, commit 2 — mechanical application of the fully-proven vocabulary
   // (Modals that migrated to OverlayShell in Phase 2d were removed from this list:
   //  PermissionsView, EffortModal, CommitModal, FeedbackModal, HookTrustModal,
@@ -94,6 +94,8 @@ const EXTRACTED_FILES = [
   "src/cli/tui/components/TrustPrompt.tsx",
   "src/cli/tui/components/HookTrustPrompt.tsx",
   "src/cli/tui/components/McpTrustPrompt.tsx",
+  // Phase 6c
+  "src/cli/tui/components/PlanCursor.tsx",
 ];
 
 const FORBIDDEN_COLOUR_LITERALS = [...new Set(Object.values(role))];

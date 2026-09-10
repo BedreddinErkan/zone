@@ -572,7 +572,9 @@ describe("TODOS_SET / TODO_STATUS_SET", () => {
     const next = reducer(s, { type: "TODOS_SET", todos: [TODO_A, TODO_B] });
     expect(next.todos).toHaveLength(2);
     expect(next.todos[0].status).toBe("pending");
-    expect(next.transcript).toHaveLength(0);
+    // Phase 6c — TODOS_SET appends a plan_snapshot to the transcript
+    expect(next.transcript).toHaveLength(1);
+    expect(next.transcript[0]?.kind).toBe("plan_snapshot");
   });
 
   it("TODO_STATUS_SET completed updates the matching todo", () => {

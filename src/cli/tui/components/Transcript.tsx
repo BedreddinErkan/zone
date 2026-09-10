@@ -99,6 +99,29 @@ function renderEntry(entry: TranscriptEntry, index: number, colWidth: number): R
         </Box>
       );
     }
+    case "plan_snapshot": {
+      const { todos } = entry;
+      return (
+        <Box key={index} flexDirection="column" marginTop={spacing.sm}>
+          {todos.map((todo) => {
+            const statusGlyph = todo.status === "completed"
+              ? glyph.successMark
+              : todo.status === "in_progress"
+                ? glyph.selectionCursor
+                : glyph.pendingMark;
+            const dim = todo.status !== "in_progress";
+            return (
+              <Box key={todo.id}>
+                <Text dimColor={dim} color={todo.status === "completed" ? role.success : undefined}>
+                  {statusGlyph}{" "}
+                </Text>
+                <Text dimColor={dim} bold={todo.status === "in_progress"}>{todo.text}</Text>
+              </Box>
+            );
+          })}
+        </Box>
+      );
+    }
     case "compact_summary": {
       const { totalCompacted, counts } = entry;
       const parts: string[] = [`${totalCompacted} earlier events compacted`];
