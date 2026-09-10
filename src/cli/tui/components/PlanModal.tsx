@@ -10,13 +10,14 @@ interface PlanModalProps {
 }
 
 export function PlanModal({ proposal, dispatch }: PlanModalProps): React.ReactElement {
-  useInput((input, key) => {
-    if (input === "a" || input === "A") {
+  useInput((input, _key) => {
+    // Phase 6e — verb polish: y/n to match trust modal convention (Phase 3a)
+    if (input === "y" || input === "Y") {
       resolveRevisionApproval({ revisionId: proposal.revisionId, runId: proposal.runId, decision: "approve" });
       dispatch({ type: "PLAN_RESOLVED" });
       return;
     }
-    if (input === "r" || input === "R" || key.escape) {
+    if (input === "n" || input === "N") {
       resolveRevisionApproval({ revisionId: proposal.revisionId, runId: proposal.runId, decision: "reject" });
       dispatch({ type: "PLAN_RESOLVED" });
       dispatch({ type: "RUN_ABORTED" });
@@ -43,7 +44,7 @@ export function PlanModal({ proposal, dispatch }: PlanModalProps): React.ReactEl
         <Text dimColor>{"Missing: "}{proposal.missingFiles!.join(", ")}</Text>
       )}
       <Text> </Text>
-      <Text dimColor>{"A accept  ·  R reject and cancel  ·  Esc = R"}</Text>
+      <Text dimColor>{"Y accept  ·  N reject and cancel  ·  Esc close"}</Text>
     </Box>
   );
 }

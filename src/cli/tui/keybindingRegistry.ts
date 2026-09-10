@@ -132,9 +132,8 @@ export const KEYBINDINGS: KeyBinding[] = [
   { context: "modal:approval", keys: ["escape"],     owner: "ApprovalModal", action: "deny command (same as n)" },
 
   // ── Modal: plan (revision) ────────────────────────────────────────────────
-  { context: "modal:plan", keys: ["a"],       owner: "PlanModal", action: "approve plan" },
-  { context: "modal:plan", keys: ["r"],       owner: "PlanModal", action: "reject plan and abort" },
-  { context: "modal:plan", keys: ["escape"],  owner: "PlanModal", action: "reject plan and abort (same as R)" },
+  { context: "modal:plan", keys: ["y"],       owner: "PlanModal", action: "approve plan" },
+  { context: "modal:plan", keys: ["n"],       owner: "PlanModal", action: "reject plan and abort" },
 
   // ── Modal: staged diffs ───────────────────────────────────────────────────
   { context: "modal:stagedDiffs", keys: ["1"],          owner: "StagedDiffModal", action: "approve all" },
