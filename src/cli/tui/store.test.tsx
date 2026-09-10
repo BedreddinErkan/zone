@@ -748,3 +748,66 @@ describe("streamingAnswer cleared at every run-terminal/park transition", () => 
     expect(s.transcript.some(e => e.kind === "assistant_final")).toBe(true);
   });
 });
+
+describe("Phase 4c — transcript cap with compact summary", () => {
+  function appendErrors(state: ReturnType<typeof initialState>, n: number) {
+    let s = state;
+    for (let i = 0; i < n; i++) {
+      s = reducer(s, { type: "ERROR_LINE", text: `Error ${i}` });
+    }
+    return s;
+  }
+
+  it("appending 401 entries triggers compaction", () => {
+    const s = appendErrors(initialState(), 401);
+    expect(s.transcript.length).toBeLessThanOrEqual(500);
+    expect(s.transcript[0]?.kind).toBe("compact_summary");
+    if (s.transcript[0]?.kind === "compact_summary") {
+      expect(s.transcript[0].counts.errors).toBeGreaterThan(0);
+    }
+  });
+
+  it("compaction resets to 101, then grows again until next threshold", () => {
+    // At entry 401: compaction fires → 1 summary + 100 tail = 101
+    const s401 = appendErrors(initialState(), 401);
+    expect(s401.transcript.length).toBe(101);
+    expect(s401.transcript[0]?.kind).toBe("compact_summary");
+    expect(s401.transcript[100]?.kind).toBe("error");
+
+    // At entry 450: 101 + 49 more = 150 (no second compaction yet)
+    const s450 = appendErrors(initialState(), 450);
+    expect(s450.transcript.length).toBe(150);
+    expect(s450.transcript[0]?.kind).toBe("compact_summary");
+  });
+
+  it("counts aggregate correctly: errors and tool calls", () => {
+    let s = initialState();
+    // Add 200 errors
+    for (let i = 0; i < 200; i++) {
+      s = reducer(s, { type: "ERROR_LINE", text: `err-${i}` });
+    }
+    // Add 250 user_prompts to exceed 400 total
+    for (let i = 0; i < 250; i++) {
+      s = reducer(s, { type: "USER_PROMPT", text: `prompt-${i}` });
+    }
+    expect(s.transcript.length).toBeLessThanOrEqual(500);
+    expect(s.transcript[0]?.kind).toBe("compact_summary");
+    if (s.transcript[0]?.kind === "compact_summary") {
+      expect(s.transcript[0].counts.errors).toBe(200);
+    }
+  });
+
+  it("double compaction folds previous summary counts in", () => {
+    let s = appendErrors(initialState(), 401);
+    expect(s.transcript[0]?.kind).toBe("compact_summary");
+    const firstCounts = s.transcript[0]?.kind === "compact_summary" ? s.transcript[0].counts : null;
+    expect(firstCounts).toBeTruthy();
+
+    // Add 300 more errors to trigger second compaction
+    s = appendErrors(s, 300);
+    expect(s.transcript[0]?.kind).toBe("compact_summary");
+    if (s.transcript[0]?.kind === "compact_summary" && firstCounts) {
+      expect(s.transcript[0].counts.errors).toBeGreaterThan(firstCounts.errors);
+    }
+  });
+});

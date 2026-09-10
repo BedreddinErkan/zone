@@ -99,6 +99,19 @@ function renderEntry(entry: TranscriptEntry, index: number, colWidth: number): R
         </Box>
       );
     }
+    case "compact_summary": {
+      const { totalCompacted, counts } = entry;
+      const parts: string[] = [`${totalCompacted} earlier events compacted`];
+      if (counts.toolCalls > 0) parts.push(`${counts.toolCalls} tool call${counts.toolCalls === 1 ? "" : "s"}`);
+      if (counts.narrations > 0) parts.push(`${counts.narrations} narration${counts.narrations === 1 ? "" : "s"}`);
+      if (counts.errors > 0) parts.push(`${counts.errors} error${counts.errors === 1 ? "" : "s"}`);
+      if (counts.subagents > 0) parts.push(`${counts.subagents} subagent${counts.subagents === 1 ? "" : "s"}`);
+      return (
+        <Box key={index}>
+          <Text color={role.muted}>{glyph.separator} [{parts.join(" · ")}] {glyph.separator}</Text>
+        </Box>
+      );
+    }
     case "plan_ready":
       return (
         <Box key={index} marginTop={spacing.sm} marginBottom={spacing.sm}>

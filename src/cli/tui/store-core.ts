@@ -77,6 +77,10 @@ export type TranscriptEntry =
   | { kind: "error"; text: string }
   | { kind: "user_prompt"; text: string }
   | { kind: "assistant_final"; text: string }
+  /** Phase 4c — collapsed summary of earlier transcript entries. Created by appendEntry
+   *  when the transcript exceeds COMPACT_THRESHOLD; replaces entries [0..N-101] with one
+   *  line carrying aggregate counts so the user sees what happened without storing it all. */
+  | { kind: "compact_summary"; totalCompacted: number; counts: { toolCalls: number; narrations: number; errors: number; subagents: number } }
   /** `diffShownInline` lists the paths whose diff a preceding `tool_call` entry already rendered
    *  inline, so the end-of-run block can show its aggregation (header, path, +N/-M) without
    *  repeating a diff body the user has already read. Computed once at dispatch — see the
@@ -625,8 +629,7 @@ function flushReadOnlyBatch(state: StoreState): StoreState {
   if (pendingReadOnlyBatch.length === 0) return state;
   const entry: TranscriptEntry = { kind: "tool_call_group", calls: pendingReadOnlyBatch };
   return {
-    ...state,
-    transcript: [...state.transcript, entry],
+    ...appendEntry(state, entry),
     liveTail: { ...state.liveTail, pendingReadOnlyBatch: [] },
   };
 }
@@ -657,6 +660,56 @@ function diffsAlreadyShownInline(transcript: TranscriptEntry[], files: StagedFil
     shown.add(entry.args);
   }
   return files.map((f) => f.path).filter((p) => shown.has(p));
+}
+
+/** Phase 4c — transcript cap. The transcript never grows beyond TRANSCRIPT_CAP entries.
+ *  When it exceeds COMPACT_THRESHOLD, the oldest entries are collapsed into a single
+ *  compact_summary entry carrying aggregate counts. The 100-entry tail is kept verbatim
+ *  so recent context is always available. */
+const TRANSCRIPT_CAP = 500;
+const COMPACT_THRESHOLD = 400;
+const COMPACT_TAIL_SIZE = 100;
+
+/** Appends a transcript entry and enforces the cap. If the transcript exceeds
+ *  COMPACT_THRESHOLD after appending, the oldest entries are collapsed into a
+ *  compact_summary and the last COMPACT_TAIL_SIZE entries are kept verbatim.
+ *  If (somehow) the transcript still exceeds TRANSCRIPT_CAP, the oldest entries
+ *  beyond the cap are silently dropped. */
+function appendEntry(state: StoreState, entry: TranscriptEntry): StoreState {
+  let transcript = [...state.transcript, entry];
+
+  if (transcript.length > COMPACT_THRESHOLD) {
+    const compactCount = transcript.length - COMPACT_TAIL_SIZE;
+    if (compactCount > 0) {
+      const toCompact = transcript.slice(0, compactCount);
+      const counts = { toolCalls: 0, narrations: 0, errors: 0, subagents: 0 };
+      for (const e of toCompact) {
+        if (e.kind === "tool_call" || e.kind === "tool_call_group") counts.toolCalls++;
+        else if (e.kind === "narration") counts.narrations++;
+        else if (e.kind === "error") counts.errors++;
+      }
+      // If there's already a compact_summary at position 0, fold its counts in
+      if (toCompact[0]?.kind === "compact_summary") {
+        counts.toolCalls += toCompact[0].counts.toolCalls;
+        counts.narrations += toCompact[0].counts.narrations;
+        counts.errors += toCompact[0].counts.errors;
+        counts.subagents += toCompact[0].counts.subagents;
+      }
+      const summary: TranscriptEntry = {
+        kind: "compact_summary",
+        totalCompacted: compactCount,
+        counts,
+      };
+      transcript = [summary, ...transcript.slice(compactCount)];
+    }
+  }
+
+  // Hard cap safety — should never trigger if compaction works correctly
+  if (transcript.length > TRANSCRIPT_CAP) {
+    transcript = transcript.slice(transcript.length - TRANSCRIPT_CAP);
+  }
+
+  return { ...state, transcript };
 }
 
 export function reducer(state: StoreState, action: StoreAction): StoreState {
@@ -745,7 +798,7 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         ...(tc.patch ? { patch: tc.patch } : {}),
         results: [{ ok: action.ok, detail: action.detail, ...(action.blocked ? { blocked: true as const } : {}) }],
       };
-      return { ...flushed, transcript: [...flushed.transcript, entry] };
+      return appendEntry(flushed, entry);
     }
 
     case "TOOL_CALL_CLOSE":
@@ -783,10 +836,7 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
       };
 
     case "ERROR_LINE":
-      return {
-        ...state,
-        transcript: [...state.transcript, { kind: "error", text: action.text }],
-      };
+      return appendEntry(state, { kind: "error", text: action.text });
 
     case "RUN_DONE": {
       // Self-contained flush, not reliant on a preceding NARRATION_COMMIT: RUN_DONE
@@ -844,37 +894,24 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
 
     case "USER_PROMPT":
       return {
-        ...state,
+        ...appendEntry(state, { kind: "user_prompt", text: action.text }),
         todos: [],
-        transcript: [...state.transcript, { kind: "user_prompt", text: action.text }],
       };
 
     case "ASSISTANT_FINAL": {
       // Self-contained flush, for the same reason RUN_DONE carries one: the final report must be
       // the last thing in the transcript, and reads still sitting in the batch would otherwise
-      // commit after it. That is exactly what happened — eventToActions pushes ASSISTANT_FINAL
-      // then RUN_DONE, so RUN_DONE's own flush landed the pending group below the report. Fixing
-      // it here rather than by reordering those two keeps the invariant true for any future
-      // dispatcher: a committed report is preceded by everything that happened before it.
+      // commit after it.
       const flushed = flushReadOnlyBatch(state);
-      return {
-        ...flushed,
-        transcript: [...flushed.transcript, { kind: "assistant_final", text: action.text }],
-      };
+      return appendEntry(flushed, { kind: "assistant_final", text: action.text });
     }
 
     case "POST_EXECUTE_DIFFS":
-      return {
-        ...state,
-        transcript: [
-          ...state.transcript,
-          {
-            kind: "post_execute_diffs",
-            files: action.files,
-            diffShownInline: diffsAlreadyShownInline(state.transcript, action.files),
-          },
-        ],
-      };
+      return appendEntry(state, {
+        kind: "post_execute_diffs",
+        files: action.files,
+        diffShownInline: diffsAlreadyShownInline(state.transcript, action.files),
+      });
 
     case "TRANSCRIPT_CLEAR":
       return { ...state, transcript: [], todos: [] };
@@ -939,23 +976,23 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         spinner: null,
       };
 
-    case "USER_QUESTION_RESOLVED":
-      return {
+    case "USER_QUESTION_RESOLVED": {
+      // Back to the run, not to idle — runStartMs is untouched, so the
+      // reported duration never counted the wait as inference.
+      const base: StoreState = {
         ...state,
         pendingQuestion: null,
         parkedMs: state.parkedMs + (state.parkStartedMs != null ? Date.now() - state.parkStartedMs : 0),
         parkStartedMs: undefined,
-        // Back to the run, not to idle — runStartMs is untouched, so the
-        // reported duration never counted the wait as inference.
         runState: "running",
         spinner: { active: true, label: "Working" },
-        // The pinned panel disappears with the question, so the answer has to
-        // land in the scrollback or there is no record of what was agreed.
-        // Not USER_PROMPT: that arm resets todos mid-run.
-        transcript: action.echo
-          ? [...state.transcript, { kind: "user_prompt" as const, text: action.echo }]
-          : state.transcript,
       };
+      // The pinned panel disappears with the question, so the answer has to
+      // land in the scrollback or there is no record of what was agreed.
+      return action.echo
+        ? appendEntry(base, { kind: "user_prompt" as const, text: action.echo })
+        : base;
+    }
 
     case "USER_QUESTION_DISMISSED":
       // Only reachable for a carried question: no run is starting, so this goes
@@ -1171,10 +1208,8 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
     case "PLAN_READY_PROPOSED": {
       // Flush first, then append plan_ready after it — matching chronological
       // order (the reads that informed the plan happened before the plan did).
-      // Without this, files read while building the plan could stay buffered and
-      // invisible right when the user is reviewing the plan they informed.
       const flushed = flushReadOnlyBatch(state);
-      return {
+      const withProposal: StoreState = {
         ...flushed,
         modalView: "plan_ready",
         planReadyProposal: {
@@ -1191,25 +1226,22 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
           ...(action.narrative ? { narrative: action.narrative } : {}),
           ...(action.filesLikely?.length ? { filesLikely: action.filesLikely } : {}),
         },
-        transcript: [
-          ...flushed.transcript,
-          {
-            kind: "plan_ready" as const,
-            planId: action.planId,
-            runId: action.runId,
-            objective: action.objective,
-            steps: action.steps,
-            ...(action.scopeNotes ? { scopeNotes: action.scopeNotes } : {}),
-            ...(action.noChangeReason ? { noChangeReason: action.noChangeReason } : {}),
-            ...(action.cannotVerifyReason ? { cannotVerifyReason: action.cannotVerifyReason } : {}),
-            ...(action.answerOnlyReason ? { answerOnlyReason: action.answerOnlyReason } : {}),
-            riskHints: action.riskHints,
-            scopeSummary: action.scopeSummary,
-            ...(action.narrative ? { narrative: action.narrative } : {}),
-            ...(action.filesLikely?.length ? { filesLikely: action.filesLikely } : {}),
-          },
-        ],
       };
+      return appendEntry(withProposal, {
+        kind: "plan_ready" as const,
+        planId: action.planId,
+        runId: action.runId,
+        objective: action.objective,
+        steps: action.steps,
+        ...(action.scopeNotes ? { scopeNotes: action.scopeNotes } : {}),
+        ...(action.noChangeReason ? { noChangeReason: action.noChangeReason } : {}),
+        ...(action.cannotVerifyReason ? { cannotVerifyReason: action.cannotVerifyReason } : {}),
+        ...(action.answerOnlyReason ? { answerOnlyReason: action.answerOnlyReason } : {}),
+        riskHints: action.riskHints,
+        scopeSummary: action.scopeSummary,
+        ...(action.narrative ? { narrative: action.narrative } : {}),
+        ...(action.filesLikely?.length ? { filesLikely: action.filesLikely } : {}),
+      });
     }
 
     case "PLAN_READY_RESOLVED":
@@ -1243,17 +1275,22 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
 
     case "TRANSCRIPT_ADD_THINKING":
       if (!action.text) return state;
-      return { ...state, transcript: [...state.transcript, { kind: "thinking" as const, text: action.text }] };
+      return appendEntry(state, { kind: "thinking" as const, text: action.text });
 
     case "NARRATION_COMMIT": {
       const { narrationBuffer } = state.liveTail;
       if (!narrationBuffer) return state;
       const last = state.transcript[state.transcript.length - 1];
-      const narEntry: TranscriptEntry = { kind: "narration", text: narrationBuffer };
-      const newTranscript = last?.kind === "narration"
-        ? [...state.transcript.slice(0, -1), { kind: "narration" as const, text: last.text + narrationBuffer }]
-        : [...state.transcript, narEntry];
-      return { ...state, transcript: newTranscript, liveTail: { ...state.liveTail, narrationBuffer: "" } };
+      const cleared = { ...state, liveTail: { ...state.liveTail, narrationBuffer: "" } };
+      if (last?.kind === "narration") {
+        // Merge into existing narration entry — replace last, then re-check cap
+        const merged: TranscriptEntry = { kind: "narration" as const, text: last.text + narrationBuffer };
+        const replaced = { ...cleared, transcript: [...cleared.transcript.slice(0, -1), merged] };
+        // Merging doesn't increase length, so cap is unchanged — just return
+        return replaced;
+      }
+      // New narration entry — goes through appendEntry for cap enforcement
+      return appendEntry(cleared, { kind: "narration", text: narrationBuffer });
     }
 
     case "MODEL_MODAL_OPEN": {
@@ -1425,13 +1462,9 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
 
     case "SESSION_MEMORY_CLEAR":
       return {
-        ...state,
+        ...appendEntry(state, { kind: "user_prompt" as const, text: "Session memory cleared — starting fresh." }),
         sessionId: action.newSessionId,
         modalView: "none",
-        transcript: [
-          ...state.transcript,
-          { kind: "user_prompt" as const, text: "Session memory cleared — starting fresh." },
-        ],
       };
 
     case "COMMIT_MODAL_OPEN":
