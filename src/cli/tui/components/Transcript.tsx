@@ -132,6 +132,45 @@ function renderEntry(entry: TranscriptEntry, index: number, colWidth: number): R
   }
 }
 
+/** Phase 5b — group marker types for nested subagent rendering. These are
+ *  rendering-only constructs, never stored in the transcript. */
+type GroupedItem =
+  | { kind: "entry"; entry: TranscriptEntry; index: number }
+  | { kind: "group_header"; subagentId: string; subagentType: string; title: string; index: number }
+  | { kind: "group_footer"; subagentId: string; index: number };
+
+function buildGroupedItems(
+  transcript: TranscriptEntry[],
+  threads: Record<string, import("../store.js").SubagentThread>,
+): GroupedItem[] {
+  const items: GroupedItem[] = [];
+  let i = 0;
+  while (i < transcript.length) {
+    const entry = transcript[i]!;
+    const sid = (entry as any).subagentId as string | undefined;
+    if (!sid) {
+      items.push({ kind: "entry", entry, index: i });
+      i++;
+      continue;
+    }
+    // Start of a subagent group — collect consecutive entries with same subagentId
+    const thread = threads[sid];
+    items.push({
+      kind: "group_header",
+      subagentId: sid,
+      subagentType: thread?.subagentType ?? "worker",
+      title: thread?.title ?? "",
+      index: i,
+    });
+    while (i < transcript.length && (transcript[i] as any).subagentId === sid) {
+      items.push({ kind: "entry", entry: transcript[i]!, index: i });
+      i++;
+    }
+    items.push({ kind: "group_footer", subagentId: sid, index: i });
+  }
+  return items;
+}
+
 export function Transcript(): React.ReactElement {
   const { state } = useStore();
   const { stdout } = useStdout();
@@ -139,17 +178,55 @@ export function Transcript(): React.ReactElement {
   const liveNarration = state.liveTail.narrationBuffer;
   const liveStreamingAnswer = state.liveTail.streamingAnswer;
   const pendingBatchCount = state.liveTail.pendingReadOnlyBatch.length;
+  const groupedItems = buildGroupedItems(state.transcript, state.subagentThreads);
 
   return (
     <Box flexDirection="column">
       <Static
         key={state.transcriptGeneration}
-        items={state.transcript.map((entry, index) => ({ entry, index }))}
+        items={groupedItems}
         style={{ width: stdout.columns ?? 80 }}
       >
-        {(item: { entry: TranscriptEntry; index: number }) =>
-          renderEntry(item.entry, item.index, stdout.columns ?? 80)
-        }
+        {(item: GroupedItem) => {
+          if (item.kind === "group_header") {
+            const truncated = item.title.length > 60 ? item.title.slice(0, 57) + "..." : item.title;
+            return (
+              <Box key={`gh-${item.index}`}>
+                <Text color={role.muted}>┌─ </Text>
+                <Text color={role.accent}>{item.subagentType}</Text>
+                <Text color={role.muted}> · {truncated} ──────</Text>
+              </Box>
+            );
+          }
+          if (item.kind === "group_footer") {
+            const thread = state.subagentThreads[item.subagentId];
+            const statusMark = thread?.status === "failed"
+              ? glyph.failureMark
+              : thread?.status === "completed"
+                ? glyph.successMark
+                : glyph.pendingMark;
+            const parts: string[] = [];
+            if (thread?.iterations !== undefined) parts.push(`${thread.iterations} iters`);
+            if (thread?.costUsd !== undefined) parts.push(`$${thread.costUsd.toFixed(4)}`);
+            if (thread?.status === "running") parts.push(`${thread.toolCallCount} calls`);
+            if (thread?.summary) {
+              const s = thread.summary.length > 80 ? thread.summary.slice(0, 77) + "..." : thread.summary;
+              parts.push(s);
+            }
+            return (
+              <Box key={`gf-${item.index}`}>
+                <Text color={role.muted}>└─ {statusMark} {parts.join(" · ")}</Text>
+              </Box>
+            );
+          }
+          // Regular entry — indent if inside a subagent group
+          const sid = (item.entry as any).subagentId as string | undefined;
+          return (
+            <Box key={item.index} paddingLeft={sid ? 2 : 0}>
+              {renderEntry(item.entry, item.index, stdout.columns ?? 80)}
+            </Box>
+          );
+        }}
       </Static>
       {liveNarration && (
         <Box>

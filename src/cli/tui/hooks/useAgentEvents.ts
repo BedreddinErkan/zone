@@ -293,6 +293,11 @@ export function useAgentEvents(
     bus.on("mcp_connected",                   simple);
     bus.on("mcp_tool_called",                 simple);
 
+    // Phase 5a — subagent lifecycle. Simple dispatch (no flush needed — these are
+    // bookkeeping events, not user-facing content that must follow narration).
+    bus.on("subagent_started",                simple);
+    bus.on("subagent_completed",              simple);
+
     return () => {
       bus.off("run_failed",               flushFirst);
       bus.off("plan_ready_for_approval",  simple);
@@ -340,6 +345,8 @@ export function useAgentEvents(
       bus.off("hook_completed",                  simple);
       bus.off("mcp_connected",                   simple);
       bus.off("mcp_tool_called",                 simple);
+      bus.off("subagent_started",                simple);
+      bus.off("subagent_completed",              simple);
     };
   }, [bus, dispatch]);
 }

@@ -204,6 +204,7 @@ function AppInner({ bus, initialPrompt, initialMode, onSubmit, onUndoRequest, on
           runId={state.pendingApproval.runId}
           command={state.pendingApproval.command}
           kind={state.pendingApproval.kind}
+          subagentId={state.pendingApproval.subagentId}
           dispatch={dispatch}
         />
       )}

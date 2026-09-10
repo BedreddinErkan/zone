@@ -11,10 +11,12 @@ interface Props {
   runId: string;
   command: string;
   kind?: "command" | "edit" | "mcp";
+  /** Phase 5c — subagent that requested this approval, if any. */
+  subagentId?: string;
   dispatch: Dispatch<StoreAction>;
 }
 
-export function ApprovalModal({ approvalId, runId, command, kind, dispatch }: Props): React.ReactElement {
+export function ApprovalModal({ approvalId, runId, command, kind, subagentId, dispatch }: Props): React.ReactElement {
   const isEdit = kind === "edit";
   // MCP resolves through the command registry (requestCommandApproval), so it takes every
   // non-edit path unchanged — including [T]rust, which is gated on !isEdit. Only the framing
@@ -55,6 +57,9 @@ export function ApprovalModal({ approvalId, runId, command, kind, dispatch }: Pr
 
   return (
     <Box borderStyle="single" borderColor={role.caution} flexDirection="column" paddingX={spacing.sm} marginX={spacing.md}>
+      {subagentId && (
+        <Text color={role.muted}>  ↳ worker requests:</Text>
+      )}
       <Text bold color={role.caution}>{isEdit ? "Edit approval required" : isMcp ? "MCP tool approval required" : "Command approval required"}</Text>
       <Box marginTop={spacing.sm}>
         {isEdit

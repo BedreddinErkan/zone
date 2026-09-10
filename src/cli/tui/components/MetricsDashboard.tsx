@@ -2,6 +2,7 @@ import React from "react";
 import { Box, Text, useInput } from "ink";
 import { useState, useEffect } from "react";
 import { buildRunRecords, aggregateMetrics, type MetricsResponse } from "../../../llm/metricsAggregator.js";
+import { useStore } from "../store.js";
 import { role, spacing } from "../theme.js";
 
 type Period = "day" | "week" | "month" | "all";
@@ -42,6 +43,9 @@ export function MetricsDashboard(): React.ReactElement {
   const [period, setPeriod] = useState<Period>("day");
   const [data, setData] = useState<MetricsResponse | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
+  const { state } = useStore();
+  const threads = state.subagentThreads;
+  const threadList = Object.values(threads);
 
   const cols = process.stdout.columns ?? 80;
   const wide = cols >= 80;
@@ -145,6 +149,25 @@ export function MetricsDashboard(): React.ReactElement {
               </Box>
             );
           })}
+        </Box>
+      )}
+
+      {/* Phase 5d — subagent summary section (derived from store threads) */}
+      {threadList.length > 0 && (
+        <Box flexDirection="column" marginTop={spacing.sm}>
+          <Text bold>Subagents (this session):</Text>
+          {(() => {
+            const totalCost = threadList.reduce((s, t) => s + (t.costUsd ?? 0), 0);
+            const completed = threadList.filter(t => t.status === "completed").length;
+            const pct = threadList.length > 0 ? Math.round((completed / threadList.length) * 100) : 0;
+            return (
+              <Box flexDirection="column" paddingLeft={spacing.sm}>
+                <Text><Text dimColor>dispatches: </Text>{threadList.length}</Text>
+                <Text><Text dimColor>cost: </Text>${totalCost.toFixed(4)}</Text>
+                <Text><Text dimColor>success rate: </Text>{pct}%</Text>
+              </Box>
+            );
+          })()}
         </Box>
       )}
 

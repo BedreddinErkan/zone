@@ -72,8 +72,8 @@ export type LiveTailState = {
 export type TranscriptEntry =
   | { kind: "narration"; text: string }
   | { kind: "thinking"; text: string }
-  | { kind: "tool_call"; toolName: string; args: string; patch?: string; results: { ok: boolean; detail: string; blocked?: true }[] }
-  | { kind: "tool_call_group"; calls: Array<{ toolName: string; arg: string }> }
+  | { kind: "tool_call"; toolName: string; args: string; patch?: string; results: { ok: boolean; detail: string; blocked?: true }[]; subagentId?: string }
+  | { kind: "tool_call_group"; calls: Array<{ toolName: string; arg: string }>; subagentId?: string }
   | { kind: "error"; text: string }
   | { kind: "user_prompt"; text: string }
   | { kind: "assistant_final"; text: string }
@@ -184,6 +184,18 @@ export type PendingQuestion =
       conversationLost: boolean;
     };
 
+/** Phase 5a — per-subagent thread state for nested transcript rendering. */
+export interface SubagentThread {
+  subagentId: string;
+  subagentType: string;
+  title: string;
+  status: "running" | "completed" | "failed";
+  toolCallCount: number;
+  costUsd?: number;
+  iterations?: number;
+  summary?: string;
+}
+
 export type StoreState = {
   transcript: TranscriptEntry[];
   sessionId: string;
@@ -193,6 +205,12 @@ export type StoreState = {
   spinner: { active: boolean; label: string } | null;
   /** Label of the last SPINNER_START, so SPINNER_RESUME can restore it after a transient one. */
   spinnerBaseLabel?: string;
+  /** Phase 5a — subagent thread registry. Keyed by subagentId. */
+  subagentThreads: Record<string, SubagentThread>;
+  /** Phase 5a — currently active subagent (for tool_call tagging by interval inference). */
+  currentSubagentId: string | null;
+  /** Phase 5c — spinner label stack. Pushed on SUBAGENT_STARTED, popped on COMPLETED. */
+  parentSpinnerLabels: string[];
   statusBar: StatusBarState;
   runState: RunState;
   /** Wall-clock start of the CURRENT task (reset per run, not per session). */
@@ -213,7 +231,7 @@ export type StoreState = {
   parkStartedMs?: number;
   toastQueue: ToastEntry[];
   modalStack: ModalEntry[];
-  pendingApproval: { approvalId: string; runId: string; command: string; kind?: "command" | "edit" | "trust" | "mcp" } | null;
+  pendingApproval: { approvalId: string; runId: string; command: string; kind?: "command" | "edit" | "trust" | "mcp"; subagentId?: string } | null;
   /**
    * A question the agent is parked on. Deliberately NOT pendingApproval: that
    * field hard-blocks the Composer (Composer.tsx returns early while it is
@@ -376,6 +394,9 @@ export function buildInitialState(initialValues?: {
       streamingAnswer: initialValues?.seedStreamingAnswer ?? "",
     },
     spinner: null,
+    subagentThreads: {},
+    currentSubagentId: null,
+    parentSpinnerLabels: [],
     statusBar: {
       iter: 0,
       costUsd: 0,
@@ -475,8 +496,12 @@ export type StoreAction =
   | { type: "ASSISTANT_FINAL"; text: string }
   | { type: "TRANSCRIPT_CLEAR" }
   | { type: "TRANSCRIPT_REMOUNT" }
-  | { type: "PENDING_APPROVAL_SET"; approvalId: string; runId: string; command: string; kind?: "command" | "edit" | "trust" | "mcp" }
+  | { type: "PENDING_APPROVAL_SET"; approvalId: string; runId: string; command: string; kind?: "command" | "edit" | "trust" | "mcp"; subagentId?: string }
   | { type: "PENDING_APPROVAL_RESOLVED" }
+  // Phase 5a — subagent lifecycle. STARTED creates a thread + sets currentSubagentId for
+  // tool_call tagging. COMPLETED updates status/cost/summary + clears currentSubagentId.
+  | { type: "SUBAGENT_STARTED"; subagentId: string; subagentType: string; title: string }
+  | { type: "SUBAGENT_COMPLETED"; subagentId: string; status: "completed" | "failed"; costUsd?: number; iterations?: number; summary?: string }
   | { type: "USER_QUESTION_ASKED"; questionId: string; runId: string; question: string }
   | {
       type: "USER_QUESTION_CARRIED";
@@ -627,7 +652,12 @@ export type StoreAction =
 function flushReadOnlyBatch(state: StoreState): StoreState {
   const { pendingReadOnlyBatch } = state.liveTail;
   if (pendingReadOnlyBatch.length === 0) return state;
-  const entry: TranscriptEntry = { kind: "tool_call_group", calls: pendingReadOnlyBatch };
+  const entry: TranscriptEntry = {
+    kind: "tool_call_group",
+    calls: pendingReadOnlyBatch,
+    // Phase 5a — tag with current subagent if one is active.
+    ...(state.currentSubagentId ? { subagentId: state.currentSubagentId } : {}),
+  };
   return {
     ...appendEntry(state, entry),
     liveTail: { ...state.liveTail, pendingReadOnlyBatch: [] },
@@ -797,6 +827,9 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         args: tc.args,
         ...(tc.patch ? { patch: tc.patch } : {}),
         results: [{ ok: action.ok, detail: action.detail, ...(action.blocked ? { blocked: true as const } : {}) }],
+        // Phase 5a — tag with current subagent (interval inference: serial execution
+        // means any tool_call between STARTED and COMPLETED belongs to that subagent).
+        ...(flushed.currentSubagentId ? { subagentId: flushed.currentSubagentId } : {}),
       };
       return appendEntry(flushed, entry);
     }
@@ -920,7 +953,7 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
       return { ...state, transcriptGeneration: state.transcriptGeneration + 1 };
 
     case "PENDING_APPROVAL_SET": {
-      const next: StoreState = { ...state, pendingApproval: { approvalId: action.approvalId, runId: action.runId, command: action.command, kind: action.kind } };
+      const next: StoreState = { ...state, pendingApproval: { approvalId: action.approvalId, runId: action.runId, command: action.command, kind: action.kind, ...(action.subagentId ? { subagentId: action.subagentId } : {}) } };
       // Phase 2d — trust approvals render through the OverlayLayer stack; push "trust" so the
       // TrustPrompt content component renders inside OverlayShell.
       if (action.kind === "trust") {
@@ -1538,6 +1571,54 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
       return { ...state, armedMcpManager: action.manager, pendingMcpTrust: null };
     case "MCP_TRUST_DENIED":
       return { ...state, pendingMcpTrust: null, armedMcpManager: null };
+
+    // Phase 5a+5c — subagent lifecycle. STARTED creates a thread entry, sets currentSubagentId
+    // for tool_call tagging (interval inference: serial execution means every tool_call between
+    // STARTED and COMPLETED belongs to that subagent), and pushes the spinner label onto a stack
+    // so nested subagents can restore their parent's label on completion.
+    // DESIGN NOTE: this relies on serial subagent execution (toolExecutor.ts cap=1). If parallel
+    // dispatch ever lands (deferred-work), the durable fix is producer-side tagging via
+    // AsyncLocalStorage in emitStructuredProgress.
+    case "SUBAGENT_STARTED": {
+      const thread: SubagentThread = {
+        subagentId: action.subagentId,
+        subagentType: action.subagentType,
+        title: action.title,
+        status: "running",
+        toolCallCount: 0,
+      };
+      const currentLabel = state.spinner?.label ?? "";
+      const truncatedTitle = action.title.length > 40 ? action.title.slice(0, 37) + "..." : action.title;
+      return {
+        ...state,
+        subagentThreads: { ...state.subagentThreads, [action.subagentId]: thread },
+        currentSubagentId: action.subagentId,
+        parentSpinnerLabels: [...state.parentSpinnerLabels, currentLabel],
+        spinner: state.spinner ? { ...state.spinner, label: `↳ ${action.subagentType} · ${truncatedTitle}` } : state.spinner,
+      };
+    }
+    case "SUBAGENT_COMPLETED": {
+      const existing = state.subagentThreads[action.subagentId];
+      if (!existing) return state;
+      const updated: SubagentThread = {
+        ...existing,
+        status: action.status,
+        ...(action.costUsd !== undefined ? { costUsd: action.costUsd } : {}),
+        ...(action.iterations !== undefined ? { iterations: action.iterations } : {}),
+        ...(action.summary !== undefined ? { summary: action.summary } : {}),
+      };
+      const labels = state.parentSpinnerLabels;
+      const parentLabel = labels.length > 0 ? labels[labels.length - 1] : null;
+      return {
+        ...state,
+        subagentThreads: { ...state.subagentThreads, [action.subagentId]: updated },
+        currentSubagentId: null,
+        parentSpinnerLabels: labels.slice(0, -1),
+        spinner: state.spinner && parentLabel !== null
+          ? { ...state.spinner, label: parentLabel }
+          : state.spinner,
+      };
+    }
 
     // Phase 2c — overlay stack. Push appends (a modal re-opening itself stacks, deliberately —
     // the user can Esc through the history). Pop removes the top regardless of id so the

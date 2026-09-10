@@ -426,6 +426,35 @@ export function eventToActions(
       // No-op: tool_call/tool_result events already render the call in the transcript.
       return { actions: [], intents: [] };
 
+    // Phase 5a — subagent lifecycle events.
+    case "subagent_started": {
+      const subagentId = (evt as any).subagentId ?? "";
+      const subagentType = (evt as any).subagentType ?? "worker";
+      const title = evt.title ?? "";
+      if (!subagentId) return { actions: [], intents: [] };
+      return {
+        actions: [{ type: "SUBAGENT_STARTED", subagentId, subagentType, title }],
+        intents: [],
+      };
+    }
+
+    case "subagent_completed": {
+      const subagentId = (evt as any).subagentId ?? "";
+      if (!subagentId) return { actions: [], intents: [] };
+      const status = (evt as any).status === "failed" ? "failed" as const : "completed" as const;
+      return {
+        actions: [{
+          type: "SUBAGENT_COMPLETED",
+          subagentId,
+          status,
+          ...((evt as any).costUsd !== undefined ? { costUsd: (evt as any).costUsd } : {}),
+          ...((evt as any).iterations !== undefined ? { iterations: (evt as any).iterations } : {}),
+          ...((evt as any).summary !== undefined ? { summary: (evt as any).summary } : {}),
+        }],
+        intents: [],
+      };
+    }
+
     default:
       return { actions: [], intents: [] };
   }
