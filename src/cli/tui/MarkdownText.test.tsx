@@ -76,4 +76,101 @@ describe("TUI.10.C: MarkdownText component", () => {
     const frame = renderMd("Plan called for both utilities plus barrel update.");
     expect(frame).toContain("Plan called for both utilities plus barrel update.");
   });
+
+  // Phase 6d — fenced code blocks
+  it("fenced code block renders with dim bar and indent", () => {
+    const text = [
+      "```typescript",
+      "function hello() {",
+      "  return 'world';",
+      "}",
+      "```",
+    ].join("\n");
+    const frame = renderMd(text);
+    // Fence lines (```) should not appear in output
+    expect(frame).not.toContain("```");
+    // Code content should be present
+    expect(frame).toContain("function hello()");
+    expect(frame).toContain("return 'world';");
+    // Dim bar character (separator glyph: "─") should be present
+    expect(frame).toContain("─");
+  });
+
+  it("unclosed fence at EOF closes implicitly", () => {
+    const text = [
+      "```",
+      "some code here",
+      // No closing ```
+    ].join("\n");
+    const frame = renderMd(text);
+    expect(frame).not.toContain("```");
+    expect(frame).toContain("some code here");
+  });
+
+  it("code line indentation preserved", () => {
+    const text = [
+      "```",
+      "if (true) {",
+      "  nested();",
+      "    deep();",
+      "}",
+      "```",
+    ].join("\n");
+    const frame = renderMd(text);
+    expect(frame).toContain("if (true)");
+    expect(frame).toContain("nested()");
+    expect(frame).toContain("deep()");
+  });
+
+  // Phase 6d — numbered lists
+  it("numbered list renders with number prefix", () => {
+    const text = [
+      "1. First item",
+      "2. Second item",
+      "3. Third item",
+    ].join("\n");
+    const frame = renderMd(text);
+    expect(frame).toContain("1.");
+    expect(frame).toContain("First item");
+    expect(frame).toContain("2.");
+    expect(frame).toContain("Second item");
+    expect(frame).toContain("3.");
+    expect(frame).toContain("Third item");
+  });
+
+  // Phase 6d — inline links
+  it("[text](url) renders text followed by muted url", () => {
+    const frame = renderMd("See [the docs](https://example.com) for details");
+    expect(frame).not.toContain("[");
+    expect(frame).not.toContain("](");
+    expect(frame).toContain("the docs");
+    expect(frame).toContain("https://example.com");
+    expect(frame).toContain("See");
+    expect(frame).toContain("for details");
+  });
+
+  // Phase 6d — mixed document
+  it("mixed document: heading + fence + list + link", () => {
+    const text = [
+      "## Summary",
+      "",
+      "```",
+      "const x = 1;",
+      "```",
+      "",
+      "1. Step one",
+      "2. Step two",
+      "",
+      "See [example](https://test.com) for more.",
+    ].join("\n");
+    const frame = renderMd(text);
+    expect(frame).toContain("Summary");
+    expect(frame).toContain("const x = 1");
+    expect(frame).toContain("1.");
+    expect(frame).toContain("Step one");
+    expect(frame).toContain("example");
+    expect(frame).toContain("https://test.com");
+    expect(frame).not.toContain("##");
+    expect(frame).not.toContain("```");
+  });
 });
