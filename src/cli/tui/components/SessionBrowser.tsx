@@ -1,13 +1,18 @@
+import React from "react";
 import { Box, Text, useInput } from "ink";
 import { useStore } from "../store.js";
 import { loadSession } from "../../../api/diskSessions.js";
-import { role, glyph, spacing } from "../theme.js";
+import { role, glyph } from "../theme.js";
 
 function truncate(s: string, max: number): string {
   return s.length > max ? s.slice(0, max - 1) + "…" : s;
 }
 
-export function SessionsModal(): React.ReactElement {
+/**
+ * Phase 2d — content-only session browser. No border, no title, no footer hints —
+ * those come from OverlayShell when OverlayLayer wraps this component.
+ */
+export function SessionBrowser(): React.ReactElement {
   const { state, dispatch } = useStore();
   const list = state.sessionsList;
   const sel = state.sessionsSelectedIndex;
@@ -16,7 +21,7 @@ export function SessionsModal(): React.ReactElement {
 
   useInput((_input, key) => {
     if (key.escape) {
-      dispatch({ type: "SESSIONS_CLOSE" });
+      dispatch({ type: "OVERLAY_POP" });
     } else if (key.upArrow) {
       dispatch({ type: "SESSIONS_NAV", direction: "up" });
     } else if (key.downArrow) {
@@ -25,17 +30,20 @@ export function SessionsModal(): React.ReactElement {
       const meta = list[sel];
       if (meta) {
         void loadSession(process.cwd(), meta.filename).then(session => {
-          if (session) dispatch({ type: "SESSION_RESUME", session });
-          else dispatch({ type: "SESSIONS_CLOSE" });
+          if (session) {
+            dispatch({ type: "SESSION_RESUME", session });
+            dispatch({ type: "OVERLAY_POP" });
+          } else {
+            dispatch({ type: "OVERLAY_POP" });
+          }
         });
       }
     }
   });
 
   return (
-    <Box borderStyle="round" borderColor={role.accent} flexDirection="column" paddingX={spacing.sm} marginX={spacing.md}>
-      <Text bold color={role.accent}>Sessions</Text>
-      <Text dimColor>Past sessions — Enter to resume, Esc to cancel:</Text>
+    <Box flexDirection="column">
+      <Text dimColor>Past sessions — Enter to resume:</Text>
       <Box height={1} />
       {list.length === 0 ? (
         <Text dimColor>No saved sessions found.</Text>
@@ -71,8 +79,6 @@ export function SessionsModal(): React.ReactElement {
           );
         })
       )}
-      <Box height={1} />
-      <Text dimColor>{glyph.navigateArrows} navigate  Enter resume  Esc close</Text>
     </Box>
   );
 }

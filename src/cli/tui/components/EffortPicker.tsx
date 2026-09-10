@@ -1,37 +1,36 @@
+import React from "react";
 import { Box, Text, useInput } from "ink";
-import type { Dispatch } from "react";
 import { useStore } from "../store.js";
-import type { StoreAction } from "../store.js";
 import { supportsEffort, getDefaultModelId, effortLevelsFor } from "../../../llm/modelRegistry.js";
 import type { EffortLevel } from "../../../llm/modelRegistry.js";
 import { saveDiskModel } from "../../../api/diskModel.js";
 import { role, glyph, spacing } from "../theme.js";
 
-interface Props {
-  dispatch: Dispatch<StoreAction>;
-}
-
 const ALL_EFFORT_LABELS: Record<EffortLevel, string> = {
-  low:   "Low — Faster, less deliberation",
+  low:    "Low — Faster, less deliberation",
   medium: "Medium — Balanced (default)",
-  high:  "High — Slower, deeper analysis",
-  // Deliberately does not enumerate models: the list is MODEL_EFFORT_LEVELS, and a
-  // hard-coded roster here goes stale on every model addition. The modal already
-  // shows only the levels the selected model allows.
-  xhigh: "XHigh — Extended reasoning (not supported by every model)",
-  max:   "Max — Maximum reasoning budget",
+  high:   "High — Slower, deeper analysis",
+  xhigh:  "XHigh — Extended reasoning (not supported by every model)",
+  max:    "Max — Maximum reasoning budget",
 };
 
-export function EffortModal({ dispatch }: Props): React.ReactElement {
-  const { state } = useStore();
+/**
+ * Phase 2d — content-only effort picker. No border, no title, no footer hints — those
+ * come from OverlayShell when OverlayLayer wraps this component. Reads the same slice
+ * of state EffortModal.tsx reads; dispatches OVERLAY_POP on Esc instead of
+ * EFFORT_MODAL_CLOSE so the central stack owns the lifecycle.
+ */
+export function EffortPicker(): React.ReactElement {
+  const { state, dispatch } = useStore();
   const sel = state.effortSelectedIndex;
   const currentModel = state.modelSettings?.model ?? getDefaultModelId();
   const modelSupports = supportsEffort(currentModel);
   const EFFORTS = effortLevelsFor(currentModel);
+  const currentEffort = state.modelSettings?.effort;
 
   useInput((_input, key) => {
     if (key.escape) {
-      dispatch({ type: "EFFORT_MODAL_CLOSE" });
+      dispatch({ type: "OVERLAY_POP" });
     } else if (key.upArrow) {
       dispatch({ type: "EFFORT_NAV", direction: "up" });
     } else if (key.downArrow) {
@@ -44,24 +43,13 @@ export function EffortModal({ dispatch }: Props): React.ReactElement {
           : { version: 2 as const, model: currentModel, provider: "anthropic" as const, effort, updatedAt: new Date().toISOString() };
         void saveDiskModel(process.cwd(), updated);
         dispatch({ type: "EFFORT_APPLY", effort });
+        dispatch({ type: "OVERLAY_POP" });
       }
     }
   });
 
-  const cols = process.stdout.columns ?? 80;
-  const innerWidth = Math.min(cols - 4, 56);
-  const currentEffort = state.modelSettings?.effort;
-
   return (
-    <Box
-      flexDirection="column"
-      borderStyle="round"
-      borderColor={role.accent}
-      paddingX={spacing.sm}
-      width={innerWidth}
-    >
-      <Text bold color={role.accent}> Reasoning effort</Text>
-      <Text> </Text>
+    <Box flexDirection="column">
       {EFFORTS.map((effort, i) => {
         const selected = i === sel;
         const marker = currentEffort === effort ? glyph.radioSelected : glyph.radioUnselected;
@@ -71,14 +59,13 @@ export function EffortModal({ dispatch }: Props): React.ReactElement {
           </Box>
         );
       })}
-      <Text> </Text>
-      <Text> Current model: <Text bold>{currentModel}</Text></Text>
+      <Box marginTop={spacing.sm}>
+        <Text> Current model: <Text bold>{currentModel}</Text></Text>
+      </Box>
       {modelSupports
         ? <Text color={role.success}> Supports effort: yes</Text>
         : <Text color={role.caution}> Does not use effort (preference saved for later)</Text>
       }
-      <Text> </Text>
-      <Text dimColor> {glyph.navigateArrows} navigate · Enter select · Esc cancel</Text>
     </Box>
   );
 }

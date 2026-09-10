@@ -1,14 +1,9 @@
+import React from "react";
 import { Box, Text, useInput } from "ink";
-import type { Dispatch } from "react";
 import { useStore } from "../store.js";
-import type { StoreAction } from "../store.js";
 import { saveDiskModel } from "../../../api/diskModel.js";
 import { getDefaultModelId } from "../../../llm/modelRegistry.js";
-import { role, glyph, spacing } from "../theme.js";
-
-interface Props {
-  dispatch: Dispatch<StoreAction>;
-}
+import { role, glyph } from "../theme.js";
 
 const FORMATS: Array<"compact" | "detailed"> = ["compact", "detailed"];
 const FORMAT_LABELS: Record<"compact" | "detailed", string> = {
@@ -16,14 +11,19 @@ const FORMAT_LABELS: Record<"compact" | "detailed", string> = {
   detailed: "Detailed — longer bullets, paragraph Why, Files list",
 };
 
-export function SummaryModal({ dispatch }: Props): React.ReactElement {
-  const { state } = useStore();
+/**
+ * Phase 2d — content-only summary format picker. No border, no title, no footer hints —
+ * those come from OverlayShell when OverlayLayer wraps this component.
+ */
+export function SummaryPicker(): React.ReactElement {
+  const { state, dispatch } = useStore();
   const sel = state.summarySelectedIndex;
   const currentModel = state.modelSettings?.model ?? getDefaultModelId();
+  const currentFormat = state.modelSettings?.summaryFormat ?? "compact";
 
   useInput((_input, key) => {
     if (key.escape) {
-      dispatch({ type: "SUMMARY_MODAL_CLOSE" });
+      dispatch({ type: "OVERLAY_POP" });
     } else if (key.upArrow) {
       dispatch({ type: "SUMMARY_NAV", direction: "up" });
     } else if (key.downArrow) {
@@ -36,24 +36,13 @@ export function SummaryModal({ dispatch }: Props): React.ReactElement {
           : { version: 2 as const, model: currentModel, provider: "anthropic" as const, summaryFormat, updatedAt: new Date().toISOString() };
         void saveDiskModel(process.cwd(), updated);
         dispatch({ type: "SUMMARY_APPLY", summaryFormat });
+        dispatch({ type: "OVERLAY_POP" });
       }
     }
   });
 
-  const cols = process.stdout.columns ?? 80;
-  const innerWidth = Math.min(cols - 4, 60);
-  const currentFormat = state.modelSettings?.summaryFormat ?? "compact";
-
   return (
-    <Box
-      flexDirection="column"
-      borderStyle="round"
-      borderColor={role.accent}
-      paddingX={spacing.sm}
-      width={innerWidth}
-    >
-      <Text bold color={role.accent}> Summary format</Text>
-      <Text> </Text>
+    <Box flexDirection="column">
       {FORMATS.map((fmt, i) => {
         const selected = i === sel;
         const marker = currentFormat === fmt ? glyph.radioSelected : glyph.radioUnselected;
@@ -63,8 +52,6 @@ export function SummaryModal({ dispatch }: Props): React.ReactElement {
           </Box>
         );
       })}
-      <Text> </Text>
-      <Text dimColor> {glyph.navigateArrows} navigate · Enter select · Esc cancel</Text>
     </Box>
   );
 }

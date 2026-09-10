@@ -278,6 +278,7 @@ export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, onRemot
       }
       case "/permissions":
         void loadDiskTrust(process.cwd()).then(store => {
+          // Phase 2d — PERMISSIONS_OPEN seeds data AND pushes "permissions" onto the overlay stack.
           dispatch({ type: "PERMISSIONS_OPEN", list: store.trustedPrefixes });
         });
         break;
@@ -298,6 +299,7 @@ export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, onRemot
           break;
         }
         void listSessionsMeta(process.cwd()).then(list => {
+          // Phase 2d — SESSIONS_OPEN seeds data AND pushes "sessions" onto the overlay stack.
           dispatch({ type: "SESSIONS_OPEN", list });
         });
         break;
@@ -340,28 +342,32 @@ export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, onRemot
           dispatch({ type: "USER_PROMPT", text: "Cannot change /effort while a run is in progress." });
           break;
         }
-        dispatch({ type: "EFFORT_MODAL_OPEN" });
+        // Phase 2d — EffortPicker renders via the OverlayLayer stack.
+        dispatch({ type: "OVERLAY_PUSH", overlayId: "effort" });
         break;
       case "/summary":
         if (disabled) {
           dispatch({ type: "USER_PROMPT", text: "Cannot change /summary while a run is in progress." });
           break;
         }
-        dispatch({ type: "SUMMARY_MODAL_OPEN" });
+        // Phase 2d — SummaryPicker renders via the OverlayLayer stack.
+        dispatch({ type: "OVERLAY_PUSH", overlayId: "summary" });
         break;
       case "/plan-mode":
         if (disabled) {
           dispatch({ type: "USER_PROMPT", text: "Cannot change /plan-mode while a run is in progress." });
           break;
         }
-        dispatch({ type: "PLANMODE_MODAL_OPEN" });
+        // Phase 2d — PlanModePicker renders via the OverlayLayer stack.
+        dispatch({ type: "OVERLAY_PUSH", overlayId: "planMode" });
         break;
       case "/session":
         if (disabled) {
           dispatch({ type: "USER_PROMPT", text: "Cannot change /session while a run is in progress." });
           break;
         }
-        dispatch({ type: "MEMORY_MODAL_OPEN" });
+        // Phase 2d — SessionMemoryPicker renders via the OverlayLayer stack.
+        dispatch({ type: "OVERLAY_PUSH", overlayId: "session" });
         break;
       case "/metrics":
         // Phase 2c — MetricsDashboard renders via the OverlayLayer stack.
@@ -372,7 +378,8 @@ export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, onRemot
           dispatch({ type: "USER_PROMPT", text: "Cannot change /limits while a run is in progress." });
           break;
         }
-        dispatch({ type: "LIMITS_MODAL_OPEN" });
+        // Phase 2d — LimitsEditor renders via the OverlayLayer stack.
+        dispatch({ type: "OVERLAY_PUSH", overlayId: "limits" });
         break;
       case "/commit": {
         if (disabled) {
@@ -384,6 +391,7 @@ export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, onRemot
           dispatch({ type: "USER_PROMPT", text: "Nothing to commit — run a task first." });
           break;
         }
+        // Phase 2d — COMMIT_MODAL_OPEN seeds commitData AND pushes "commit" onto the overlay stack.
         dispatch({ type: "COMMIT_MODAL_OPEN", filePaths: commitData.filePaths, message: commitData.message, repoPath: commitData.repoPath });
         break;
       }
@@ -397,6 +405,7 @@ export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, onRemot
           dispatch({ type: "USER_PROMPT", text: "Nothing to report yet — run a task first." });
           break;
         }
+        // Phase 2d — FEEDBACK_MODAL_OPEN seeds feedbackData AND pushes "feedback" onto the overlay stack.
         dispatch({ type: "FEEDBACK_MODAL_OPEN", runId: feedbackData.runId, sessionId: feedbackData.sessionId, logs: feedbackData.logs, version: feedbackData.version, repoPath: feedbackData.repoPath });
         break;
       }

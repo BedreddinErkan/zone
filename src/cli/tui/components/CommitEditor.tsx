@@ -1,18 +1,13 @@
-import { Box, Text, useInput, useStdout } from "ink";
+import React from "react";
+import { Box, Text, useInput } from "ink";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
 import { useState } from "react";
-import type { Dispatch } from "react";
 import { useStore } from "../store.js";
-import type { StoreAction } from "../store.js";
 import { role, glyph, spacing } from "../theme.js";
 
 const execFileAsync = promisify(execFile);
-
-interface Props {
-  dispatch: Dispatch<StoreAction>;
-}
 
 export async function executeCommit(
   repoPath: string,
@@ -20,16 +15,12 @@ export async function executeCommit(
   filePaths: string[]
 ): Promise<{ ok: true; hash: string } | { ok: false; error: string }> {
   const opts = { cwd: repoPath, windowsHide: true };
-  // Step 1: stage exactly the run's files (new + modified + deletions).
-  // Scoped via -- <paths> — NEVER "git add ." and NEVER -A.
   try {
     await execFileAsync("git", ["add", "--", ...filePaths], opts);
   } catch (err) {
     const e = err as { stderr?: string; stdout?: string };
     return { ok: false, error: (e.stderr || e.stdout || String(err)).trim() };
   }
-  // Step 2: commit only those paths. The pathspec -- <paths> puts git in
-  // "only these paths" mode so pre-existing staged changes are not swept in.
   try {
     const { stdout } = await execFileAsync(
       "git",
@@ -44,9 +35,13 @@ export async function executeCommit(
   }
 }
 
-export function CommitModal({ dispatch }: Props): React.ReactElement {
-  const { state } = useStore();
-  const { stdout } = useStdout();
+/**
+ * Phase 2d — content-only commit editor. No border, no title, no footer hints — those
+ * come from OverlayShell when OverlayLayer wraps this component. Reads commitData from
+ * the store; dispatches OVERLAY_POP on Esc/close.
+ */
+export function CommitEditor(): React.ReactElement {
+  const { state, dispatch } = useStore();
   const data = state.commitData!;
   const [draftMsg, setDraftMsg] = useState(data.message);
   const [status, setStatus] = useState<"editing" | "running" | "error">("editing");
@@ -55,7 +50,7 @@ export function CommitModal({ dispatch }: Props): React.ReactElement {
   useInput((input, key) => {
     if (status === "running") return;
     if (key.escape) {
-      dispatch({ type: "COMMIT_MODAL_CLOSE" });
+      dispatch({ type: "OVERLAY_POP" });
       return;
     }
     if (key.return) {
@@ -63,7 +58,7 @@ export function CommitModal({ dispatch }: Props): React.ReactElement {
       setStatus("running");
       void executeCommit(data.repoPath, draftMsg.trim(), data.filePaths).then(r => {
         if (r.ok) {
-          dispatch({ type: "COMMIT_MODAL_CLOSE" });
+          dispatch({ type: "OVERLAY_POP" });
           dispatch({
             type: "TOAST_PUSH",
             entry: { id: randomUUID(), message: `Committed: ${r.hash}`, level: "info" },
@@ -84,34 +79,20 @@ export function CommitModal({ dispatch }: Props): React.ReactElement {
     }
   });
 
-  const cols = stdout?.columns ?? process.stdout.columns ?? 80;
-  const innerWidth = Math.min(cols - 4, 70);
-
   return (
-    <Box
-      flexDirection="column"
-      borderStyle="round"
-      borderColor={role.accent}
-      paddingX={spacing.sm}
-      width={innerWidth}
-    >
-      <Text bold color={role.accent}> Commit changes</Text>
-      <Text> </Text>
+    <Box flexDirection="column">
       <Text dimColor> Files:</Text>
       {data.filePaths.map(fp => (
         <Text key={fp} dimColor>   · {fp}</Text>
       ))}
-      <Text> </Text>
-      <Text> Message:</Text>
+      <Box marginTop={spacing.sm}>
+        <Text> Message:</Text>
+      </Box>
       <Text>   {draftMsg}{glyph.cursor}</Text>
-      <Text> </Text>
       {status === "error" && (
         <Text color={role.danger}>  {errorMsg}</Text>
       )}
-      {status === "running"
-        ? <Text dimColor> Committing…</Text>
-        : <Text dimColor> Type message · Enter commit · Esc cancel</Text>
-      }
+      {status === "running" && <Text dimColor> Committing…</Text>}
     </Box>
   );
 }

@@ -1,22 +1,24 @@
+import React from "react";
 import { Box, Text, useInput } from "ink";
 import { useState } from "react";
 import { useStore } from "../store.js";
 import { writeDailyUsdCapOverride } from "../../../visual/tierSettings.js";
 import { role, spacing } from "../theme.js";
 
-export function LimitsModal(): React.ReactElement {
+/**
+ * Phase 2d — content-only spending limits editor. No border, no title, no footer hints —
+ * those come from OverlayShell when OverlayLayer wraps this component.
+ */
+export function LimitsEditor(): React.ReactElement {
   const { state, dispatch } = useStore();
   const currentCap = state.statusBar.capUsd;
   const [input, setInput] = useState(currentCap.toFixed(2));
   const [error, setError] = useState<string | null>(null);
-
-  const cols = process.stdout.columns ?? 80;
-  const innerWidth = Math.min(cols - 4, 52);
   const orgPolicy = !!process.env.ZONE_ORG_POLICY_PATH;
 
   useInput((ch, key) => {
     if (key.escape) {
-      dispatch({ type: "LIMITS_MODAL_CLOSE" });
+      dispatch({ type: "OVERLAY_POP" });
       return;
     }
     if (key.return) {
@@ -27,6 +29,7 @@ export function LimitsModal(): React.ReactElement {
       }
       writeDailyUsdCapOverride(n);
       dispatch({ type: "LIMITS_APPLY", capUsd: n });
+      dispatch({ type: "OVERLAY_POP" });
       return;
     }
     if (key.backspace || key.delete) {
@@ -46,24 +49,15 @@ export function LimitsModal(): React.ReactElement {
   });
 
   return (
-    <Box
-      flexDirection="column"
-      borderStyle="round"
-      borderColor={role.accent}
-      paddingX={spacing.sm}
-      width={innerWidth}
-    >
-      <Text bold color={role.accent}> Daily USD Cap</Text>
-      <Text> </Text>
+    <Box flexDirection="column">
       <Text dimColor>Current cap: <Text color={role.emphasis}>${currentCap.toFixed(2)}</Text></Text>
       {orgPolicy && (
         <Text color={role.caution}>  Note: org policy may override this value.</Text>
       )}
-      <Text> </Text>
-      <Text>New cap: <Text bold>$</Text>{input}<Text inverse> </Text></Text>
+      <Box marginTop={spacing.sm}>
+        <Text>New cap: <Text bold>$</Text>{input}<Text inverse> </Text></Text>
+      </Box>
       {error !== null && <Text color={role.danger}>  {error}</Text>}
-      <Text> </Text>
-      <Text dimColor>↵ apply · Esc cancel</Text>
     </Box>
   );
 }

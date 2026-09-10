@@ -1,22 +1,22 @@
+import React from "react";
 import { Box, Text, useInput, useStdout } from "ink";
 import { randomUUID } from "node:crypto";
 import { useState } from "react";
-import type { Dispatch } from "react";
 import { buildFeedbackReport } from "../../../feedback/buildFeedbackReport.js";
 import type { FeedbackReport } from "../../../feedback/buildFeedbackReport.js";
 import { useStore } from "../store.js";
-import type { StoreAction } from "../store.js";
 import { copyToClipboard, openUrlInBrowser } from "../../../utils/clipboardMailto.js";
-import { role, glyph, spacing } from "../theme.js";
+import { glyph, spacing } from "../theme.js";
 
 const REPO_SLUG = "BedreddinErkan/zone";
 
-interface Props {
-  dispatch: Dispatch<StoreAction>;
-}
-
-export function FeedbackModal({ dispatch }: Props): React.ReactElement {
-  const { state } = useStore();
+/**
+ * Phase 2d — content-only feedback form. No border, no title, no footer hints — those
+ * come from OverlayShell when OverlayLayer wraps this component. Reads feedbackData from
+ * the store; dispatches OVERLAY_POP on Esc/close.
+ */
+export function FeedbackForm(): React.ReactElement {
+  const { state, dispatch } = useStore();
   const { stdout } = useStdout();
   const data = state.feedbackData!;
   const [draftMsg, setDraftMsg] = useState("");
@@ -27,20 +27,20 @@ export function FeedbackModal({ dispatch }: Props): React.ReactElement {
     if (status === "delivering") return;
 
     if (key.escape) {
-      dispatch({ type: "FEEDBACK_MODAL_CLOSE" });
+      dispatch({ type: "OVERLAY_POP" });
       return;
     }
 
     if (status === "delivered") {
       if (input === "m" && !key.ctrl && !key.meta && builtReport) {
         openUrlInBrowser(builtReport.mailtoUrl);
-        dispatch({ type: "FEEDBACK_MODAL_CLOSE" });
+        dispatch({ type: "OVERLAY_POP" });
         dispatch({
           type: "TOAST_PUSH",
           entry: { id: randomUUID(), message: "Email draft opened", level: "info" },
         });
       } else {
-        dispatch({ type: "FEEDBACK_MODAL_CLOSE" });
+        dispatch({ type: "OVERLAY_POP" });
       }
       return;
     }
@@ -62,7 +62,7 @@ export function FeedbackModal({ dispatch }: Props): React.ReactElement {
         setBuiltReport(r);
         setStatus("delivered");
       }).catch(() => {
-        dispatch({ type: "FEEDBACK_MODAL_CLOSE" });
+        dispatch({ type: "OVERLAY_POP" });
         dispatch({
           type: "TOAST_PUSH",
           entry: { id: randomUUID(), message: "Feedback build failed", level: "warning" },
@@ -84,15 +84,7 @@ export function FeedbackModal({ dispatch }: Props): React.ReactElement {
   const logLines = data.logs ? data.logs.split("\n").filter(Boolean).slice(-5) : [];
 
   return (
-    <Box
-      flexDirection="column"
-      borderStyle="round"
-      borderColor={role.accent}
-      paddingX={spacing.sm}
-      width={innerWidth}
-    >
-      <Text bold color={role.accent}> Send feedback</Text>
-      <Text> </Text>
+    <Box flexDirection="column">
       <Text dimColor> Run ID: {data.runId}</Text>
       {logLines.length > 0 && (
         <>
@@ -102,16 +94,12 @@ export function FeedbackModal({ dispatch }: Props): React.ReactElement {
           ))}
         </>
       )}
-      <Text> </Text>
-      <Text> Message:</Text>
+      <Box marginTop={spacing.sm}>
+        <Text> Message:</Text>
+      </Box>
       <Text>   {draftMsg}{glyph.cursor}</Text>
-      <Text> </Text>
-      {status === "delivering"
-        ? <Text dimColor> Opening GitHub issue…</Text>
-        : status === "delivered"
-          ? <Text dimColor> Copied · GitHub opened · m for email · any key to close</Text>
-          : <Text dimColor> Type message · Enter send · Esc cancel</Text>
-      }
+      {status === "delivering" && <Text dimColor> Opening GitHub issue…</Text>}
+      {status === "delivered" && <Text dimColor> Copied · GitHub opened · m for email · any key to close</Text>}
     </Box>
   );
 }

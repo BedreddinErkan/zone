@@ -8,7 +8,7 @@ vi.mock("node:child_process", async (importOriginal) => {
   return { ...actual, execFile: execFileMock };
 });
 
-import { executeCommit } from "./components/CommitModal.js";
+import { executeCommit } from "./components/CommitEditor.js";
 import { reducer, buildInitialState } from "./store.js";
 
 beforeEach(() => {

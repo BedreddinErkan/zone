@@ -1,27 +1,30 @@
-import { Box, Text, useInput, useStdout } from "ink";
-import { type Dispatch } from "react";
+import React from "react";
+import { Box, Text, useInput } from "ink";
 import { randomUUID } from "node:crypto";
-import type { StoreAction } from "../store.js";
-import type { SnapshotManifest } from "../../../snapshots/snapshotStore.js";
+import { useStore } from "../store.js";
 import { restoreSnapshot } from "../../../snapshots/snapshotStore.js";
-import { role, glyph, spacing } from "../theme.js";
+import { role, glyph } from "../theme.js";
 
-interface Props {
-  data: { manifest: SnapshotManifest; driftedPaths: string[] };
-  dispatch: Dispatch<StoreAction>;
-}
+/**
+ * Phase 2d — content-only undo confirmation. No border, no title, no footer hints — those
+ * come from OverlayShell when OverlayLayer wraps this component. Reads undoModalData from
+ * the store; dispatches OVERLAY_POP on Esc/cancel/after-confirm.
+ */
+export function UndoConfirm(): React.ReactElement | null {
+  const { state, dispatch } = useStore();
+  const data = state.undoModalData;
+  if (!data) return null;
 
-export function UndoModal({ data, dispatch }: Props): React.ReactElement | null {
-  const { stdout } = useStdout();
+  const { manifest, driftedPaths } = data;
+  const driftedSet = new Set(driftedPaths);
 
   useInput((input, key) => {
     if (key.escape || input === "n" || input === "N") {
-      dispatch({ type: "UNDO_MODAL_CLOSE" });
+      dispatch({ type: "OVERLAY_POP" });
       return;
     }
     if (key.return || input === "y" || input === "Y") {
-      const { manifest } = data;
-      dispatch({ type: "UNDO_MODAL_CLOSE" });
+      dispatch({ type: "OVERLAY_POP" });
       restoreSnapshot(manifest.runId, manifest.repoPath)
         .then((result) => {
           if (result.alreadyUndone) {
@@ -37,15 +40,8 @@ export function UndoModal({ data, dispatch }: Props): React.ReactElement | null 
     }
   });
 
-  const { manifest, driftedPaths } = data;
-  const driftedSet = new Set(driftedPaths);
-  const cols = stdout?.columns ?? 80;
-  const width = Math.min(cols - 4, 62);
-
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={role.caution} paddingX={spacing.sm} width={width}>
-      <Text bold color={role.caution}> Undo last run?</Text>
-      <Text> </Text>
+    <Box flexDirection="column">
       <Text>{` Revert ${manifest.files.length} file(s) to state before last run:`}</Text>
       {manifest.files.map((entry) => {
         const isDrifted = driftedSet.has(entry.path);
@@ -62,8 +58,6 @@ export function UndoModal({ data, dispatch }: Props): React.ReactElement | null 
           </Box>
         );
       })}
-      <Text> </Text>
-      <Text dimColor>  [Y/Enter] Confirm   [N/Esc] Cancel</Text>
     </Box>
   );
 }

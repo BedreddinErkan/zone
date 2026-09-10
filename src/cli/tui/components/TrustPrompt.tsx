@@ -1,31 +1,39 @@
+import React from "react";
 import { Box, Text, useInput } from "ink";
-import type { Dispatch } from "react";
+import { useStore } from "../store.js";
 import { resolveTrustApproval } from "../../../api/trustApprovals.js";
-import type { StoreAction } from "../store.js";
 import { role, spacing } from "../theme.js";
 
-interface Props {
-  runId: string;
-  projectPath: string;
-  dispatch: Dispatch<StoreAction>;
-}
+/**
+ * Phase 2d — content-only trust prompt. No border, no title, no footer hints — those
+ * come from OverlayShell when OverlayLayer wraps this component. Reads pendingApproval
+ * from the store (kind: "trust"); resolves the trust decision and dispatches
+ * PENDING_APPROVAL_RESOLVED + OVERLAY_POP.
+ */
+export function TrustPrompt(): React.ReactElement | null {
+  const { state, dispatch } = useStore();
+  const approval = state.pendingApproval;
+  if (!approval || approval.kind !== "trust") return null;
 
-export function TrustModal({ runId, projectPath, dispatch }: Props): React.ReactElement {
+  const runId = approval.runId;
+  const projectPath = approval.command;
+
   useInput((input, key) => {
     const ch = input.toLowerCase();
     if (ch === "y") {
       resolveTrustApproval(runId, true);
       dispatch({ type: "PENDING_APPROVAL_RESOLVED" });
+      dispatch({ type: "OVERLAY_POP" });
     } else if (ch === "n" || key.escape) {
       resolveTrustApproval(runId, false);
       dispatch({ type: "PENDING_APPROVAL_RESOLVED" });
+      dispatch({ type: "OVERLAY_POP" });
     }
   });
 
   return (
-    <Box borderStyle="single" borderColor={role.caution} flexDirection="column" paddingX={spacing.sm} marginX={spacing.md}>
-      <Text bold color={role.caution}>Trust this folder?</Text>
-      <Box marginTop={spacing.sm}>
+    <Box flexDirection="column">
+      <Box>
         <Text color={role.accent}>{"  "}{projectPath}</Text>
       </Box>
       <Box marginTop={spacing.sm}>

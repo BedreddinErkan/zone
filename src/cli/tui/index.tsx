@@ -34,7 +34,7 @@ import { log } from "../../utils/logger.js";
 import type { StoreState, StoreAction, PendingQuestion } from "./store.js";
 import { isRunInFlight } from "./store-core.js";
 import { deriveCommitMessage, shouldAutoCommit } from "./commitMessage.js";
-import { executeCommit } from "./components/CommitModal.js";
+import { executeCommit } from "./components/CommitEditor.js";
 import { loadUserCommands, type UserCommand } from "./userCommands.js";
 import { shouldRedrawOnResize, applyResizeRedraw } from "./resize.js";
 import { getUsage } from "../../usage/usageTracker.js";

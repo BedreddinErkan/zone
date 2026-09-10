@@ -44,28 +44,19 @@ const EXTRACTED_FILES = [
   "src/cli/tui/components/ToolCall.tsx",
   "src/cli/tui/components/toolCallFormat.ts",
   "src/cli/tui/components/PlanPanel.tsx",
-  "src/cli/tui/components/PermissionsView.tsx",
-  "src/cli/tui/components/EffortModal.tsx",
   // Part 2, commit 2 — mechanical application of the fully-proven vocabulary
+  // (Modals that migrated to OverlayShell in Phase 2d were removed from this list:
+  //  PermissionsView, EffortModal, CommitModal, FeedbackModal, HookTrustModal,
+  //  LimitsModal, McpTrustModal, PlanModeModal, SessionMemoryModal, SessionsModal,
+  //  SummaryModal, TrustModal, UndoModal — their replacements are in Phase 2d below.)
   "src/cli/tui/components/ApprovalModal.tsx",
-  "src/cli/tui/components/CommitModal.tsx",
   "src/cli/tui/components/DiffView.tsx",
-  "src/cli/tui/components/FeedbackModal.tsx",
-  "src/cli/tui/components/HookTrustModal.tsx",
-  "src/cli/tui/components/LimitsModal.tsx",
-  "src/cli/tui/components/McpTrustModal.tsx",
   "src/cli/tui/components/MetricsModal.tsx",
   "src/cli/tui/components/PlanActionPrompt.tsx",
   "src/cli/tui/components/PlanModal.tsx",
-  "src/cli/tui/components/PlanModeModal.tsx",
   "src/cli/tui/components/QuestionPanel.tsx",
-  "src/cli/tui/components/SessionMemoryModal.tsx",
-  "src/cli/tui/components/SessionsModal.tsx",
   "src/cli/tui/components/StagedDiffModal.tsx",
-  "src/cli/tui/components/SummaryModal.tsx",
   "src/cli/tui/components/Toast.tsx",
-  "src/cli/tui/components/TrustModal.tsx",
-  "src/cli/tui/components/UndoModal.tsx",
   // The selection-contrast pass's follow-up: the startup banner stopped carrying a hardcoded
   // 256-colour escape and now formats role.brand through chalk. index.tsx itself is deliberately
   // NOT declared here — after the extraction it holds no colour and imports no seam, so the
@@ -89,6 +80,20 @@ const EXTRACTED_FILES = [
   "src/cli/tui/components/ApiKeysManager.tsx",
   "src/cli/tui/components/MetricsDashboard.tsx",
   "src/cli/tui/components/OverlayLayer.tsx",
+  // Phase 2d — remaining 13 content components migrated to the OverlayLayer stack.
+  "src/cli/tui/components/EffortPicker.tsx",
+  "src/cli/tui/components/SummaryPicker.tsx",
+  "src/cli/tui/components/PlanModePicker.tsx",
+  "src/cli/tui/components/SessionMemoryPicker.tsx",
+  "src/cli/tui/components/SessionBrowser.tsx",
+  "src/cli/tui/components/PermissionsManager.tsx",
+  "src/cli/tui/components/LimitsEditor.tsx",
+  "src/cli/tui/components/CommitEditor.tsx",
+  "src/cli/tui/components/FeedbackForm.tsx",
+  "src/cli/tui/components/UndoConfirm.tsx",
+  "src/cli/tui/components/TrustPrompt.tsx",
+  "src/cli/tui/components/HookTrustPrompt.tsx",
+  "src/cli/tui/components/McpTrustPrompt.tsx",
 ];
 
 const FORBIDDEN_COLOUR_LITERALS = [...new Set(Object.values(role))];

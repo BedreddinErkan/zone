@@ -1,14 +1,8 @@
 import React from "react";
 import { Box, Text, useInput } from "ink";
-import type { UserHooksConfig, UserHookEntry } from "../../../api/diskHooks.js";
+import type { UserHookEntry } from "../../../api/diskHooks.js";
+import { useStore } from "../store.js";
 import { role, glyph, spacing } from "../theme.js";
-
-interface HookTrustModalProps {
-  config: UserHooksConfig;
-  projectPath: string;
-  onApprove: () => void;
-  onDeny: () => void;
-}
 
 function renderHookEntry(entry: UserHookEntry, index: number): React.ReactElement {
   const label = entry.description ? `[${entry.description}]` : `[hook ${index + 1}]`;
@@ -21,12 +15,33 @@ function renderHookEntry(entry: UserHookEntry, index: number): React.ReactElemen
   );
 }
 
-export function HookTrustModal({ config, projectPath, onApprove, onDeny }: HookTrustModalProps): React.ReactElement {
+/**
+ * Phase 2d — content-only hook trust prompt. No border, no title, no footer hints — those
+ * come from OverlayShell when OverlayLayer wraps this component. Reads pendingHookTrust
+ * from the store; records trust on approve, denies on deny/Esc.
+ */
+export function HookTrustPrompt(): React.ReactElement | null {
+  const { state, dispatch } = useStore();
+  const pending = state.pendingHookTrust;
+  if (!pending) return null;
+
+  const { config, projectPath } = pending;
+
   useInput((input, key) => {
     if (input === "a" || input === "A") {
-      onApprove();
+      import("../../../api/diskTrustedHooks.js").then(({ recordHooksTrust }) => {
+        if (state.pendingHookTrust) {
+          recordHooksTrust(state.pendingHookTrust.projectPath, state.pendingHookTrust.hash);
+        }
+        dispatch({ type: "HOOKS_TRUST_APPROVED", hash: pending.hash, projectPath: pending.projectPath });
+        dispatch({ type: "OVERLAY_POP" });
+      }).catch(() => {
+        dispatch({ type: "HOOKS_TRUST_DENIED" });
+        dispatch({ type: "OVERLAY_POP" });
+      });
     } else if (input === "n" || input === "N" || key.escape) {
-      onDeny();
+      dispatch({ type: "HOOKS_TRUST_DENIED" });
+      dispatch({ type: "OVERLAY_POP" });
     }
   });
 
@@ -35,9 +50,8 @@ export function HookTrustModal({ config, projectPath, onApprove, onDeny }: HookT
   const totalCount = preHooks.length + postHooks.length;
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={role.caution} paddingX={spacing.md} paddingY={spacing.sm} marginY={spacing.sm}>
-      <Text bold color={role.caution}>{glyph.warningMark}  Hook Trust Required</Text>
-      <Box marginTop={spacing.sm}>
+    <Box flexDirection="column">
+      <Box>
         <Text>This project defines {totalCount} shell hook{totalCount !== 1 ? "s" : ""} in .zone/hooks.json</Text>
       </Box>
       <Text dimColor>Project: {projectPath}</Text>

@@ -136,7 +136,10 @@ export type OverlayId =
   | "limits"
   | "commit"
   | "feedback"
-  | "undo";
+  | "undo"
+  | "trust"
+  | "hookTrust"
+  | "mcpTrust";
 
 /**
  * The run is still in flight — inference or a human, either way not finished.
@@ -427,7 +430,15 @@ export function buildInitialState(initialValues?: {
     pendingHookTrust: initialValues?.pendingHookTrust ?? null,
     armedMcpManager: initialValues?.armedMcpManager ?? null,
     pendingMcpTrust: initialValues?.pendingMcpTrust ?? null,
-    overlayStack: [],
+    // Phase 2d — trust modals render through the OverlayLayer stack. If the initial state
+    // includes pending hook/MCP trust decisions (startup-time checks), push them so
+    // OverlayLayer renders the right HookTrustPrompt/McpTrustPrompt content component.
+    // Project-trust approvals (kind: "trust") arrive during the session via
+    // PENDING_APPROVAL_SET, which pushes "trust" in the reducer.
+    overlayStack: [
+      ...(initialValues?.pendingHookTrust ? ["hookTrust" as const] : []),
+      ...(initialValues?.pendingMcpTrust ? ["mcpTrust" as const] : []),
+    ],
   };
 }
 
@@ -860,8 +871,15 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
     case "TRANSCRIPT_REMOUNT":
       return { ...state, transcriptGeneration: state.transcriptGeneration + 1 };
 
-    case "PENDING_APPROVAL_SET":
-      return { ...state, pendingApproval: { approvalId: action.approvalId, runId: action.runId, command: action.command, kind: action.kind } };
+    case "PENDING_APPROVAL_SET": {
+      const next: StoreState = { ...state, pendingApproval: { approvalId: action.approvalId, runId: action.runId, command: action.command, kind: action.kind } };
+      // Phase 2d — trust approvals render through the OverlayLayer stack; push "trust" so the
+      // TrustPrompt content component renders inside OverlayShell.
+      if (action.kind === "trust") {
+        next.overlayStack = [...state.overlayStack, "trust" as const];
+      }
+      return next;
+    }
 
     case "PENDING_APPROVAL_RESOLVED":
       return { ...state, pendingApproval: null };
@@ -943,7 +961,9 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
       return { ...state, sessionTrustedPrefixes: [...state.sessionTrustedPrefixes, action.prefix] };
 
     case "PERMISSIONS_OPEN":
-      return { ...state, modalView: "permissions", permissionsList: action.list, permissionsSelectedIndex: 0 };
+      // Phase 2d — PermissionsManager renders via the OverlayLayer stack; push alongside modalView
+      // so the data-seeding dispatch from Composer opens the overlay in one step.
+      return { ...state, modalView: "permissions", permissionsList: action.list, permissionsSelectedIndex: 0, overlayStack: [...state.overlayStack, "permissions" as const] };
 
     case "PERMISSIONS_CLOSE":
       return { ...state, modalView: "none" };
@@ -1069,7 +1089,8 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         seen.add(s.sessionId);
         return true;
       });
-      return { ...state, modalView: "sessions", sessionsList: deduped, sessionsSelectedIndex: 0 };
+      // Phase 2d — SessionBrowser renders via the OverlayLayer stack.
+      return { ...state, modalView: "sessions", sessionsList: deduped, sessionsSelectedIndex: 0, overlayStack: [...state.overlayStack, "sessions" as const] };
     }
 
     case "SESSIONS_CLOSE":
@@ -1403,19 +1424,22 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
       };
 
     case "COMMIT_MODAL_OPEN":
-      return { ...state, modalView: "commit", commitData: { filePaths: action.filePaths, message: action.message, repoPath: action.repoPath } };
+      // Phase 2d — CommitEditor renders via the OverlayLayer stack.
+      return { ...state, modalView: "commit", commitData: { filePaths: action.filePaths, message: action.message, repoPath: action.repoPath }, overlayStack: [...state.overlayStack, "commit" as const] };
 
     case "COMMIT_MODAL_CLOSE":
       return { ...state, modalView: "none" };
 
     case "FEEDBACK_MODAL_OPEN":
-      return { ...state, modalView: "feedback", feedbackData: { runId: action.runId, sessionId: action.sessionId, logs: action.logs, version: action.version, repoPath: action.repoPath } };
+      // Phase 2d — FeedbackForm renders via the OverlayLayer stack.
+      return { ...state, modalView: "feedback", feedbackData: { runId: action.runId, sessionId: action.sessionId, logs: action.logs, version: action.version, repoPath: action.repoPath }, overlayStack: [...state.overlayStack, "feedback" as const] };
 
     case "FEEDBACK_MODAL_CLOSE":
       return { ...state, modalView: "none" };
 
     case "UNDO_MODAL_OPEN":
-      return { ...state, modalView: "undo", undoModalData: { manifest: action.manifest, driftedPaths: action.driftedPaths } };
+      // Phase 2d — UndoConfirm renders via the OverlayLayer stack.
+      return { ...state, modalView: "undo", undoModalData: { manifest: action.manifest, driftedPaths: action.driftedPaths }, overlayStack: [...state.overlayStack, "undo" as const] };
 
     case "UNDO_MODAL_CLOSE":
       return { ...state, modalView: "none", undoModalData: null };

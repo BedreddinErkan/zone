@@ -10,22 +10,9 @@ import { StatusBar } from "./components/StatusBar.js";
 import { Toast } from "./components/Toast.js";
 import { Composer } from "./components/Composer.js";
 import { ApprovalModal } from "./components/ApprovalModal.js";
-import { TrustModal } from "./components/TrustModal.js";
-import { PermissionsView } from "./components/PermissionsView.js";
-import { SessionsModal } from "./components/SessionsModal.js";
 import { PlanModal } from "./components/PlanModal.js";
 import { PlanActionPrompt } from "./components/PlanActionPrompt.js";
 import { StagedDiffModal } from "./components/StagedDiffModal.js";
-import { EffortModal } from "./components/EffortModal.js";
-import { SummaryModal } from "./components/SummaryModal.js";
-import { PlanModeModal } from "./components/PlanModeModal.js";
-import { SessionMemoryModal } from "./components/SessionMemoryModal.js";
-import { LimitsModal } from "./components/LimitsModal.js";
-import { CommitModal } from "./components/CommitModal.js";
-import { FeedbackModal } from "./components/FeedbackModal.js";
-import { UndoModal } from "./components/UndoModal.js";
-import { HookTrustModal } from "./components/HookTrustModal.js";
-import { McpTrustModal } from "./components/McpTrustModal.js";
 import { PlanPanel } from "./components/PlanPanel.js";
 import { QuestionPanel } from "./components/QuestionPanel.js";
 import { OverlayLayer } from "./components/OverlayLayer.js";
@@ -98,7 +85,7 @@ interface AppInnerProps {
   onSessionClear: ((oldSessionId: string) => void) | undefined;
 }
 
-function AppInner({ bus, initialPrompt, initialMode, onSubmit, onUndoRequest, onRemoteControlCommand, onEnvelopeResume, onCarriedAnswer, onCarriedDiscard, onStateChange, onModelApply, getCommitData, getFeedbackData, onDispatchCapture, onSessionClear }: AppInnerProps): React.ReactElement {
+function AppInner({ bus, initialPrompt, initialMode, onSubmit, onUndoRequest, onRemoteControlCommand, onEnvelopeResume, onCarriedAnswer, onCarriedDiscard, onStateChange, onModelApply, getCommitData, getFeedbackData, onDispatchCapture, onSessionClear: _onSessionClear }: AppInnerProps): React.ReactElement {
   const { exit } = useApp();
   const { state, dispatch } = useStore();
   const runAcRef = useRef<AbortController | null>(null);
@@ -221,66 +208,14 @@ function AppInner({ bus, initialPrompt, initialMode, onSubmit, onUndoRequest, on
           dispatch={dispatch}
         />
       )}
-      {state.pendingApproval?.kind === "trust" && (
-        <TrustModal
-          runId={state.pendingApproval.runId}
-          projectPath={state.pendingApproval.command}
-          dispatch={dispatch}
-        />
-      )}
-      {state.modalView === "permissions" && <PermissionsView />}
-      {state.modalView === "sessions" && <SessionsModal />}
-      {state.modalView === "effort" && <EffortModal dispatch={dispatch} />}
-      {state.modalView === "summary" && <SummaryModal dispatch={dispatch} />}
-      {state.modalView === "planMode" && <PlanModeModal dispatch={dispatch} />}
-      {state.modalView === "session" && <SessionMemoryModal dispatch={dispatch} onSessionClear={onSessionClear} />}
-      {state.modalView === "limits" && <LimitsModal />}
-      {state.modalView === "commit" && <CommitModal dispatch={dispatch} />}
-      {state.modalView === "feedback" && <FeedbackModal dispatch={dispatch} />}
-      {state.modalView === "undo" && state.undoModalData !== null && <UndoModal data={state.undoModalData} dispatch={dispatch} />}
-      {/* Phase 2c — migrated modals render through the OverlayLayer stack rather than the
-          legacy modalView single-slot. Keys/model/metrics now dispatch OVERLAY_PUSH; the
-          remaining twelve modals still use modalView and will migrate in Phase 2d. */}
+      {/* Phase 2c+2d — all 16 modals (model, keys, metrics, effort, summary, planMode, session,
+          sessions, permissions, limits, commit, feedback, undo, trust, hookTrust, mcpTrust)
+          render through the OverlayLayer stack. The overlay stack is populated by:
+          - OVERLAY_PUSH from Composer (simple settings modals)
+          - Reducer side-effects on data-seeding actions (commit, feedback, permissions, sessions, undo)
+          - Reducer side-effect on PENDING_APPROVAL_SET with kind: "trust"
+          - buildInitialState for startup-time trust decisions */}
       <OverlayLayer />
-      {state.pendingHookTrust !== null && (
-        <HookTrustModal
-          config={state.pendingHookTrust.config}
-          projectPath={state.pendingHookTrust.projectPath}
-          onApprove={() => {
-            import("../../api/diskTrustedHooks.js").then(({ recordHooksTrust }) => {
-              if (state.pendingHookTrust) {
-                recordHooksTrust(state.pendingHookTrust.projectPath, state.pendingHookTrust.hash);
-              }
-              dispatch({ type: "HOOKS_TRUST_APPROVED", hash: state.pendingHookTrust!.hash, projectPath: state.pendingHookTrust!.projectPath });
-            }).catch(() => {
-              dispatch({ type: "HOOKS_TRUST_DENIED" });
-            });
-          }}
-          onDeny={() => dispatch({ type: "HOOKS_TRUST_DENIED" })}
-        />
-      )}
-      {state.pendingMcpTrust !== null && (
-        <McpTrustModal
-          config={state.pendingMcpTrust.config}
-          projectPath={state.pendingMcpTrust.projectPath}
-          onApprove={async () => {
-            if (!state.pendingMcpTrust) return;
-            const { config, hash, projectPath } = state.pendingMcpTrust;
-            try {
-              const [{ recordMcpTrust }, { McpClientManager }] = await Promise.all([
-                import("../../api/diskTrustedMcp.js"),
-                import("../../mcp/mcpClientManager.js"),
-              ]);
-              recordMcpTrust(projectPath, hash);
-              const manager = await McpClientManager.connect(config.mcpServers, projectPath);
-              dispatch({ type: "MCP_TRUST_APPROVED", manager });
-            } catch {
-              dispatch({ type: "MCP_TRUST_DENIED" });
-            }
-          }}
-          onDeny={() => dispatch({ type: "MCP_TRUST_DENIED" })}
-        />
-      )}
       {state.planProposal !== null && (
         <PlanModal proposal={state.planProposal} dispatch={dispatch} />
       )}

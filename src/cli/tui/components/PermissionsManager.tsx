@@ -1,16 +1,21 @@
+import React from "react";
 import { Box, Text, useInput } from "ink";
 import { useStore } from "../store.js";
 import { removeDiskTrustPrefix } from "../../../api/diskTrust.js";
-import { role, glyph, spacing } from "../theme.js";
+import { role, glyph } from "../theme.js";
 
-export function PermissionsView(): React.ReactElement {
+/**
+ * Phase 2d — content-only permissions manager. No border, no title, no footer hints —
+ * those come from OverlayShell when OverlayLayer wraps this component.
+ */
+export function PermissionsManager(): React.ReactElement {
   const { state, dispatch } = useStore();
   const list = state.permissionsList;
   const sel = state.permissionsSelectedIndex;
 
   useInput((input, key) => {
     if (key.escape) {
-      dispatch({ type: "PERMISSIONS_CLOSE" });
+      dispatch({ type: "OVERLAY_POP" });
     } else if (key.upArrow) {
       dispatch({ type: "PERMISSIONS_NAV", direction: "up" });
     } else if (key.downArrow) {
@@ -25,8 +30,7 @@ export function PermissionsView(): React.ReactElement {
   });
 
   return (
-    <Box borderStyle="round" borderColor={role.accent} flexDirection="column" paddingX={spacing.sm} marginX={spacing.md}>
-      <Text bold color={role.accent}>Permissions</Text>
+    <Box flexDirection="column">
       <Text dimColor>Trusted command prefixes (.zone/trust.json):</Text>
       <Box height={1} />
       {list.length === 0 ? (
@@ -40,8 +44,6 @@ export function PermissionsView(): React.ReactElement {
           </Box>
         ))
       )}
-      <Box height={1} />
-      <Text dimColor>{glyph.navigateArrows} navigate  Del/d remove  Esc close</Text>
     </Box>
   );
 }

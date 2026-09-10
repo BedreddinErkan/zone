@@ -116,6 +116,7 @@ describe("OVERLAY_PUSH / OVERLAY_POP / OVERLAY_CLEAR reducer", () => {
     const ids: OverlayId[] = [
       "model", "keys", "metrics", "effort", "summary", "planMode",
       "session", "sessions", "permissions", "limits", "commit", "feedback", "undo",
+      "trust", "hookTrust", "mcpTrust",
     ];
     let state = buildInitialState({ model: "test-model", capUsd: 10 });
     for (const id of ids) {
@@ -180,16 +181,19 @@ describe("OverlayLayer rendering", () => {
     instance.unmount();
   });
 
-  it("returns null for an OverlayId that has no content component wired yet (Phase 2d)", async () => {
-    // "effort" is on the OverlayId union but OverlayLayer's switch has no case for it.
-    // Returning null (not throwing) is the contract — the rest of the UI must stay usable.
+  it("renders EffortPicker (title + content) when overlayStack top is 'effort' (Phase 2d)", async () => {
     const instance = render(
       <StoreProvider initialValues={{ model: "test-model", capUsd: 10 }}>
         <OverlayHarness overlayId="effort" />
       </StoreProvider>
     );
     await drainInk();
-    expect(stripAnsi(instance.lastFrame() ?? "")).toBe("");
+    const frame = stripAnsi(instance.lastFrame() ?? "");
+    // OverlayShell title (lowercased)
+    expect(frame).toContain("effort");
+    // EffortPicker content
+    expect(frame).toContain("Medium");
+    expect(frame).toContain("Esc");
     instance.unmount();
   });
 });

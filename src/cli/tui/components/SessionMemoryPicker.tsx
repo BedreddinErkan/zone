@@ -1,16 +1,10 @@
+import React from "react";
 import { randomUUID } from "node:crypto";
 import { Box, Text, useInput } from "ink";
-import type { Dispatch } from "react";
 import { useStore } from "../store.js";
-import type { StoreAction } from "../store.js";
 import { saveDiskModel } from "../../../api/diskModel.js";
 import { getDefaultModelId } from "../../../llm/modelRegistry.js";
-import { role, glyph, spacing } from "../theme.js";
-
-interface Props {
-  dispatch: Dispatch<StoreAction>;
-  onSessionClear?: (oldSessionId: string) => void;
-}
+import { role, glyph } from "../theme.js";
 
 const MEMORY_OPTIONS = [false, true] as const;
 const MEMORY_LABELS: Record<string, string> = {
@@ -18,25 +12,29 @@ const MEMORY_LABELS: Record<string, string> = {
   true: "On — inject prior task summary each run (default)",
 };
 
-export function SessionMemoryModal({ dispatch, onSessionClear }: Props): React.ReactElement {
-  const { state } = useStore();
+/**
+ * Phase 2d — content-only session memory picker. No border, no title, no footer hints —
+ * those come from OverlayShell when OverlayLayer wraps this component. The "Clear" option
+ * (index 2) resets the session and generates a new session id.
+ */
+export function SessionMemoryPicker(): React.ReactElement {
+  const { state, dispatch } = useStore();
   const sel = state.memorySelectedIndex;
   const currentModel = state.modelSettings?.model ?? getDefaultModelId();
+  const currentMemory = state.modelSettings?.memoryEnabled ?? true;
 
   useInput((_input, key) => {
     if (key.escape) {
-      dispatch({ type: "MEMORY_MODAL_CLOSE" });
+      dispatch({ type: "OVERLAY_POP" });
     } else if (key.upArrow) {
       dispatch({ type: "MEMORY_NAV", direction: "up" });
     } else if (key.downArrow) {
       dispatch({ type: "MEMORY_NAV", direction: "down" });
     } else if (key.return) {
       if (sel === 2) {
-        // Clear: capture old sessionId BEFORE dispatch mutates state, then GC the old .jsonl.
-        const oldSessionId = state.sessionId;
         const newSessionId = randomUUID();
-        onSessionClear?.(oldSessionId);   // best-effort delete old .jsonl (fire-and-forget)
         dispatch({ type: "SESSION_MEMORY_CLEAR", newSessionId });
+        dispatch({ type: "OVERLAY_POP" });
       } else {
         const memoryEnabled = MEMORY_OPTIONS[sel] ?? true;
         const updated = state.modelSettings
@@ -44,24 +42,13 @@ export function SessionMemoryModal({ dispatch, onSessionClear }: Props): React.R
           : { version: 2 as const, model: currentModel, provider: "anthropic" as const, memoryEnabled, updatedAt: new Date().toISOString() };
         void saveDiskModel(process.cwd(), updated);
         dispatch({ type: "MEMORY_APPLY", memoryEnabled });
+        dispatch({ type: "OVERLAY_POP" });
       }
     }
   });
 
-  const cols = process.stdout.columns ?? 80;
-  const innerWidth = Math.min(cols - 4, 60);
-  const currentMemory = state.modelSettings?.memoryEnabled ?? true;  // ?? true matches TUI default
-
   return (
-    <Box
-      flexDirection="column"
-      borderStyle="round"
-      borderColor={role.accent}
-      paddingX={spacing.sm}
-      width={innerWidth}
-    >
-      <Text bold color={role.accent}> Session memory</Text>
-      <Text> </Text>
+    <Box flexDirection="column">
       {MEMORY_OPTIONS.map((opt, i) => {
         const selected = i === sel;
         const marker = currentMemory === opt ? glyph.radioSelected : glyph.radioUnselected;
@@ -74,8 +61,6 @@ export function SessionMemoryModal({ dispatch, onSessionClear }: Props): React.R
       <Box backgroundColor={sel === 2 ? role.selectionBackground : undefined}>
         <Text color={sel === 2 ? role.selectionForeground : role.caution}>   ⟳  Clear — start fresh next run</Text>
       </Box>
-      <Text> </Text>
-      <Text dimColor> {glyph.navigateArrows} navigate · Enter select/clear · Esc cancel</Text>
     </Box>
   );
 }

@@ -102,11 +102,13 @@ describe("theme — selection contrast is a computable fact, not a terminal gues
 describe("selection-contrast pass — the migrated call sites, not just the pinned values", () => {
   // A wrong-but-consistent value would pass the pinned snapshot above; this checks the six call
   // sites actually moved, which the value-level tests above cannot see.
+  // Phase 2d — the old modal files were retired; the content components that replaced them
+  // carry the selection-contrast treatment forward.
   const MIGRATED_FILES = [
-    "src/cli/tui/components/EffortModal.tsx",
-    "src/cli/tui/components/SummaryModal.tsx",
-    "src/cli/tui/components/PlanModeModal.tsx",
-    "src/cli/tui/components/SessionMemoryModal.tsx",
+    "src/cli/tui/components/EffortPicker.tsx",
+    "src/cli/tui/components/SummaryPicker.tsx",
+    "src/cli/tui/components/PlanModePicker.tsx",
+    "src/cli/tui/components/SessionMemoryPicker.tsx",
   ];
 
   it("no longer references role.emphasis at all — its only job in these files was the selected-row foreground, now role.selectionForeground", () => {
