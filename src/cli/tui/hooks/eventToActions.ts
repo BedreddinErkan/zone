@@ -185,8 +185,17 @@ export function eventToActions(
           intents: [{ kind: "resolveCommand", approvalId: evt.approvalId, runId: evt.runId ?? "", approved: true }],
         };
       }
+      // Phase 5c — pass subagentId through from the enriched event payload.
+      const subagentId = (evt as any).subagentId as string | undefined;
       return {
-        actions: [{ type: "PENDING_APPROVAL_SET", approvalId: evt.approvalId, runId: evt.runId ?? "", command, ...(evt.kind ? { kind: evt.kind } : {}) }],
+        actions: [{
+          type: "PENDING_APPROVAL_SET",
+          approvalId: evt.approvalId,
+          runId: evt.runId ?? "",
+          command,
+          ...(evt.kind ? { kind: evt.kind } : {}),
+          ...(subagentId ? { subagentId } : {}),
+        }],
         intents: [],
       };
     }

@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { log } from "../utils/logger.js";
+import { getRequestContext } from "../llm/openaiContext.js";
 
 /**
  * Additional prefixes auto-approved ONLY during plan-mode investigation
@@ -303,6 +304,8 @@ export function requestCommandApproval(input: {
     command: string;
     approvalId: string;
     kind?: "command" | "mcp";
+    /** Phase 5c — subagent that requested this approval, when inside a subagent loop. */
+    subagentId?: string;
   }) => void;
   /**
    * What is being approved. Defaults to a shell command; `"mcp"` is an MCP tool call.
@@ -464,12 +467,16 @@ export function requestCommandApproval(input: {
     // would change the event shape for every existing producer and consumer — which is exactly what
     // the field's own doc comment promises it does not do, and what a deep-equal assertion in this
     // module's tests correctly caught. Additive means additive.
+    // Phase 5c completion — enrich with subagentId from ALS when inside a subagent loop.
+    // Undefined outside subagent contexts; zero behavior change there.
+    const subagentId = getRequestContext()?.subagentId;
     input.emit({
       type: "command_approval_required",
       runId,
       command,
       approvalId,
       ...(kind !== "command" ? { kind } : {}),
+      ...(subagentId ? { subagentId } : {}),
     });
   });
 }
