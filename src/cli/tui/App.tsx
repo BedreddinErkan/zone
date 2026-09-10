@@ -232,7 +232,9 @@ function AppInner({ bus, initialPrompt, initialMode, onSubmit, onUndoRequest, on
       </Box>
       <Spinner />
       {modals}
-      <PlanActionPrompt proposal={state.planReadyProposal} dispatch={dispatch} />
+      {state.planReadyProposal !== null && (
+        <PlanActionPrompt proposal={state.planReadyProposal} dispatch={dispatch} />
+      )}
       {/* Phase 2c — Composer is hidden while a blocking modal is open (approval, trust,
           plan-ready, staged-diffs, or anything on the overlayStack). The user talks to the
           modal, not the agent, while it's up; leaving the Composer visible would invite a

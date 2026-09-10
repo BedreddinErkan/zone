@@ -6,7 +6,7 @@ import { resolvePlanApproval } from "../../../llm/planApprovals.js";
 import { role, glyph } from "../theme.js";
 
 interface PlanActionPromptProps {
-  proposal: StoreState["planReadyProposal"];
+  proposal: NonNullable<StoreState["planReadyProposal"]>;
   dispatch: Dispatch<StoreAction>;
 }
 
@@ -14,22 +14,15 @@ function renderFeedbackBuffer(buf: string, pos: number): string {
   return buf.slice(0, pos) + glyph.cursor + buf.slice(pos);
 }
 
-// Always mounted (App.tsx renders it unconditionally, replacing the old
-// conditional-mount PlanReadyModal) — self-gated by `proposal` nullness inside
-// the useInput/usePaste callbacks, exactly the way Composer already self-gates
-// on state.modalView. Hooks are called unconditionally every render regardless
-// of proposal; only the early-return inside each callback, and the final JSX
-// return, are conditioned on proposal === null. This avoids a rules-of-hooks
-// violation from a prop that toggles between null and non-null across renders.
-export function PlanActionPrompt({ proposal, dispatch }: PlanActionPromptProps): React.ReactElement | null {
+// Phase 2e — conditionally mounted by App.tsx (only when planReadyProposal is non-null).
+// No self-gating needed: the component is either fully mounted (hooks active) or absent.
+export function PlanActionPrompt({ proposal, dispatch }: PlanActionPromptProps): React.ReactElement {
   const [feedbackMode, setFeedbackMode] = useState(false);
   const [pendingDecision, setPendingDecision] = useState<"feedback" | "approve_with_feedback" | null>(null);
   const [feedbackBuffer, setFeedbackBuffer] = useState("");
   const [feedbackCursor, setFeedbackCursor] = useState(0);
 
   useInput((input, key) => {
-    if (proposal === null) return;
-
     if (feedbackMode) {
       if (key.return && feedbackBuffer.trim()) {
         resolvePlanApproval({
@@ -64,7 +57,6 @@ export function PlanActionPrompt({ proposal, dispatch }: PlanActionPromptProps):
       return;
     }
 
-    // Normal mode
     if (input === "1") {
       resolvePlanApproval({ planId: proposal.planId, runId: proposal.runId, decision: "accept_all" });
       dispatch({ type: "PLAN_READY_RESOLVED" });
@@ -94,12 +86,10 @@ export function PlanActionPrompt({ proposal, dispatch }: PlanActionPromptProps):
   });
 
   usePaste((text) => {
-    if (proposal === null || !feedbackMode) return;
+    if (!feedbackMode) return;
     setFeedbackBuffer(feedbackBuffer.slice(0, feedbackCursor) + text + feedbackBuffer.slice(feedbackCursor));
     setFeedbackCursor(feedbackCursor + text.length);
   }, { isActive: true });
-
-  if (proposal === null) return null;
 
   return (
     <Box flexDirection="column">

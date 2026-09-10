@@ -309,7 +309,9 @@ describe("PlanActionPrompt — Composer stays muted while a proposal is pending"
     return (
       <>
         <Composer onSubmit={onSubmit} onExit={() => {}} />
-        <PlanActionPrompt proposal={state.planReadyProposal} dispatch={dispatch} />
+        {state.planReadyProposal !== null && (
+          <PlanActionPrompt proposal={state.planReadyProposal} dispatch={dispatch} />
+        )}
       </>
     );
   }
