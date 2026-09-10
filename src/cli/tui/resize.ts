@@ -18,10 +18,27 @@
  * Height-only resizes never change columns, so they still return false.
  * Returns false on any invalid (non-positive-finite) argument.
  */
+/**
+ * Phase 4d — redraw only on narrowing or large widening (>20%).
+ *
+ * Narrowing always needs a redraw because committed Static content is wider
+ * than the new viewport and will be clipped. Widening is more nuanced: small
+ * widenings self-correct because Ink reflows the live region on next render,
+ * and the Static block being slightly narrower than the live region is
+ * cosmetically acceptable. Large widenings (>20% of prevCols) leave the
+ * Static block visibly narrower than the live region, so we remount to
+ * reflow committed history.
+ *
+ * Height-only resizes never change columns, so they still return false.
+ * Returns false on any invalid (non-positive-finite) argument.
+ */
 export function shouldRedrawOnResize(prevCols: number, nextCols: number): boolean {
   if (!Number.isFinite(prevCols) || prevCols <= 0) return false;
   if (!Number.isFinite(nextCols) || nextCols <= 0) return false;
-  return nextCols !== prevCols;
+  if (nextCols < prevCols) return true; // narrowing — always redraw
+  if (nextCols === prevCols) return false; // no change
+  // Widening — only redraw if increase exceeds 20% of previous width
+  return (nextCols - prevCols) > prevCols * 0.2;
 }
 
 /** Clear screen + scrollback + cursor home. */

@@ -2,19 +2,28 @@ import { describe, it, expect, vi } from "vitest";
 import { shouldRedrawOnResize, applyResizeRedraw, CLEAR_SCREEN_AND_SCROLLBACK } from "./resize.js";
 
 describe("shouldRedrawOnResize", () => {
-  it("returns true on narrowing", () => {
+  it("returns true on narrowing by 1 column", () => {
+    expect(shouldRedrawOnResize(100, 99)).toBe(true);
+  });
+
+  it("returns true on large narrowing", () => {
     expect(shouldRedrawOnResize(100, 80)).toBe(true);
   });
 
   /**
-   * Was `false` until the width-staleness pass. Widening was skipped on the premise that Ink
-   * self-corrects it; measured, Ink recalculates Yoga layout on resize but never re-renders React,
-   * so committed history stayed laid out for the old width and every width computed inside a
-   * component body stayed frozen. The clear+remount path already fixed that — it just never fired
-   * in this direction.
+   * Phase 4d — small widenings (<20%) self-correct because Ink reflows the live
+   * region on next render. No need to clear+remount for a few extra columns.
    */
-  it("returns true on widening — the direction that used to be skipped", () => {
-    expect(shouldRedrawOnResize(80, 100)).toBe(true);
+  it("returns false on small widening (10%)", () => {
+    expect(shouldRedrawOnResize(80, 88)).toBe(false); // 10% increase
+  });
+
+  /**
+   * Large widenings (>20%) leave the Static block visibly narrower than the live
+   * region, so we remount to reflow committed history.
+   */
+  it("returns true on large widening (25%)", () => {
+    expect(shouldRedrawOnResize(80, 100)).toBe(true); // 25% increase
   });
 
   it("returns false on no change (height-only resize)", () => {
