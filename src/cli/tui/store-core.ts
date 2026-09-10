@@ -1208,6 +1208,11 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         statusBar: { ...state.statusBar, costUsd: 0, iter: 0 },
         transcriptGeneration: state.transcriptGeneration + 1,
         todos: [],
+        // Phase 5d — restore subagent threads for nested transcript rendering.
+        // Absent in pre-5d session files → empty record (backward compatible).
+        subagentThreads: action.session.subagentThreads ?? {},
+        currentSubagentId: null,
+        parentSpinnerLabels: [],
       };
 
     case "MODE_CYCLE":

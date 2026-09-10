@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
 import type { TranscriptEntry } from "../cli/tui/store.js";
+import type { SubagentThread } from "../cli/tui/store-core.js";
 import { log } from "../utils/logger.js";
 
 export interface DiskSession {
@@ -17,6 +18,9 @@ export interface DiskSession {
   totalCostUsd: number;
   totalTokens: number;
   totalElapsedMs: number;
+  /** Phase 5d — subagent threads for nested transcript rendering on resume.
+   *  Absent in pre-5d session files; resume treats absence as empty record. */
+  subagentThreads?: Record<string, SubagentThread>;
 }
 
 const MAX_SESSIONS = 30;

@@ -1140,6 +1140,10 @@ export async function runTui(
       totalCostUsd: state.statusBar.costUsd,
       totalTokens: state.statusBar.cumulativeTokens,
       totalElapsedMs: Date.now() - new Date(state.sessionStartedAt).getTime(),
+      // Phase 5d — persist subagent threads for nested rendering on resume.
+      ...(Object.keys(state.subagentThreads).length > 0
+        ? { subagentThreads: state.subagentThreads }
+        : {}),
     };
   }
 
@@ -1185,6 +1189,21 @@ export async function runTui(
   // storeCapture.state is null → _resolveSessionId falls back to this guaranteed ID.
   // App.tsx receives it as initialSessionId so the store's sessionId matches (same .jsonl file).
   const localSessionId = pendingEnvelopeResume?.sessionId ?? resumedSession?.sessionId ?? randomUUID();
+
+  // Phase 5d — persist subagent lifecycle events to the conversation JSONL so they
+  // survive across turns. Low-frequency (one pair per subagent dispatch).
+  const persistSubagentEvent = (type: string, evt: any): void => {
+    void import("../../core/conversationFilesystemStore.js").then(({ appendFsConversationEvent }) => {
+      appendFsConversationEvent({
+        repoPath: config.repoPath,
+        threadId: storeCapture.state?.sessionId ?? localSessionId,
+        event: { type, ts: evt.ts, subagentId: evt.subagentId, subagentType: evt.subagentType, title: evt.title, ...(evt.status ? { status: evt.status } : {}), ...(evt.costUsd !== undefined ? { costUsd: evt.costUsd } : {}) },
+      });
+    });
+  };
+  bus.on("subagent_started", (evt) => persistSubagentEvent("subagent_started", evt));
+  bus.on("subagent_completed", (evt) => persistSubagentEvent("subagent_completed", evt));
+
   const runPromptDeps: _RunPromptDeps = { config, storeCapture, bus, scheduler, localSessionId, pendingEnvelopeResume };
   const runPrompt = (prompt: string, ac: AbortController, mode: TuiMode = "normal", images?: import("../../api/imageUpload.js").ImageAttachment[]): void => {
     void _runPromptImpl(prompt, ac, mode, images, runPromptDeps);
