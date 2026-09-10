@@ -49,10 +49,7 @@ export function CommitEditor(): React.ReactElement {
 
   useInput((input, key) => {
     if (status === "running") return;
-    if (key.escape) {
-      dispatch({ type: "OVERLAY_POP" });
-      return;
-    }
+    // Esc falls through to central handler (Phase 3b).
     if (key.return) {
       if (!draftMsg.trim()) return;
       setStatus("running");

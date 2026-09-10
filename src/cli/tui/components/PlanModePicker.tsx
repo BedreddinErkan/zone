@@ -23,9 +23,8 @@ export function PlanModePicker(): React.ReactElement {
   const currentDepth: "quick" | "strict" = rawDepth === "investigate" ? "strict" : (rawDepth as "quick" | "strict");
 
   useInput((_input, key) => {
-    if (key.escape) {
-      dispatch({ type: "OVERLAY_POP" });
-    } else if (key.upArrow) {
+    // Esc handled by central handler (Phase 3b).
+    if (key.upArrow) {
       dispatch({ type: "PLANMODE_NAV", direction: "up" });
     } else if (key.downArrow) {
       dispatch({ type: "PLANMODE_NAV", direction: "down" });

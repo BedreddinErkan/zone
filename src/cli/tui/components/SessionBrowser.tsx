@@ -20,9 +20,8 @@ export function SessionBrowser(): React.ReactElement {
   const narrow = cols < 60;
 
   useInput((_input, key) => {
-    if (key.escape) {
-      dispatch({ type: "OVERLAY_POP" });
-    } else if (key.upArrow) {
+    // Esc handled by central handler (Phase 3b).
+    if (key.upArrow) {
       dispatch({ type: "SESSIONS_NAV", direction: "up" });
     } else if (key.downArrow) {
       dispatch({ type: "SESSIONS_NAV", direction: "down" });

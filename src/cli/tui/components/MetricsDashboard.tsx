@@ -1,7 +1,6 @@
 import React from "react";
 import { Box, Text, useInput } from "ink";
 import { useState, useEffect } from "react";
-import { useStore } from "../store.js";
 import { buildRunRecords, aggregateMetrics, type MetricsResponse } from "../../../llm/metricsAggregator.js";
 import { role, spacing } from "../theme.js";
 
@@ -40,7 +39,6 @@ const BAR_MAX_WIDTH = 15;
  * do: tests render it directly. Phase 2d will retire it.
  */
 export function MetricsDashboard(): React.ReactElement {
-  const { dispatch } = useStore();
   const [period, setPeriod] = useState<Period>("day");
   const [data, setData] = useState<MetricsResponse | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
@@ -66,9 +64,8 @@ export function MetricsDashboard(): React.ReactElement {
   }, [autoRefresh, period]);
 
   useInput((input, key) => {
-    if (key.escape) {
-      dispatch({ type: "OVERLAY_POP" });
-    } else if (key.leftArrow) {
+    // Esc handled by central handler (Phase 3b).
+    if (key.leftArrow) {
       setPeriod(p => PERIODS[(PERIODS.indexOf(p) - 1 + PERIODS.length) % PERIODS.length]!);
     } else if (key.rightArrow) {
       setPeriod(p => PERIODS[(PERIODS.indexOf(p) + 1) % PERIODS.length]!);

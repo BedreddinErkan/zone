@@ -25,11 +25,7 @@ export function FeedbackForm(): React.ReactElement {
 
   useInput((input, key) => {
     if (status === "delivering") return;
-
-    if (key.escape) {
-      dispatch({ type: "OVERLAY_POP" });
-      return;
-    }
+    // Esc falls through to central handler (Phase 3b).
 
     if (status === "delivered") {
       if (input === "m" && !key.ctrl && !key.meta && builtReport) {

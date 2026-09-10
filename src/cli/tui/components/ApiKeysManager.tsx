@@ -1,5 +1,6 @@
 import React from "react";
 import { Box, Text, useInput, usePaste } from "ink";
+import { useEffect } from "react";
 import { randomUUID } from "node:crypto";
 import { useStore } from "../store.js";
 import { loadDiskKeys, setDiskKey, removeDiskKey, maskKey } from "../../../api/diskKeys.js";
@@ -37,6 +38,13 @@ export function ApiKeysManager(): React.ReactElement {
 
   const PRICE_MODES = ["price-model-id", "price-input", "price-output", "price-cache-read", "price-cache-write"] as const;
   const inPricing = (PRICE_MODES as readonly string[]).includes(mode);
+  const inSubMenu = mode !== "view";
+
+  // Phase 3b — report sub-mode so the central Esc handler defers while the user is
+  // in a key-input, provider-select, confirm-delete, or pricing sub-state.
+  useEffect(() => {
+    dispatch(inSubMenu ? { type: "OVERLAY_SUBMODE_OPEN" } : { type: "OVERLAY_SUBMODE_CLOSE" });
+  }, [inSubMenu, dispatch]);
 
   const savePricing = (finalDraft: typeof priceDraft): void => {
     const row = list.find(k => k.provider === priceProvider);
@@ -74,7 +82,7 @@ export function ApiKeysManager(): React.ReactElement {
 
   useInput((input, key) => {
     if (mode === "view") {
-      if (key.escape) { dispatch({ type: "OVERLAY_POP" }); return; }
+      // Esc falls through to central handler (Phase 3b).
       if (key.upArrow) { dispatch({ type: "KEYS_NAV", direction: "up" }); return; }
       if (key.downArrow) { dispatch({ type: "KEYS_NAV", direction: "down" }); return; }
       if (input === "n" || input === "N") { dispatch({ type: "KEYS_START_ADD" }); return; }

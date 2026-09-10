@@ -1,5 +1,6 @@
 import React from "react";
 import { Box, Text, useInput } from "ink";
+import { useEffect } from "react";
 import { randomUUID } from "node:crypto";
 import { useStore } from "../store.js";
 import { USER_FACING_MODELS, getDefaultModelId } from "../../../llm/modelRegistry.js";
@@ -32,6 +33,13 @@ export function ModelPicker(): React.ReactElement {
   const customMode = state.modelCustomMode;
   const customInput = state.modelCustomInput;
   const gateways = state.gatewayIds;
+  const inSubMenu = customMode !== "none";
+
+  // Phase 3b — report sub-mode so the central Esc handler defers while the user is
+  // typing a custom model id or picking a gateway.
+  useEffect(() => {
+    dispatch(inSubMenu ? { type: "OVERLAY_SUBMODE_OPEN" } : { type: "OVERLAY_SUBMODE_CLOSE" });
+  }, [inSubMenu, dispatch]);
 
   const applyModel = (model: string, provider: string): void => {
     const settings: DiskModelSettings = {
@@ -78,9 +86,8 @@ export function ModelPicker(): React.ReactElement {
       }
       return;
     }
-    if (key.escape) {
-      dispatch({ type: "OVERLAY_POP" });
-    } else if (key.upArrow) {
+    // Normal mode — Esc falls through to central handler (Phase 3b).
+    if (key.upArrow) {
       dispatch({ type: "MODEL_NAV", direction: "up", count });
     } else if (key.downArrow) {
       dispatch({ type: "MODEL_NAV", direction: "down", count });

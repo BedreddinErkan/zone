@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc *)",
+      "Bash(python3 *)",
+      "Bash(do *)",
+      "Bash(done)",
+      "Agent(Explore)"
+    ]
+  },
+  "$version": 4
+}

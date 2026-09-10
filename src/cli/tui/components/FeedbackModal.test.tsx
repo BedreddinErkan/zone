@@ -53,11 +53,12 @@ describe("FeedbackForm", () => {
     unmount();
   });
 
-  it("T-ESC: Esc dispatches OVERLAY_POP, no clipboard/mailto call", async () => {
+  it("T-ESC: Esc does not dispatch from component (central handler owns Esc, Phase 3b)", async () => {
     const { stdin, unmount } = renderForm();
     stdin.write("\x1b");
     await wait();
-    expect(mockDispatch).toHaveBeenCalledWith({ type: "OVERLAY_POP" });
+    // Component no longer dispatches OVERLAY_POP on Esc — the central handler in App.tsx does.
+    expect(mockDispatch).not.toHaveBeenCalled();
     expect(mockCopyToClipboard).not.toHaveBeenCalled();
     expect(mockOpenMailtoFeedback).not.toHaveBeenCalled();
     unmount();

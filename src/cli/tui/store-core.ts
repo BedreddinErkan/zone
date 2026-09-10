@@ -237,6 +237,11 @@ export type StoreState = {
    * during the migration and `selectIsBlockingModalOpen` reads both.
    */
   overlayStack: OverlayId[];
+  /** Phase 3b — true when the top overlay's content component is in a text-input or confirm
+   *  sub-state. While true, the central Esc handler defers to the component's own useInput;
+   *  when false, the central handler pops the overlay on Esc. Reset to false on every
+   *  OVERLAY_PUSH and OVERLAY_POP so a layer change always starts with a clean sub-mode. */
+  overlaySubModeOpen: boolean;
   undoModalData: { manifest: import("../../snapshots/snapshotStore.js").SnapshotManifest; driftedPaths: string[] } | null;
   planModeSelectedIndex: number;
   commitData: { filePaths: string[]; message: string; repoPath: string } | null;
@@ -439,6 +444,7 @@ export function buildInitialState(initialValues?: {
       ...(initialValues?.pendingHookTrust ? ["hookTrust" as const] : []),
       ...(initialValues?.pendingMcpTrust ? ["mcpTrust" as const] : []),
     ],
+    overlaySubModeOpen: false,
   };
 }
 
@@ -600,7 +606,12 @@ export type StoreAction =
   // run ending does not leave a stale overlay parked on screen).
   | { type: "OVERLAY_PUSH"; overlayId: OverlayId }
   | { type: "OVERLAY_POP" }
-  | { type: "OVERLAY_CLEAR" };
+  | { type: "OVERLAY_CLEAR" }
+  // Phase 3b — sub-mode flag. Content components dispatch OPEN when entering a text-input
+  // or confirm sub-state (so the central Esc handler defers to the component's own Esc);
+  // CLOSE when leaving (so the central handler regains Esc ownership for the overlay pop).
+  | { type: "OVERLAY_SUBMODE_OPEN" }
+  | { type: "OVERLAY_SUBMODE_CLOSE" };
 
 /**
  * Commits the pending read-only batch as one `tool_call_group` transcript entry,
@@ -1501,15 +1512,20 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
     // is. Clear is the teardown primitive — used when a run ends or a session resets so a
     // stale overlay does not survive the transition.
     case "OVERLAY_PUSH":
-      return { ...state, overlayStack: [...state.overlayStack, action.overlayId] };
+      // Phase 3b — a new layer always starts with sub-mode closed.
+      return { ...state, overlayStack: [...state.overlayStack, action.overlayId], overlaySubModeOpen: false };
     case "OVERLAY_POP":
       // Empty-stack pop is a pure no-op — return the same state reference so cheap
       // equality checks (`next === state`) detect no-change and the reducer doesn't
       // spuriously re-render consumers on a stray Esc.
       if (state.overlayStack.length === 0) return state;
-      return { ...state, overlayStack: state.overlayStack.slice(0, -1) };
+      return { ...state, overlayStack: state.overlayStack.slice(0, -1), overlaySubModeOpen: false };
     case "OVERLAY_CLEAR":
-      return { ...state, overlayStack: [] };
+      return { ...state, overlayStack: [], overlaySubModeOpen: false };
+    case "OVERLAY_SUBMODE_OPEN":
+      return { ...state, overlaySubModeOpen: true };
+    case "OVERLAY_SUBMODE_CLOSE":
+      return { ...state, overlaySubModeOpen: false };
 
     default:
       return state;
@@ -1539,3 +1555,17 @@ export const selectIsBlockingModalOpen = (state: StoreState): boolean =>
   state.planReadyProposal !== null ||
   state.stagedDiffProposal !== null ||
   state.overlayStack.length > 0;
+
+/**
+ * Phase 3b — Esc-key routing. Determines which handler should own the next Esc press.
+ * "submode" wins over "overlay" so a text-input inside an overlay gets Esc first (to cancel
+ * the input) before the overlay itself pops. "question" wins over "run" so dismissing a
+ * parked question does not also abort the run. "none" means no handler should fire.
+ */
+export const selectEscTarget = (state: StoreState): "submode" | "overlay" | "question" | "run" | "none" => {
+  if (state.overlaySubModeOpen) return "submode";
+  if (state.overlayStack.length > 0) return "overlay";
+  if (state.pendingQuestion !== null) return "question";
+  if (state.runState === "running") return "run";
+  return "none";
+};

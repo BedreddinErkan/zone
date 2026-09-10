@@ -6,8 +6,8 @@ import { writeDailyUsdCapOverride } from "../../../visual/tierSettings.js";
 import { role, spacing } from "../theme.js";
 
 /**
- * Phase 2d — content-only spending limits editor. No border, no title, no footer hints —
- * those come from OverlayShell when OverlayLayer wraps this component.
+ * Phase 2d — content-only spending limits editor. Phase 3b — Esc falls through to the
+ * central handler (no sub-mode: the text input IS the component, no internal state to cancel).
  */
 export function LimitsEditor(): React.ReactElement {
   const { state, dispatch } = useStore();
@@ -17,10 +17,7 @@ export function LimitsEditor(): React.ReactElement {
   const orgPolicy = !!process.env.ZONE_ORG_POLICY_PATH;
 
   useInput((ch, key) => {
-    if (key.escape) {
-      dispatch({ type: "OVERLAY_POP" });
-      return;
-    }
+    // Esc falls through to central handler (Phase 3b).
     if (key.return) {
       const n = parseFloat(input);
       if (!Number.isFinite(n) || n <= 0 || n > 1000) {

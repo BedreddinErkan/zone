@@ -18,13 +18,14 @@ export function TrustPrompt(): React.ReactElement | null {
   const runId = approval.runId;
   const projectPath = approval.command;
 
-  useInput((input, key) => {
+  useInput((input, _key) => {
+    // Esc handled by central handler (Phase 3b).
     const ch = input.toLowerCase();
     if (ch === "y") {
       resolveTrustApproval(runId, true);
       dispatch({ type: "PENDING_APPROVAL_RESOLVED" });
       dispatch({ type: "OVERLAY_POP" });
-    } else if (ch === "n" || key.escape) {
+    } else if (ch === "n") {
       resolveTrustApproval(runId, false);
       dispatch({ type: "PENDING_APPROVAL_RESOLVED" });
       dispatch({ type: "OVERLAY_POP" });

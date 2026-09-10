@@ -16,7 +16,7 @@ import { StagedDiffModal } from "./components/StagedDiffModal.js";
 import { PlanPanel } from "./components/PlanPanel.js";
 import { QuestionPanel } from "./components/QuestionPanel.js";
 import { OverlayLayer } from "./components/OverlayLayer.js";
-import { selectIsBlockingModalOpen } from "./store-core.js";
+import { selectIsBlockingModalOpen, selectEscTarget } from "./store-core.js";
 import { resolveCommandApproval } from "../../api/commandApprovals.js";
 import { resolveEditApproval } from "../../api/editApprovals.js";
 import { declineUserQuestion } from "../../api/questionApprovals.js";
@@ -163,29 +163,28 @@ function AppInner({ bus, initialPrompt, initialMode, onSubmit, onUndoRequest, on
       dispatch({ type: "MODE_CYCLE" });
       return;
     }
-    // Esc with a question pending — discard the question, leave the run alive.
-    // Checked first: while parked the run state is awaiting_input rather than
-    // running, so the abort branch below cannot fire, but the ordering makes the
-    // precedence legible instead of incidental.
-    if (key.escape && state.pendingQuestion !== null && state.modalView === "none") {
-      const pending = state.pendingQuestion;
-      if (pending.kind === "live") {
-        // The loop is parked awaiting a tool_result, so the decline must return one.
-        declineUserQuestion({ questionId: pending.questionId, runId: pending.runId });
-        dispatch({ type: "USER_QUESTION_RESOLVED" });
-      } else {
-        // No loop to reply to — the suspended run is set aside instead. Not
-        // deleted: it can hold the only copy of staged work.
-        onCarriedDiscard?.(pending.runId, pending.iter);
-        dispatch({ type: "USER_QUESTION_DISMISSED" });
+    // Phase 3b — central Esc handler. Precedence is defined in selectEscTarget:
+    // submode (content component owns Esc) > overlay (pop stack) > question (dismiss) > run (abort).
+    // "submode" is a no-op here — the content component's own useInput fires when
+    // overlaySubModeOpen is true, so the central handler must not double-fire.
+    if (key.escape) {
+      const target = selectEscTarget(state);
+      if (target === "overlay") {
+        dispatch({ type: "OVERLAY_POP" });
+      } else if (target === "question" && state.modalView === "none") {
+        const pending = state.pendingQuestion!;
+        if (pending.kind === "live") {
+          declineUserQuestion({ questionId: pending.questionId, runId: pending.runId });
+          dispatch({ type: "USER_QUESTION_RESOLVED" });
+        } else {
+          onCarriedDiscard?.(pending.runId, pending.iter);
+          dispatch({ type: "USER_QUESTION_DISMISSED" });
+        }
+      } else if (target === "run" && state.pendingApproval === null && state.modalView === "none") {
+        runAcRef.current?.abort();
+        dispatch({ type: "NARRATION_COMMIT" });
+        dispatch({ type: "RUN_ABORTED" });
       }
-      return;
-    }
-    // Esc — abort running task only; never exit TUI. Skip when approval modal is active.
-    if (key.escape && state.runState === "running" && state.pendingApproval === null && state.modalView === "none") {
-      runAcRef.current?.abort();
-      dispatch({ type: "NARRATION_COMMIT" });
-      dispatch({ type: "RUN_ABORTED" });
     }
   });
 

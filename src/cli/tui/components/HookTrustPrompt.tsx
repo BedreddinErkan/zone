@@ -27,7 +27,7 @@ export function HookTrustPrompt(): React.ReactElement | null {
 
   const { config, projectPath } = pending;
 
-  useInput((input, key) => {
+  useInput((input, _key) => {
     if (input === "y" || input === "Y") {
       import("../../../api/diskTrustedHooks.js").then(({ recordHooksTrust }) => {
         if (state.pendingHookTrust) {
@@ -39,7 +39,8 @@ export function HookTrustPrompt(): React.ReactElement | null {
         dispatch({ type: "HOOKS_TRUST_DENIED" });
         dispatch({ type: "OVERLAY_POP" });
       });
-    } else if (input === "n" || input === "N" || key.escape) {
+    } else if (input === "n" || input === "N") {
+      // Esc handled by central handler (Phase 3b).
       dispatch({ type: "HOOKS_TRUST_DENIED" });
       dispatch({ type: "OVERLAY_POP" });
     }

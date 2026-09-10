@@ -24,9 +24,8 @@ export function SessionMemoryPicker(): React.ReactElement {
   const currentMemory = state.modelSettings?.memoryEnabled ?? true;
 
   useInput((_input, key) => {
-    if (key.escape) {
-      dispatch({ type: "OVERLAY_POP" });
-    } else if (key.upArrow) {
+    // Esc handled by central handler (Phase 3b).
+    if (key.upArrow) {
       dispatch({ type: "MEMORY_NAV", direction: "up" });
     } else if (key.downArrow) {
       dispatch({ type: "MEMORY_NAV", direction: "down" });

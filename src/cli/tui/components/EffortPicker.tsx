@@ -29,9 +29,8 @@ export function EffortPicker(): React.ReactElement {
   const currentEffort = state.modelSettings?.effort;
 
   useInput((_input, key) => {
-    if (key.escape) {
-      dispatch({ type: "OVERLAY_POP" });
-    } else if (key.upArrow) {
+    // Esc handled by central handler (Phase 3b).
+    if (key.upArrow) {
       dispatch({ type: "EFFORT_NAV", direction: "up" });
     } else if (key.downArrow) {
       dispatch({ type: "EFFORT_NAV", direction: "down" });

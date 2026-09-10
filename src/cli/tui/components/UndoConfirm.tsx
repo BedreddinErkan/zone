@@ -19,7 +19,8 @@ export function UndoConfirm(): React.ReactElement | null {
   const driftedSet = new Set(driftedPaths);
 
   useInput((input, key) => {
-    if (key.escape || input === "n" || input === "N") {
+    // Esc handled by central handler (Phase 3b). 'n' still cancels here.
+    if (input === "n" || input === "N") {
       dispatch({ type: "OVERLAY_POP" });
       return;
     }

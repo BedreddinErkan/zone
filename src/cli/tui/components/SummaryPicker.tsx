@@ -22,9 +22,8 @@ export function SummaryPicker(): React.ReactElement {
   const currentFormat = state.modelSettings?.summaryFormat ?? "compact";
 
   useInput((_input, key) => {
-    if (key.escape) {
-      dispatch({ type: "OVERLAY_POP" });
-    } else if (key.upArrow) {
+    // Esc handled by central handler (Phase 3b).
+    if (key.upArrow) {
       dispatch({ type: "SUMMARY_NAV", direction: "up" });
     } else if (key.downArrow) {
       dispatch({ type: "SUMMARY_NAV", direction: "down" });

@@ -14,9 +14,8 @@ export function PermissionsManager(): React.ReactElement {
   const sel = state.permissionsSelectedIndex;
 
   useInput((input, key) => {
-    if (key.escape) {
-      dispatch({ type: "OVERLAY_POP" });
-    } else if (key.upArrow) {
+    // Esc handled by central handler (Phase 3b).
+    if (key.upArrow) {
       dispatch({ type: "PERMISSIONS_NAV", direction: "up" });
     } else if (key.downArrow) {
       dispatch({ type: "PERMISSIONS_NAV", direction: "down" });
