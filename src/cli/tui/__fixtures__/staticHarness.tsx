@@ -10,6 +10,8 @@ export interface HarnessInstance {
   anyFrameContains: (text: string) => boolean;
   /** Last dynamic frame only — for live narrationBuffer and liveToolCall */
   lastFrame: () => string | undefined;
+  /** Number of stdout writes (frames dispatched) — for frame-cost assertions */
+  frameCount: () => number;
   unmount: () => void;
 }
 
@@ -22,6 +24,7 @@ export function renderTranscript(transcript: TranscriptEntry[]): HarnessInstance
   return {
     anyFrameContains: (text) => instance.frames.some((f) => f?.includes(text)),
     lastFrame: () => instance.lastFrame(),
+    frameCount: () => instance.frames.length,
     unmount: () => instance.unmount(),
   };
 }
@@ -48,6 +51,7 @@ export function renderTranscriptAt(
   return {
     anyFrameContains: (text) => frames.some((f) => f?.includes(text)),
     lastFrame: () => frames[frames.length - 1],
+    frameCount: () => frames.length,
     unmount: () => instance.unmount(),
   };
 }

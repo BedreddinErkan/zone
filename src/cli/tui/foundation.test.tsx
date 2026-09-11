@@ -72,8 +72,18 @@ describe("TUI.0 foundation", () => {
     unmount();
   });
 
-  // Phase 6f — flake fix: increased wait from 50ms to 120ms to allow
-  // bus emit → scheduler → reducer → React re-render cycle to complete.
+  // Phase 6f — flake fix: increased wait from 50ms to 120ms.
+  // Phase 6f.1 — padded-wait mitigation note:
+  //   Root cause: bus.emit() → scheduler microtask → reducer dispatch → React
+  //   reconciliation is a multi-step async chain. Under event-loop contention
+  //   (busy full-suite runs), 50ms is insufficient for the chain to complete.
+  //   Why acceptable: the 120ms wait is well under the test's timeout budget
+  //   and the assertion (frame contains "aborted") is idempotent — a longer wait
+  //   cannot produce a false pass, only a slower test.
+  //   Proper fix: replace padded wait with waitFor() on the expected state
+  //   (e.g. waitFor(() => expect(lastFrame()).toContain("aborted"))) or drive
+  //   the scheduler with fake timers so the chain resolves synchronously.
+  //   Tracked in docs/deferred-work.md item 416.
   it("Esc in running state transitions to aborted", async () => {
     const bus = createEventBus();
     const { lastFrame, stdin, unmount } = render(<App bus={bus} />);

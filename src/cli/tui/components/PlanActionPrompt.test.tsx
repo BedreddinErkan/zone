@@ -316,8 +316,19 @@ describe("PlanActionPrompt — Composer stays muted while a proposal is pending"
     );
   }
 
-  // Phase 6f — flake fix: increased waits to 150ms to allow React mount + dispatch
-  // cycle to complete in busy full-suite runs.
+  // Phase 6f — flake fix: increased waits to 150ms.
+  // Phase 6f.1 — padded-wait mitigation note:
+  //   Root cause: the mount-time PLAN_READY_PROPOSED dispatch triggers a store
+  //   update → React reconciliation → PlanActionPrompt mount chain. Under
+  //   event-loop contention (busy full-suite runs), the default 50ms wait is
+  //   insufficient for the dispatch to land and the component to be interactive.
+  //   Why acceptable: 150ms is well under the test's timeout budget and both
+  //   assertions (resolvePlanApproval called, Composer placeholder visible) are
+  //   idempotent — a longer wait cannot produce a false pass.
+  //   Proper fix: replace padded waits with waitFor() on the expected state
+  //   (e.g. waitFor(() => expect(mockResolvePlanApproval).toHaveBeenCalled()))
+  //   or flush the store dispatch synchronously with fake timers.
+  //   Tracked in docs/deferred-work.md item 416.
   it("pressing '1' resolves accept_all AND leaves the Composer buffer untouched", async () => {
     const onSubmit = vi.fn();
     const { lastFrame, stdin, unmount } = render(

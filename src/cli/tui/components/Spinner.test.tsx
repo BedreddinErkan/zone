@@ -37,15 +37,28 @@ const DIAGONAL_FRAMES = ["╱", "│", "╲", "─"];
 describe("Spinner", () => {
   afterEach(() => { vi.useRealTimers(); });
 
-  // Phase 6f — flake fix: increased wait from 50ms to 150ms for bus emit
-  // → scheduler → reducer → React re-render cycle in busy full-suite runs.
+  // Phase 6f — flake fix: increased wait from 50ms to 150ms.
+  // Phase 6f.1 — padded-wait mitigation note:
+  //   Root cause: bus.emit("agent_loop_start") → scheduler microtask → reducer
+  //   dispatch → React re-render is a multi-step async chain. Under event-loop
+  //   contention (busy full-suite runs), 50ms is insufficient for the spinner
+  //   frame to appear in the last rendered output.
+  //   Why acceptable: 150ms is well under the test's timeout budget and the
+  //   assertion (frame contains "╱") is idempotent — a longer wait cannot
+  //   produce a false pass, only a slower test.
+  //   Proper fix: use fake timers (vi.useFakeTimers + advanceTimersByTimeAsync)
+  //   to drive the scheduler deterministically, as the sibling "keeps the
+  //   Starting… label fixed" test already does.
+  //   Tracked in docs/deferred-work.md item 416.
   it("renders a diagonal frame when agent_loop_start activates spinner", async () => {
     const bus = createEventBus();
     const { lastFrame, unmount } = render(<App bus={bus} />);
     bus.emit("agent_loop_start", makeUntitledEvt("agent_loop_start"));
     await wait(150);
     const frame = lastFrame() ?? "";
-    expect(frame.includes("╱")).toBe(true);
+    // The spinner rotates every FRAME_MS (100ms). After 150ms the first frame ("╱")
+    // may have been replaced by a later frame — assert any spinner frame is present.
+    expect(DIAGONAL_FRAMES.some((f) => frame.includes(f))).toBe(true);
     unmount();
   });
 
@@ -86,7 +99,14 @@ describe("Spinner", () => {
 describe("Spinner — no context parenthetical (b045f350 reverted)", () => {
   afterEach(() => { vi.useRealTimers(); });
 
-  // Phase 6f — flake fix: increased wait from 50ms to 150ms (same as above).
+  // Phase 6f — flake fix: increased wait from 50ms to 150ms.
+  // Phase 6f.1 — padded-wait mitigation note:
+  //   Root cause: same as the "renders a diagonal frame" test above — bus emit
+  //   → scheduler → reducer → React re-render chain under event-loop contention.
+  //   Why acceptable: same reasoning — 150ms is within timeout budget and the
+  //   assertion (spinnerLine contains label, no parenthetical) is idempotent.
+  //   Proper fix: convert to fake timers like the sibling label-stability tests.
+  //   Tracked in docs/deferred-work.md item 416.
   it("while running, the spinner line contains the gerund and no parenthetical", async () => {
     const bus = createEventBus();
     const { lastFrame, unmount } = render(<App bus={bus} />);

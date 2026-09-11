@@ -31710,3 +31710,48 @@ same data gave five and eleven under two defensible definitions.
 followed it. See item 115 for the entry-point and retention properties this relies on, item 220 for the
 zero itself, and item 151 for the neighbouring shape — ruling out a class of explanations from an
 invariant, which forecloses hypotheses without needing an enumeration and is therefore a different move.
+
+## 416. TUI timing tests use padded waits instead of fake timers
+
+**What it is.** Several TUI tests rely on `await wait(N)` (real-time `setTimeout`) to let
+asynchronous state propagation complete before asserting on rendered output. The waits were
+padded from 50ms to 120–150ms in Phase 6f to stop flakes under event-loop contention, and the
+streaming frame-cost test's wall-clock threshold was relaxed from 200ms to 500ms. Phase 6f.1
+replaced the frame-cost test's wall-clock assertion with a deterministic frame-count guard
+(fake timers + `frameCount()` from the static harness), but the three integration-style tests
+below still use padded waits.
+
+**Affected files and sites:**
+
+- `src/cli/tui/foundation.test.tsx` — "Esc in running state transitions to aborted": two
+  `await wait(120)` calls around `bus.emit("agent_loop_start")` and `stdin.write("\x1b")`,
+  waiting for bus → scheduler → reducer → React re-render.
+- `src/cli/tui/components/PlanActionPrompt.test.tsx` — "pressing '1' resolves accept_all AND
+  leaves the Composer buffer untouched": two `await wait(150)` calls, waiting for mount-time
+  `PLAN_READY_PROPOSED` dispatch to land and for `resolvePlanApproval` to fire after keystroke.
+- `src/cli/tui/components/Spinner.test.tsx` — "renders a diagonal frame when agent_loop_start
+  activates spinner" and "while running, the spinner line contains the gerund and no
+  parenthetical": one `await wait(150)` each, waiting for bus emit → spinner frame render.
+
+**Root cause.** The propagation path is bus.emit() → scheduler microtask → reducer dispatch →
+React reconciliation → Ink stdout write. Under event-loop contention (busy full-suite runs with
+many concurrent timers and I/O), the real-time delay is unpredictable. The padded waits are
+conservative enough that they don't flake, but they are not deterministic.
+
+**Why it is deferred.** Converting these tests to fake timers requires understanding which
+async boundaries each test crosses (scheduler microtasks vs. macrotask setTimeout vs. React's
+own batching), and in some cases the component under test uses real timers internally (the
+Spinner's own frame interval). A partial conversion risks introducing new flakes. The padded
+waits are documented in-line (Phase 6f.1 mitigation comments) and are stable in CI.
+
+**What would close it.** Convert each site to one of:
+1. `vi.useFakeTimers()` + `vi.advanceTimersByTimeAsync()` to drive the scheduler deterministically
+   (the Spinner's label-stability tests already do this successfully).
+2. `waitFor()` from `@testing-library/react` (or a polling equivalent) that retries the assertion
+   until it passes or times out, making the test resilient without depending on a fixed delay.
+3. For the bus-driven tests, expose a flush mechanism on the event bus or store that resolves
+   when all pending dispatches have been processed, then `await` that instead of a timer.
+
+**Where the code lives.** The three test files listed above, plus the static harness at
+`src/cli/tui/__fixtures__/staticHarness.tsx` (which gained `frameCount()` in Phase 6f.1 to
+support the deterministic frame-cost guard — the same pattern could extend to these tests).
