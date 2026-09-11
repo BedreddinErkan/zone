@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Box, Text } from "ink";
 import { useStore, type RunState, type TuiMode } from "../store.js";
+import { selectPersistentWarnings } from "../store-core.js";
 import { role, glyph, spacing } from "../theme.js";
 
 function formatTokens(n: number): string {
@@ -120,13 +121,23 @@ export function StatusBar(): React.ReactElement {
   const usedStr = dailyUsedUsd > 0 ? ` · used $${dailyUsedUsd.toFixed(2)}` : "";
   const badgeLine = `${modelLabel}${effortStr}${usedStr} · cap $${(capUsd ?? 10).toFixed(2)}`;
 
+  // Phase 7b — persistent warnings (cap usage, RC state). Rendered right-aligned
+  // in role.caution after the existing right hint, separated by " · ".
+  const persistentWarnings = selectPersistentWarnings(state);
+  const warningStr = persistentWarnings.length > 0
+    ? ` · ${persistentWarnings.join(" · ")}`
+    : "";
+
   return (
     <Box flexDirection="column">
       <Text dimColor>{sep}</Text>
       <Box justifyContent="space-between" paddingX={spacing.sm}>
         <Text color={tokenColor}>{leftText(runState, costUsd, model, elapsedSec, cumulativeTokens, waitedSec, liveElapsedSec)}{webSearch ? " · [W]" : ""}{mem ? " · [M]" : ""}</Text>
         {pill ? <Text color={pillColor}>{pill}</Text> : null}
-        <Text dimColor>{rightHint(runState, state.pendingQuestion?.kind ?? null)}</Text>
+        <Box>
+          <Text dimColor>{rightHint(runState, state.pendingQuestion?.kind ?? null)}</Text>
+          {warningStr ? <Text color={role.caution}>{warningStr}</Text> : null}
+        </Box>
       </Box>
       <Box paddingX={spacing.sm}>
         <Text dimColor>{badgeLine}</Text>

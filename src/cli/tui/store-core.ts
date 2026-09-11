@@ -1794,3 +1794,19 @@ export const selectEscTarget = (state: StoreState): "submode" | "overlay" | "que
   if (state.runState === "running") return "run";
   return "none";
 };
+
+/**
+ * Phase 7b — persistent condition warnings for the StatusBar. Returns at most 2 items.
+ * These are conditions that persist until resolved (unlike transient Toasts).
+ * - Daily cap usage above 80% → "cap {pct}%"
+ * - Remote control disconnected → "/rc failed" (reserved for future RC state integration)
+ */
+export const selectPersistentWarnings = (state: StoreState): string[] => {
+  const warnings: string[] = [];
+  const { dailyUsedUsd, capUsd } = state.statusBar;
+  if (capUsd > 0 && dailyUsedUsd > 0) {
+    const pct = Math.round((dailyUsedUsd / capUsd) * 100);
+    if (pct >= 80) warnings.push(`cap ${pct}%`);
+  }
+  return warnings.slice(0, 2);
+};

@@ -200,3 +200,56 @@ describe("StatusBar — live elapsed-time ticker", () => {
     unmount();
   });
 });
+
+describe("StatusBar — persistent warning slot (Phase 7b)", () => {
+  it("shows cap warning when daily usage exceeds 80% of cap", () => {
+    const { lastFrame, unmount } = render(
+      <StoreProvider initialValues={{ model: "test-model", capUsd: 10, dailyUsedUsd: 8.5 }}>
+        <StatusBar />
+      </StoreProvider>
+    );
+    expect(lastFrame()).toContain("cap 85%");
+    unmount();
+  });
+
+  it("no cap warning when usage is below 80%", () => {
+    const { lastFrame, unmount } = render(
+      <StoreProvider initialValues={{ model: "test-model", capUsd: 10, dailyUsedUsd: 5 }}>
+        <StatusBar />
+      </StoreProvider>
+    );
+    // Badge line always has "cap $10.00" — check no percentage warning
+    expect(lastFrame()).not.toMatch(/cap \d+%/);
+    unmount();
+  });
+
+  it("no warning when dailyUsedUsd is 0", () => {
+    const { lastFrame, unmount } = render(
+      <StoreProvider initialValues={{ model: "test-model", capUsd: 10, dailyUsedUsd: 0 }}>
+        <StatusBar />
+      </StoreProvider>
+    );
+    const frame = lastFrame() ?? "";
+    // Should not contain a "cap XX%" pattern (the badge line "cap $10.00" is always present)
+    expect(frame).not.toMatch(/cap \d+%/);
+    unmount();
+  });
+
+  it("StatusBar height invariant: warning does not add extra rows", () => {
+    const withWarning = render(
+      <StoreProvider initialValues={{ model: "test-model", capUsd: 10, dailyUsedUsd: 9 }}>
+        <StatusBar />
+      </StoreProvider>
+    );
+    const withoutWarning = render(
+      <StoreProvider initialValues={{ model: "test-model", capUsd: 10, dailyUsedUsd: 0 }}>
+        <StatusBar />
+      </StoreProvider>
+    );
+    const withLines = (withWarning.lastFrame() ?? "").split("\n").filter(Boolean).length;
+    const withoutLines = (withoutWarning.lastFrame() ?? "").split("\n").filter(Boolean).length;
+    expect(withLines).toBe(withoutLines);
+    withWarning.unmount();
+    withoutWarning.unmount();
+  });
+});
