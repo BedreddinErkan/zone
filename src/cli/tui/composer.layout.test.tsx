@@ -107,6 +107,47 @@ describe("composer layout — what ships, not a reconstruction of it", () => {
   });
 });
 
+describe("composer chrome — Phase 7c input-box language", () => {
+  it("top and bottom separator rules render around the input surface", async () => {
+    const { lastFrame, unmount } = render(<App />);
+    await wait(60);
+    const frame = lastFrame() ?? "";
+    // The rules use glyph.separator (─) — they should appear above and below the "> " line
+    const lines = frame.split("\n");
+    const inputIdx = lines.findIndex((l) => l.includes("> "));
+    expect(inputIdx).toBeGreaterThan(0);
+    // Top rule is the line above the input surface
+    expect(lines[inputIdx - 1]).toContain("─");
+    // Bottom rule is the line below the input surface
+    const bottomRuleIdx = lines.findIndex((l, i) => i > inputIdx && l.includes("─") && !l.includes(">"));
+    expect(bottomRuleIdx).toBeGreaterThan(inputIdx);
+    unmount();
+  });
+
+  it("key hints row renders exactly one line at idle", async () => {
+    const { lastFrame, unmount } = render(<App />);
+    await wait(60);
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("shift+tab");
+    expect(frame).toContain("/help");
+    expect(frame).toContain("@file");
+    expect(frame).toContain("esc");
+    // The hints must be on a single line
+    const hintLines = frame.split("\n").filter((l) => l.includes("shift+tab"));
+    expect(hintLines).toHaveLength(1);
+    unmount();
+  });
+
+  it("hints row invariant: exactly one line, not wrapped", async () => {
+    const { lastFrame, unmount } = render(<App />);
+    await wait(60);
+    const frame = lastFrame() ?? "";
+    const hintLines = frame.split("\n").filter((l) => l.includes("shift+tab") && l.includes("mode"));
+    expect(hintLines.length).toBe(1);
+    unmount();
+  });
+});
+
 /**
  * The colour half, with its regime declared.
  *

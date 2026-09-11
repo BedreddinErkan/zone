@@ -4,6 +4,7 @@ import fg from "fast-glob";
 import { readAtFileContext } from "../atFileContext.js";
 import { useStore } from "../store.js";
 import { role, glyph, spacing } from "../theme.js";
+import { KeyHints } from "./primitives/KeyHints.js";
 import { loadDiskTrust } from "../../../api/diskTrust.js";
 import { loadDiskKeys } from "../../../api/diskKeys.js";
 import { listSessionsMeta } from "../../../api/diskSessions.js";
@@ -759,6 +760,11 @@ export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, onRemot
     ? expandSentinels(buffer, sideMapRef.current)
     : renderBuffer(buffer, cursorPos, sideMapRef.current);
 
+  // Phase 7c — thin rules + key-hints row in zonecli.dev input-box language.
+  const cols = stdout.columns ?? 80;
+  const rule = glyph.separator.repeat(cols);
+  const showHints = state.runState === "idle" && !disabled;
+
   return (
     <Box flexDirection="column">
       {atPaletteOpen && atFiles.length > 0 && (
@@ -771,6 +777,7 @@ export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, onRemot
       {paletteOpen && filteredCommands.length > 0 && (
         <SlashCommandPalette commands={filteredCommands} selectedIdx={paletteIdx} />
       )}
+      <Text color={role.muted}>{rule}</Text>
       {/* Every run inside this box sets role.surfaceForeground. The fill is a fixed hex the app
           controls; leaving the foreground to the terminal made the pairing uncomputable and, on a
           light theme, near-invisible at 1.08:1. dimColor still applies on top — it modulates a
@@ -778,7 +785,7 @@ export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, onRemot
       <Box
         backgroundColor={role.surface}
         paddingX={spacing.md}
-        width={stdout.columns ?? 80 /* width: intentional — full-bleed composer chrome, not a content column */}
+        width={cols}
       >
         <Text color={role.surfaceForeground} dimColor={disabled}>{disabled ? "  " : "> "}</Text>
         <Box flexGrow={1}>
@@ -788,6 +795,18 @@ export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, onRemot
           )}
         </Box>
       </Box>
+      <Text color={role.muted}>{rule}</Text>
+      {showHints && (
+        <Box paddingX={spacing.sm}>
+          <KeyHints items={[
+            { key: "shift+tab", label: "mode" },
+            { key: "/help", label: "commands" },
+            { key: "@file", label: "context" },
+            { key: "\\+enter", label: "newline" },
+            { key: "esc", label: "clear" },
+          ]} />
+        </Box>
+      )}
       {stagedImages.length > 0 && (
         <Text dimColor>{`  [${stagedImages.length} image${stagedImages.length === 1 ? "" : "s"} staged]`}</Text>
       )}
