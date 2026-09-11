@@ -37,13 +37,26 @@ describe("WelcomeFrame", () => {
     expect(frame).toContain("zone");
     expect(frame).toContain("v2.3.0");
     expect(frame).toContain("welcome back Ada Lovelace");
-    expect(frame).toContain("zone");
     expect(frame).toContain("main");
     expect(frame).toContain("byok");
     expect(frame).toContain("anthropic");
     expect(frame).toContain("claude-sonnet-4-6");
     expect(frame).toContain("cap $30");
-    expect(frame).toContain("shift+tab cycle mode");
+  });
+
+  it("renders the 6x4 half-block logo", () => {
+    const frame = renderWithBoot(FULL_BOOT);
+    // Each logo row uses half-block characters
+    expect(frame).toContain("█▀▀▀▀█");
+    expect(frame).toContain("█  ▄▀█");
+    expect(frame).toContain("█▄▀  █");
+    expect(frame).toContain("█▄▄▄▄█");
+  });
+
+  it("does NOT render interaction hints (those live in Composer chrome)", () => {
+    const frame = renderWithBoot(FULL_BOOT);
+    expect(frame).not.toContain("shift+tab");
+    expect(frame).not.toContain("/help commands");
   });
 
   it("renders what's-new bullets when present", () => {
@@ -59,6 +72,26 @@ describe("WelcomeFrame", () => {
     expect(frame).toContain("welcome back Ada Lovelace");
   });
 
+  it("strips markdown emphasis (** and `) from whatsNew lines", () => {
+    const boot = { ...FULL_BOOT, whatsNew: [
+      "- Added **bold feature** with `code_ref` support",
+    ]};
+    const frame = renderWithBoot(boot);
+    expect(frame).not.toContain("**");
+    expect(frame).not.toContain("`");
+    expect(frame).toContain("Added bold feature with code_ref support");
+  });
+
+  it("truncates long whatsNew lines to width-8 with ellipsis", () => {
+    const longLine = "- " + "x".repeat(200);
+    const boot = { ...FULL_BOOT, whatsNew: [longLine] };
+    const frame = renderWithBoot(boot);
+    // Must contain ellipsis character
+    expect(frame).toContain("\u2026");
+    // Must not contain the full 200-char string
+    expect(frame).not.toContain("x".repeat(200));
+  });
+
   it("formats cap as integer when >= $1", () => {
     const frame = renderWithBoot(FULL_BOOT);
     expect(frame).toContain("cap $30");
@@ -70,6 +103,17 @@ describe("WelcomeFrame", () => {
     expect(frame).toContain("cap $0.50");
   });
 
+  it("shows (resumed) marker when isResumed is true", () => {
+    const boot = { ...FULL_BOOT, isResumed: true };
+    const frame = renderWithBoot(boot);
+    expect(frame).toContain("(resumed)");
+  });
+
+  it("no (resumed) marker for fresh sessions", () => {
+    const frame = renderWithBoot(FULL_BOOT);
+    expect(frame).not.toContain("(resumed)");
+  });
+
   it("renders without boot data (no WelcomeFrame shown)", () => {
     const { lastFrame, unmount } = render(
       <StoreProvider initialValues={{ model: "test", capUsd: 10 }}>
@@ -78,16 +122,13 @@ describe("WelcomeFrame", () => {
     );
     const frame = lastFrame() ?? "";
     expect(frame).not.toContain("welcome back");
-    expect(frame).not.toContain("shift+tab cycle mode");
+    expect(frame).not.toContain("█▀▀▀▀█");
     unmount();
   });
 
-  it("renders separator rule at various column widths", () => {
-    // The separator character is "─" — verify it appears in the frame
-    for (const boot of [FULL_BOOT]) {
-      const frame = renderWithBoot(boot);
-      expect(frame).toContain("─");
-    }
+  it("renders separator rule", () => {
+    const frame = renderWithBoot(FULL_BOOT);
+    expect(frame).toContain("─");
   });
 });
 

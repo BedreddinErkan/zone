@@ -234,6 +234,7 @@ export interface BootData {
   dailyCapUsd: number;
   keySource: "byok" | "gateway";
   whatsNew: string[];
+  isResumed?: boolean;
 }
 
 export type StoreState = {

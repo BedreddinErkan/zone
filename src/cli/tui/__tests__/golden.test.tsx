@@ -63,19 +63,20 @@ describe("golden replay tests", () => {
     const events = loadReplayFixture("fresh-session.jsonl");
     const harness = await replayEvents(events);
     const frame = harness.lastFrame();
+    // Logo
+    expect(frame).toContain("█▀▀▀▀█");
     // Boot identity lines
     expect(frame).toContain("zone");
     expect(frame).toContain("v2.3.0");
     expect(frame).toContain("Ada Lovelace");
-    expect(frame).toContain("zone");
     expect(frame).toContain("main");
     expect(frame).toContain("byok");
     expect(frame).toContain("anthropic");
     expect(frame).toContain("claude-sonnet-4-6");
     expect(frame).toContain("cap $30");
-    // Key hints
-    expect(frame).toContain("shift+tab cycle mode");
-    // What's-new bullets
+    // No interaction hints in WelcomeFrame (those live in Composer chrome)
+    expect(frame).not.toContain("shift+tab cycle mode");
+    // What's-new bullets (markdown-stripped)
     expect(frame).toContain("MCP servers can declare which tools to expose");
     expect(frame).toContain("Destructive MCP tool calls now require approval");
     harness.unmount();

@@ -16,7 +16,6 @@ import { loadCliConfig, validateCliConfig, applyDiskKeyFallbacks, applyProviderS
 import { runOneShotInner, type TuiMode } from "../dispatch.js";
 import { ApiKeyError, ProviderRequestError, PlanRefusalError } from "../../llm/factory.js";
 import { resolveInitialTuiMode } from "./initialMode.js";
-import { buildBannerLine } from "./banner.js";
 import type { LlmPatchFlowResult } from "../../core/runLlmPatchFlow.js";
 import { createEventBus } from "../eventBus.js";
 import { UiScheduler } from "./uiScheduler.js";
@@ -87,7 +86,7 @@ function _readWhatsNew(): string[] {
 }
 
 /** Phase 7a — collect boot data once at startup. Every read is try/catch guarded. */
-function _collectBootData(cfg: CliConfig): import("./store-core.js").BootData {
+function _collectBootData(cfg: CliConfig, isResumed: boolean): import("./store-core.js").BootData {
   const branch = _getGitBranch();
   const user = _getGitUser() || "operator";
   const repoPath = basename(process.cwd());
@@ -102,6 +101,7 @@ function _collectBootData(cfg: CliConfig): import("./store-core.js").BootData {
     dailyCapUsd: cfg.dailyUsdCap ?? 10,
     keySource,
     whatsNew: _readWhatsNew(),
+    isResumed,
   };
 }
 
@@ -130,19 +130,6 @@ function providersWithResolvedKey(cfg: CliConfig): string[] {
 /** Just the gateway ids. `/model`'s free-text flow branches on the LENGTH of this. */
 function gatewayIdsFromStore(): string[] {
   return readGatewayProfilesSync().map((g) => g.id);
-}
-
-function writeBannerToStdout(opts: { isResumed: boolean }): void {
-  // Construction lives in banner.ts so it can be asserted on byte-for-byte; this side of it is
-  // only the stdout write.
-  process.stdout.write(
-    buildBannerLine({
-      version: _zoneVersion,
-      cwd: process.cwd(),
-      branch: _getGitBranch(),
-      isResumed: opts.isResumed,
-    })
-  );
 }
 
 function emitTranscriptLine(
@@ -1436,7 +1423,7 @@ export async function runTui(
     } catch { /* best-effort — missing file or other errors are silently ignored */ }
   };
 
-  writeBannerToStdout({ isResumed: !!resumedSession });
+  // Phase 7a — banner removed; WelcomeFrame is the single identity block in scrollback.
 
   const initialMode: TuiMode = resolveInitialTuiMode(opts.permissionMode);
 
@@ -1487,7 +1474,7 @@ export async function runTui(
           webSearchEnabled: config.webSearchEnabled,
           dailyCapUsd: config.dailyUsdCap,
         }}
-        initialBoot={_collectBootData(config)}
+        initialBoot={_collectBootData(config, !!resumedSession)}
         onModelApply={(model, provider, effort, summaryFormat, memoryEnabled, commitOnSuccess) => {
           // Phase 6a — instead of mutating the CliConfig in-place, resolve the provider
           // selection on a scratch copy, then dispatch CONFIG_PATCHED with the delta.

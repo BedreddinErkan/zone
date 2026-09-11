@@ -2,9 +2,29 @@ import { Box, Text, useStdout } from "ink";
 import { role, glyph, spacing } from "../theme.js";
 import type { BootData } from "../store-core.js";
 
+/** 6×4 half-block logo: a square containing a diagonal slash from bottom-left to top-right.
+ *  Composed from Unicode half-block characters (▀ ▄ █) in role.brand. */
+const LOGO = [
+  "█▀▀▀▀█",
+  "█  ▄▀█",
+  "█▄▀  █",
+  "█▄▄▄▄█",
+];
+
+/** Strip markdown emphasis (** and `) from a CHANGELOG bullet line. */
+function stripMarkdown(s: string): string {
+  return s.replace(/\*\*/g, "").replace(/`/g, "");
+}
+
+/** Truncate to maxLen chars with a trailing ellipsis. */
+function truncate(s: string, maxLen: number): string {
+  if (s.length <= maxLen) return s;
+  return s.slice(0, maxLen - 1) + "\u2026";
+}
+
 /** Phase 7a — one-time opening frame, Static-committed so it persists in scrollback.
- *  Composes exclusively from existing theme tokens: lowercase labels, single teal accent
- *  (role.brand), thin rule (glyph.separator), generous whitespace. */
+ *  Single identity block: 6×4 logo + version, personalized line, context line, thin rule, whatsNew.
+ *  No interaction hints (those live in Composer's Phase 7c bottom chrome). */
 export function WelcomeFrame({ boot }: { boot: BootData }): React.ReactElement {
   const { stdout } = useStdout();
   const cols = stdout.columns ?? 80;
@@ -12,15 +32,22 @@ export function WelcomeFrame({ boot }: { boot: BootData }): React.ReactElement {
   const capStr = boot.dailyCapUsd >= 1
     ? `cap $${boot.dailyCapUsd.toFixed(0)}`
     : `cap $${boot.dailyCapUsd.toFixed(2)}`;
+  const maxLineLen = Math.max(cols - 8, 40);
 
   return (
     <Box flexDirection="column" marginBottom={spacing.sm}>
-      <Box>
-        <Text color={role.brand}>{glyph.entryMarker.trim()}</Text>
-        <Text color={role.brand}> zone </Text>
-        <Text dimColor>v{boot.version}</Text>
+      <Box flexDirection="row">
+        <Box flexDirection="column">
+          {LOGO.map((line, i) => (
+            <Text key={i} color={role.brand}>{line}</Text>
+          ))}
+        </Box>
+        <Box flexDirection="column" paddingLeft={spacing.md} justifyContent="center">
+          <Text color={role.brand} bold>zone</Text>
+          <Text dimColor>v{boot.version}{boot.isResumed ? " (resumed)" : ""}</Text>
+        </Box>
       </Box>
-      <Box>
+      <Box marginTop={spacing.xs}>
         <Text>welcome back {boot.user}</Text>
         <Text dimColor> · {boot.repoPath} · {boot.branch}</Text>
       </Box>
@@ -28,12 +55,9 @@ export function WelcomeFrame({ boot }: { boot: BootData }): React.ReactElement {
         <Text dimColor>{boot.keySource} · {boot.provider} · {boot.model} · {capStr}</Text>
       </Box>
       <Text color={role.muted}>{rule}</Text>
-      <Box>
-        <Text dimColor>shift+tab cycle mode · /help commands · /sessions resume</Text>
-      </Box>
       {boot.whatsNew.map((line, i) => (
         <Box key={i}>
-          <Text color={role.muted}>{line}</Text>
+          <Text color={role.muted}>{truncate(stripMarkdown(line), maxLineLen)}</Text>
         </Box>
       ))}
     </Box>
