@@ -1505,6 +1505,7 @@ export async function runTui(
   // measured explanation in resize.ts. The cost of acting on it is that widening
   // now discards native scrollback too, the same cost narrowing has always paid.
   let prevCols = process.stdout.columns ?? 80;
+  let prevRows = process.stdout.rows ?? 24;
   let resizeTimer: ReturnType<typeof setTimeout> | null = null;
   if (process.stdout.isTTY) {
     process.stdout.on("resize", () => {
@@ -1512,13 +1513,15 @@ export async function runTui(
       resizeTimer = setTimeout(() => {
         resizeTimer = null;
         const nextCols = process.stdout.columns ?? 0;
-        if (shouldRedrawOnResize(prevCols, nextCols)) {
+        const nextRows = process.stdout.rows ?? 0;
+        if (shouldRedrawOnResize(prevCols, nextCols, prevRows, nextRows)) {
           applyResizeRedraw(
             (s) => process.stdout.write(s),
             () => storeCapture.dispatch?.({ type: "TRANSCRIPT_REMOUNT" }),
           );
         }
-        prevCols = nextCols; // always update baseline (tracks widening too, no-op for clear)
+        prevCols = nextCols;
+        prevRows = nextRows;
       }, 100);
     });
   }

@@ -1,4 +1,4 @@
-import { Box, useInput, useApp } from "ink";
+import { Box, useInput, useApp, useStdout } from "ink";
 import { useEffect, useRef, type Dispatch } from "react";
 import { StoreProvider, useStore } from "./store.js";
 import { spacing } from "./theme.js";
@@ -16,6 +16,7 @@ import { StagedDiffModal } from "./components/StagedDiffModal.js";
 import { PlanCursor } from "./components/PlanCursor.js";
 import { QuestionPanel } from "./components/QuestionPanel.js";
 import { OverlayLayer } from "./components/OverlayLayer.js";
+import { EmptyStateHero } from "./components/EmptyStateHero.js";
 import { selectIsBlockingModalOpen, selectEscTarget } from "./store-core.js";
 import { resolveCommandApproval } from "../../api/commandApprovals.js";
 import { resolveEditApproval } from "../../api/editApprovals.js";
@@ -92,6 +93,8 @@ interface AppInnerProps {
 function AppInner({ bus, initialPrompt, initialMode, onSubmit, onUndoRequest, onRemoteControlCommand, onEnvelopeResume, onCarriedAnswer, onCarriedDiscard, onStateChange, onModelApply, getCommitData, getFeedbackData, onDispatchCapture, onSessionClear: _onSessionClear }: AppInnerProps): React.ReactElement {
   const { exit } = useApp();
   const { state, dispatch } = useStore();
+  const { stdout } = useStdout();
+  const rows = stdout.rows ?? 24;
   const runAcRef = useRef<AbortController | null>(null);
   const sessionTrustedPrefixesRef = useRef<string[]>(state.sessionTrustedPrefixes);
   useEffect(() => {
@@ -229,46 +232,62 @@ function AppInner({ bus, initialPrompt, initialMode, onSubmit, onUndoRequest, on
     </>
   );
 
+  // Phase 7.5a — empty-state hero: shown only when transcript is empty, no run active,
+  // and no live buffers are rendering. Disappears the moment the first entry lands.
+  const showHero = state.transcript.length === 0
+    && state.runState === "idle"
+    && !state.liveTail.narrationBuffer
+    && !state.liveTail.streamingAnswer
+    && !state.liveTail.currentToolCall;
+
   return (
     <Box flexDirection="column">
       <Box paddingX={spacing.md}>
         <Transcript />
       </Box>
-      <Spinner />
-      {modals}
-      {state.planReadyProposal !== null && (
-        <PlanActionPrompt proposal={state.planReadyProposal} dispatch={dispatch} />
-      )}
-      {/* Phase 2c — Composer is hidden while a blocking modal is open (approval, trust,
-          plan-ready, staged-diffs, or anything on the overlayStack). The user talks to the
-          modal, not the agent, while it's up; leaving the Composer visible would invite a
-          submission that the run-loop cannot accept. QuestionPanel is NOT gated — a pending
-          question IS the conversation, so the Composer must stay live to receive the answer. */}
-      {!selectIsBlockingModalOpen(state) && (
-        <Composer
-          onSubmit={handleComposerSubmit}
-          onExit={() => { runAcRef.current?.abort(); exit(); }}
-          onInitStart={(ac) => { runAcRef.current = ac; }}
-          onUndoRequest={onUndoRequest}
-          onRemoteControlCommand={onRemoteControlCommand}
-          onEnvelopeResume={onEnvelopeResume}
-          onCarriedAnswer={onCarriedAnswer}
-          getCommitData={getCommitData}
-          getFeedbackData={getFeedbackData}
-        />
-      )}
-      {state.pendingQuestion !== null && (
-        <QuestionPanel
-          question={state.pendingQuestion.question}
-          carriedOver={state.pendingQuestion.kind === "carried"}
-          conversationLost={
-            state.pendingQuestion.kind === "carried" && state.pendingQuestion.conversationLost
-          }
-        />
-      )}
-      {/* Phase 6c — PlanCursor: one-line live cursor; full checklist in <Static> via plan_snapshot */}
-      <PlanCursor />
-      <StatusBar />
+      {/* Phase 7.5a — viewport-high live region. height={rows} pins the bottom chrome
+          (composer + status bar) to the terminal's last row; the hero area above fills
+          the remaining space with flexGrow. Static transcript scrolls above this box
+          into native scrollback. */}
+      <Box flexDirection="column" height={rows}>
+        {showHero && <EmptyStateHero />}
+        {!showHero && <Box flexGrow={1} />}
+        <Spinner />
+        {modals}
+        {state.planReadyProposal !== null && (
+          <PlanActionPrompt proposal={state.planReadyProposal} dispatch={dispatch} />
+        )}
+        {/* Phase 2c — Composer is hidden while a blocking modal is open (approval, trust,
+            plan-ready, staged-diffs, or anything on the overlayStack). The user talks to the
+            modal, not the agent, while it's up; leaving the Composer visible would invite a
+            submission that the run-loop cannot accept. QuestionPanel is NOT gated — a pending
+            question IS the conversation, so the Composer must stay live to receive the answer. */}
+        {!selectIsBlockingModalOpen(state) && (
+          <Composer
+            onSubmit={handleComposerSubmit}
+            onExit={() => { runAcRef.current?.abort(); exit(); }}
+            onInitStart={(ac) => { runAcRef.current = ac; }}
+            onUndoRequest={onUndoRequest}
+            onRemoteControlCommand={onRemoteControlCommand}
+            onEnvelopeResume={onEnvelopeResume}
+            onCarriedAnswer={onCarriedAnswer}
+            getCommitData={getCommitData}
+            getFeedbackData={getFeedbackData}
+          />
+        )}
+        {state.pendingQuestion !== null && (
+          <QuestionPanel
+            question={state.pendingQuestion.question}
+            carriedOver={state.pendingQuestion.kind === "carried"}
+            conversationLost={
+              state.pendingQuestion.kind === "carried" && state.pendingQuestion.conversationLost
+            }
+          />
+        )}
+        {/* Phase 6c — PlanCursor: one-line live cursor; full checklist in <Static> via plan_snapshot */}
+        <PlanCursor />
+        <StatusBar />
+      </Box>
     </Box>
   );
 }

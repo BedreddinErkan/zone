@@ -53,6 +53,24 @@ describe("shouldRedrawOnResize", () => {
   it("returns false when nextCols is negative", () => {
     expect(shouldRedrawOnResize(100, -1)).toBe(false);
   });
+
+  // Phase 7.5a — rows-change triggers redraw
+  it("returns true when rows change (viewport-high frame depends on rows)", () => {
+    expect(shouldRedrawOnResize(100, 100, 24, 30)).toBe(true);
+  });
+
+  it("returns false when rows are the same and cols are the same", () => {
+    expect(shouldRedrawOnResize(100, 100, 24, 24)).toBe(false);
+  });
+
+  it("returns true on rows decrease", () => {
+    expect(shouldRedrawOnResize(100, 100, 30, 24)).toBe(true);
+  });
+
+  it("ignores invalid row values", () => {
+    expect(shouldRedrawOnResize(100, 100, 0, 30)).toBe(false);
+    expect(shouldRedrawOnResize(100, 100, 24, NaN)).toBe(false);
+  });
 });
 
 /**

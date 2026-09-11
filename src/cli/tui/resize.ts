@@ -32,9 +32,24 @@
  * Height-only resizes never change columns, so they still return false.
  * Returns false on any invalid (non-positive-finite) argument.
  */
-export function shouldRedrawOnResize(prevCols: number, nextCols: number): boolean {
+/**
+ * Phase 7.5a — also redraws on row-count changes. The viewport-high live
+ * region (height={rows}) depends on the terminal row count, so any row
+ * change needs a remount to reflow the height-constrained box.
+ */
+export function shouldRedrawOnResize(
+  prevCols: number, nextCols: number,
+  prevRows?: number, nextRows?: number,
+): boolean {
   if (!Number.isFinite(prevCols) || prevCols <= 0) return false;
   if (!Number.isFinite(nextCols) || nextCols <= 0) return false;
+  // Phase 7.5a — any row change triggers redraw (viewport-high frame depends on rows)
+  if (prevRows != null && nextRows != null
+      && Number.isFinite(prevRows) && prevRows > 0
+      && Number.isFinite(nextRows) && nextRows > 0
+      && prevRows !== nextRows) {
+    return true;
+  }
   if (nextCols < prevCols) return true; // narrowing — always redraw
   if (nextCols === prevCols) return false; // no change
   // Widening — only redraw if increase exceeds 20% of previous width

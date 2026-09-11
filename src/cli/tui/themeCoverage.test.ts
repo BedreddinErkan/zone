@@ -98,6 +98,8 @@ const EXTRACTED_FILES = [
   "src/cli/tui/components/PlanCursor.tsx",
   // Phase 7a
   "src/cli/tui/components/WelcomeFrame.tsx",
+  // Phase 7.5a
+  "src/cli/tui/components/EmptyStateHero.tsx",
 ];
 
 const FORBIDDEN_COLOUR_LITERALS = [...new Set(Object.values(role))];
