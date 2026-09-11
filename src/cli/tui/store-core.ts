@@ -229,11 +229,6 @@ export interface BootData {
   user: string;
   repoPath: string;
   branch: string;
-  model: string;
-  provider: string;
-  dailyCapUsd: number;
-  keySource: "byok" | "gateway";
-  whatsNew: string[];
   isResumed?: boolean;
 }
 

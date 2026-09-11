@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 import { exec, execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { promisify } from "node:util";
-import { readFileSync } from "node:fs";
 import { basename } from "node:path";
+import os from "node:os";
 import { render } from "ink";
 import qrcode from "qrcode-terminal";
 
@@ -55,52 +55,40 @@ function _getGitBranch(): string {
   } catch { return ""; }
 }
 
-function _getGitUser(): string {
+/** Phase 7a — 4-step identity chain, first non-empty hit wins. Every step is try/catch
+ *  guarded; a failure in any step falls through to the next, never throws at boot.
+ *  Exported for testing — the chain's ordering is load-bearing (ZONE_USER > git > os > fallback). */
+export function _resolveUser(): string {
+  // Step a: ZONE_USER environment variable (explicit override)
   try {
-    return execFileSync("git", ["config", "user.name"], {
+    const envUser = process.env.ZONE_USER?.trim();
+    if (envUser) return envUser;
+  } catch { /* fall through */ }
+  // Step b: git config user.name (repo -> global -> system)
+  try {
+    const gitUser = execFileSync("git", ["config", "user.name"], {
       encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
     }).trim();
-  } catch { return ""; }
-}
-
-/** Phase 7a — extract the first two bullet lines under the first "## " heading of CHANGELOG.md. */
-function _readWhatsNew(): string[] {
+    if (gitUser) return gitUser;
+  } catch { /* fall through */ }
+  // Step c: os.userInfo().username (Node built-in, no child_process spawn)
   try {
-    const changelogPath = _bannerRequire.resolve("../../../CHANGELOG.md");
-    const text = readFileSync(changelogPath, "utf8") as string;
-    const headingIdx = text.indexOf("\n## ");
-    if (headingIdx === -1) return [];
-    const section = text.slice(headingIdx);
-    const lines = section.split("\n");
-    const bullets: string[] = [];
-    for (const line of lines) {
-      if (line.startsWith("- ")) {
-        bullets.push(line);
-        if (bullets.length === 2) break;
-      } else if (line.startsWith("## ") && bullets.length > 0) {
-        break;
-      }
-    }
-    return bullets;
-  } catch { return []; }
+    const osUser = os.userInfo().username;
+    if (osUser) return osUser;
+  } catch { /* fall through */ }
+  // Step d: literal fallback
+  return "operator";
 }
 
-/** Phase 7a — collect boot data once at startup. Every read is try/catch guarded. */
-function _collectBootData(cfg: CliConfig, isResumed: boolean): import("./store-core.js").BootData {
-  const branch = _getGitBranch();
-  const user = _getGitUser() || "operator";
-  const repoPath = basename(process.cwd());
-  const keySource: "byok" | "gateway" = cfg.profile ? "gateway" : "byok";
+/** Phase 7a — collect boot data once at startup. Every read is try/catch guarded.
+ *  Model, provider, cap, and key source are NOT collected here — the reactive StatusBar
+ *  reads them from state.config. Boot data carries only identity + context. */
+function _collectBootData(isResumed: boolean): import("./store-core.js").BootData {
   return {
     version: _zoneVersion,
-    user,
-    repoPath,
-    branch: branch || "-",
-    model: cfg.model || "default",
-    provider: cfg.provider || "anthropic",
-    dailyCapUsd: cfg.dailyUsdCap ?? 10,
-    keySource,
-    whatsNew: _readWhatsNew(),
+    user: _resolveUser(),
+    repoPath: basename(process.cwd()),
+    branch: _getGitBranch() || "-",
     isResumed,
   };
 }
@@ -1474,7 +1462,7 @@ export async function runTui(
           webSearchEnabled: config.webSearchEnabled,
           dailyCapUsd: config.dailyUsdCap,
         }}
-        initialBoot={_collectBootData(config, !!resumedSession)}
+        initialBoot={_collectBootData(!!resumedSession)}
         onModelApply={(model, provider, effort, summaryFormat, memoryEnabled, commitOnSuccess) => {
           // Phase 6a — instead of mutating the CliConfig in-place, resolve the provider
           // selection on a scratch copy, then dispatch CONFIG_PATCHED with the delta.

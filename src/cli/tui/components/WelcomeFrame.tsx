@@ -11,28 +11,14 @@ const LOGO = [
   "█▄▄▄▄█",
 ];
 
-/** Strip markdown emphasis (** and `) from a CHANGELOG bullet line. */
-function stripMarkdown(s: string): string {
-  return s.replace(/\*\*/g, "").replace(/`/g, "");
-}
-
-/** Truncate to maxLen chars with a trailing ellipsis. */
-function truncate(s: string, maxLen: number): string {
-  if (s.length <= maxLen) return s;
-  return s.slice(0, maxLen - 1) + "\u2026";
-}
-
 /** Phase 7a — one-time opening frame, Static-committed so it persists in scrollback.
- *  Single identity block: 6×4 logo + version, personalized line, context line, thin rule, whatsNew.
- *  No interaction hints (those live in Composer's Phase 7c bottom chrome). */
+ *  Exactly three elements: 6×4 logo with version, personalized line, thin rule as the
+ *  bottom boundary separating the frame from the transcript. Model, provider, cap, and
+ *  key source are shown by the reactive StatusBar; whatsNew was removed as noise. */
 export function WelcomeFrame({ boot }: { boot: BootData }): React.ReactElement {
   const { stdout } = useStdout();
   const cols = stdout.columns ?? 80;
   const rule = glyph.separator.repeat(Math.max(cols - 4, 20));
-  const capStr = boot.dailyCapUsd >= 1
-    ? `cap $${boot.dailyCapUsd.toFixed(0)}`
-    : `cap $${boot.dailyCapUsd.toFixed(2)}`;
-  const maxLineLen = Math.max(cols - 8, 40);
 
   return (
     <Box flexDirection="column" marginBottom={spacing.sm}>
@@ -51,15 +37,7 @@ export function WelcomeFrame({ boot }: { boot: BootData }): React.ReactElement {
         <Text>welcome back {boot.user}</Text>
         <Text dimColor> · {boot.repoPath} · {boot.branch}</Text>
       </Box>
-      <Box>
-        <Text dimColor>{boot.keySource} · {boot.provider} · {boot.model} · {capStr}</Text>
-      </Box>
       <Text color={role.muted}>{rule}</Text>
-      {boot.whatsNew.map((line, i) => (
-        <Box key={i}>
-          <Text color={role.muted}>{truncate(stripMarkdown(line), maxLineLen)}</Text>
-        </Box>
-      ))}
     </Box>
   );
 }
