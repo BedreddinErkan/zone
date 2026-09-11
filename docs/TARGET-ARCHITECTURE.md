@@ -372,3 +372,45 @@ The redesign is complete when:
     Subagent runs are visually distinct (header, indent, cost line, spinner label).
     npm test passes with 5875+ cases (existing + new golden tests).
     Manual review of a 30-minute run transcript shows no ghost rows, no layout reflow, no silent event drops.
+
+10 — App-feel layer
+10.1 Rationale
+Competitor CLI agents (Claude Code, Codex CLI) achieve their distinctive "app feel" through two
+mechanisms: a persistent identity frame pinned at the top of the terminal scrollback, and a visually
+anchored bottom chrome (status bar + composer). Zone's coding-agent correctness depends on inline
+scrollback — selection, grep, pipe-to-file, and screenshot capture all require the transcript to
+live in the terminal's normal scroll buffer. Alternate screen (which Claude Code uses) would break
+these workflows. Phase 7 therefore keeps inline scrollback and adds the identity-frame and
+chrome-unification layers on top of it.
+
+10.2 Visual language source of truth
+zonecli.dev defines the visual language: lowercase mono labels, a single teal accent (#22B3C4)
+carried by role.brand and role.accent, thin rules (glyph.separator, role.muted) instead of heavy
+box borders, and generous whitespace (spacing.md/lg). Phase 7 components compose exclusively
+from existing theme tokens — no new colors, no new glyphs, no ASCII art beyond the single brand
+glyph already in the glyph table.
+
+10.3 Components
+WelcomeFrame (7a) — A one-time opening frame, Static-committed so it persists in scrollback
+(Claude Code model: a durable identity, not a vanishing splash). Reads boot data from
+StoreState.boot: version, user (git config user.name, fallback "operator"), repoPath (cwd
+basename), branch, model, provider, dailyCapUsd, keySource ("byok" | "gateway"), and the first
+two bullet lines of CHANGELOG.md's latest heading. All git/file reads at startup are try/catch
+guarded with safe fallbacks — a broken git must never block boot.
+
+StatusBar persistent warning slot (7b) — A selector (selectPersistentWarnings) returns at most
+two persistent condition strings (e.g. "/rc failed", "cap 85%"). Rendered right-aligned in
+role.caution after the existing right hint. Transient Toasts stay unchanged; this slot is for
+conditions that persist until resolved, not momentary notifications.
+
+Composer chrome (7c) — Wraps the existing input surface with the site's input-box language: a
+thin top rule and bottom rule (glyph.separator, role.muted), and a one-row key-hints line
+beneath (visible at idle only): "shift+tab mode · /help · @file · \+enter newline · esc clear".
+No behavior change — palettes, paste handling, and submission routing stay identical.
+
+10.4 Constraints
+- No alternate screen. Inline scrollback is the correctness requirement.
+- WelcomeFrame renders once via Static commit. It must not re-render per event.
+- All startup reads (git config, CHANGELOG.md) are try/catch guarded. A broken git or missing
+  CHANGELOG must never block boot — every field has a documented fallback.
+- No new dependencies. All composition uses existing theme tokens and Ink primitives.

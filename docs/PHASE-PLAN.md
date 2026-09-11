@@ -423,3 +423,38 @@ The campaign is complete when:
    - Resize preserves scrollback on widening
 4. Cost parity: plan mode small tasks cost ~$0.05 not ~$0.22
 5. User feedback: at least 3 beta testers confirm "feels like Claude Code"
+
+---
+
+## Phase 7 — App-feel layer
+
+Competitor app-feel (Claude Code, Codex CLI, Cursor terminal) comes from two things: a persistent
+identity frame pinned in scrollback, and bottom chrome that stays visually anchored. Zone keeps
+inline scrollback for coding-agent correctness (selection, grep, pipe-to-file all depend on it),
+so alternate screen is rejected. Phase 7 adds the identity frame (WelcomeFrame) and unifies the
+bottom chrome in the zonecli.dev visual language: lowercase mono, single teal accent (#22B3C4 via
+role.brand/role.accent), thin rules instead of heavy boxes, generous whitespace.
+
+### Sub-phases and gates
+
+| Sub-phase | Scope | Gate |
+|-----------|-------|------|
+| 7a | WelcomeFrame — one-time Static-committed opening frame with boot data (version, user, repo, branch, model, provider, cap, keySource, whatsNew). Store gains `boot: BootData`. | WelcomeFrame.test.tsx passes (fallbacks, cap formatting, rule width at 60/80/120 cols); golden fixture `fresh-session.jsonl` asserts frame lines above empty transcript |
+| 7b | StatusBar persistent warning slot — `selectPersistentWarnings(state)` returns ≤ 2 items (rc disconnected, cap > 80%). Rendered right-aligned in role.caution. | StatusBar.test.tsx: warning present/absent, two-warning case, single-line height invariant |
+| 7c | Composer chrome — thin top/bottom rules (glyph.separator, role.muted), key-hints row beneath (shift+tab mode · /help · @file · \+enter newline · esc clear). Idle only. | composer.layout.test.tsx: new chrome lines, one-line hints invariant, existing tests unchanged |
+
+### Commits
+
+```
+commit 23: Phase 7a WelcomeFrame
+commit 24: Phase 7b StatusBar persistent warnings
+commit 25: Phase 7c Composer chrome
+```
+
+**Total:** 25 atomic commits (Phase 0–7c), each passing `npm test` + manual smoke.
+
+### Updated success criteria
+
+6. Opening frame visible in scrollback on every fresh session; survives resize and compaction
+7. Composer key-hints row renders exactly one line at idle
+8. StatusBar persistent warnings appear/disappear without layout shift
