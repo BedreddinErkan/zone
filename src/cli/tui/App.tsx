@@ -67,6 +67,8 @@ interface AppProps {
   initialCarriedQuestion?: Extract<import("./store-core.js").PendingQuestion, { kind: "carried" }> | null;
   /** Phase 6a — initial config snapshot from CliConfig. */
   initialConfig?: import("./store-core.js").RunConfigShape;
+  /** Phase 7a — boot-time identity/context. */
+  initialBoot?: import("./store-core.js").BootData | null;
 }
 
 interface AppInnerProps {
@@ -271,7 +273,7 @@ function AppInner({ bus, initialPrompt, initialMode, onSubmit, onUndoRequest, on
   );
 }
 
-export function App({ initialPrompt, initialMode, bus, initialModel, capUsd, initialDailyUsedUsd, onSubmit, onUndoRequest, onRemoteControlCommand, onEnvelopeResume, onCarriedAnswer, onCarriedDiscard, initialTrustedPrefixes, resumedSession, initialSessionId, onStateChange, initialModelSettings, initialProvidersWithKey, gatewayIds, activeProfile, onModelApply, getCommitData, getFeedbackData, onDispatchCapture, onSessionClear, initialUserCommands, initialArmedUserHooks, initialPendingHookTrust, initialArmedMcpManager, initialPendingMcpTrust, initialCarriedQuestion, initialConfig }: AppProps): React.ReactElement {
+export function App({ initialPrompt, initialMode, bus, initialModel, capUsd, initialDailyUsedUsd, onSubmit, onUndoRequest, onRemoteControlCommand, onEnvelopeResume, onCarriedAnswer, onCarriedDiscard, initialTrustedPrefixes, resumedSession, initialSessionId, onStateChange, initialModelSettings, initialProvidersWithKey, gatewayIds, activeProfile, onModelApply, getCommitData, getFeedbackData, onDispatchCapture, onSessionClear, initialUserCommands, initialArmedUserHooks, initialPendingHookTrust, initialArmedMcpManager, initialPendingMcpTrust, initialCarriedQuestion, initialConfig, initialBoot }: AppProps): React.ReactElement {
   return (
     <StoreProvider initialValues={{
       model: initialModel ?? "",
@@ -293,6 +295,7 @@ export function App({ initialPrompt, initialMode, bus, initialModel, capUsd, ini
       pendingMcpTrust: initialPendingMcpTrust,
       carriedQuestion: initialCarriedQuestion,
       initialConfig,
+      initialBoot,
     }}>
       <AppInner bus={bus} initialPrompt={initialPrompt} initialMode={initialMode} onSubmit={onSubmit} onUndoRequest={onUndoRequest} onRemoteControlCommand={onRemoteControlCommand} onEnvelopeResume={onEnvelopeResume} onCarriedAnswer={onCarriedAnswer} onCarriedDiscard={onCarriedDiscard} onStateChange={onStateChange} onModelApply={onModelApply} getCommitData={getCommitData} getFeedbackData={getFeedbackData} onDispatchCapture={onDispatchCapture} onSessionClear={onSessionClear} />
     </StoreProvider>

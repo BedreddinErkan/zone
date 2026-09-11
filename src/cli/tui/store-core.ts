@@ -221,9 +221,26 @@ export interface RunConfigShape {
   dailyCapUsd: number;
 }
 
+/** Phase 7a — boot-time identity/context snapshot. Collected once at runTui startup,
+ *  committed to Static via WelcomeFrame. Every field has a safe fallback — a broken git or
+ *  missing CHANGELOG must never block boot. */
+export interface BootData {
+  version: string;
+  user: string;
+  repoPath: string;
+  branch: string;
+  model: string;
+  provider: string;
+  dailyCapUsd: number;
+  keySource: "byok" | "gateway";
+  whatsNew: string[];
+}
+
 export type StoreState = {
   /** Phase 6a — immutable config snapshot. Mutated only via CONFIG_PATCHED. */
   config: RunConfigShape;
+  /** Phase 7a — boot-time identity/context. Set once at startup via BOOT_SET. */
+  boot: BootData | null;
   transcript: TranscriptEntry[];
   sessionId: string;
   sessionStartedAt: string;
@@ -410,6 +427,8 @@ export function buildInitialState(initialValues?: {
   seedStreamingAnswer?: string;
   /** Phase 6a — initial config snapshot from CliConfig. Required at startup. */
   initialConfig?: RunConfigShape;
+  /** Phase 7a — boot-time identity/context. Collected once at runTui startup. */
+  initialBoot?: BootData | null;
 }): StoreState {
   // Phase 6a — config-as-state: the store owns the config snapshot. If no initial config
   // is provided (tests), construct a minimal default.
@@ -420,6 +439,7 @@ export function buildInitialState(initialValues?: {
   };
   return {
     config,
+    boot: initialValues?.initialBoot ?? null,
     transcript: initialValues?.resumedTranscript ?? [],
     sessionId: initialValues?.resumedSessionId ?? randomUUID(),
     sessionStartedAt: initialValues?.resumedStartedAt ?? new Date().toISOString(),
@@ -515,6 +535,7 @@ export type StoreAction =
   // CONFIG_PERSISTED is dispatched after the disk write succeeds (informational only).
   | { type: "CONFIG_PATCHED"; patch: Partial<RunConfigShape> }
   | { type: "CONFIG_PERSISTED"; path: string }
+  | { type: "BOOT_SET"; boot: BootData }
   | { type: "SPINNER_START"; label: string }
   | { type: "SPINNER_UPDATE"; label: string }
   | { type: "SPINNER_RESUME" }
@@ -816,6 +837,9 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
     case "CONFIG_PERSISTED":
       // Informational only — the disk write succeeded. No state change needed.
       return state;
+    // Phase 7a — boot-time identity/context. Set once; WelcomeFrame reads it and Static-commits.
+    case "BOOT_SET":
+      return { ...state, boot: action.boot };
 
     case "SPINNER_START":
       return {

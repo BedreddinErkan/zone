@@ -13,6 +13,15 @@ function loadFixture(name: string): ZoneStructuredProgressEvent[] {
     .map((line) => JSON.parse(line) as ZoneStructuredProgressEvent);
 }
 
+/** Loads a fixture that may contain virtual replay events (e.g. "boot"). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function loadReplayFixture(name: string): any[] {
+  return readFileSync(join(fixturesDir, name), "utf-8")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+}
+
 describe("golden replay tests", () => {
   it("run-with-tool-calls renders expected transcript", async () => {
     const events = loadFixture("run-with-tool-calls.jsonl");
@@ -47,6 +56,28 @@ describe("golden replay tests", () => {
     expect(frame).toContain("Update documentation");
     // The frame should contain snapshot glyphs (successMark for completed)
     expect(frame).toContain("✓");
+    harness.unmount();
+  });
+
+  it("fresh-session: WelcomeFrame renders above empty transcript", async () => {
+    const events = loadReplayFixture("fresh-session.jsonl");
+    const harness = await replayEvents(events);
+    const frame = harness.lastFrame();
+    // Boot identity lines
+    expect(frame).toContain("zone");
+    expect(frame).toContain("v2.3.0");
+    expect(frame).toContain("Ada Lovelace");
+    expect(frame).toContain("zone");
+    expect(frame).toContain("main");
+    expect(frame).toContain("byok");
+    expect(frame).toContain("anthropic");
+    expect(frame).toContain("claude-sonnet-4-6");
+    expect(frame).toContain("cap $30");
+    // Key hints
+    expect(frame).toContain("shift+tab cycle mode");
+    // What's-new bullets
+    expect(frame).toContain("MCP servers can declare which tools to expose");
+    expect(frame).toContain("Destructive MCP tool calls now require approval");
     harness.unmount();
   });
 

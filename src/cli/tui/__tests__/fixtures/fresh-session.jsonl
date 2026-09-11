@@ -1,0 +1,1 @@
+{"type":"boot","ts":1725000000000,"boot":{"version":"2.3.0","user":"Ada Lovelace","repoPath":"zone","branch":"main","model":"claude-sonnet-4-6","provider":"anthropic","dailyCapUsd":30,"keySource":"byok","whatsNew":["- MCP servers can declare which tools to expose (tools allowlist)","- Destructive MCP tool calls now require approval"]}}

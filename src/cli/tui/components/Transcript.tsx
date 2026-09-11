@@ -7,6 +7,7 @@ import { getToolDisplayName, formatToolArgs } from "./toolCallFormat.js";
 import { MarkdownText } from "./MarkdownText.js";
 import { DiffView } from "./DiffView.js";
 import { PlanBody } from "./PlanBody.js";
+import { WelcomeFrame } from "./WelcomeFrame.js";
 import { role, glyph, spacing } from "../theme.js";
 
 function renderEntry(entry: TranscriptEntry, index: number, colWidth: number): React.ReactElement {
@@ -158,6 +159,7 @@ function renderEntry(entry: TranscriptEntry, index: number, colWidth: number): R
 /** Phase 5b — group marker types for nested subagent rendering. These are
  *  rendering-only constructs, never stored in the transcript. */
 type GroupedItem =
+  | { kind: "welcome" }
   | { kind: "entry"; entry: TranscriptEntry; index: number }
   | { kind: "group_header"; subagentId: string; subagentType: string; title: string; index: number }
   | { kind: "group_footer"; subagentId: string; index: number };
@@ -202,15 +204,23 @@ export function Transcript(): React.ReactElement {
   const liveStreamingAnswer = state.liveTail.streamingAnswer;
   const pendingBatchCount = state.liveTail.pendingReadOnlyBatch.length;
   const groupedItems = buildGroupedItems(state.transcript, state.subagentThreads);
+  // Phase 7a — WelcomeFrame as the first Static item. Stable key "welcome-frame"
+  // ensures Ink commits it once; subsequent re-renders of the Static tree preserve it.
+  const allItems: GroupedItem[] = state.boot
+    ? [{ kind: "welcome" }, ...groupedItems]
+    : groupedItems;
 
   return (
     <Box flexDirection="column">
       <Static
         key={state.transcriptGeneration}
-        items={groupedItems}
+        items={allItems}
         style={{ width: stdout.columns ?? 80 }}
       >
         {(item: GroupedItem) => {
+          if (item.kind === "welcome") {
+            return <WelcomeFrame key="welcome-frame" boot={state.boot!} />;
+          }
           if (item.kind === "group_header") {
             const truncated = item.title.length > 60 ? item.title.slice(0, 57) + "..." : item.title;
             return (

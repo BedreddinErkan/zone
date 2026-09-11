@@ -30,7 +30,8 @@ type VirtualReplayEvent =
   | { type: "narration"; runId?: string; text?: string; title?: string; ts?: number }
   | { type: "streaming_answer_delta"; runId?: string; text?: string; ts?: number }
   | { type: "transcript_remount"; runId?: string; ts?: number }
-  | { type: "approval_granted"; runId?: string; approvalId?: string; ts?: number };
+  | { type: "approval_granted"; runId?: string; approvalId?: string; ts?: number }
+  | { type: "boot"; runId?: string; ts?: number; boot: import("../store-core.js").BootData };
 
 type ReplayEvent = ZoneStructuredProgressEvent | VirtualReplayEvent;
 
@@ -58,6 +59,8 @@ function actionsForEvent(evt: ReplayEvent): StoreAction[] {
       return [{ type: "TRANSCRIPT_REMOUNT" }];
     case "approval_granted":
       return [{ type: "PENDING_APPROVAL_RESOLVED" }];
+    case "boot":
+      return [{ type: "BOOT_SET", boot: (evt as { boot: import("../store-core.js").BootData }).boot }];
     default:
       return eventToActions(evt as ZoneStructuredProgressEvent, eventCtx).actions;
   }

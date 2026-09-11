@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { exec, execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { promisify } from "node:util";
+import { readFileSync } from "node:fs";
+import { basename } from "node:path";
 import { render } from "ink";
 import qrcode from "qrcode-terminal";
 
@@ -52,6 +54,55 @@ function _getGitBranch(): string {
       encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
     }).trim();
   } catch { return ""; }
+}
+
+function _getGitUser(): string {
+  try {
+    return execFileSync("git", ["config", "user.name"], {
+      encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch { return ""; }
+}
+
+/** Phase 7a — extract the first two bullet lines under the first "## " heading of CHANGELOG.md. */
+function _readWhatsNew(): string[] {
+  try {
+    const changelogPath = _bannerRequire.resolve("../../../CHANGELOG.md");
+    const text = readFileSync(changelogPath, "utf8") as string;
+    const headingIdx = text.indexOf("\n## ");
+    if (headingIdx === -1) return [];
+    const section = text.slice(headingIdx);
+    const lines = section.split("\n");
+    const bullets: string[] = [];
+    for (const line of lines) {
+      if (line.startsWith("- ")) {
+        bullets.push(line);
+        if (bullets.length === 2) break;
+      } else if (line.startsWith("## ") && bullets.length > 0) {
+        break;
+      }
+    }
+    return bullets;
+  } catch { return []; }
+}
+
+/** Phase 7a — collect boot data once at startup. Every read is try/catch guarded. */
+function _collectBootData(cfg: CliConfig): import("./store-core.js").BootData {
+  const branch = _getGitBranch();
+  const user = _getGitUser() || "operator";
+  const repoPath = basename(process.cwd());
+  const keySource: "byok" | "gateway" = cfg.profile ? "gateway" : "byok";
+  return {
+    version: _zoneVersion,
+    user,
+    repoPath,
+    branch: branch || "-",
+    model: cfg.model || "default",
+    provider: cfg.provider || "anthropic",
+    dailyCapUsd: cfg.dailyUsdCap ?? 10,
+    keySource,
+    whatsNew: _readWhatsNew(),
+  };
 }
 
 /**
@@ -1436,6 +1487,7 @@ export async function runTui(
           webSearchEnabled: config.webSearchEnabled,
           dailyCapUsd: config.dailyUsdCap,
         }}
+        initialBoot={_collectBootData(config)}
         onModelApply={(model, provider, effort, summaryFormat, memoryEnabled, commitOnSuccess) => {
           // Phase 6a — instead of mutating the CliConfig in-place, resolve the provider
           // selection on a scratch copy, then dispatch CONFIG_PATCHED with the delta.

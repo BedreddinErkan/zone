@@ -96,6 +96,8 @@ const EXTRACTED_FILES = [
   "src/cli/tui/components/McpTrustPrompt.tsx",
   // Phase 6c
   "src/cli/tui/components/PlanCursor.tsx",
+  // Phase 7a
+  "src/cli/tui/components/WelcomeFrame.tsx",
 ];
 
 const FORBIDDEN_COLOUR_LITERALS = [...new Set(Object.values(role))];
