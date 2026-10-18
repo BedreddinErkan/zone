@@ -15,6 +15,28 @@ import type { UserCommand } from "./userCommands.js";
 import type { StagedFile } from "../../core/fileDiff.js";
 import type { UserHooksConfig } from "../../api/diskHooks.js";
 import { READ_ONLY_TOOLS } from "../../tools/toolDefinitions.js";
+import { resolveDailyUsdCap } from "../../llm/usdCapResolver.js";
+import type { ZoneStructuredProgressEvent } from "../../core/agentLifecycleEvents.js";
+import { PRINT_BATCH_SIZE, createPrintDelivery, enqueuePrint, enqueuePrintEntry, closePrintGroup, type PrintDelivery } from "./transcriptDelivery.js";
+
+export const STREAMING_ANSWER_TAIL_CAP = 2000;
+export function computeStreamingAnswerUpdate(
+  prev: { buffer: string; key: string | null },
+  event: { runId?: string; flowId?: number; iter?: number; delta?: string },
+  tailCap = STREAMING_ANSWER_TAIL_CAP,
+): { buffer: string; key: string } {
+  const key = `${event.runId ?? ""}:${event.iter ?? ""}${event.flowId === undefined ? "" : `:${event.flowId}`}`;
+  return { key, buffer: ((key === prev.key ? prev.buffer : "") + (event.delta ?? "")).slice(-tailCap) };
+}
+
+type ExecutionOwnership = {
+  runId: string;
+  open: boolean;
+  flowId: number;
+  flowClosed: boolean;
+  iter: number;
+  retiredIter: number;
+};
 
 // Local copy, not a mutation of the shared export: READ_ONLY_TOOLS also gates
 // EXPLORE_ALLOWED_TOOLS and AUDIT_ALLOWED_TOOLS (subagents.ts) — real subagent
@@ -219,6 +241,9 @@ export interface RunConfigShape {
   commitOnSuccess?: boolean;
   webSearchEnabled?: boolean;
   dailyCapUsd: number;
+  planDepth?: DiskModelSettings["planDepth"];
+  /** Startup constraints used to resolve /limits; never forwarded as execution options. */
+  dailyCapConstraints?: { policyValue?: number; envValue?: string };
 }
 
 /** Phase 7a — boot-time identity/context snapshot. Collected once at runTui startup,
@@ -233,11 +258,14 @@ export interface BootData {
 }
 
 export type StoreState = {
+  /** UI admission only; execution and flow completion are separate boundaries. */
+  execution?: ExecutionOwnership;
   /** Phase 6a — immutable config snapshot. Mutated only via CONFIG_PATCHED. */
   config: RunConfigShape;
   /** Phase 7a — boot-time identity/context. Set once at startup via BOOT_SET. */
   boot: BootData | null;
   transcript: TranscriptEntry[];
+  printDelivery: PrintDelivery;
   sessionId: string;
   sessionStartedAt: string;
   isResumed: boolean;
@@ -405,6 +433,7 @@ export function buildInitialState(initialValues?: {
   dailyUsedUsd?: number;
   trustedPrefixes?: string[];
   resumedTranscript?: TranscriptEntry[];
+  resumedSubagentThreads?: Record<string, SubagentThread>;
   resumedSessionId?: string;
   resumedStartedAt?: string;
   modelSettings?: DiskModelSettings | null;
@@ -437,6 +466,8 @@ export function buildInitialState(initialValues?: {
     config,
     boot: initialValues?.initialBoot ?? null,
     transcript: initialValues?.resumedTranscript ?? [],
+    printDelivery: createPrintDelivery(0, initialValues?.resumedTranscript ?? [],
+      initialValues?.resumedSubagentThreads ?? {}, initialValues?.initialBoot ?? null),
     sessionId: initialValues?.resumedSessionId ?? randomUUID(),
     sessionStartedAt: initialValues?.resumedStartedAt ?? new Date().toISOString(),
     isResumed: !!initialValues?.resumedTranscript,
@@ -447,7 +478,7 @@ export function buildInitialState(initialValues?: {
       streamingAnswer: initialValues?.seedStreamingAnswer ?? "",
     },
     spinner: null,
-    subagentThreads: {},
+    subagentThreads: initialValues?.resumedSubagentThreads ?? {},
     currentSubagentId: null,
     parentSpinnerLabels: [],
     statusBar: {
@@ -527,6 +558,10 @@ export function buildInitialState(initialValues?: {
 }
 
 export type StoreAction =
+  | { type: "EXECUTION_REGISTERED"; runId: string }
+  | { type: "EXECUTION_SETTLED"; runId: string; outcome?: "done" | "aborted" | "failed" }
+  | { type: "PROGRESS_RECEIVED"; event: ZoneStructuredProgressEvent; actions: StoreAction[] }
+  | { type: "STREAMING_ANSWER_DELTA"; delta: string; iter?: number }
   // Phase 6a — config-as-state. CONFIG_PATCHED merges a partial config update immutably.
   // CONFIG_PERSISTED is dispatched after the disk write succeeds (informational only).
   | { type: "CONFIG_PATCHED"; patch: Partial<RunConfigShape> }
@@ -554,6 +589,9 @@ export type StoreAction =
   | { type: "ASSISTANT_FINAL"; text: string }
   | { type: "TRANSCRIPT_CLEAR" }
   | { type: "TRANSCRIPT_REMOUNT" }
+  | { type: "PRINT_BATCH_START"; epoch: number }
+  | { type: "PRINT_BATCH_SUBMITTED"; epoch: number; through: number }
+  | { type: "PRINT_BATCH_ACK"; epoch: number; through: number }
   | { type: "PENDING_APPROVAL_SET"; approvalId: string; runId: string; command: string; kind?: "command" | "edit" | "trust" | "mcp"; subagentId?: string }
   | { type: "PENDING_APPROVAL_RESOLVED" }
   // Phase 5a — subagent lifecycle. STARTED creates a thread + sets currentSubagentId for
@@ -764,6 +802,7 @@ const COMPACT_TAIL_SIZE = 100;
  *  If (somehow) the transcript still exceeds TRANSCRIPT_CAP, the oldest entries
  *  beyond the cap are silently dropped. */
 function appendEntry(state: StoreState, entry: TranscriptEntry): StoreState {
+  const printDelivery = enqueuePrintEntry(state.printDelivery, entry, state.subagentThreads);
   let transcript = [...state.transcript, entry];
 
   if (transcript.length > COMPACT_THRESHOLD) {
@@ -797,7 +836,7 @@ function appendEntry(state: StoreState, entry: TranscriptEntry): StoreState {
     transcript = transcript.slice(transcript.length - TRANSCRIPT_CAP);
   }
 
-  return { ...state, transcript };
+  return { ...state, transcript, printDelivery };
 }
 
 /** Phase 6c — appends a plan_snapshot transcript entry if the todos differ from the
@@ -822,20 +861,89 @@ function maybeAppendPlanSnapshot(state: StoreState, todos: RunTodo[]): StoreStat
  *  Runs consume this snapshot at startup; mid-run CONFIG_PATCHED changes apply to the
  *  NEXT run, never the current one. The returned object is a fresh copy each time. */
 export function buildRunConfig(state: StoreState): RunConfigShape {
-  return { ...state.config };
+  return structuredClone(state.config);
 }
 
 export function reducer(state: StoreState, action: StoreAction): StoreState {
   switch (action.type) {
+    case "EXECUTION_REGISTERED": {
+      const flushed = flushReadOnlyBatch(state);
+      return { ...flushed,
+        execution: { runId: action.runId, open: true, flowId: 0, flowClosed: false, iter: -1, retiredIter: -1 },
+        currentSubagentId: null, parentSpinnerLabels: [],
+        liveTail: { ...flushed.liveTail, streamingAnswer: "", narrationBuffer: "", currentToolCall: null },
+      };
+    }
+    case "EXECUTION_SETTLED": {
+      if (state.execution?.runId !== action.runId || !state.execution.open) return state;
+      const terminal = action.outcome === "aborted" ? "RUN_ABORTED" : action.outcome === "failed" ? "RUN_FAILED" : "RUN_DONE";
+      const next = reducer(reducer(state, { type: "NARRATION_COMMIT" }), { type: terminal });
+      return { ...next, execution: { ...next.execution!, open: false, flowClosed: true } };
+    }
+    case "PROGRESS_RECEIVED": {
+      const evt = action.event;
+      // Child assistant text is deliberately not forwarded by agentLoop. Keep
+      // that boundary even if a transport supplies a child-scoped text event.
+      if (evt.type === "chat_chunk" && evt.subagentId) return state;
+      // Legacy standalone App consumers can establish their first run from progress.
+      // Production registers before asynchronous startup; a closed run is never adopted again.
+      let next = state.execution ? state : reducer(state, { type: "EXECUTION_REGISTERED", runId: evt.runId });
+      let owner = next.execution!;
+      if (owner.runId !== evt.runId) return state;
+      const usage = evt.type === "run_summary" || evt.type === "iter_cost_update";
+      if (!owner.open && !usage) return state;
+      const flowId = evt.flowId ?? 0;
+      // Unscoped wrapper failures belong to the execution; failures explicitly
+      // attributed to an older flow must not terminate the current flow.
+      const executionFailure = evt.type === "run_failed" && evt.flowId === undefined;
+      if (!executionFailure && flowId < owner.flowId && !(usage && evt.flowId === undefined)) return state;
+      if (flowId > owner.flowId) {
+        if (!owner.open) return state;
+        next = flushReadOnlyBatch(next);
+        owner = { ...owner, flowId, flowClosed: false, iter: -1, retiredIter: -1 };
+        next = { ...next, execution: owner, liveTail: { ...next.liveTail, streamingAnswer: "", narrationBuffer: "", currentToolCall: null } };
+      }
+      const answerEvent = ["chat_chunk", "narration", "chat_response", "thinking", "tool_call", "tool_result",
+        "terminal_output", "terminal_done", "subagent_started", "subagent_completed", "agent_loop_start", "agent_loop_complete"].includes(evt.type);
+      if (owner.flowClosed && answerEvent) return state;
+      if (evt.type === "chat_chunk") {
+        const iter = evt.iter ?? 0;
+        if (iter < owner.iter || iter <= owner.retiredIter) return state;
+      }
+      if (evt.type === "tool_call" || evt.type === "narration" || evt.type === "chat_response") {
+        next = { ...next, execution: { ...owner, retiredIter: owner.iter }, liveTail: { ...next.liveTail, streamingAnswer: "" } };
+      }
+      for (const child of action.actions) {
+        // Usage can arrive after an answer or execution has ended. It updates
+        // counters, never reopens or terminates another flow.
+        if (usage && child.type !== "STATUS_UPDATE") continue;
+        next = reducer(next, child);
+      }
+      return next;
+    }
+    case "STREAMING_ANSWER_DELTA": {
+      if (!action.delta || !state.execution?.open || state.execution.flowClosed) return state;
+      const owner = state.execution;
+      const iter = action.iter ?? 0;
+      if (iter < owner.iter || iter <= owner.retiredIter) return state;
+      const { buffer } = computeStreamingAnswerUpdate(
+        { buffer: state.liveTail.streamingAnswer, key: `${owner.runId}:${owner.iter}:${owner.flowId}` },
+        { runId: owner.runId, flowId: owner.flowId, iter, delta: action.delta },
+      );
+      if (buffer === state.liveTail.streamingAnswer && iter === owner.iter) return state;
+      return { ...state, execution: { ...owner, iter }, liveTail: { ...state.liveTail, streamingAnswer: buffer } };
+    }
     // Phase 6a — config-as-state. Immutable merge; the old config object is never mutated.
     case "CONFIG_PATCHED":
-      return { ...state, config: { ...state.config, ...action.patch } };
+      return { ...state, config: { ...state.config, ...action.patch },
+        activeProfile: "profile" in action.patch ? action.patch.profile ?? null : state.activeProfile };
     case "CONFIG_PERSISTED":
       // Informational only — the disk write succeeded. No state change needed.
       return state;
     // Phase 7a — boot-time identity/context. Set once; WelcomeFrame reads it and Static-commits.
     case "BOOT_SET":
-      return { ...state, boot: action.boot };
+      return { ...state, boot: action.boot, printDelivery: state.boot ? state.printDelivery
+        : enqueuePrint(state.printDelivery, { kind: "welcome", boot: action.boot }) };
 
     case "SPINNER_START":
       return {
@@ -951,11 +1059,9 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
     case "TOAST_POP":
       return { ...state, toastQueue: state.toastQueue.slice(1) };
 
-    // Wholesale set, not append — accumulation/turn-boundary reset/tail-cap all happen in the
-    // ref-backed buffer in useAgentEvents.ts before this ever dispatches. Never touches
-    // `transcript`: this is the one guarantee that keeps ASSISTANT_FINAL the sole writer to
-    // `<Static>` for the same content.
+    // Wholesale set retained for local fixtures; live progress uses scoped deltas.
     case "STREAMING_ANSWER_SET":
+      if (state.liveTail.streamingAnswer === action.text) return state;
       return {
         ...state,
         liveTail: { ...state.liveTail, streamingAnswer: action.text },
@@ -977,6 +1083,7 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         ...withSnapshot,
         spinner: null,
         runState: "done",
+        execution: withSnapshot.execution ? { ...withSnapshot.execution, flowClosed: true } : undefined,
         // Bank a park still in flight. A run that ENDS while parked — which is
         // exactly what suspending on a question does — would otherwise report
         // the whole wait as work.
@@ -999,6 +1106,7 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         ...flushed,
         spinner: null,
         runState: "aborted",
+        execution: flushed.execution ? { ...flushed.execution, open: false, flowClosed: true } : undefined,
         parkedMs: flushed.parkedMs + (flushed.parkStartedMs != null ? Date.now() - flushed.parkStartedMs : 0),
         parkStartedMs: undefined,
         runEndMs: Date.now(),
@@ -1014,6 +1122,7 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
         ...flushed,
         spinner: null,
         runState: "failed",
+        execution: flushed.execution ? { ...flushed.execution, open: false, flowClosed: true } : undefined,
         parkedMs: flushed.parkedMs + (flushed.parkStartedMs != null ? Date.now() - flushed.parkStartedMs : 0),
         parkStartedMs: undefined,
         runEndMs: Date.now(),
@@ -1047,7 +1156,26 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
       return { ...state, transcript: [], todos: [] };
 
     case "TRANSCRIPT_REMOUNT":
-      return { ...state, transcriptGeneration: state.transcriptGeneration + 1 };
+      return { ...state, transcriptGeneration: state.transcriptGeneration + 1,
+        printDelivery: createPrintDelivery(state.printDelivery.epoch + 1, state.transcript, state.subagentThreads, state.boot) };
+
+    case "PRINT_BATCH_START": {
+      const p = state.printDelivery;
+      if (action.epoch !== p.epoch || p.active || p.pending.length === 0) return state;
+      return { ...state, printDelivery: { ...p, active: { from: p.pending[0].seq,
+        through: p.pending[Math.min(PRINT_BATCH_SIZE, p.pending.length) - 1].seq, submitted: false } } };
+    }
+    case "PRINT_BATCH_SUBMITTED": {
+      const p = state.printDelivery;
+      if (action.epoch !== p.epoch || !p.active || p.active.through !== action.through || p.active.submitted) return state;
+      return { ...state, printDelivery: { ...p, active: { ...p.active, submitted: true } } };
+    }
+    case "PRINT_BATCH_ACK": {
+      const p = state.printDelivery;
+      if (action.epoch !== p.epoch || !p.active?.submitted || p.active.through !== action.through) return state;
+      return { ...state, printDelivery: { ...p, acknowledged: action.through, active: null,
+        pending: p.pending.filter(record => record.seq > action.through) } };
+    }
 
     case "PENDING_APPROVAL_SET": {
       const next: StoreState = { ...state, pendingApproval: { approvalId: action.approvalId, runId: action.runId, command: action.command, kind: action.kind, ...(action.subagentId ? { subagentId: action.subagentId } : {}) } };
@@ -1287,6 +1415,8 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
       return {
         ...state,
         transcript: action.session.transcript,
+        printDelivery: createPrintDelivery(state.printDelivery.epoch + 1, action.session.transcript,
+          action.session.subagentThreads ?? {}, state.boot),
         sessionId: action.session.sessionId,
         sessionStartedAt: action.session.startedAt,
         isResumed: true,
@@ -1420,7 +1550,8 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
       if (last?.kind === "narration") {
         // Merge into existing narration entry — replace last, then re-check cap
         const merged: TranscriptEntry = { kind: "narration" as const, text: last.text + narrationBuffer };
-        const replaced = { ...cleared, transcript: [...cleared.transcript.slice(0, -1), merged] };
+        const replaced = { ...cleared, transcript: [...cleared.transcript.slice(0, -1), merged],
+          printDelivery: enqueuePrintEntry(cleared.printDelivery, { kind: "narration", text: narrationBuffer }, cleared.subagentThreads) };
         // Merging doesn't increase length, so cap is unchanged — just return
         return replaced;
       }
@@ -1444,7 +1575,7 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
       const effortToKeep = supportsEffort(action.settings.model)
         ? action.settings.effort
         : undefined;
-      const settings = { ...action.settings, effort: effortToKeep };
+      const settings = { ...state.modelSettings, ...action.settings, effort: effortToKeep };
       const newEffortCount = effortLevelsFor(settings.model).length;
       const clampedEffortIndex = newEffortCount > 0
         ? Math.min(state.effortSelectedIndex, newEffortCount - 1)
@@ -1512,8 +1643,13 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
     case "LIMITS_MODAL_CLOSE":
       return { ...state, modalView: "none" };
 
-    case "LIMITS_APPLY":
-      return { ...state, statusBar: { ...state.statusBar, capUsd: action.capUsd }, modalView: "none" };
+    case "LIMITS_APPLY": {
+      const { capUsd } = resolveDailyUsdCap({
+        userId: "local-dev", ...state.config.dailyCapConstraints,
+        userOverride: action.capUsd, enforceEnvCeiling: true,
+      });
+      return { ...state, config: { ...state.config, dailyCapUsd: capUsd }, statusBar: { ...state.statusBar, capUsd }, modalView: "none" };
+    }
 
     case "DAILY_USED_UPDATE":
       return { ...state, statusBar: { ...state.statusBar, dailyUsedUsd: action.dailyUsedUsd } };
@@ -1687,6 +1823,7 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
     // dispatch ever lands (deferred-work), the durable fix is producer-side tagging via
     // AsyncLocalStorage in emitStructuredProgress.
     case "SUBAGENT_STARTED": {
+      state = flushReadOnlyBatch(state);
       const thread: SubagentThread = {
         subagentId: action.subagentId,
         subagentType: action.subagentType,
@@ -1707,6 +1844,7 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
     case "SUBAGENT_COMPLETED": {
       const existing = state.subagentThreads[action.subagentId];
       if (!existing) return state;
+      state = flushReadOnlyBatch(state);
       const updated: SubagentThread = {
         ...existing,
         status: action.status,
@@ -1718,6 +1856,8 @@ export function reducer(state: StoreState, action: StoreAction): StoreState {
       const parentLabel = labels.length > 0 ? labels[labels.length - 1] : null;
       return {
         ...state,
+        printDelivery: state.printDelivery.openChild?.subagentId === action.subagentId
+          ? closePrintGroup(state.printDelivery, { ...state.subagentThreads, [action.subagentId]: updated }) : state.printDelivery,
         subagentThreads: { ...state.subagentThreads, [action.subagentId]: updated },
         currentSubagentId: null,
         parentSpinnerLabels: labels.slice(0, -1),

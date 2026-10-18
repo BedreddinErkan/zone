@@ -2936,12 +2936,15 @@ async function runAgentLoopScoped(input: AgentLoopInput, stats: LoopRunStats): P
     }));
     const policy = policyResult.ok ? policyResult.policy : null;
 
-    const capResolution = resolveDailyUsdCap({
-      userId,
-      policyValue: policy?.dailyUsdCap,
-      userOverride: readDailyUsdCapOverride(),
-      envValue: process.env.ZONE_DAILY_USD_CAP,
-    });
+    const capturedDailyCap = getRequestContext()?.dailyUsdCap;
+    const capResolution = capturedDailyCap !== undefined
+      ? { capUsd: capturedDailyCap, source: "run_snapshot" }
+      : resolveDailyUsdCap({
+        userId,
+        policyValue: policy?.dailyUsdCap,
+        userOverride: readDailyUsdCapOverride(),
+        envValue: process.env.ZONE_DAILY_USD_CAP,
+      });
     const todayUsage = await getUsage(userId, "day");
     log("[zone-daily-usd-status]", JSON.stringify({
       runId: input.runId ?? null,

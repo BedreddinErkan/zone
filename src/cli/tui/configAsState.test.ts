@@ -54,6 +54,18 @@ describe("Phase 6a — next-run semantics", () => {
     expect(snapshotBefore.model).toBe("test-model");
     expect(snapshotAfter.model).toBe("patched-model");
   });
+
+  it("copies nested provider profiles so snapshots share no mutable profile data", () => {
+    const state = baseState({ profile: {
+      id: "fixture-proxy", protocol: "openai-chat", adapterProvider: "openai",
+      keyRef: { envVar: "FIXTURE_PROXY_KEY", keyExample: "fixture" },
+      pricing: { rates: { custom: { input: 1, output: 2, cache_read: 0, cache_write: 0 } } },
+    } });
+    const snapshot = buildRunConfig(state);
+    expect(snapshot.profile).not.toBe(state.config.profile);
+    expect(snapshot.profile?.keyRef).not.toBe(state.config.profile?.keyRef);
+    expect(snapshot.profile?.pricing?.rates).not.toBe(state.config.profile?.pricing?.rates);
+  });
 });
 
 describe("Phase 6a — CONFIG_PERSISTED", () => {

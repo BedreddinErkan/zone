@@ -53,6 +53,8 @@ export interface CliConfig {
   memoryEnabled?: boolean;
   commitOnSuccess?: boolean;
   webSearchEnabled?: boolean;
+  /** Captured by the TUI; absent callers retain the dispatcher's disk fallback. */
+  planDepth?: "quick" | "investigate" | "strict";
   /** --trust (true) / --no-trust (false) / neither (undefined) */
   trust?: boolean;
   /** --max-turns: user ceiling on MAIN-loop iterations (parent loop only). */

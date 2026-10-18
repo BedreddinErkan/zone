@@ -1,5 +1,5 @@
 import React from "react";
-import { Box, Text } from "ink";
+import { Text } from "ink";
 import { role } from "../../theme.js";
 
 export type KeyHint = {
@@ -21,10 +21,23 @@ export type KeyHint = {
  * footprint, not a blank line — Phase 2c/2d modals compose KeyHints into the footer slot and
  * some have no actions to advertise.
  */
-export function KeyHints({ items }: { items: KeyHint[] }): React.ReactElement | null {
+export function KeyHints({ items, maxWidth, compactItems }: {
+  items: KeyHint[];
+  maxWidth?: number;
+  compactItems?: KeyHint[];
+}): React.ReactElement | null {
   if (items.length === 0) return null;
+  // These shortcut labels are single-cell text. Choose complete hints before
+  // rendering; sibling flex Text nodes otherwise squeeze each other's words.
+  const length = (hints: KeyHint[]) => hints.reduce((n, h) => n + h.key.length + (h.label ? h.label.length + 1 : 0), 0)
+    + Math.max(0, hints.length - 1) * 3;
+  let visible = items;
+  if (maxWidth !== undefined && length(visible) > maxWidth) {
+    visible = compactItems ?? items.map(h => ({ ...h, label: h.primary ? h.label : "" }));
+    if (length(visible) > maxWidth) visible = visible.map(h => ({ ...h, label: "" }));
+  }
   const rendered: React.ReactNode[] = [];
-  items.forEach((hint, i) => {
+  visible.forEach((hint, i) => {
     if (i > 0) {
       rendered.push(
         <Text key={`sep-${i}`} color={role.muted}>
@@ -38,9 +51,9 @@ export function KeyHints({ items }: { items: KeyHint[] }): React.ReactElement | 
         <Text bold color={color}>
           {hint.key}
         </Text>
-        <Text color={color}>{" "}{hint.label}</Text>
+        {hint.label && <Text color={color}>{" "}{hint.label}</Text>}
       </Text>
     );
   });
-  return <Box>{rendered}</Box>;
+  return <Text>{rendered}</Text>;
 }

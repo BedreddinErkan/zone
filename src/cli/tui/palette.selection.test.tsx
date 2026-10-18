@@ -37,7 +37,7 @@ describe("slash palette — selection is marked structurally, not by colour alon
     await wait(60);
 
     const frame = lastFrame() ?? "";
-    const cursorRows = frame.split("\n").filter((l) => l.includes(glyph.selectionCursor.trim()));
+    const cursorRows = frame.split("\n").filter((l) => l.includes(glyph.selectionCursor.trim()) && l.includes("│"));
     expect(cursorRows).toHaveLength(1);
     // Default selection is index 0, which is /help.
     expect(cursorRows[0]).toContain("/help");
@@ -52,7 +52,7 @@ describe("slash palette — selection is marked structurally, not by colour alon
     await wait(60);
 
     const frame = lastFrame() ?? "";
-    const cursorRows = frame.split("\n").filter((l) => l.includes(glyph.selectionCursor.trim()));
+    const cursorRows = frame.split("\n").filter((l) => l.includes(glyph.selectionCursor.trim()) && l.includes("│"));
     expect(cursorRows).toHaveLength(1);
     expect(cursorRows[0]).not.toContain("/help");
     unmount();

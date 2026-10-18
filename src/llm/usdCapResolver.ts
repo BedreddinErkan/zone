@@ -17,7 +17,17 @@ export function resolveDailyUsdCap(input: {
   policyValue?: number;
   userOverride?: number;
   envValue?: string;
+  /** TUI selections may lower, but never raise, a positive environment ceiling. */
+  enforceEnvCeiling?: boolean;
 }): DailyUsdCapResolution {
+  if (input.enforceEnvCeiling) {
+    const resolved = resolveDailyUsdCap({ ...input, enforceEnvCeiling: false });
+    const ceiling = parseFloat(input.envValue ?? "");
+    if (Number.isFinite(ceiling) && ceiling > 0 && (resolved.capUsd === 0 || resolved.capUsd > ceiling)) {
+      return { capUsd: ceiling, source: "env" };
+    }
+    return resolved;
+  }
   if (typeof input.policyValue === "number" && input.policyValue >= 0) {
     return { capUsd: input.policyValue, source: "policy" };
   }

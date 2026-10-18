@@ -32,7 +32,7 @@ function wait(ms: number): Promise<void> {
  *  above the status bar, and is the only row carrying the input marker. */
 function composerRows(frame: string): string[] {
   const lines = frame.split("\n");
-  const start = lines.findIndex((l) => l.includes("> "));
+  const start = lines.findIndex((l) => l.includes("▸ "));
   if (start === -1) return [];
   const end = lines.findIndex((l, i) => i > start && /\$0\.\d|·\s*\d+k tok|elapsed/.test(l));
   return lines.slice(start, end === -1 ? lines.length : end).filter((l) => l.trim() !== "");
@@ -67,7 +67,7 @@ describe("composer layout — what ships, not a reconstruction of it", () => {
     const withHint = rows.filter((l) => l.includes(COMPOSER_PLACEHOLDER));
     expect(withHint).toHaveLength(1);
     // The marker is on that same row, not pushed onto its own.
-    expect(withHint[0]).toContain(">");
+    expect(withHint[0]).toContain("▸");
     unmount();
   });
 
@@ -107,20 +107,18 @@ describe("composer layout — what ships, not a reconstruction of it", () => {
   });
 });
 
-describe("composer chrome — Phase 7c input-box language", () => {
-  it("top and bottom separator rules render around the input surface", async () => {
+describe("composer chrome — Phase 7.5b input-box language", () => {
+  it("uses a borderless input surface without horizontal Composer rules", async () => {
     const { lastFrame, unmount } = render(<App />);
     await wait(60);
-    const frame = lastFrame() ?? "";
-    // The rules use glyph.separator (─) — they should appear above and below the "> " line
-    const lines = frame.split("\n");
-    const inputIdx = lines.findIndex((l) => l.includes("> "));
+    const lines = (lastFrame() ?? "").split("\n");
+    const inputIdx = lines.findIndex(l => l.includes("▸ ▋"));
     expect(inputIdx).toBeGreaterThan(0);
-    // Top rule is the line above the input surface
-    expect(lines[inputIdx - 1]).toContain("─");
-    // Bottom rule is the line below the input surface
-    const bottomRuleIdx = lines.findIndex((l, i) => i > inputIdx && l.includes("─") && !l.includes(">"));
-    expect(bottomRuleIdx).toBeGreaterThan(inputIdx);
+    expect(lines[inputIdx - 1]).not.toContain("─");
+    expect(lines[inputIdx + 1]).toContain("shift+tab");
+    expect(lines[inputIdx + 1]).not.toContain("─");
+    // StatusBar owns its rules below the Composer hints.
+    expect(lines[inputIdx + 2]).toContain("─");
     unmount();
   });
 
@@ -133,7 +131,7 @@ describe("composer chrome — Phase 7c input-box language", () => {
     expect(frame).toContain("@file");
     expect(frame).toContain("esc");
     // The hints must be on a single line
-    const hintLines = frame.split("\n").filter((l) => l.includes("shift+tab"));
+    const hintLines = composerRows(frame).filter((l) => l.includes("shift+tab"));
     expect(hintLines).toHaveLength(1);
     unmount();
   });
@@ -142,7 +140,7 @@ describe("composer chrome — Phase 7c input-box language", () => {
     const { lastFrame, unmount } = render(<App />);
     await wait(60);
     const frame = lastFrame() ?? "";
-    const hintLines = frame.split("\n").filter((l) => l.includes("shift+tab") && l.includes("mode"));
+    const hintLines = composerRows(frame).filter((l) => l.includes("shift+tab") && l.includes("mode"));
     expect(hintLines.length).toBe(1);
     unmount();
   });

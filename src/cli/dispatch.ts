@@ -106,9 +106,8 @@ export async function runOneShotInner(
 ): Promise<LlmPatchFlowResult> {
   const ac = opts.externalAc ?? new AbortController();
 
-  const effectiveConfig = opts.mode === "autoAccept"
-    ? { ...config, autoApprove: true }
-    : config;
+  // Key fallback fills this object in-place; never modify the caller's snapshot.
+  const effectiveConfig = { ...config, ...(opts.mode === "autoAccept" ? { autoApprove: true } : {}) };
 
   // Re-merge disk keys so a key set via /keys in the same session takes effect immediately.
   // applyDiskKeyFallbacks fills empty fields only — env/config.json keys always win.
@@ -147,6 +146,7 @@ export async function runOneShotInner(
   // approvals-path calls are transitively inside the sink's own onProgress closure), so skipping
   // construction needs no no-op stand-in for the rest of the interface.
   let spinner: Spinner | undefined;
+  let nextFlowId = 0;
   let progressCallback: OneShotOpts["onProgress"] & ((update: LlmPatchProgressUpdate) => void);
   if (opts.onProgress) {
     progressCallback = opts.onProgress;
@@ -164,6 +164,11 @@ export async function runOneShotInner(
       spinner
     ).onProgress;
   }
+
+  const flowProgress = (flowId: number) => (update: LlmPatchProgressUpdate): void => {
+    progressCallback(typeof update === "string" || !update.progress
+      ? update : { ...update, progress: { ...update.progress, flowId } });
+  };
 
   // --- Phase 2 trust gate ---
   {
@@ -289,8 +294,7 @@ export async function runOneShotInner(
       runId,
     };
 
-    const diskSettings = loadDiskModelSync(effectiveConfig.repoPath);
-    const planDepth = diskSettings?.planDepth ?? "quick";
+    const planDepth = effectiveConfig.planDepth ?? loadDiskModelSync(effectiveConfig.repoPath)?.planDepth ?? "quick";
 
     if (planDepth === "investigate" || planDepth === "strict") {
       // Strict / legacy-investigate: staged-diff checkpoint (opt-in).
@@ -731,7 +735,7 @@ export async function runOneShotInner(
             runId,
             conversationId: opts.conversationId,
             sessionId: opts.sessionId,
-            onProgress: progressCallback,
+            onProgress: flowProgress(++nextFlowId),
             abortSignal: ac.signal,
             userApiKey,
             provider: effectiveConfig.provider,
@@ -794,7 +798,7 @@ export async function runOneShotInner(
         runId,
         conversationId: opts.conversationId,
         sessionId: opts.sessionId,
-        onProgress: progressCallback,
+        onProgress: flowProgress(++nextFlowId),
         abortSignal: ac.signal,
         userApiKey,
         provider: effectiveConfig.provider,

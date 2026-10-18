@@ -57,37 +57,34 @@ describe("TUI.2 transcript rendering", () => {
     const bus = createEventBus();
     const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
 
-    // Phase 4a — tests bypass the scheduler, so emit the post-scheduler streaming_batch shape
-    bus.emit("chat_chunk", makeEvt("chat_chunk", { text: "Hello world", iter: 1 }));
+    // The scheduler preserves the producer delta contract.
+    bus.emit("chat_chunk", makeEvt("chat_chunk", { delta: "Hello world", iter: 1 }));
     await wait(250);
 
     // Visible while streaming — the live region below <Static>.
     expect(lastFrame()).toContain("Hello world");
 
-    // A run-terminal event clears liveTail. run_summary carries no `detail`, so it produces no
+    // A flow-terminal event clears liveTail. No `detail` means it produces no
     // ASSISTANT_FINAL — nothing re-adds the text. If chat_chunk were still routed through
     // handleTextEvent/NARRATION_COMMIT it would have been committed to <Static> by now and would
     // survive this clear; that it does NOT survive is the assertion that tells the two apart.
-    bus.emit("run_summary", makeEvt("run_summary"));
+    bus.emit("agent_loop_complete", makeEvt("agent_loop_complete"));
     await wait(250);
 
     expect(lastFrame()).not.toContain("Hello world");
     unmount();
   });
 
-  it("10 rapid chat_chunk events coalesce into one concatenated preview (debounce)", async () => {
+  it("10 rapid chat_chunk deltas concatenate into one live preview", async () => {
     const bus = createEventBus();
     const { lastFrame, unmount } = render(<App bus={bus} initialPrompt="test task" />);
 
-    // Phase 4a — emit the post-scheduler streaming_batch shape (all fragments pre-concatenated
-    // since the scheduler coalesces them; the test verifies the consumer renders the result)
-    const allChunks = Array.from({ length: 10 }, (_, i) => `chunk${i} `).join("");
-    bus.emit("chat_chunk", makeEvt("chat_chunk", { text: allChunks, iter: 1 }));
+    for (let i = 0; i < 10; i++) {
+      bus.emit("chat_chunk", makeEvt("chat_chunk", { delta: `chunk${i} `, iter: 1 }));
+    }
     await wait(250);
 
-    // Previously this test emitted, waited, and unmounted with no assertion at all — its comment
-    // claimed a verification it never performed. All ten fragments share one (runId, iter), so
-    // they accumulate rather than reset, and the 200ms debounce commits them as one string.
+    // All fragments share an iteration; only the transient preview accumulates.
     const frame = lastFrame() ?? "";
     for (let i = 0; i < 10; i++) expect(frame).toContain(`chunk${i}`);
     unmount();

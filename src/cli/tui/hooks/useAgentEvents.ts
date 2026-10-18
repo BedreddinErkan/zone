@@ -1,4 +1,4 @@
-import { useEffect, useRef, type Dispatch, type RefObject } from "react";
+import { useEffect, type Dispatch, type RefObject } from "react";
 import type { EventBus } from "../../eventBus.js";
 import type { StoreAction, TuiMode } from "../store.js";
 import type { ZoneStructuredProgressEvent } from "../../../core/agentLifecycleEvents.js";
@@ -117,47 +117,8 @@ export function handleStagedDiffsReadyExported(
 // and the scheduler's ordering guarantee is the single source of truth.
 // ---------------------------------------------------------------------------
 
-function flushBuffer(): void {
-  // No-op: the uiScheduler flushes coalesce buffers before every batch/priority
-  // emission, guaranteeing narration_batch arrives before the tool_call that follows.
-}
-
-// ---------------------------------------------------------------------------
-// computeStreamingAnswerUpdate — pure; extracted so the reset/accumulate/cap
-// logic is unit-testable without a hook-rendering harness, the same reason
-// formatCompactionNarration above is separated from its own stateful handler.
-// ---------------------------------------------------------------------------
-
-/**
- * Reset key is `${runId}:${iter}`, not `iter` alone and not a run/turn boundary event: the
- * main call and its own auto-continuation deliberately share one `iter` within a run
- * (agentLoop.ts's onTextDelta closure comment explains why — a continuation extends the same
- * answer), so they correctly append; a genuinely new LLM turn within the same run carries a
- * new `iter` and correctly resets. `runId` in the key closes a gap `iter` alone cannot: two
- * runs can coincidentally end/start on the same iter number (e.g. both are one-iteration
- * runs), and `iter` alone would misread that as a continuation. `runId` is never reused
- * across runs, so folding it in resets correctly at every run boundary — including
- * RUN_ABORTED (Esc) and a fresh USER_PROMPT submission, neither of which is a bus event this
- * hook can listen for directly.
- */
-export const STREAMING_ANSWER_TAIL_CAP = 2000;
-
-export function computeStreamingAnswerUpdate(
-  prev: { buffer: string; key: string | null },
-  event: { runId?: string; iter?: number; delta?: string },
-  tailCap: number = STREAMING_ANSWER_TAIL_CAP
-): { buffer: string; key: string } {
-  const fragment = event.delta ?? "";
-  const key = `${event.runId ?? ""}:${event.iter ?? ""}`;
-  const isNewTurn = key !== prev.key;
-  let buffer = (isNewTurn ? "" : prev.buffer) + fragment;
-  if (buffer.length > tailCap) buffer = buffer.slice(-tailCap);
-  return { buffer, key };
-}
-
-// ---------------------------------------------------------------------------
-// useAgentEvents hook
-// ---------------------------------------------------------------------------
+// Compatibility exports; accumulation now belongs to the pure reducer.
+export { computeStreamingAnswerUpdate, STREAMING_ANSWER_TAIL_CAP } from "../store-core.js";
 
 export function useAgentEvents(
   bus: EventBus | undefined,
@@ -165,43 +126,26 @@ export function useAgentEvents(
   trustedPrefixesRef: RefObject<string[]> = { current: [] },
   modeRef: RefObject<TuiMode> = { current: "normal" }
 ): void {
-  // Phase 4a — streaming answer state still lives here (the scheduler only
-  // coalesces deltas into streaming_batch; the reset/accumulate/cap logic for
-  // the store field stays in the consumer).
-  const streamingAnswerBuffer = useRef("");
-  const streamingAnswerLastKey = useRef<string | null>(null);
-
   useEffect(() => {
     if (!bus) return;
 
-    // Phase 4a — narration_batch arrives from the scheduler with aggregated text.
-    // Same dispatch the old debounced flush produced.
-    function handleNarrationBatch(evt: ZoneStructuredProgressEvent): void {
-      const text = (evt as any).text as string | undefined;
-      if (!text) return;
-      dispatch({ type: "TRANSCRIPT_APPEND_NARRATION", text });
+    function applyProgress(evt: ZoneStructuredProgressEvent, actions: StoreAction[]): void {
+      dispatch({ type: "PROGRESS_RECEIVED", event: evt, actions });
     }
 
-    // Phase 4a — streaming_batch arrives from the scheduler with aggregated delta text.
-    // Uses the same computeStreamingAnswerUpdate for reset/accumulate/cap semantics.
+    function handleNarrationBatch(evt: ZoneStructuredProgressEvent): void {
+      const text = evt.text ?? evt.delta ?? evt.title;
+      if (text) applyProgress(evt, [{ type: "TRANSCRIPT_APPEND_NARRATION", text }]);
+    }
+
     function handleStreamingBatch(evt: ZoneStructuredProgressEvent): void {
-      const text = (evt as any).text as string | undefined;
-      if (!text) return;
-      const { buffer, key } = computeStreamingAnswerUpdate(
-        { buffer: streamingAnswerBuffer.current, key: streamingAnswerLastKey.current },
-        { runId: evt.runId, iter: evt.iter, delta: text },
-      );
-      streamingAnswerBuffer.current = buffer;
-      streamingAnswerLastKey.current = key;
-      dispatch({ type: "STREAMING_ANSWER_SET", text: streamingAnswerBuffer.current });
+      if (evt.delta) applyProgress(evt, [{ type: "STREAMING_ANSWER_DELTA", delta: evt.delta, iter: evt.iter }]);
     }
 
     const ctx = (): EventCtx => ({
       trustedPrefixes: trustedPrefixesRef.current ?? [],
       mode: modeRef.current ?? "normal",
     });
-
-    const applyActions = (actions: StoreAction[]) => { for (const a of actions) dispatch(a); };
 
     const applyIntents = (intents: ResolverIntent[]) => {
       for (const intent of intents) {
@@ -217,17 +161,11 @@ export function useAgentEvents(
     const simple = (evt: ZoneStructuredProgressEvent) => {
       const { actions, intents } = eventToActions(evt, ctx());
       applyIntents(intents);
-      applyActions(actions);
+      applyProgress(evt, actions);
     };
 
-    // Flush-first: Phase 4a — flushBuffer is now a no-op (scheduler owns ordering).
-    // The handler still runs eventToActions + intents/actions in the same order.
-    const flushFirst = (evt: ZoneStructuredProgressEvent) => {
-      flushBuffer();
-      const { actions, intents } = eventToActions(evt, ctx());
-      applyIntents(intents);
-      applyActions(actions);
-    };
+    // Ordering is established by the scheduler before either handler is invoked.
+    const flushFirst = simple;
 
     // command_approval_required: conditional flush
     // Trusted path → intents=[resolveCommand], actions=[] → no flush (silent auto-approve)
@@ -236,8 +174,7 @@ export function useAgentEvents(
       const { actions, intents } = eventToActions(evt, ctx());
       applyIntents(intents);
       if (actions.length > 0) {
-        flushBuffer();
-        applyActions(actions);
+        applyProgress(evt, actions);
       }
     };
 
@@ -246,9 +183,7 @@ export function useAgentEvents(
     bus.on("agent_loop_start",         simple);
     bus.on("agent_loop_complete",      flushFirst);
     bus.on("run_summary",              flushFirst);
-    // Phase 4a — scheduler emits narration_batch on "narration" channel and
-    // streaming_batch on "chat_chunk" channel. The original event types are
-    // coalesced by the scheduler and never reach these handlers directly.
+    // Scheduler preserves typed incremental events and their ownership metadata.
     bus.on("narration",                handleNarrationBatch);
     bus.on("thinking",                 simple);
     bus.on("chat_chunk",               handleStreamingBatch);

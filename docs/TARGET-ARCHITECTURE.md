@@ -408,6 +408,16 @@ thin top rule and bottom rule (glyph.separator, role.muted), and a one-row key-h
 beneath (visible at idle only): "shift+tab mode · /help · @file · \+enter newline · esc clear".
 No behavior change — palettes, paste handling, and submission routing stay identical.
 
+Phase 7.5b supersedes that Composer chrome: a one-cell `role.accent` strip spans the
+editable height beside a borderless `role.surface` input with `role.surfaceForeground`
+text and the `▸` prompt. There are no Composer horizontal rules. Whole shortcut hints
+use compact variants at narrow widths. Palettes and the model picker window around
+keyboard focus; decorative hero content yields to interactive controls. ModelPicker
+uses one submode-aware OverlayShell footer and a navigation cursor separate from the
+applied-model radio, including when terminal colors are disabled. Logical transcript
+retention, acknowledged Static delivery, and the explicit resize-clearing policy are
+unchanged.
+
 10.4 Constraints
 - No alternate screen. Inline scrollback is the correctness requirement.
 - WelcomeFrame renders once via Static commit. It must not re-render per event.

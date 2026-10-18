@@ -1,4 +1,6 @@
-import { Box, Static, Text, useStdout } from "ink";
+import { useEffect, useLayoutEffect } from "react";
+import { Box, Static, Text, useApp, useStdout } from "ink";
+import type { PrintRecord } from "../transcriptDelivery.js";
 import { useStore, type TranscriptEntry } from "../store.js";
 import { ToolCall } from "./ToolCall.js";
 import { ToolCallGroup } from "./ToolCallGroup.js";
@@ -156,111 +158,80 @@ function renderEntry(entry: TranscriptEntry, index: number, colWidth: number): R
   }
 }
 
-/** Phase 5b — group marker types for nested subagent rendering. These are
- *  rendering-only constructs, never stored in the transcript. */
-type GroupedItem =
-  | { kind: "welcome" }
-  | { kind: "entry"; entry: TranscriptEntry; index: number }
-  | { kind: "group_header"; subagentId: string; subagentType: string; title: string; index: number }
-  | { kind: "group_footer"; subagentId: string; index: number };
+const EMPTY_PRINT_BATCH: PrintRecord[] = [];
 
-function buildGroupedItems(
-  transcript: TranscriptEntry[],
-  threads: Record<string, import("../store.js").SubagentThread>,
-): GroupedItem[] {
-  const items: GroupedItem[] = [];
-  let i = 0;
-  while (i < transcript.length) {
-    const entry = transcript[i]!;
-    const sid = (entry as any).subagentId as string | undefined;
-    if (!sid) {
-      items.push({ kind: "entry", entry, index: i });
-      i++;
-      continue;
-    }
-    // Start of a subagent group — collect consecutive entries with same subagentId
-    const thread = threads[sid];
-    items.push({
-      kind: "group_header",
-      subagentId: sid,
-      subagentType: thread?.subagentType ?? "worker",
-      title: thread?.title ?? "",
-      index: i,
-    });
-    while (i < transcript.length && (transcript[i] as any).subagentId === sid) {
-      items.push({ kind: "entry", entry: transcript[i]!, index: i });
-      i++;
-    }
-    items.push({ kind: "group_footer", subagentId: sid, index: i });
-  }
-  return items;
+/** Ink 7 writes dirty Static output in resetAfterCommit, before layout effects.
+ * SUBMITTED records that commit (so an incidental remount does not resubmit it).
+ * It is NOT an I/O acknowledgement. The public flush API drains renders and waits
+ * for stdout's write callback before ACK releases the records. This cannot prove
+ * physical terminal display or provide crash-proof exactly-once I/O.
+ */
+function StaticBatchPrinter(): React.ReactElement {
+  const { state, dispatch } = useStore();
+  const { stdout } = useStdout();
+  const { waitUntilRenderFlush } = useApp();
+  const { epoch, active, pending } = state.printDelivery;
+  useLayoutEffect(() => {
+    if (!active && pending.length) dispatch({ type: "PRINT_BATCH_START", epoch });
+    else if (active && !active.submitted) dispatch({ type: "PRINT_BATCH_SUBMITTED", epoch, through: active.through });
+  }, [dispatch, epoch, active, pending.length]);
+  useEffect(() => {
+    if (!active?.submitted) return;
+    let cancelled = false;
+    // This effect runs after the empty-array commit. Do not combine that reset
+    // with delivery of the next batch: Static must commit its index back to zero.
+    void waitUntilRenderFlush().then(() => {
+      if (!cancelled && !stdout.destroyed && stdout.writable !== false)
+        dispatch({ type: "PRINT_BATCH_ACK", epoch, through: active.through });
+    }).catch(() => { /* Keep unacknowledged records on output failure; do not blindly replay. */ });
+    return () => { cancelled = true; };
+  }, [dispatch, epoch, active, waitUntilRenderFlush, stdout]);
+  const items = active && !active.submitted
+    ? pending.slice(0, active.through - active.from + 1)
+    : EMPTY_PRINT_BATCH;
+  return (
+    <Static key={state.transcriptGeneration} items={items} style={{ width: stdout.columns ?? 80 }}>
+      {(item: PrintRecord) => {
+        if (item.kind === "welcome") return <WelcomeFrame key={item.seq} boot={item.boot} />;
+        if (item.kind === "group_header") {
+          const { title, subagentType } = item.thread;
+          const truncated = title.length > 60 ? title.slice(0, 57) + "..." : title;
+          return <Box key={item.seq}><Text color={role.muted}>┌─ </Text>
+            <Text color={role.accent}>{subagentType}</Text><Text color={role.muted}> · {truncated} ──────</Text></Box>;
+        }
+        if (item.kind === "group_footer") {
+          const thread = item.thread;
+          const statusMark = thread.status === "failed" ? glyph.failureMark
+            : thread.status === "completed" ? glyph.successMark : glyph.pendingMark;
+          const parts: string[] = [];
+          if (thread.iterations !== undefined) parts.push(`${thread.iterations} iters`);
+          if (thread.costUsd !== undefined) parts.push(`$${thread.costUsd.toFixed(4)}`);
+          if (thread.status === "running") parts.push(`${thread.toolCallCount} calls`);
+          if (thread.summary) parts.push(thread.summary.length > 80 ? thread.summary.slice(0, 77) + "..." : thread.summary);
+          return <Box key={item.seq}><Text color={role.muted}>└─ {statusMark} {parts.join(" · ")}</Text></Box>;
+        }
+        const sid = "subagentId" in item.entry ? item.entry.subagentId : undefined;
+        return <Box key={item.seq} paddingLeft={sid ? 2 : 0}>
+          {renderEntry(item.entry, item.seq, stdout.columns ?? 80)}
+        </Box>;
+      }}
+    </Static>
+  );
 }
 
-export function Transcript(): React.ReactElement {
+export function Transcript({ live = true }: { live?: boolean }): React.ReactElement {
+  return <Box flexDirection="column"><StaticBatchPrinter />{live && <TranscriptPreview />}</Box>;
+}
+
+/** The App places this transient region inside its viewport budget, never in Static. */
+export function TranscriptPreview(): React.ReactElement {
   const { state } = useStore();
-  const { stdout } = useStdout();
   const liveToolCall = state.liveTail.currentToolCall;
   const liveNarration = state.liveTail.narrationBuffer;
   const liveStreamingAnswer = state.liveTail.streamingAnswer;
   const pendingBatchCount = state.liveTail.pendingReadOnlyBatch.length;
-  const groupedItems = buildGroupedItems(state.transcript, state.subagentThreads);
-  // Phase 7a — WelcomeFrame as the first Static item. Stable key "welcome-frame"
-  // ensures Ink commits it once; subsequent re-renders of the Static tree preserve it.
-  const allItems: GroupedItem[] = state.boot
-    ? [{ kind: "welcome" }, ...groupedItems]
-    : groupedItems;
-
   return (
     <Box flexDirection="column">
-      <Static
-        key={state.transcriptGeneration}
-        items={allItems}
-        style={{ width: stdout.columns ?? 80 }}
-      >
-        {(item: GroupedItem) => {
-          if (item.kind === "welcome") {
-            return <WelcomeFrame key="welcome-frame" boot={state.boot!} />;
-          }
-          if (item.kind === "group_header") {
-            const truncated = item.title.length > 60 ? item.title.slice(0, 57) + "..." : item.title;
-            return (
-              <Box key={`gh-${item.index}`}>
-                <Text color={role.muted}>┌─ </Text>
-                <Text color={role.accent}>{item.subagentType}</Text>
-                <Text color={role.muted}> · {truncated} ──────</Text>
-              </Box>
-            );
-          }
-          if (item.kind === "group_footer") {
-            const thread = state.subagentThreads[item.subagentId];
-            const statusMark = thread?.status === "failed"
-              ? glyph.failureMark
-              : thread?.status === "completed"
-                ? glyph.successMark
-                : glyph.pendingMark;
-            const parts: string[] = [];
-            if (thread?.iterations !== undefined) parts.push(`${thread.iterations} iters`);
-            if (thread?.costUsd !== undefined) parts.push(`$${thread.costUsd.toFixed(4)}`);
-            if (thread?.status === "running") parts.push(`${thread.toolCallCount} calls`);
-            if (thread?.summary) {
-              const s = thread.summary.length > 80 ? thread.summary.slice(0, 77) + "..." : thread.summary;
-              parts.push(s);
-            }
-            return (
-              <Box key={`gf-${item.index}`}>
-                <Text color={role.muted}>└─ {statusMark} {parts.join(" · ")}</Text>
-              </Box>
-            );
-          }
-          // Regular entry — indent if inside a subagent group
-          const sid = (item.entry as any).subagentId as string | undefined;
-          return (
-            <Box key={item.index} paddingLeft={sid ? 2 : 0}>
-              {renderEntry(item.entry, item.index, stdout.columns ?? 80)}
-            </Box>
-          );
-        }}
-      </Static>
       {liveNarration && (
         <Box>
           <Text color={role.accent}>{glyph.entryMarker}</Text>

@@ -16,6 +16,8 @@ export interface ZoneRequestContext {
   parentRunId?: string;
   /** TUI.7.G: user-selected reasoning effort; threaded to adapter via agentLoop. */
   effort?: EffortLevel;
+  /** Effective daily cap captured before TUI execution starts; 0 means unlimited. */
+  dailyUsdCap?: number;
 }
 
 export const zoneRequestContext = new AsyncLocalStorage<ZoneRequestContext>();

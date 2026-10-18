@@ -69,7 +69,14 @@ export function OverlayLayer(): React.ReactElement | null {
   switch (topOverlay) {
     case "model":
       children = <ModelPicker />;
-      keyHints = [
+      keyHints = state.modelCustomMode === "input" ? [
+        { key: "Enter", label: "confirm", primary: true },
+        { key: "Esc", label: "cancel" },
+      ] : state.modelCustomMode === "pick-gateway" ? [
+        { key: "↑↓", label: "navigate" }, // glyph: keyboard-shortcut
+        { key: "Enter", label: "route", primary: true },
+        { key: "Esc", label: "cancel" },
+      ] : [
         { key: "↑↓", label: "navigate" }, // glyph: keyboard-shortcut — physical key labels for useInput
         { key: "Enter", label: "select", primary: true },
         { key: "C", label: "custom" },

@@ -26,8 +26,26 @@ describe("golden replay tests", () => {
   it("run-with-tool-calls renders expected transcript", async () => {
     const events = loadFixture("run-with-tool-calls.jsonl");
     const harness = await replayEvents(events);
-    expect(harness.lastFrame()).toMatchSnapshot();
-    harness.unmount();
+    try {
+      const frame = harness.lastFrame();
+      // Replay commits each fragment explicitly. Logical narration can merge,
+      // but immutable terminal records must print each committed fragment once.
+      const narration = events.filter(e => e.type === "narration")
+        .map(e => (e.text ?? e.title).trim());
+      expect(frame.split("\n").filter(line => line.startsWith("◆ ")))
+        .toEqual(narration.map(text => `◆ ${text}`));
+      for (const text of narration) expect(frame.split(text)).toHaveLength(2);
+      const ordered = [...narration.slice(0, 3), "● Read ×1", "● Edit(", "● Bash(", narration[3]!];
+      let previous = -1;
+      for (const text of ordered) {
+        const at = frame.indexOf(text);
+        expect(at, `missing or out-of-order output: ${text}`).toBeGreaterThan(previous);
+        previous = at;
+      }
+      expect(frame).toMatchSnapshot();
+    } finally {
+      harness.unmount();
+    }
   });
 
   it("approval-modal-cycle renders approval modal", async () => {

@@ -32,6 +32,12 @@ import { _runPromptImpl, _resolveSessionId, type _RunPromptDeps } from "./index.
 import { readFsConversationEvents } from "../../core/conversationFilesystemStore.js";
 import { buildContinuationContext } from "../../llm/sessionWindow.js";
 import { createEventBus } from "../eventBus.js";
+import { UiScheduler } from "./uiScheduler.js";
+
+function makeTransport() {
+  const bus = createEventBus();
+  return { bus, scheduler: new UiScheduler(bus) };
+}
 import type { StoreState } from "./store.js";
 import type { CliConfig } from "../config.js";
 import type { OneShotOpts } from "../dispatch.js";
@@ -110,7 +116,7 @@ describe("cross-turn context — Issue 1 (integration)", () => {
     await _runPromptImpl("generate full report", new AbortController(), "normal", undefined, {
       config: makeConfig(tmpDir),
       storeCapture: makeStoreCapture(null), // null = React hasn't populated state yet
-      bus: createEventBus(),
+      ...makeTransport(),
       localSessionId,
     });
 
@@ -140,7 +146,7 @@ describe("cross-turn context — Issue 1 (integration)", () => {
     await _runPromptImpl("generate full report", new AbortController(), "normal", undefined, {
       config: makeConfig(tmpDir),
       storeCapture: makeStoreCapture(null),
-      bus: createEventBus(),
+      ...makeTransport(),
       localSessionId,
     });
 
@@ -168,7 +174,7 @@ describe("cross-turn context — Issue 1 (integration)", () => {
       {
         config: makeConfig(tmpDir),
         storeCapture: makeStoreCapture({ sessionId: localSessionId }),
-        bus: createEventBus(),
+        ...makeTransport(),
         localSessionId,
       }
     );
@@ -193,7 +199,7 @@ describe("cross-turn context — Issue 1 (integration)", () => {
     await _runPromptImpl("do something", new AbortController(), "normal", undefined, {
       config: makeConfig(tmpDir),
       storeCapture: makeStoreCapture(null),
-      bus: createEventBus(),
+      ...makeTransport(),
       localSessionId,
     });
 
@@ -224,7 +230,7 @@ describe("cross-turn context — Issue 1 (integration)", () => {
       {
         config: makeConfig(tmpDir),
         storeCapture: makeStoreCapture({ sessionId: localSessionId }),
-        bus: createEventBus(),
+        ...makeTransport(),
         localSessionId,
       }
     );

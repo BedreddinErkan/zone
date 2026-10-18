@@ -1,10 +1,10 @@
 import { Box, useInput, useApp, useStdout } from "ink";
-import { useEffect, useRef, type Dispatch } from "react";
+import { useEffect, useLayoutEffect, useRef, type Dispatch } from "react";
 import { StoreProvider, useStore } from "./store.js";
 import { spacing } from "./theme.js";
 import type { ApiKeyProvider } from "../../api/diskKeys.js";
 import { useAgentEvents } from "./hooks/useAgentEvents.js";
-import { Transcript } from "./components/Transcript.js";
+import { Transcript, TranscriptPreview } from "./components/Transcript.js";
 import { Spinner } from "./components/Spinner.js";
 import { StatusBar } from "./components/StatusBar.js";
 import { Toast } from "./components/Toast.js";
@@ -17,9 +17,10 @@ import { PlanCursor } from "./components/PlanCursor.js";
 import { QuestionPanel } from "./components/QuestionPanel.js";
 import { OverlayLayer } from "./components/OverlayLayer.js";
 import { EmptyStateHero } from "./components/EmptyStateHero.js";
-import { selectIsBlockingModalOpen, selectEscTarget } from "./store-core.js";
+import { selectIsBlockingModalOpen, selectEscTarget, type OverlayId } from "./store-core.js";
 import { resolveCommandApproval } from "../../api/commandApprovals.js";
 import { resolveEditApproval } from "../../api/editApprovals.js";
+import { resolveTrustApproval } from "../../api/trustApprovals.js";
 import { declineUserQuestion } from "../../api/questionApprovals.js";
 import { resolvePlanApproval } from "../../llm/planApprovals.js";
 import { resolveStagedApproval } from "../../api/stagedApprovals.js";
@@ -54,7 +55,7 @@ interface AppProps {
   initialProvidersWithKey?: string[];
   gatewayIds?: string[];
   activeProfile?: import("../../llm/providerProfile.js").ProviderProfile | null;
-  onModelApply?: (model: string, provider: ApiKeyProvider, effort?: EffortLevel, summaryFormat?: "compact" | "detailed", memoryEnabled?: boolean, commitOnSuccess?: boolean) => void;
+  onModelApply?: (model: string, provider: ApiKeyProvider, effort?: EffortLevel, summaryFormat?: "compact" | "detailed", memoryEnabled?: boolean, commitOnSuccess?: boolean, webSearchEnabled?: boolean, planDepth?: DiskModelSettings["planDepth"]) => void;
   getCommitData?: () => { filePaths: string[]; message: string; repoPath: string } | null;
   getFeedbackData?: () => { runId: string; sessionId: string; logs: string; version: string; repoPath: string } | null;
   onDispatchCapture?: (dispatch: Dispatch<StoreAction>) => void;
@@ -83,11 +84,55 @@ interface AppInnerProps {
   onCarriedAnswer: ((answer: string, ac: AbortController) => void) | undefined;
   onCarriedDiscard: ((envelopeKey: string, iter: number) => void) | undefined;
   onStateChange: ((state: StoreState) => void) | undefined;
-  onModelApply: ((model: string, provider: ApiKeyProvider, effort?: EffortLevel, summaryFormat?: "compact" | "detailed", memoryEnabled?: boolean, commitOnSuccess?: boolean) => void) | undefined;
+  onModelApply: ((model: string, provider: ApiKeyProvider, effort?: EffortLevel, summaryFormat?: "compact" | "detailed", memoryEnabled?: boolean, commitOnSuccess?: boolean, webSearchEnabled?: boolean, planDepth?: DiskModelSettings["planDepth"]) => void) | undefined;
   getCommitData: (() => { filePaths: string[]; message: string; repoPath: string } | null) | undefined;
   getFeedbackData: (() => { runId: string; sessionId: string; logs: string; version: string; repoPath: string } | null) | undefined;
   onDispatchCapture: ((dispatch: Dispatch<StoreAction>) => void) | undefined;
   onSessionClear: ((oldSessionId: string) => void) | undefined;
+}
+
+const OVERLAY_CLOSE_ACTIONS: Record<Exclude<OverlayId, "trust" | "hookTrust" | "mcpTrust">, StoreAction> = {
+  model: { type: "MODEL_MODAL_CLOSE" },
+  keys: { type: "KEYS_CLOSE" },
+  metrics: { type: "METRICS_MODAL_CLOSE" },
+  effort: { type: "EFFORT_MODAL_CLOSE" },
+  summary: { type: "SUMMARY_MODAL_CLOSE" },
+  planMode: { type: "PLANMODE_MODAL_CLOSE" },
+  session: { type: "MEMORY_MODAL_CLOSE" },
+  sessions: { type: "SESSIONS_CLOSE" },
+  permissions: { type: "PERMISSIONS_CLOSE" },
+  limits: { type: "LIMITS_MODAL_CLOSE" },
+  commit: { type: "COMMIT_MODAL_CLOSE" },
+  feedback: { type: "FEEDBACK_MODAL_CLOSE" },
+  undo: { type: "UNDO_MODAL_CLOSE" },
+};
+
+/** Escape closes the owning decision/legacy modal as well as its visible stack entry. */
+function dismissTopOverlay(state: StoreState, dispatch: Dispatch<StoreAction>): void {
+  const top = state.overlayStack.at(-1);
+  if (!top) return;
+  switch (top) {
+    case "trust":
+      if (state.pendingApproval?.kind === "trust") {
+        // The registry removes the entry before resolving, so repeated rejection is safe.
+        resolveTrustApproval(state.pendingApproval.runId, false);
+        dispatch({ type: "PENDING_APPROVAL_RESOLVED" });
+      }
+      break;
+    case "hookTrust":
+      // Startup hook/MCP decisions live only in store state, not the interaction registry.
+      dispatch({ type: "HOOKS_TRUST_DENIED" });
+      break;
+    case "mcpTrust":
+      dispatch({ type: "MCP_TRUST_DENIED" });
+      break;
+    default:
+      // Do not clear another layer's modal, or a repeated instance still on the stack.
+      if (state.modalView === top && !state.overlayStack.slice(0, -1).includes(top)) {
+        dispatch(OVERLAY_CLOSE_ACTIONS[top]);
+      }
+  }
+  dispatch({ type: "OVERLAY_POP" });
 }
 
 function AppInner({ bus, initialPrompt, initialMode, onSubmit, onUndoRequest, onRemoteControlCommand, onEnvelopeResume, onCarriedAnswer, onCarriedDiscard, onStateChange, onModelApply, getCommitData, getFeedbackData, onDispatchCapture, onSessionClear: _onSessionClear }: AppInnerProps): React.ReactElement {
@@ -102,18 +147,18 @@ function AppInner({ bus, initialPrompt, initialMode, onSubmit, onUndoRequest, on
   }, [state.sessionTrustedPrefixes]);
   const modeRef = useRef<TuiMode>(state.mode);
   useEffect(() => { modeRef.current = state.mode; }, [state.mode]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     onStateChange?.(state);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state]);
 
   // Capture dispatch once for use in imperative code outside React (e.g. auto-commit toasts).
-  useEffect(() => { onDispatchCapture?.(dispatch); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useLayoutEffect(() => { onDispatchCapture?.(dispatch); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Propagate model/effort selection back to the live config so next run uses the selected model.
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (state.modelSettings) {
-      onModelApply?.(state.modelSettings.model, state.modelSettings.provider, state.modelSettings.effort, state.modelSettings.summaryFormat, state.modelSettings.memoryEnabled, state.modelSettings.commitOnSuccess);
+      onModelApply?.(state.modelSettings.model, state.modelSettings.provider, state.modelSettings.effort, state.modelSettings.summaryFormat, state.modelSettings.memoryEnabled, state.modelSettings.commitOnSuccess, state.modelSettings.webSearchEnabled, state.modelSettings.planDepth);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.modelSettings]);
@@ -171,13 +216,13 @@ function AppInner({ bus, initialPrompt, initialMode, onSubmit, onUndoRequest, on
       return;
     }
     // Phase 3b — central Esc handler. Precedence is defined in selectEscTarget:
-    // submode (content component owns Esc) > overlay (pop stack) > question (dismiss) > run (abort).
+    // submode (content component owns Esc) > overlay (dismiss) > question (dismiss) > run (abort).
     // "submode" is a no-op here — the content component's own useInput fires when
     // overlaySubModeOpen is true, so the central handler must not double-fire.
     if (key.escape) {
       const target = selectEscTarget(state);
       if (target === "overlay") {
-        dispatch({ type: "OVERLAY_POP" });
+        dismissTopOverlay(state, dispatch);
       } else if (target === "question" && state.modalView === "none") {
         const pending = state.pendingQuestion!;
         if (pending.kind === "live") {
@@ -235,6 +280,7 @@ function AppInner({ bus, initialPrompt, initialMode, onSubmit, onUndoRequest, on
   // Phase 7.5a — empty-state hero: shown only when transcript is empty, no run active,
   // and no live buffers are rendering. Disappears the moment the first entry lands.
   const showHero = state.transcript.length === 0
+    && !selectIsBlockingModalOpen(state)
     && state.runState === "idle"
     && !state.liveTail.narrationBuffer
     && !state.liveTail.streamingAnswer
@@ -243,7 +289,7 @@ function AppInner({ bus, initialPrompt, initialMode, onSubmit, onUndoRequest, on
   return (
     <Box flexDirection="column">
       <Box paddingX={spacing.md}>
-        <Transcript />
+        <Transcript live={false} />
       </Box>
       {/* Phase 7.5a — viewport-high live region. height={rows} pins the bottom chrome
           (composer + status bar) to the terminal's last row; the hero area above fills
@@ -251,7 +297,9 @@ function AppInner({ bus, initialPrompt, initialMode, onSubmit, onUndoRequest, on
           into native scrollback. */}
       <Box flexDirection="column" height={rows}>
         {showHero && <EmptyStateHero />}
-        {!showHero && <Box flexGrow={1} />}
+        {!showHero && <Box flexDirection="column" flexGrow={1} flexShrink={1} overflow="hidden" paddingX={spacing.md}>
+          <TranscriptPreview />
+        </Box>}
         <Spinner />
         {modals}
         {state.planReadyProposal !== null && (
@@ -300,6 +348,7 @@ export function App({ initialPrompt, initialMode, bus, initialModel, capUsd, ini
       dailyUsedUsd: initialDailyUsedUsd ?? 0,
       trustedPrefixes: initialTrustedPrefixes ?? [],
       resumedTranscript: resumedSession?.transcript,
+      resumedSubagentThreads: resumedSession?.subagentThreads,
       resumedSessionId: initialSessionId,
       resumedStartedAt: resumedSession?.startedAt,
       modelSettings: initialModelSettings,

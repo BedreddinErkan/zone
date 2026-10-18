@@ -32,6 +32,12 @@ vi.mock("../dispatch.js", () => ({
 
 import { _runPromptImpl, _resumeStartupAction, _carriedDiscardTelemetry, type _RunPromptDeps } from "./index.js";
 import { createEventBus } from "../eventBus.js";
+import { UiScheduler } from "./uiScheduler.js";
+
+function makeTransport() {
+  const bus = createEventBus();
+  return { bus, scheduler: new UiScheduler(bus) };
+}
 import type { StoreState } from "./store.js";
 import type { CliConfig } from "../config.js";
 import type { OneShotOpts } from "../dispatch.js";
@@ -180,7 +186,7 @@ describe("durable resume — _runPromptImpl threading (Fix A + Fix B)", () => {
     const deps: _RunPromptDeps = {
       config: makeConfig(tmpDir),
       storeCapture: makeStoreCapture(null),
-      bus: createEventBus(),
+      ...makeTransport(),
       localSessionId,
       pendingEnvelopeResume: makeEnvelopeResume(),
     };
@@ -199,7 +205,7 @@ describe("durable resume — _runPromptImpl threading (Fix A + Fix B)", () => {
     const deps: _RunPromptDeps = {
       config: makeConfig(tmpDir),
       storeCapture: makeStoreCapture(null),
-      bus: createEventBus(),
+      ...makeTransport(),
       localSessionId,
       pendingEnvelopeResume: makeEnvelopeResume(),
     };
@@ -215,7 +221,7 @@ describe("durable resume — _runPromptImpl threading (Fix A + Fix B)", () => {
     const deps: _RunPromptDeps = {
       config: makeConfig(tmpDir),
       storeCapture: makeStoreCapture(null),
-      bus: createEventBus(),
+      ...makeTransport(),
       localSessionId,
       pendingEnvelopeResume: makeEnvelopeResume(),
     };
@@ -235,7 +241,7 @@ describe("durable resume — _runPromptImpl threading (Fix A + Fix B)", () => {
     const deps: _RunPromptDeps = {
       config: makeConfig(tmpDir),
       storeCapture: makeStoreCapture(null),
-      bus: createEventBus(),
+      ...makeTransport(),
       localSessionId,
       pendingEnvelopeResume: null,
     };
@@ -254,7 +260,7 @@ describe("durable resume — _runPromptImpl threading (Fix A + Fix B)", () => {
     const deps: _RunPromptDeps = {
       config: makeConfig(tmpDir),
       storeCapture: makeStoreCapture(null),
-      bus: createEventBus(),
+      ...makeTransport(),
       localSessionId,
       pendingEnvelopeResume: makeEnvelopeResume(),
     };

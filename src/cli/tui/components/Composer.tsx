@@ -1,4 +1,4 @@
-import { Box, Text, useInput, usePaste, useStdout } from "ink";
+import { Box, Text, useInput, usePaste, useStdout, useBoxMetrics } from "ink";
 import { useState, useEffect, useMemo, useRef } from "react";
 import fg from "fast-glob";
 import { readAtFileContext } from "../atFileContext.js";
@@ -145,25 +145,27 @@ export function renderBuffer(buf: string, pos: number, sideMap: Map<string, Past
 interface PaletteProps {
   commands: SlashCommand[];
   selectedIdx: number;
+  maxRows: number;
 }
 
-function SlashCommandPalette({ commands, selectedIdx }: PaletteProps): React.ReactElement {
+function SlashCommandPalette({ commands, selectedIdx, maxRows }: PaletteProps): React.ReactElement {
+  const start = Math.max(0, Math.min(selectedIdx - Math.floor(maxRows / 2), commands.length - maxRows));
   return (
-    <Box flexDirection="column" borderStyle="single" borderColor={role.muted} paddingX={spacing.sm}>
+    <Box flexDirection="column" flexShrink={0} borderStyle="single" borderColor={role.muted} paddingX={spacing.sm}>
       {/* Selection is marked two ways on purpose. The cursor glyph is the structural half — it
           survives a terminal with no colour at all, and matches what SessionsModal/PermissionsView/
           ApiKeysView already do. role.brand is the colour half, chosen over role.accent (the
           previous marker) because accent is a bare ANSI index the terminal's own theme resolves,
           which is the same class of colour that rendered wrong in the surface pass; brand is a
           fixed hex. */}
-      {commands.map((cmd, i) => {
-        const selected = i === selectedIdx;
+      {commands.slice(start, start + maxRows).map((cmd, i) => {
+        const selected = start + i === selectedIdx;
         return (
           <Box key={cmd.name}>
-            <Text color={selected ? role.brand : undefined}>
+            <Text wrap="truncate-end" color={selected ? role.brand : undefined}>
               {selected ? glyph.selectionCursor : "  "}{cmd.name}{"  "}
+              <Text dimColor>{cmd.desc}</Text>
             </Text>
-            <Text dimColor>{cmd.desc}</Text>
           </Box>
         );
       })}
@@ -174,6 +176,8 @@ function SlashCommandPalette({ commands, selectedIdx }: PaletteProps): React.Rea
 export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, onRemoteControlCommand, getCommitData, getFeedbackData, onEnvelopeResume, onCarriedAnswer }: ComposerProps): React.ReactElement {
   const { state, dispatch } = useStore();
   const { stdout } = useStdout();
+  const cursorMeasureRef = useRef(null);
+  const cursorMetrics = useBoxMetrics(cursorMeasureRef);
   const disabled = state.runState === "running";
 
   // Dedup: user commands whose names don't collide with any built-in.
@@ -760,45 +764,68 @@ export function Composer({ onSubmit, onExit, onInitStart, onUndoRequest, onRemot
     ? expandSentinels(buffer, sideMapRef.current)
     : renderBuffer(buffer, cursorPos, sideMapRef.current);
 
-  // Phase 7c — thin rules + key-hints row in zonecli.dev input-box language.
+  // Phase 7.5b — zonecli.dev input-box language: 1-cell accent bar + surface-filled input area.
+  // The accent bar IS the identity — no outer border. Key-hints row stays beneath.
   const cols = stdout.columns ?? 80;
-  const rule = glyph.separator.repeat(cols);
   const showHints = state.runState === "idle" && !disabled;
+  // Leave room for the input, status, and live activity. Window the list around
+  // keyboard focus instead of asking Yoga to compress every option to zero.
+  const paletteRows = Math.max(1, Math.min(6, Math.floor((stdout.rows ?? 24) / 3)));
+  const fileStart = Math.max(0, Math.min(atIdx - Math.floor(paletteRows / 2), atFiles.length - paletteRows));
+  const inputRows = Math.max(1, Math.floor((stdout.rows ?? 24) / 3));
+  const inputScroll = Math.max(0, cursorMetrics.height - inputRows);
 
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" flexShrink={0}>
       {atPaletteOpen && atFiles.length > 0 && (
         <Box flexDirection="column" borderStyle="single" borderColor={role.muted} paddingX={spacing.sm}>
-          {atFiles.map((f, i) => (
-            <Text key={f} color={i === atIdx ? role.accent : undefined}>{f}</Text>
+          {atFiles.slice(fileStart, fileStart + paletteRows).map((f, i) => (
+            <Text key={f} wrap="truncate-end" color={fileStart + i === atIdx ? role.accent : undefined}>
+              {fileStart + i === atIdx ? glyph.selectionCursor : "  "}{f}
+            </Text>
           ))}
         </Box>
       )}
       {paletteOpen && filteredCommands.length > 0 && (
-        <SlashCommandPalette commands={filteredCommands} selectedIdx={paletteIdx} />
+        <SlashCommandPalette commands={filteredCommands} selectedIdx={paletteIdx} maxRows={paletteRows} />
       )}
-      <Text color={role.muted}>{rule}</Text>
-      {/* Every run inside this box sets role.surfaceForeground. The fill is a fixed hex the app
-          controls; leaving the foreground to the terminal made the pairing uncomputable and, on a
-          light theme, near-invisible at 1.08:1. dimColor still applies on top — it modulates a
-          known colour now rather than an unknown one. */}
-      <Box
-        backgroundColor={role.surface}
-        paddingX={spacing.md}
-        width={cols}
-      >
-        <Text color={role.surfaceForeground} dimColor={disabled}>{disabled ? "  " : "> "}</Text>
-        <Box flexGrow={1}>
-          <Text color={role.surfaceForeground} dimColor={disabled}>{displayBuffer}</Text>
-          {!disabled && !buffer && (
-            <Text color={role.surfaceForeground} dimColor>{COMPOSER_PLACEHOLDER}</Text>
-          )}
+      {/* Input surface: [accent bar][surface-filled input area]. The accent bar is a 1-cell
+          wide column with role.accent background — the zonecli.dev input-box identity.
+          surfaceForeground on the text keeps the pairing computable (1.08:1 without it). */}
+      <Box width={cols} flexShrink={0} minHeight={1}>
+        <Box backgroundColor={role.accent} width={1} flexShrink={0}>{/* width: intentional — one-cell accent strip */}
+          <Text> </Text>
+        </Box>
+        <Box backgroundColor={role.surface} paddingX={spacing.md} flexGrow={1}>
+          <Box flexShrink={0}><Text color={role.accent} bold>{disabled ? "  " : glyph.promptMarker}</Text></Box>
+          <Box flexDirection="column" flexGrow={1} minWidth={0}>
+            {/* Measure the cursor prefix using Ink's own cell widths and hard wrapping.
+                This zero-height clipped box prints nothing; it lets long input scroll
+                around the cursor without truncating the editable/submitted buffer. */}
+            <Box height={0} overflow="hidden" alignItems="flex-start" aria-hidden>
+              <Box ref={cursorMeasureRef} flexDirection="column" flexGrow={1} flexShrink={0}>
+                <Text wrap="hard" color={role.surfaceForeground}>{expandSentinels(buffer.slice(0, cursorPos), sideMapRef.current) + glyph.cursor}</Text>
+              </Box>
+            </Box>
+            <Box maxHeight={inputRows} overflow="hidden" flexDirection="column">
+              <Box flexDirection="column" flexShrink={0} marginTop={-inputScroll}>
+                <Text wrap="hard" color={role.surfaceForeground} dimColor={disabled}>
+                  {displayBuffer}
+                  {!disabled && !buffer && <Text color={role.surfaceForeground} dimColor>{COMPOSER_PLACEHOLDER}</Text>}
+                </Text>
+              </Box>
+            </Box>
+          </Box>
         </Box>
       </Box>
-      <Text color={role.muted}>{rule}</Text>
       {showHints && (
         <Box paddingX={spacing.sm}>
-          <KeyHints items={[
+          <KeyHints maxWidth={cols - 2 * spacing.sm} compactItems={[
+            { key: "shift+tab", label: "mode" },
+            { key: "/help", label: "" },
+            ...(cols >= 60 ? [{ key: "@file", label: "" }] : []),
+            { key: "esc", label: "clear" },
+          ]} items={[
             { key: "shift+tab", label: "mode" },
             { key: "/help", label: "commands" },
             { key: "@file", label: "context" },

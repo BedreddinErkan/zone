@@ -71,7 +71,7 @@ export function OverlayShell({
         </Box>
         {keyHints.length > 0 && (
           <Box marginTop={spacing.sm}>
-            <KeyHints items={keyHints} />
+            <KeyHints items={keyHints} maxWidth={computedWidth - 2 * spacing.md - 2} />
           </Box>
         )}
       </Box>

@@ -1,5 +1,5 @@
 import React from "react";
-import { Box, Text, useInput } from "ink";
+import { Box, Text, useInput, useStdout } from "ink";
 import { useEffect } from "react";
 import { randomUUID } from "node:crypto";
 import { useStore } from "../store.js";
@@ -22,8 +22,9 @@ import { visibleModelRows, hiddenRowCount } from "../modelPickerList.js";
  */
 export function ModelPicker(): React.ReactElement {
   const { state, dispatch } = useStore();
+  const { stdout } = useStdout();
   const sel = state.modelSelectedIndex;
-  const cols = process.stdout.columns ?? 80;
+  const cols = stdout.columns ?? 80;
   const narrow = cols < 60;
   const currentModelId = state.modelSettings?.model ?? getDefaultModelId();
   const visibleModels = visibleModelRows(USER_FACING_MODELS, state.providersWithKey, currentModelId);
@@ -43,6 +44,7 @@ export function ModelPicker(): React.ReactElement {
 
   const applyModel = (model: string, provider: string): void => {
     const settings: DiskModelSettings = {
+      ...state.modelSettings,
       version: 2,
       model,
       provider,
@@ -104,13 +106,18 @@ export function ModelPicker(): React.ReactElement {
   // the flat index, not from how many JSX rows we've emitted.
   const rows: React.ReactElement[] = [];
   let lastProvider: string | null = null;
+  // Shell chrome (10), status (4), and the two informational lines are
+  // reserved. Each option needs at most a header, label and disclosure row.
+  const windowSize = Math.max(1, Math.floor(((stdout.rows ?? 24) - 16) / 3));
+  const start = Math.max(0, Math.min(sel - Math.floor(windowSize / 2), count - windowSize));
 
-  visibleModels.forEach((m, flatIdx) => {
+  visibleModels.slice(start, start + windowSize).forEach((m, i) => {
+    const flatIdx = start + i;
     if (m.provider !== lastProvider) {
       lastProvider = m.provider;
       const sectionLabel = m.provider === "anthropic" ? "Anthropic" : "OpenAI";
       rows.push(
-        <Box key={`hdr-${m.provider}`} marginTop={rows.length === 0 ? spacing.xs : spacing.sm}>
+        <Box key={`hdr-${m.provider}`} flexShrink={0}>
           <Text bold color={role.emphasis}>{sectionLabel}</Text>
         </Box>
       );
@@ -118,17 +125,19 @@ export function ModelPicker(): React.ReactElement {
     const selected = flatIdx === sel;
     const marker = m.id === currentModelId ? glyph.radioSelected : glyph.radioUnselected;
     const bg = selected ? role.selectionBackground : undefined;
-    const retentionBadge = m.retention ? ` ⚠ ${m.retention.minDays}d retention` : "";
     const label = narrow
-      ? `${marker} ${m.id}${retentionBadge}`
+      ? `${marker} ${m.id}`
       : `${marker} ${m.displayName}${m.costNote ? ` — ${m.costNote}` : ""}`;
     rows.push(
-      <Box key={m.id} flexDirection="column" paddingLeft={spacing.sm} backgroundColor={bg}>
-        <Text color={selected ? role.selectionForeground : undefined}>{label}</Text>
-        {m.retention && !narrow && (
+      <Box key={m.id} flexDirection="column" flexShrink={0} paddingLeft={spacing.sm} backgroundColor={bg}>
+        <Text wrap="truncate-end" color={selected ? role.selectionForeground : undefined}>
+          {selected ? glyph.selectionCursor : "  "}{label}
+        </Text>
+        {m.retention && (
           <Box paddingLeft={spacing.md}>
-            <Text dimColor>
-              {`⚠ Requires ${m.retention.minDays}-day data retention · ` +
+            <Text wrap="truncate-end" color={selected ? role.selectionForeground : undefined} dimColor={!selected}>
+              {narrow ? `⚠ ${m.retention.minDays}d retention · ${m.retention.zdrAvailable ? "ZDR" : "no ZDR"}` :
+               `⚠ Requires ${m.retention.minDays}-day data retention · ` +
                `${m.retention.zdrAvailable ? "ZDR available" : "ZDR not available"} · ` +
                `longer than the 7-day API default`}
             </Text>
@@ -143,9 +152,9 @@ export function ModelPicker(): React.ReactElement {
       {customMode === "none" && rows}
       {customMode === "input" && (
         <Box flexDirection="column">
-          <Text dimColor>Model id served by your gateway (e.g. openai/gpt-4o-mini):</Text>
+          <Text wrap="truncate-end" dimColor>Model id served by your gateway (e.g. openai/gpt-4o-mini):</Text>
           <Box paddingLeft={spacing.sm}>
-            <Text>{"> "}{customInput}<Text inverse> </Text></Text>
+            <Text wrap="truncate-start">{glyph.promptMarker}{customInput}<Text inverse> </Text></Text>
           </Box>
           {gateways.length === 1 && (
             <Box paddingLeft={spacing.md}><Text dimColor>{`→ via ${gateways[0]}`}</Text></Box>
@@ -160,33 +169,24 @@ export function ModelPicker(): React.ReactElement {
       )}
       {customMode === "pick-gateway" && (
         <Box flexDirection="column">
-          <Text dimColor>{`Route "${customInput.trim()}" through which gateway?`}</Text>
-          {gateways.map((g, i) => (
+          <Text wrap="truncate-end" dimColor>{`Route "${customInput.trim()}" through which gateway?`}</Text>
+          {gateways.slice(Math.max(0, state.modelGatewayIndex - windowSize + 1), Math.max(windowSize, state.modelGatewayIndex + 1)).map((g) => (
             <Box key={g} paddingLeft={spacing.sm}>
-              <Text color={i === state.modelGatewayIndex ? role.accent : undefined}>
-                {i === state.modelGatewayIndex ? glyph.selectionCursor : "  "}{g}
+              <Text wrap="truncate-end" color={g === gateways[state.modelGatewayIndex] ? role.accent : undefined}>
+                {g === gateways[state.modelGatewayIndex] ? glyph.selectionCursor : "  "}{g}
               </Text>
             </Box>
           ))}
         </Box>
       )}
-      <Box marginTop={spacing.sm}>
-        <Text dimColor>
-          {customMode === "none"
-            ? "↑↓ navigate · Enter select · Esc cancel"
-            : customMode === "input"
-              ? "Enter confirm · Esc cancel"
-              : "↑↓ navigate · Enter route · Esc cancel"}
-        </Text>
-      </Box>
       {customMode === "none" && hidden > 0 && (
         <Box marginTop={spacing.xs}>
-          <Text dimColor>{`${hidden} hidden — no API key for that provider · /keys to add`}</Text>
+          <Text wrap="truncate-end" dimColor>{`${hidden} hidden — no API key for that provider · /keys to add`}</Text>
         </Box>
       )}
       {customMode === "none" && (
         <Box marginTop={spacing.xs}>
-          <Text dimColor>C — enter a custom model id served by a gateway</Text>
+          <Text wrap="truncate-end" dimColor>C — enter a custom model id served by a gateway</Text>
         </Box>
       )}
     </Box>

@@ -101,6 +101,8 @@ export type RunSummaryPayload = {
 /** Rich UI progress payload (SSE); legacy `stage` string remains for older clients. */
 export type ZoneStructuredProgressEvent = {
   runId: string;
+  /** Monotonic flow invocation within a dispatch; absent means execution scope 0. */
+  flowId?: number;
   ts: number;
   type:
     | "reading_file"

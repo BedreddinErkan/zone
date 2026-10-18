@@ -443,6 +443,13 @@ role.brand/role.accent), thin rules instead of heavy boxes, generous whitespace.
 | 7b | StatusBar persistent warning slot — `selectPersistentWarnings(state)` returns ≤ 2 items (rc disconnected, cap > 80%). Rendered right-aligned in role.caution. | StatusBar.test.tsx: warning present/absent, two-warning case, single-line height invariant |
 | 7c | Composer chrome — thin top/bottom rules (glyph.separator, role.muted), key-hints row beneath (shift+tab mode · /help · @file · \+enter newline · esc clear). Idle only. | composer.layout.test.tsx: new chrome lines, one-line hints invariant, existing tests unchanged |
 
+**Phase 7.5b supersedes the 7c Composer chrome above:** one-cell teal accent strip,
+borderless dark surface with explicit foreground, `▸` prompt, no horizontal Composer
+rules. Keep editing behavior; window interactive lists around selection, compact
+whole hints at narrow widths, and let the hero yield space. The rendering gate is
+`phase75b.geometry.test.tsx`: real primary-screen Ink at 120×40, 100×24, 80×24, 60×24,
+and 40×24 with colors disabled and truecolor, plus existing keyboard/reliability suites.
+
 ### Commits
 
 ```

@@ -62,6 +62,7 @@ vi.mock("../visual/tierSettings.js", () => ({
 }));
 
 import { runAgentLoop } from "./agentLoop.js";
+import { withRequestContext } from "./openaiContext.js";
 
 function makeUsageAggregate(totalCostUsd: number) {
   return {
@@ -106,6 +107,18 @@ afterEach(() => {
 });
 
 describe("K.1 — daily USD cap gate", () => {
+  it("uses the captured run cap even when disk or environment settings change", async () => {
+    mocks.getUsage.mockResolvedValue(makeUsageAggregate(6));
+    mocks.readDailyUsdCapOverride.mockReturnValue(100);
+    mocks.createChatCompletion.mockResolvedValue(makeDoneResponse());
+    process.env.ZONE_DAILY_USD_CAP = "100";
+    const result = await withRequestContext({ dailyUsdCap: 5 }, () => runAgentLoop({
+      task: "blocked by captured cap", repoPath, userId: "local-dev",
+    }));
+    expect(result.terminationReason).toBe("daily_usd_cap_exceeded");
+    expect(mocks.createChatCompletion).not.toHaveBeenCalled();
+  });
+
   it("terminates with daily_usd_cap_exceeded when spend >= cap", async () => {
     mocks.getUsage.mockResolvedValue(makeUsageAggregate(10.0));
     // default cap = $10.00 via env fallback → default

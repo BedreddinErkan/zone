@@ -95,9 +95,9 @@ describe("TUI.0 foundation", () => {
     unmount();
   });
 
-  it("Composer renders when no initialPrompt (shows > prompt)", () => {
+  it("Composer renders when no initialPrompt (shows ▸ prompt)", () => {
     const { lastFrame, unmount } = render(<App />);
-    expect(lastFrame()).toContain(">");
+    expect(lastFrame()).toContain("▸ ▋");
     unmount();
   });
 

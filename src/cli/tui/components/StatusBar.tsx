@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Box, Text } from "ink";
+import { Box, Text, useStdout } from "ink";
 import { useStore, type RunState, type TuiMode } from "../store.js";
 import { selectPersistentWarnings } from "../store-core.js";
 import { role, glyph, spacing } from "../theme.js";
@@ -61,6 +61,7 @@ function modePill(m: TuiMode, narrow: boolean): string | null {
 
 export function StatusBar(): React.ReactElement {
   const { state } = useStore();
+  const { stdout } = useStdout();
   const { costUsd, dailyUsedUsd, model, tokenBudgetRatio, cumulativeTokens, capUsd } = state.statusBar;
   const { runState, runStartMs, runEndMs, parkedMs, mode } = state;
   // webSearch defaults ON (absence = enabled); show indicator when active
@@ -108,7 +109,7 @@ export function StatusBar(): React.ReactElement {
   const tokenColor =
     tokenBudgetRatio >= 0.9 ? role.danger : tokenBudgetRatio >= 0.7 ? role.caution : undefined;
 
-  const cols = process.stdout.columns ?? 80;
+  const cols = stdout.columns ?? 80;
   const sep = glyph.separator.repeat(cols);
   const narrow = cols < 60;
   const pill = modePill(mode, narrow);
@@ -117,9 +118,9 @@ export function StatusBar(): React.ReactElement {
   const modelLabel = model || "default";
   // Absent for models that don't support effort (EffortModal.tsx:52's own read pattern).
   const effort = state.modelSettings?.effort;
-  const effortStr = effort ? ` · effort: ${effort}` : "";
+  const effortStr = effort ? ` · ${narrow ? "" : "effort: "}${effort}` : "";
   const usedStr = dailyUsedUsd > 0 ? ` · used $${dailyUsedUsd.toFixed(2)}` : "";
-  const badgeLine = `${modelLabel}${effortStr}${usedStr} · cap $${(capUsd ?? 10).toFixed(2)}`;
+  const budgetLabel = `${effortStr}${usedStr} · cap $${(capUsd ?? 10).toFixed(2)}`;
 
   // Phase 7b — persistent warnings (cap usage, RC state). Rendered right-aligned
   // in role.caution after the existing right hint, separated by " · ".
@@ -127,20 +128,25 @@ export function StatusBar(): React.ReactElement {
   const warningStr = persistentWarnings.length > 0
     ? ` · ${persistentWarnings.join(" · ")}`
     : "";
+  const hint = narrow && !["running", "awaiting_input"].includes(runState)
+    ? "/help" : rightHint(runState, state.pendingQuestion?.kind ?? null);
 
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" flexShrink={0}>
       <Text dimColor>{sep}</Text>
       <Box justifyContent="space-between" paddingX={spacing.sm}>
-        <Text color={tokenColor}>{leftText(runState, costUsd, model, elapsedSec, cumulativeTokens, waitedSec, liveElapsedSec)}{webSearch ? " · [W]" : ""}{mem ? " · [M]" : ""}</Text>
-        {pill ? <Text color={pillColor}>{pill}</Text> : null}
-        <Box>
-          <Text dimColor>{rightHint(runState, state.pendingQuestion?.kind ?? null)}</Text>
+        <Box flexGrow={1} minWidth={0} marginRight={spacing.sm}>
+          <Text wrap="truncate-end" color={tokenColor}>{leftText(runState, costUsd, model, elapsedSec, cumulativeTokens, waitedSec, liveElapsedSec)}{webSearch ? " · [W]" : ""}{mem ? " · [M]" : ""}</Text>
+        </Box>
+        {pill ? <Box flexShrink={0} marginRight={spacing.sm}><Text color={pillColor}>{pill}</Text></Box> : null}
+        <Box flexShrink={0}>
+          <Text dimColor>{hint}</Text>
           {warningStr ? <Text color={role.caution}>{warningStr}</Text> : null}
         </Box>
       </Box>
       <Box paddingX={spacing.sm}>
-        <Text dimColor>{badgeLine}</Text>
+        <Box flexShrink={1} minWidth={0}><Text wrap="truncate-end" dimColor>{modelLabel}</Text></Box>
+        <Box flexShrink={0}><Text dimColor>{budgetLabel}</Text></Box>
       </Box>
       <Text dimColor>{sep}</Text>
     </Box>

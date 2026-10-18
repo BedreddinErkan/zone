@@ -19,7 +19,9 @@ exports[`golden replay tests > resize-sequence remounts transcript cleanly 1`] =
 `;
 
 exports[`golden replay tests > run-with-tool-calls renders expected transcript 1`] = `
-"◆ Let me look at the project structure to understand what's going on.
+"◆ Let me look at
+◆ the project structure
+◆ to understand what's going on.
 
 ● Read ×1
   └ src/cli/tui/store-core.ts

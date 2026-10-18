@@ -21,9 +21,9 @@ describe("TUI.4 composer", () => {
     vi.clearAllMocks();
   });
 
-  it("Composer renders > prompt when runState is idle", () => {
+  it("Composer renders ▸ prompt when runState is idle", () => {
     const { lastFrame, unmount } = render(<App />);
-    expect(lastFrame()).toContain(">");
+    expect(lastFrame()).toContain("▸ ▋");
     unmount();
   });
 
@@ -187,7 +187,8 @@ describe("TUI.4 composer", () => {
     stdin.write("\r");
     await wait(50);
     // Modal must open — the model selection UI is present
-    expect(lastFrame()).toContain("↑↓ navigate · Enter select · Esc cancel");
+    expect(lastFrame()).toMatch(/▸.*\([• ]\)/);
+    expect(lastFrame()).toContain("Enter select · C custom · Esc close");
     unmount();
   });
 
@@ -206,7 +207,8 @@ describe("TUI.4 composer", () => {
     stdin.write("\r");
     await wait(50);
     // Modal must open — the model selection UI is present
-    expect(lastFrame()).toContain("↑↓ navigate · Enter select · Esc cancel");
+    expect(lastFrame()).toMatch(/▸.*\([• ]\)/);
+    expect(lastFrame()).toContain("Enter select · C custom · Esc close");
     unmount();
   });
 

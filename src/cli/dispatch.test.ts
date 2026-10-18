@@ -76,6 +76,7 @@ vi.mock("../api/stagedApprovals.js", () => ({
 // Import after mocks are registered
 import { runOneShotInner, runOneShotFromCli } from "./dispatch.js";
 import { getRequestContext } from "../llm/openaiContext.js";
+import { loadDiskKeys } from "../api/diskKeys.js";
 
 const SUCCESS_RESULT = {
   ok: true,
@@ -555,6 +556,15 @@ describe("runOneShotInner — planDepth routing", () => {
   const PLAN_CONFIG = { ...BASE_CONFIG };
   const AC = () => new AbortController();
 
+  it("uses captured strict depth instead of a later quick setting on disk", async () => {
+    mockRequestPlanApproval.mockResolvedValueOnce({ planId: "changed-disk", decision: "accept_all" });
+    mockLoadDiskModelSync.mockReturnValue({ version: 2, model: "claude-sonnet-4-6", provider: "anthropic", planDepth: "quick", updatedAt: "" });
+    mockRunLlmPatchFlow.mockResolvedValueOnce(SUCCESS_RESULT);
+    await runOneShotInner("add feature", { ...PLAN_CONFIG, planDepth: "strict" }, "captured-depth", { mode: "plan", externalAc: AC() });
+    expect(mockGenerateExecutionPlan).not.toHaveBeenCalled();
+    expect(mockRunLlmPatchFlow.mock.calls[0]![0].stagedCheckpoint).toBe(true);
+  });
+
   it("planDepth 'investigate': skips plan-gen, calls runLlmPatchFlow with stagedCheckpoint:true, no runPlanInvestigation or generateExecutionPlan", async () => {
     mockLoadDiskModelSync.mockReturnValue({ version: 2, model: "claude-sonnet-4-6", provider: "anthropic", planDepth: "investigate", updatedAt: "" });
     mockRunLlmPatchFlow.mockResolvedValueOnce(SUCCESS_RESULT);
@@ -605,6 +615,15 @@ describe("runOneShotInner — planDepth routing", () => {
     expect(call["stagedCheckpoint"]).toBe(true);
     expect(call["showPostFlushDiffs"]).toBeFalsy();
   });
+});
+
+it("fills missing credentials on a private config without modifying the submitted snapshot", async () => {
+  vi.mocked(loadDiskKeys).mockResolvedValueOnce({ version: 1, keys: [{ provider: "anthropic", key: "fixture", addedAt: "2026-01-01" }] });
+  const snapshot = { ...BASE_CONFIG, anthropicApiKey: undefined };
+  mockRunLlmPatchFlow.mockResolvedValueOnce(SUCCESS_RESULT);
+  await runOneShotInner("add pagination", snapshot, "snapshot-key", { mode: "normal" });
+  expect(snapshot.anthropicApiKey).toBeUndefined();
+  expect(mockRunLlmPatchFlow.mock.calls[0]![0].userApiKey === "fixture").toBe(true);
 });
 
 describe("E8: no-op plan short-circuit — premise verified false", () => {
@@ -1016,6 +1035,22 @@ describe("plan mode — staged checkpoint (investigate depth)", () => {
     const taskStr = thirdCall["task"] as string;
     expect(taskStr).toContain("foo");
     expect(taskStr).toContain("bar");
+  });
+
+  it("gives each restage callback a stable distinct flow identity", async () => {
+    mockRunLlmPatchFlow
+      .mockResolvedValueOnce({ ok: false, reason: "staged_refine_requested", refineFeedback: "refine", discardedStaging: new Map() })
+      .mockResolvedValueOnce(SUCCESS_RESULT);
+    const onProgress = vi.fn();
+    await runOneShotInner("add feature", PLAN_CONFIG, "flow-identity", { mode: "plan", externalAc: AC(), onProgress });
+    const callbacks = mockRunLlmPatchFlow.mock.calls.map(([input]) => input.onProgress);
+    onProgress.mockClear();
+    const update = { stage: "text", progress: { runId: "flow-identity", ts: 123, type: "chat_chunk", title: "text", iter: 1, delta: "fragment" } };
+    callbacks[0](update);
+    callbacks[1](update);
+    callbacks[0](update); // Late callback retains its original identity.
+    expect(onProgress.mock.calls.map(([u]) => u.progress.flowId)).toEqual([1, 2, 1]);
+    expect(update.progress).not.toHaveProperty("flowId");
   });
 
   it("headless (no TTY): autoApprove is true in the runLlmPatchFlow call", async () => {

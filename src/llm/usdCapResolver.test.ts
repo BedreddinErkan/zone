@@ -2,6 +2,18 @@ import { describe, expect, it } from "vitest";
 import { resolveDailyUsdCap } from "./usdCapResolver.js";
 
 describe("resolveDailyUsdCap", () => {
+  it.each([[5, 5], [20, 10], [0, 10]])("captured TUI limit %s cannot exceed an environment ceiling", (selected, effective) => {
+    expect(resolveDailyUsdCap({ userId: "local-dev", userOverride: selected, envValue: "10", enforceEnvCeiling: true }).capUsd).toBe(effective);
+  });
+
+  it("an unlimited environment setting permits a lower TUI limit", () => {
+    expect(resolveDailyUsdCap({ userId: "local-dev", userOverride: 5, envValue: "0", enforceEnvCeiling: true }).capUsd).toBe(5);
+  });
+
+  it("the environment ceiling also bounds an organization policy", () => {
+    expect(resolveDailyUsdCap({ userId: "local-dev", policyValue: 50, envValue: "10", enforceEnvCeiling: true }).capUsd).toBe(10);
+  });
+
   it("user override wins over env and default", () => {
     const result = resolveDailyUsdCap({
       userId: "user-1",
